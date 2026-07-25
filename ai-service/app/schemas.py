@@ -1,0 +1,221 @@
+"""Pydantic v2 schemas — the canonical JSON shapes from docs/api-contracts.md §5.
+
+All models serialize to **camelCase** (matching the shared contract) while using
+snake_case attribute names in Python. `populate_by_name=True` means both the
+snake_case field name and the camelCase alias are accepted on input.
+"""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
+
+Priority = Literal["high", "medium", "low"]
+Confidence = Literal["high", "medium", "low"]
+Severity = Literal["high", "medium", "low"]
+
+# Meeting lifecycle status (api-contracts.md §5 MeetingResponse).
+MeetingStatus = Literal[
+    "CREATED",
+    "UPLOADED",
+    "QUEUED",
+    "TRANSCRIBING",
+    "SUMMARIZING",
+    "EXTRACTING",
+    "READY",
+    "FAILED",
+]
+
+
+class CamelModel(BaseModel):
+    """Base model: camelCase JSON aliases, populate by field name or alias."""
+
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        extra="ignore",
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Canonical extraction shapes (§5)
+# --------------------------------------------------------------------------- #
+class ActionItem(CamelModel):
+    task_title: str
+    owner_name: str | None = None
+    due_date: str | None = None
+    priority: Priority = "medium"
+    source_sentence: str
+
+
+class Decision(CamelModel):
+    decision: str
+    confidence: Confidence = "medium"
+    source_sentence: str
+
+
+class Risk(CamelModel):
+    risk: str
+    severity: Severity = "medium"
+    source_sentence: str
+
+
+class Segment(CamelModel):
+    start: float
+    end: float
+    speaker: str
+    text: str
+
+
+class MeetingBriefResult(CamelModel):
+    """Full result — FastAPI -> Spring callback + /ai/process-meeting response."""
+
+    meeting_id: str
+    transcript: str
+    language: str = "en"
+    segments: list[Segment] = Field(default_factory=list)
+    short_summary: str
+    detailed_summary: str
+    key_points: list[str] = Field(default_factory=list)
+    decisions: list[Decision] = Field(default_factory=list)
+    action_items: list[ActionItem] = Field(default_factory=list)
+    risks: list[Risk] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------- #
+# HTTP request/response shapes (§4)
+# --------------------------------------------------------------------------- #
+class TranscribeRequest(CamelModel):
+    audio_url: str | None = None
+    audio_path: str | None = None
+
+
+class TranscriptResponse(CamelModel):
+    transcript: str
+    language: str = "en"
+    segments: list[Segment] = Field(default_factory=list)
+
+
+class SummarizeRequest(CamelModel):
+    transcript: str
+
+
+class SummaryResponse(CamelModel):
+    short_summary: str
+    detailed_summary: str
+    key_points: list[str] = Field(default_factory=list)
+
+
+class TranscriptInput(CamelModel):
+    transcript: str
+
+
+class ActionItemsResponse(CamelModel):
+    action_items: list[ActionItem] = Field(default_factory=list)
+
+
+class DecisionsResponse(CamelModel):
+    decisions: list[Decision] = Field(default_factory=list)
+
+
+class RisksResponse(CamelModel):
+    risks: list[Risk] = Field(default_factory=list)
+
+
+class ProcessMeetingRequest(CamelModel):
+    meeting_id: str
+    audio_url: str | None = None
+    audio_path: str | None = None
+
+
+class HealthResponse(CamelModel):
+    # `status` and `provider` are already single words -> unchanged by camelCase.
+    status: str = "ok"
+    provider: str
+
+
+# --------------------------------------------------------------------------- #
+# RAG chat + translation
+# --------------------------------------------------------------------------- #
+class ChatRequest(CamelModel):
+    meeting_id: str
+    question: str
+
+
+class Citation(CamelModel):
+    chunk_index: int
+    start: float | None = None
+    end: float | None = None
+    text: str
+
+
+class ChatResponse(CamelModel):
+    answer: str
+    citations: list[Citation] = Field(default_factory=list)
+
+
+class TranslateRequest(CamelModel):
+    text: str
+    target_language: str
+
+
+class TranslateResponse(CamelModel):
+    text: str
+    target_language: str
+
+
+# --------------------------------------------------------------------------- #
+# Kafka event shapes (§6)
+# --------------------------------------------------------------------------- #
+class StatusEvent(CamelModel):
+    meeting_id: str
+    status: MeetingStatus
+    progress: int = 0
+    message: str = ""
+
+
+class MeetingUploadedEvent(CamelModel):
+    meeting_id: str
+    user_id: str | None = None
+    audio_url: str | None = None
+    object_key: str | None = None
+
+
+class ProcessingFailedEvent(CamelModel):
+    meeting_id: str
+    error: str
+
+
+# --------------------------------------------------------------------------- #
+# Phase 2 — agent scaffolding (docs/phase2-agent-mcp.md)
+# --------------------------------------------------------------------------- #
+class PlanActionsRequest(CamelModel):
+    meeting_id: str
+    brief: MeetingBriefResult | None = None
+    instruction: str = "Create sensible follow-ups from this meeting."
+
+
+class PlannedAction(CamelModel):
+    type: str
+    provider: str
+    status: str = "DRAFT"
+    title: str | None = None
+    subject: str | None = None
+    task_count: int | None = None
+
+
+class ActionPlan(CamelModel):
+    meeting_id: str
+    requires_approval: bool = True
+    actions: list[PlannedAction] = Field(default_factory=list)
+
+
+class ValidateActionRequest(CamelModel):
+    action: PlannedAction
+
+
+class ValidateActionResponse(CamelModel):
+    valid: bool
+    reason: str

@@ -1,0 +1,191 @@
+"""Resilient Kafka worker (aiokafka).
+
+Consumes `meeting_uploaded`, runs the full pipeline, and for every stage emits a
+`StatusEvent` to the matching topic (§6) AND posts it to Spring's status
+callback. On completion it posts the `MeetingBriefResult` to Spring's result
+callback. On failure it emits `meeting_processing_failed`.
+
+Connection is resilient: if the broker is unreachable at startup the worker logs
+and retries with exponential backoff — it never crashes the app.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+
+from app.callback import SpringCallbackClient
+from app.config import Settings
+from app.pipeline import Pipeline
+from app.schemas import (
+    MeetingUploadedEvent,
+    ProcessingFailedEvent,
+    StatusEvent,
+)
+from app.storage import fetch_audio
+
+logger = logging.getLogger("ai-service.kafka")
+
+TOPIC_PROCESSING_FAILED = "meeting_processing_failed"
+
+
+def _json_serializer(value: dict) -> bytes:
+    return json.dumps(value).encode("utf-8")
+
+
+class KafkaWorker:
+    """Background consumer/producer wired to the pipeline."""
+
+    def __init__(
+        self,
+        settings: Settings,
+        pipeline: Pipeline,
+        callback: SpringCallbackClient,
+        rag=None,
+    ) -> None:
+        self._settings = settings
+        self._pipeline = pipeline
+        self._callback = callback
+        self._rag = rag
+        self._consumer = None  # type: ignore[var-annotated]
+        self._producer = None  # type: ignore[var-annotated]
+        self._task: asyncio.Task | None = None
+        self._stopped = asyncio.Event()
+
+    # --- lifecycle ---------------------------------------------------------- #
+    def start(self) -> None:
+        """Launch the run loop as a background task (non-blocking)."""
+        self._task = asyncio.create_task(self._run(), name="kafka-worker")
+
+    async def stop(self) -> None:
+        self._stopped.set()
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+        if self._consumer is not None:
+            try:
+                await self._consumer.stop()
+            except Exception:  # noqa: BLE001
+                pass
+        if self._producer is not None:
+            try:
+                await self._producer.stop()
+            except Exception:  # noqa: BLE001
+                pass
+
+    # --- resilient connect -------------------------------------------------- #
+    async def _connect(self) -> bool:
+        """Try to start consumer + producer. Returns True on success."""
+        from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+
+        self._producer = AIOKafkaProducer(
+            bootstrap_servers=self._settings.kafka_bootstrap_servers,
+            value_serializer=_json_serializer,
+            key_serializer=lambda k: (k or "").encode("utf-8"),
+        )
+        self._consumer = AIOKafkaConsumer(
+            self._settings.kafka_topic_meeting_uploaded,
+            bootstrap_servers=self._settings.kafka_bootstrap_servers,
+            group_id=self._settings.kafka_consumer_group,
+            value_deserializer=lambda v: json.loads(v.decode("utf-8")),
+            enable_auto_commit=True,
+            auto_offset_reset="earliest",
+        )
+        await self._producer.start()
+        await self._consumer.start()
+        return True
+
+    async def _run(self) -> None:
+        delay = 2.0
+        max_delay = 30.0
+        while not self._stopped.is_set():
+            try:
+                await self._connect()
+                logger.info(
+                    "Kafka worker connected to %s; consuming '%s'.",
+                    self._settings.kafka_bootstrap_servers,
+                    self._settings.kafka_topic_meeting_uploaded,
+                )
+                delay = 2.0  # reset backoff after a good connection
+                await self._consume_loop()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 — resilient: log + backoff + retry.
+                logger.warning(
+                    "Kafka unavailable (%s); retrying in %.0fs.", exc, delay
+                )
+                await self._cleanup_clients()
+                try:
+                    await asyncio.wait_for(self._stopped.wait(), timeout=delay)
+                except asyncio.TimeoutError:
+                    pass
+                delay = min(delay * 2, max_delay)
+
+    async def _cleanup_clients(self) -> None:
+        for client in (self._consumer, self._producer):
+            if client is not None:
+                try:
+                    await client.stop()
+                except Exception:  # noqa: BLE001
+                    pass
+        self._consumer = None
+        self._producer = None
+
+    async def _consume_loop(self) -> None:
+        assert self._consumer is not None
+        async for msg in self._consumer:
+            if self._stopped.is_set():
+                break
+            try:
+                event = MeetingUploadedEvent.model_validate(msg.value)
+                await self._handle(event)
+            except Exception as exc:  # noqa: BLE001 — one bad message must not kill the loop.
+                logger.exception("Failed handling meeting_uploaded message: %s", exc)
+
+    # --- message handling --------------------------------------------------- #
+    async def _emit(self, topic: str, key: str, value: dict) -> None:
+        if self._producer is None:
+            return
+        try:
+            await self._producer.send_and_wait(topic, value=value, key=key)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to emit to %s: %s", topic, exc)
+
+    async def _handle(self, event: MeetingUploadedEvent) -> None:
+        meeting_id = event.meeting_id
+        logger.info("Processing meeting_uploaded for %s.", meeting_id)
+
+        async def progress_hook(topic: str, status_event: StatusEvent) -> None:
+            payload = status_event.model_dump(by_alias=True)
+            await self._emit(topic, meeting_id, payload)
+            await self._callback.post_status(meeting_id, status_event)
+
+        try:
+            audio, filename = await fetch_audio(
+                self._settings, audio_url=event.audio_url, object_key=event.object_key
+            )
+            result = await self._pipeline.process(meeting_id, audio, filename, progress_hook)
+
+            # Persist final result + READY status.
+            await self._callback.post_result(meeting_id, result)
+
+            # Index the transcript into pgvector for the RAG chat feature.
+            if self._rag is not None:
+                await self._rag.index(meeting_id, result.transcript, result.segments)
+            ready = StatusEvent(
+                meeting_id=meeting_id, status="READY", progress=100, message="Meeting brief ready."
+            )
+            await self._callback.post_status(meeting_id, ready)
+            logger.info("Finished processing meeting %s.", meeting_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Processing failed for %s: %s", meeting_id, exc)
+            failed = ProcessingFailedEvent(meeting_id=meeting_id, error=str(exc))
+            await self._emit(TOPIC_PROCESSING_FAILED, meeting_id, failed.model_dump(by_alias=True))
+            await self._callback.post_status(
+                meeting_id,
+                StatusEvent(meeting_id=meeting_id, status="FAILED", progress=0, message=str(exc)),
+            )

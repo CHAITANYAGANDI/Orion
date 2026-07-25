@@ -1,0 +1,85 @@
+"use client";
+
+import * as React from "react";
+import dynamic from "next/dynamic";
+import {
+  AUTH_MODE,
+  DEFAULT_DEV_USER,
+  DEV_USER_KEY,
+  authStore,
+} from "@/lib/auth-store";
+
+interface AuthContextValue {
+  mode: "dev" | "clerk";
+  /** Current user id (dev id in dev mode, Clerk user id in clerk mode). */
+  userId: string;
+  /** Dev-only: switch the active dev user. No-op in clerk mode. */
+  setDevUserId: (id: string) => void;
+  isSignedIn: boolean;
+  isLoaded: boolean;
+  signOut?: () => void;
+}
+
+const AuthContext = React.createContext<AuthContextValue | null>(null);
+
+export function useAuth(): AuthContextValue {
+  const ctx = React.useContext(AuthContext);
+  if (!ctx) throw new Error("useAuth must be used within <AuthProvider>");
+  return ctx;
+}
+
+/** Dev-mode provider: a persisted dev user id, sent as X-Dev-User. */
+function DevAuthProvider({ children }: { children: React.ReactNode }) {
+  const [userId, setUserId] = React.useState(DEFAULT_DEV_USER);
+  const [isLoaded, setIsLoaded] = React.useState(false);
+
+  React.useEffect(() => {
+    let stored = DEFAULT_DEV_USER;
+    try {
+      stored = window.localStorage.getItem(DEV_USER_KEY) || DEFAULT_DEV_USER;
+    } catch {
+      /* ignore */
+    }
+    authStore.devUserId = stored;
+    setUserId(stored);
+    setIsLoaded(true);
+  }, []);
+
+  const setDevUserId = React.useCallback((id: string) => {
+    const next = id.trim() || DEFAULT_DEV_USER;
+    authStore.devUserId = next;
+    try {
+      window.localStorage.setItem(DEV_USER_KEY, next);
+    } catch {
+      /* ignore */
+    }
+    setUserId(next);
+  }, []);
+
+  const value: AuthContextValue = {
+    mode: "dev",
+    userId,
+    setDevUserId,
+    isSignedIn: true,
+    isLoaded,
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+// Clerk provider is loaded lazily and only in clerk mode, so dev builds never
+// need a Clerk key and the Clerk SDK is not evaluated during SSR of dev pages.
+const ClerkAuthProvider = dynamic(
+  () => import("@/lib/clerk-auth").then((m) => m.ClerkAuthProvider),
+  { ssr: false }
+);
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  if (AUTH_MODE === "clerk") {
+    return <ClerkAuthProvider AuthContext={AuthContext}>{children}</ClerkAuthProvider>;
+  }
+  return <DevAuthProvider>{children}</DevAuthProvider>;
+}
+
+export { AuthContext };
+export type { AuthContextValue };

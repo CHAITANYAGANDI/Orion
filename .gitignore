@@ -1,0 +1,36 @@
+# Env / secrets
+.env
+*.local
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+npm-debug.log*
+yarn-error.log*
+
+# Java / Gradle / Maven
+backend-spring/target/
+backend-spring/build/
+backend-spring/.gradle/
+*.class
+
+# Python
+ai-service/.venv/
+ai-service/venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Data
+pgdata/
+miniodata/
+*.log

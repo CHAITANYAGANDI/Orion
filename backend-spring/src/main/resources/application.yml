@@ -1,0 +1,110 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: recallix-backend-spring
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/recallix}
+    username: ${SPRING_DATASOURCE_USERNAME:recallix}
+    password: ${SPRING_DATASOURCE_PASSWORD:recallix}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+        format_sql: false
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: recallix-backend
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    listener:
+      missing-topics-fatal: false
+
+# NOTE: deliberately no `spring.security.oauth2.resourceserver.*` here.
+# Boot's OAuth2 resource-server autoconfiguration activates as soon as
+# jwk-set-uri is *present* — an empty value (dev mode) makes it fail startup
+# with "jwkSetUri cannot be empty". AuthenticationFilter builds the Clerk
+# JwtDecoder itself, lazily, from recallix.clerk.jwks-url below.
+
+recallix:
+  auth-mode: ${RECALLIX_AUTH_MODE:dev}
+  internal-token: ${RECALLIX_INTERNAL_TOKEN:dev-internal-token}
+  clerk:
+    issuer: ${CLERK_ISSUER:}
+    jwks-url: ${CLERK_JWKS_URL:}
+
+app:
+  frontend-url: ${APP_FRONTEND_URL:http://localhost:3000}
+  ai-service-url: ${AI_SERVICE_URL:http://localhost:8000}
+
+s3:
+  endpoint: ${S3_ENDPOINT:http://localhost:9000}
+  public-endpoint: ${S3_PUBLIC_ENDPOINT:http://localhost:9000}
+  access-key: ${S3_ACCESS_KEY:minioadmin}
+  secret-key: ${S3_SECRET_KEY:minioadmin}
+  bucket: ${S3_BUCKET:recallix}
+  region: ${S3_REGION:us-east-1}
+  presign-expiry-seconds: 900
+
+stripe:
+  secret-key: ${STRIPE_SECRET_KEY:}
+  webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+  price-pro: ${STRIPE_PRICE_PRO:}
+  price-premium: ${STRIPE_PRICE_PREMIUM:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: never
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      aiService:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+  retry:
+    instances:
+      aiService:
+        max-attempts: 3
+        wait-duration: 500ms
+
+logging:
+  level:
+    com.recallix: INFO

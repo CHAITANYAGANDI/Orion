@@ -1,0 +1,35 @@
+[project]
+name = "recallix-ai-service"
+version = "0.1.0"
+description = "Recallix AI — FastAPI AI worker (transcription, summarization, extraction)."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "aiokafka>=0.11",
+    "httpx>=0.27",
+    "openai>=1.35",
+    "boto3>=1.34",
+    "python-multipart>=0.0.9",
+    "psycopg[binary,pool]>=3.2",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
