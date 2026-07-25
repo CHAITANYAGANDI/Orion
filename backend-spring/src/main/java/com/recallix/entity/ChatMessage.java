@@ -10,7 +10,12 @@ import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 
-/** One turn in a meeting's RAG chat (role = user | assistant). */
+/**
+ * One turn in a RAG chat (role = user | assistant).
+ *
+ * <p>{@code meetingId} is null for turns belonging to the user's workspace-wide
+ * conversation, which is grounded across every meeting they own rather than one.
+ */
 @Entity
 @Table(name = "chat_messages")
 public class ChatMessage {
@@ -18,7 +23,7 @@ public class ChatMessage {
     @Id
     private String id;
 
-    @Column(name = "meeting_id", nullable = false)
+    @Column(name = "meeting_id")
     private String meetingId;
 
     @Column(name = "user_id", nullable = false)

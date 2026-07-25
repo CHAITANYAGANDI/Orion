@@ -15,6 +15,7 @@ import {
   Menu,
   Mic,
   LogOut,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
@@ -32,6 +33,7 @@ import {
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/upload", label: "Upload meeting", icon: Upload },
+  { href: "/ask", label: "Ask Recallix", icon: Sparkles },
   { href: "/search", label: "Search meetings", icon: Search },
   { href: "/action-items", label: "Action items", icon: ListChecks },
   { href: "/agent", label: "Agent actions", icon: Bot },

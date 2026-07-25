@@ -65,8 +65,29 @@ Paginated list envelope:
 | GET  | `/api/v1/meetings/{id}/action-items` | — | `ActionItemResponse[]` |
 | GET  | `/api/v1/meetings/{id}/decisions` | — | `DecisionResponse[]` |
 | GET  | `/api/v1/meetings/{id}/risks` | — | `RiskResponse[]` |
+| PATCH | `/api/v1/meetings/{id}/speakers` | `{ "mapping": { "Speaker 1": "Ana" } }` | `TranscriptResponse` |
 | POST | `/api/v1/meetings/{id}/reprocess` | — | `202 { "meetingId","status" }` |
 | DELETE | `/api/v1/meetings/{id}` | — | `204` |
+
+### Chat, semantic search & translation
+
+RAG chat exists at two scopes. **Meeting-scoped** chat is grounded in one
+transcript. **Workspace-scoped** chat is grounded across every meeting the caller
+owns — its citations additionally carry `meetingId`/`meetingTitle`, so the UI can
+deep-link to `/meetings/{id}?t={start}`.
+
+| Method | Endpoint | Body | Response |
+|---|---|---|---|
+| GET | `/api/v1/meetings/{id}/chat` | — | `ChatMessageResponse[]` |
+| POST | `/api/v1/meetings/{id}/chat` | `{ "question" }` | `ChatMessageResponse` |
+| POST | `/api/v1/meetings/{id}/translate` | `{ "targetLanguage" }` | `TranslateResponse` |
+| GET | `/api/v1/chat` | — | `ChatMessageResponse[]` (workspace conversation) |
+| POST | `/api/v1/chat` | `{ "question", "meetingIds"? }` | `ChatMessageResponse` |
+| DELETE | `/api/v1/chat` | — | `204` (clears workspace conversation) |
+| POST | `/api/v1/search/semantic` | `{ "query", "limit"? }` | `SemanticSearchHit[]` |
+
+Persistence note: `chat_messages.meeting_id` is `NULL` for workspace turns —
+that is what distinguishes the two conversations.
 
 ### Action items
 | Method | Endpoint | Body | Response |
@@ -105,7 +126,15 @@ Base: `http://ai-service:8000`
 | POST | `/ai/extract-decisions` | `{ "transcript" }` | `{ "decisions":[Decision] }` |
 | POST | `/ai/extract-risks` | `{ "transcript" }` | `{ "risks":[Risk] }` |
 | POST | `/ai/process-meeting` | `{ "meetingId","audioUrl" }` | `MeetingBriefResult` (also persisted via callback) |
+| POST | `/ai/chat` | `{ "meetingId","question" }` | `{ "answer","citations":[Citation] }` |
+| POST | `/ai/workspace-chat` | `{ "userId","question","meetingIds"? }` | `{ "answer","citations":[Citation] }` |
+| POST | `/ai/semantic-search` | `{ "userId","query","limit"? }` | `{ "hits":[SemanticSearchHit] }` |
+| POST | `/ai/translate` | `{ "text","targetLanguage" }` | `{ "text","targetLanguage" }` |
 | GET  | `/health` | — | `{ "status":"ok","provider":"openai\|mock" }` |
+
+Retrieval on the two workspace endpoints filters on `user_id`, which is
+denormalised onto `transcript_chunks` (migration `V3`). Cross-tenant grounding is
+therefore impossible even if a caller passes meeting ids they do not own.
 
 ---
 

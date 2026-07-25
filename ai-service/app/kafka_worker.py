@@ -164,24 +164,44 @@ class KafkaWorker:
             await self._emit(topic, meeting_id, payload)
             await self._callback.post_status(meeting_id, status_event)
 
+        # Index into pgvector the moment the transcript exists, concurrently with
+        # summarization/extraction, so RAG chat is queryable as soon as the
+        # meeting flips to READY instead of seconds after it.
+        index_task: asyncio.Task | None = None
+
+        async def transcript_hook(transcript) -> None:
+            nonlocal index_task
+            if self._rag is None:
+                return
+            index_task = asyncio.create_task(
+                self._rag.index(
+                    meeting_id, event.user_id, transcript.transcript, transcript.segments
+                ),
+                name=f"rag-index-{meeting_id}",
+            )
+
         try:
             audio, filename = await fetch_audio(
                 self._settings, audio_url=event.audio_url, object_key=event.object_key
             )
-            result = await self._pipeline.process(meeting_id, audio, filename, progress_hook)
+            result = await self._pipeline.process(
+                meeting_id, audio, filename, progress_hook, transcript_hook
+            )
 
             # Persist final result + READY status.
             await self._callback.post_result(meeting_id, result)
 
-            # Index the transcript into pgvector for the RAG chat feature.
-            if self._rag is not None:
-                await self._rag.index(meeting_id, result.transcript, result.segments)
+            # Indexing started during analysis; make sure it landed before READY.
+            if index_task is not None:
+                await index_task
             ready = StatusEvent(
                 meeting_id=meeting_id, status="READY", progress=100, message="Meeting brief ready."
             )
             await self._callback.post_status(meeting_id, ready)
             logger.info("Finished processing meeting %s.", meeting_id)
         except Exception as exc:  # noqa: BLE001
+            if index_task is not None and not index_task.done():
+                index_task.cancel()
             logger.exception("Processing failed for %s: %s", meeting_id, exc)
             failed = ProcessingFailedEvent(meeting_id=meeting_id, error=str(exc))
             await self._emit(TOPIC_PROCESSING_FAILED, meeting_id, failed.model_dump(by_alias=True))

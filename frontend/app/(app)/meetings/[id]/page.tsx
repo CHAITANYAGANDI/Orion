@@ -95,6 +95,24 @@ export default function MeetingDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  // Deep link from a workspace-chat citation or a semantic search hit:
+  // /meetings/{id}?t=132.5 opens the meeting and seeks to that moment.
+  // Read from location rather than useSearchParams() so the page stays
+  // prerenderable without a Suspense boundary.
+  const seekedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (seekedRef.current || !ready) return;
+    const t = Number(new URLSearchParams(window.location.search).get("t"));
+    if (!Number.isFinite(t) || t <= 0) return;
+    const el = audio.ref.current;
+    if (!el) return;
+    seekedRef.current = true;
+    const seek = () => audio.seekTo(t);
+    if (el.readyState >= 1) seek();
+    else el.addEventListener("loadedmetadata", seek, { once: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
+
   const summary = useGetSummaryQuery(id, { skip: !ready });
   const transcript = useGetTranscriptQuery(id, { skip: !ready });
   const actions = useGetMeetingActionItemsQuery(id, { skip: !ready });

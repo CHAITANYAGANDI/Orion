@@ -18,12 +18,15 @@ import type {
   Page,
   ReprocessResponse,
   RiskResponse,
+  SemanticSearchHit,
+  SemanticSearchRequest,
   SummaryResponse,
   TranscriptResponse,
   TranslateResult,
   UploadUrlRequest,
   UploadUrlResponse,
   UsageResponse,
+  WorkspaceAskRequest,
 } from "@/lib/types";
 
 export const API_BASE =
@@ -52,6 +55,7 @@ export const api = createApi({
     "Integrations",
     "AgentActions",
     "Chat",
+    "WorkspaceChat",
     "Transcript",
   ],
   endpoints: (builder) => ({
@@ -139,6 +143,27 @@ export const api = createApi({
         body: { question },
       }),
       invalidatesTags: (_r, _e, arg) => [{ type: "Chat", id: arg.id }],
+    }),
+
+    // ---- Workspace-wide chat (grounded across every meeting) ----
+    getWorkspaceChat: builder.query<ChatMessage[], void>({
+      query: () => "/chat",
+      providesTags: [{ type: "WorkspaceChat", id: "ME" }],
+    }),
+
+    askWorkspaceChat: builder.mutation<ChatMessage, WorkspaceAskRequest>({
+      query: (body) => ({ url: "/chat", method: "POST", body }),
+      invalidatesTags: [{ type: "WorkspaceChat", id: "ME" }],
+    }),
+
+    clearWorkspaceChat: builder.mutation<void, void>({
+      query: () => ({ url: "/chat", method: "DELETE" }),
+      invalidatesTags: [{ type: "WorkspaceChat", id: "ME" }],
+    }),
+
+    // ---- Semantic search (find meetings by what was said) ----
+    semanticSearch: builder.mutation<SemanticSearchHit[], SemanticSearchRequest>({
+      query: (body) => ({ url: "/search/semantic", method: "POST", body }),
     }),
 
     // ---- Translation ----
@@ -290,6 +315,10 @@ export const {
   useDeleteMeetingMutation,
   useGetChatQuery,
   useAskChatMutation,
+  useGetWorkspaceChatQuery,
+  useAskWorkspaceChatMutation,
+  useClearWorkspaceChatMutation,
+  useSemanticSearchMutation,
   useTranslateSummaryMutation,
   useRenameSpeakersMutation,
   useGetActionItemsQuery,

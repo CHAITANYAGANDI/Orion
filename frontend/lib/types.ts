@@ -141,6 +141,10 @@ export interface Citation {
   start?: number | null;
   end?: number | null;
   text: string;
+  // Present on workspace-wide answers, which span meetings; null for
+  // single-meeting chat where the meeting is implied.
+  meetingId?: string | null;
+  meetingTitle?: string | null;
 }
 
 export interface ChatMessage {
@@ -153,6 +157,29 @@ export interface ChatMessage {
 
 export interface ChatAskRequest {
   question: string;
+}
+
+// ---- Workspace-wide chat & semantic search ----
+export interface WorkspaceAskRequest {
+  question: string;
+  meetingIds?: string[];
+}
+
+export interface SemanticSearchRequest {
+  query: string;
+  limit?: number;
+}
+
+export interface SemanticSearchHit {
+  meetingId: string;
+  meetingTitle: string;
+  meetingStatus: MeetingStatus;
+  meetingCreatedAt: string;
+  chunkIndex: number;
+  snippet: string;
+  start?: number | null;
+  end?: number | null;
+  score: number; // cosine similarity in [0,1]
 }
 
 // ---- Translation ----

@@ -23,6 +23,9 @@ from app.schemas import (
     MeetingBriefResult,
     ProcessMeetingRequest,
     RisksResponse,
+    SemanticSearchHit,
+    SemanticSearchRequest,
+    SemanticSearchResponse,
     SummarizeRequest,
     SummaryResponse,
     TranscribeRequest,
@@ -30,6 +33,7 @@ from app.schemas import (
     TranscriptResponse,
     TranslateRequest,
     TranslateResponse,
+    WorkspaceChatRequest,
 )
 from app.storage import fetch_audio
 
@@ -115,6 +119,30 @@ async def chat(body: ChatRequest, rag: RagService = Depends(get_rag)) -> ChatRes
     """Answer a question grounded in one meeting's transcript (RAG over pgvector)."""
     answer, citations = await rag.answer(body.meeting_id, body.question)
     return ChatResponse(answer=answer, citations=[Citation(**c) for c in citations])
+
+
+@router.post("/workspace-chat", response_model=ChatResponse)
+async def workspace_chat(
+    body: WorkspaceChatRequest, rag: RagService = Depends(get_rag)
+) -> ChatResponse:
+    """Answer a question grounded across every meeting the user owns.
+
+    Retrieval filters on `user_id`, so cross-tenant grounding is impossible even
+    if a caller passes someone else's meeting ids.
+    """
+    answer, citations = await rag.answer_workspace(
+        body.user_id, body.question, body.meeting_ids
+    )
+    return ChatResponse(answer=answer, citations=[Citation(**c) for c in citations])
+
+
+@router.post("/semantic-search", response_model=SemanticSearchResponse)
+async def semantic_search(
+    body: SemanticSearchRequest, rag: RagService = Depends(get_rag)
+) -> SemanticSearchResponse:
+    """Meaning-based search over the user's transcripts (best passage per meeting)."""
+    hits = await rag.search(body.user_id, body.query, body.limit)
+    return SemanticSearchResponse(hits=[SemanticSearchHit(**h) for h in hits])
 
 
 @router.post("/translate", response_model=TranslateResponse)

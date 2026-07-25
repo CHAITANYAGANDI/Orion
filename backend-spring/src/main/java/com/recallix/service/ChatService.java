@@ -46,29 +46,66 @@ public class ChatService {
     @Transactional
     public ChatMessageResponse ask(String userId, String meetingId, String question) {
         requireOwnedMeeting(userId, meetingId);
-
-        // Persist the user turn.
-        ChatMessage userMsg = new ChatMessage();
-        userMsg.setId(IdGenerator.generate("msg_"));
-        userMsg.setMeetingId(meetingId);
-        userMsg.setUserId(userId);
-        userMsg.setRole("user");
-        userMsg.setContent(question);
-        messages.save(userMsg);
-
-        // Retrieve + answer via the ai-service.
+        persistTurn(userId, meetingId, "user", question, null);
         AiClient.ChatResult result = ai.chat(meetingId, question);
+        return persistTurn(userId, meetingId, "assistant",
+                result.answer() == null ? "" : result.answer(), result.citations());
+    }
 
-        ChatMessage assistant = new ChatMessage();
-        assistant.setId(IdGenerator.generate("msg_"));
-        assistant.setMeetingId(meetingId);
-        assistant.setUserId(userId);
-        assistant.setRole("assistant");
-        assistant.setContent(result.answer() == null ? "" : result.answer());
-        assistant.setCitations(mapper.valueToTree(result.citations()));
-        messages.save(assistant);
+    // --- workspace-wide chat ------------------------------------------------ //
 
-        return ChatMessageResponse.from(assistant);
+    /**
+     * History for the user's workspace-wide conversation — the turns that are not
+     * tied to any one meeting ({@code meeting_id IS NULL}).
+     */
+    @Transactional(readOnly = true)
+    public List<ChatMessageResponse> workspaceHistory(String userId) {
+        return messages.findByUserIdAndMeetingIdIsNullOrderByCreatedAtAsc(userId).stream()
+                .map(ChatMessageResponse::from)
+                .toList();
+    }
+
+    /**
+     * Ask a question grounded across every meeting the user owns. No ownership
+     * check is needed here: the ai-service filters retrieval by userId, so the
+     * answer can only ever be grounded in this user's transcripts.
+     */
+    @Transactional
+    public ChatMessageResponse askWorkspace(String userId, String question, List<String> meetingIds) {
+        // If the caller narrowed the search, verify they own what they named.
+        if (meetingIds != null) {
+            meetingIds.forEach(id -> requireOwnedMeeting(userId, id));
+        }
+        persistTurn(userId, null, "user", question, null);
+        AiClient.ChatResult result = ai.workspaceChat(userId, question, meetingIds);
+        return persistTurn(userId, null, "assistant",
+                result.answer() == null ? "" : result.answer(), result.citations());
+    }
+
+    @Transactional
+    public void clearWorkspaceHistory(String userId) {
+        messages.deleteByUserIdAndMeetingIdIsNull(userId);
+    }
+
+    // --- helpers ------------------------------------------------------------ //
+
+    /** Persist one chat turn. A null meetingId marks it as workspace-scoped. */
+    private ChatMessageResponse persistTurn(String userId,
+                                            String meetingId,
+                                            String role,
+                                            String content,
+                                            List<AiClient.Citation> citations) {
+        ChatMessage msg = new ChatMessage();
+        msg.setId(IdGenerator.generate("msg_"));
+        msg.setMeetingId(meetingId);
+        msg.setUserId(userId);
+        msg.setRole(role);
+        msg.setContent(content);
+        if (citations != null) {
+            msg.setCitations(mapper.valueToTree(citations));
+        }
+        messages.save(msg);
+        return ChatMessageResponse.from(msg);
     }
 
     private void requireOwnedMeeting(String userId, String meetingId) {

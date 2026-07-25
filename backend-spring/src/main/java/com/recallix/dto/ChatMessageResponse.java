@@ -23,7 +23,9 @@ public record ChatMessageResponse(
                         c.hasNonNull("chunkIndex") ? c.get("chunkIndex").asInt() : 0,
                         c.hasNonNull("start") ? c.get("start").asDouble() : null,
                         c.hasNonNull("end") ? c.get("end").asDouble() : null,
-                        c.hasNonNull("text") ? c.get("text").asText() : ""));
+                        c.hasNonNull("text") ? c.get("text").asText() : "",
+                        c.hasNonNull("meetingId") ? c.get("meetingId").asText() : null,
+                        c.hasNonNull("meetingTitle") ? c.get("meetingTitle").asText() : null));
             }
         }
         return new ChatMessageResponse(m.getId(), m.getRole(), m.getContent(), citations, m.getCreatedAt());

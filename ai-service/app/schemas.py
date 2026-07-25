@@ -149,11 +149,45 @@ class Citation(CamelModel):
     start: float | None = None
     end: float | None = None
     text: str
+    # Populated for workspace-wide answers, which span meetings; left null for
+    # single-meeting chat where the meeting is already implied by the request.
+    meeting_id: str | None = None
+    meeting_title: str | None = None
 
 
 class ChatResponse(CamelModel):
     answer: str
     citations: list[Citation] = Field(default_factory=list)
+
+
+class WorkspaceChatRequest(CamelModel):
+    """Ask a question across every meeting a user owns."""
+
+    user_id: str
+    question: str
+    # Optional narrowing: search only these meetings instead of all of them.
+    meeting_ids: list[str] | None = None
+
+
+class SemanticSearchRequest(CamelModel):
+    user_id: str
+    query: str
+    limit: int | None = None
+
+
+class SemanticSearchHit(CamelModel):
+    meeting_id: str
+    meeting_title: str
+    chunk_index: int
+    snippet: str
+    start: float | None = None
+    end: float | None = None
+    meeting_created_at: str | None = None
+    score: float = 0.0
+
+
+class SemanticSearchResponse(CamelModel):
+    hits: list[SemanticSearchHit] = Field(default_factory=list)
 
 
 class TranslateRequest(CamelModel):

@@ -1,15 +1,23 @@
-"""Pipeline orchestration: transcribe -> summarize -> extract.
+"""Pipeline orchestration: transcribe -> (summarize | extract) in parallel.
 
 The pipeline is provider-agnostic (it depends only on the ports) and is used by
 both the synchronous HTTP endpoints and the async Kafka worker. Progress is
 surfaced through an optional `progress_hook(topic, StatusEvent)` so the worker
 can fan each stage out to Kafka + the Spring callback, while HTTP callers can
 ignore it.
+
+Latency note: summarization and the three extractions all take the same
+transcript and are independent of one another, so they run concurrently — the
+analysis stage costs the slowest single call rather than the sum of four. The
+`transcript_hook` fires the moment the transcript exists, which lets the worker
+start RAG indexing in the background while analysis is still running.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from typing import Awaitable, Callable
 
 from app.providers.ports import LlmPort, TranscriptionPort
@@ -23,6 +31,8 @@ from app.schemas import (
 logger = logging.getLogger("ai-service.pipeline")
 
 ProgressHook = Callable[[str, StatusEvent], Awaitable[None]]
+# Fired as soon as the transcript is ready, before analysis starts.
+TranscriptHook = Callable[[TranscriptResponse], Awaitable[None]]
 
 # Kafka topics emitted per stage (api-contracts.md §6).
 TOPIC_TRANSCRIPTION_STARTED = "transcription_started"
@@ -64,6 +74,7 @@ class Pipeline:
         audio: bytes,
         filename: str,
         progress_hook: ProgressHook | None = None,
+        transcript_hook: TranscriptHook | None = None,
     ) -> MeetingBriefResult:
         """Run the full pipeline, emitting stage events through the hook."""
 
@@ -75,23 +86,32 @@ class Pipeline:
                 StatusEvent(meeting_id=meeting_id, status=status, progress=progress, message=message),
             )
 
+        started = time.perf_counter()
+
         # 1) Transcription
         await emit(TOPIC_TRANSCRIPTION_STARTED, "TRANSCRIBING", 10, "Generating transcript from audio...")
         transcript = await self._transcription.transcribe(audio, filename)
+        transcribed_at = time.perf_counter()
         await emit(
             TOPIC_TRANSCRIPTION_COMPLETED, "TRANSCRIBING", 40, "Transcript ready; preparing summary..."
         )
 
-        # 2) Summary
-        await emit(TOPIC_SUMMARY_GENERATED, "SUMMARIZING", 60, "Summarizing the meeting...")
-        summary = await self._llm.summarize(transcript.transcript)
-        await emit(TOPIC_SUMMARY_GENERATED, "SUMMARIZING", 70, "Summary generated; extracting insights...")
+        # Let the caller start indexing now — it overlaps with the analysis below
+        # so RAG chat is warm the moment the brief is ready.
+        if transcript_hook is not None:
+            await transcript_hook(transcript)
 
-        # 3) Extraction
-        await emit(TOPIC_ACTION_ITEMS_EXTRACTED, "EXTRACTING", 80, "Extracting action items, decisions, risks...")
-        action_items = await self._llm.extract_action_items(transcript.transcript)
-        decisions = await self._llm.extract_decisions(transcript.transcript)
-        risks = await self._llm.extract_risks(transcript.transcript)
+        # 2) Analysis — summary + all three extractions are independent and run
+        #    concurrently. Cost is the slowest call, not the sum of four.
+        await emit(TOPIC_SUMMARY_GENERATED, "SUMMARIZING", 60, "Summarizing and extracting insights...")
+        text = transcript.transcript
+        summary, action_items, decisions, risks = await asyncio.gather(
+            self._llm.summarize(text),
+            self._llm.extract_action_items(text),
+            self._llm.extract_decisions(text),
+            self._llm.extract_risks(text),
+        )
+        analyzed_at = time.perf_counter()
         await emit(TOPIC_ACTION_ITEMS_EXTRACTED, "EXTRACTING", 95, "Insights extracted; finalizing brief...")
 
         result = MeetingBriefResult(
@@ -107,8 +127,12 @@ class Pipeline:
             risks=risks,
         )
         logger.info(
-            "Pipeline complete for %s: %d actions, %d decisions, %d risks.",
+            "Pipeline complete for %s in %.1fs (transcribe %.1fs, analyze %.1fs): "
+            "%d actions, %d decisions, %d risks.",
             meeting_id,
+            analyzed_at - started,
+            transcribed_at - started,
+            analyzed_at - transcribed_at,
             len(action_items),
             len(decisions),
             len(risks),

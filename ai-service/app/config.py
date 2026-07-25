@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     embed_dim: int = 1536
     rag_top_k: int = 4
     rag_chunk_chars: int = 700
+    # Workspace-wide chat spans many meetings, so it needs a wider net than the
+    # single-meeting chat above.
+    rag_workspace_top_k: int = 10
+    rag_search_limit: int = 20
     pg_host: str | None = None
     pg_port: int = 5432
     pg_database: str = "recallix"

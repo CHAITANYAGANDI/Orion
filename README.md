@@ -18,7 +18,8 @@ Next.js Frontend ──Clerk JWT──▶ Spring Boot API ──┬── Postgr
                                                     ▼
                                      Python FastAPI AI Worker
                                        ├── Whisper (transcription)
-                                       ├── GPT (summary + extraction)
+                                       ├── GPT (summary + extraction, run in parallel)
+                                       ├── pgvector (chunk + embed for RAG)
                                        └── callback ──▶ Spring (persist result)
 ```
 
@@ -64,6 +65,11 @@ real pipeline set `AI_PROVIDER=openai` + `OPENAI_API_KEY`, and/or
 | Summary + key points | ✅ |
 | Action item / decision / risk extraction | ✅ |
 | Action item tracker | ✅ |
+| Ask-the-meeting RAG chat (pgvector + citations) | ✅ |
+| **Ask-everything workspace chat (grounded across all meetings)** | ✅ |
+| **Semantic search — find meetings by what was said** | ✅ |
+| Summary translation | ✅ |
+| Speaker renaming | ✅ |
 | Kafka async processing + Outbox | ✅ |
 | Redis rate limiting + status cache | ✅ |
 | WebSocket live progress | ✅ |
