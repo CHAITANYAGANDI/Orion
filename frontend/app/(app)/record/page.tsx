@@ -44,6 +44,17 @@ export default function RecordPage() {
 
   const [consented, setConsented] = React.useState(false);
   const [title, setTitle] = React.useState("");
+
+  // Arriving from the calendar page: /record?title=Sprint%20planning. Read from
+  // window.location rather than useSearchParams so the page stays prerenderable
+  // without a Suspense boundary, matching how the meeting page reads `?t=`.
+  React.useEffect(() => {
+    const fromCalendar = new URLSearchParams(window.location.search).get("title");
+    if (fromCalendar) {
+      setTitle(fromCalendar);
+    }
+  }, []);
+
   const [participants, setParticipants] = React.useState("");
   const [tags, setTags] = React.useState("");
   const [phase, setPhase] = React.useState<Phase>("idle");

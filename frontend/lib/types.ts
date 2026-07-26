@@ -82,6 +82,33 @@ export interface MeetingResponse {
   language?: string | null;
 }
 
+export interface CalendarSubscriptionResponse {
+  id: string;
+  label: string | null;
+  /** Host only — the real iCal URL is a secret and never leaves the server. */
+  redactedUrl: string;
+  lastSyncedAt: string | null;
+  lastError: string | null;
+  eventCount: number;
+}
+
+export interface CalendarSubscribeRequest {
+  url: string;
+  label?: string;
+}
+
+export interface CalendarEventResponse {
+  uid: string | null;
+  title: string;
+  start: string;
+  end: string;
+  location: string | null;
+  /** Present when the event has an online meeting link. */
+  meetingUrl: string | null;
+  allDay: boolean;
+  calendarLabel: string | null;
+}
+
 export interface PreferencesResponse {
   autoEmailRecap: boolean;
   recapEmail: string | null;

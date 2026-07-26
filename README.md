@@ -81,6 +81,7 @@ so it takes a fourth upload to see.
 | Feature | Status |
 |---|---|
 | Audio upload (S3 presigned) | ✅ |
+| **Calendar sync (iCal) — upcoming meetings, one-click record** | ✅ |
 | **YouTube import — paste a link, no upload** | ✅ |
 | **PDF import — summarise typed-up minutes** | ✅ |
 | Transcription (Whisper / mock) | ✅ |
@@ -124,14 +125,20 @@ Each service has its own README with local (non-Docker) run instructions:
 - **Testing**: pytest covers the ai-service — schema/camelCase contracts, the full
   mock pipeline, Meeting Memory's verdict and drift logic, and the import
   allowlist. JUnit covers the Spring domain helpers, `MemoryService`,
-  `ShareService`, URL imports and the recap email guards. Run them with
-  `cd ai-service && pytest` (64) and `cd backend-spring && mvn test` (76).
+  `ShareService`, URL imports, the recap email guards, the SSRF guard and the
+  iCal parser — the last of those against a real Google Calendar export, since
+  hand-written ICS is tidier than what providers actually emit. Run them with
+  `cd ai-service && pytest` (64) and `cd backend-spring && mvn test` (133).
 - **Email in dev**: `docker compose` runs [Mailpit](http://localhost:8025), so the
   recap feature is demoable with no SMTP account and no test ever mails a real
   person. Point `SMTP_HOST`/`SMTP_PORT` at a real relay to send for real.
-- **Server-side request forgery**: an imported URL is fetched by the worker, so
-  the host allowlist is enforced twice — in `MeetingService` before the event is
-  published, and in `app/ingest.py` before yt-dlp sees it.
+- **Server-side request forgery**: two user-supplied URLs are fetched server-side
+  and each is defended differently. The YouTube import uses a host allowlist,
+  enforced twice — in `MeetingService` before the event is published, and in
+  `app/ingest.py` before yt-dlp sees it. A calendar URL can't be allowlisted
+  (any host is a plausible provider), so `UrlSafetyGuard` resolves it and
+  refuses every loopback, private, link-local, unique-local and CGNAT address,
+  and redirects are refused rather than followed.
 
 > **Test coverage is partial and stated honestly.** Testcontainers is declared in
 > `pom.xml` but no integration suite uses it yet, there are no frontend tests, and
