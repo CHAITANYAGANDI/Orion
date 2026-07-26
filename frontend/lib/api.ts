@@ -14,10 +14,14 @@ import type {
   CommitmentStatus,
   DecisionDrift,
   DecisionResponse,
+  EmailDraft,
   MemoryStats,
+  ShareCreateRequest,
+  ShareResponse,
   IntegrationProvider,
   IntegrationResponse,
   MeetingCreateRequest,
+  MeetingImportRequest,
   MeetingListQuery,
   MeetingResponse,
   Page,
@@ -65,6 +69,7 @@ export const api = createApi({
     "Commitments",
     "Drift",
     "MemoryStats",
+    "Share",
   ],
   endpoints: (builder) => ({
     // ---- Meetings ----
@@ -102,6 +107,15 @@ export const api = createApi({
 
     createMeeting: builder.mutation<MeetingResponse, MeetingCreateRequest>({
       query: (body) => ({ url: "/meetings", method: "POST", body }),
+      invalidatesTags: [
+        { type: "Meetings", id: "LIST" },
+        { type: "Usage", id: "ME" },
+      ],
+    }),
+
+    /** Import from a URL (YouTube) — no upload step; the worker fetches it. */
+    importMeeting: builder.mutation<MeetingResponse, MeetingImportRequest>({
+      query: (body) => ({ url: "/meetings/import", method: "POST", body }),
       invalidatesTags: [
         { type: "Meetings", id: "LIST" },
         { type: "Usage", id: "ME" },
@@ -298,6 +312,38 @@ export const api = createApi({
       providesTags: [{ type: "MemoryStats", id: "ME" }],
     }),
 
+    // ---- Sharing ----
+    getShare: builder.query<ShareResponse | null, string>({
+      // 204 (never shared) arrives as an empty body; normalise it to null.
+      query: (id) => ({
+        url: `/meetings/${id}/share`,
+        responseHandler: async (r) => (r.status === 204 ? null : r.json()),
+      }),
+      providesTags: (_r, _e, id) => [{ type: "Share", id }],
+    }),
+
+    createShare: builder.mutation<
+      ShareResponse,
+      { id: string; body?: ShareCreateRequest }
+    >({
+      query: ({ id, body }) => ({
+        url: `/meetings/${id}/share`,
+        method: "POST",
+        body: body ?? {},
+      }),
+      invalidatesTags: (_r, _e, arg) => [{ type: "Share", id: arg.id }],
+    }),
+
+    revokeShare: builder.mutation<void, string>({
+      query: (id) => ({ url: `/meetings/${id}/share`, method: "DELETE" }),
+      invalidatesTags: (_r, _e, id) => [{ type: "Share", id }],
+    }),
+
+    // ---- Follow-up email ----
+    draftFollowUpEmail: builder.mutation<EmailDraft, string>({
+      query: (id) => ({ url: `/meetings/${id}/follow-up-email`, method: "POST" }),
+    }),
+
     // ---- Billing & usage ----
     checkout: builder.mutation<CheckoutResponse, CheckoutRequest>({
       query: (body) => ({ url: "/billing/checkout", method: "POST", body }),
@@ -364,6 +410,7 @@ export const {
   useGetMeetingQuery,
   useCreateUploadUrlMutation,
   useCreateMeetingMutation,
+  useImportMeetingMutation,
   useGetTranscriptQuery,
   useGetSummaryQuery,
   useGetMeetingActionItemsQuery,
@@ -386,6 +433,10 @@ export const {
   useGetDecisionDriftQuery,
   useAcknowledgeDriftMutation,
   useGetMemoryStatsQuery,
+  useGetShareQuery,
+  useCreateShareMutation,
+  useRevokeShareMutation,
+  useDraftFollowUpEmailMutation,
   useCheckoutMutation,
   useGetUsageQuery,
   useGetIntegrationsQuery,

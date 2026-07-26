@@ -3,6 +3,7 @@ package com.recallix.controller;
 import com.recallix.domain.MeetingStatus;
 import com.recallix.dto.DecisionResponse;
 import com.recallix.dto.MeetingCreateRequest;
+import com.recallix.dto.MeetingImportRequest;
 import com.recallix.dto.MeetingResponse;
 import com.recallix.dto.PageResponse;
 import com.recallix.dto.ReprocessResponse;
@@ -49,6 +50,13 @@ public class MeetingController {
     @ResponseStatus(HttpStatus.CREATED)
     public MeetingResponse create(@Valid @RequestBody MeetingCreateRequest req) {
         return meetings.createMeeting(SecurityUtils.currentUserId(), req);
+    }
+
+    /** Import from a URL (YouTube) instead of uploading a file. */
+    @PostMapping("/import")
+    @ResponseStatus(HttpStatus.CREATED)
+    public MeetingResponse importFromUrl(@Valid @RequestBody MeetingImportRequest req) {
+        return meetings.importFromUrl(SecurityUtils.currentUserId(), req);
     }
 
     @GetMapping

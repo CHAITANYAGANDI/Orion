@@ -21,6 +21,8 @@ from app.schemas import (
     ChatResponse,
     Citation,
     DecisionsResponse,
+    DraftEmailRequest,
+    DraftEmailResponse,
     MeetingBriefResult,
     ProcessMeetingRequest,
     ReconcileRequest,
@@ -151,6 +153,14 @@ async def semantic_search(
     """Meaning-based search over the user's transcripts (best passage per meeting)."""
     hits = await rag.search(body.user_id, body.query, body.limit)
     return SemanticSearchResponse(hits=[SemanticSearchHit(**h) for h in hits])
+
+
+@router.post("/draft-email", response_model=DraftEmailResponse)
+async def draft_email(
+    body: DraftEmailRequest, pipeline: Pipeline = Depends(get_pipeline)
+) -> DraftEmailResponse:
+    """Draft the follow-up email for a meeting, grounded in its brief."""
+    return await pipeline.draft_followup_email(body)
 
 
 @router.post("/memory/reconcile", response_model=ReconcileResponse)

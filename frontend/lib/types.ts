@@ -60,6 +60,12 @@ export interface MeetingCreateRequest {
   durationSeconds?: number;
 }
 
+/**
+ * Where a meeting came from. AUDIO and YOUTUBE have a recording behind them;
+ * DOCUMENT does not, so it renders without a player or transcript deep-links.
+ */
+export type SourceType = "AUDIO" | "YOUTUBE" | "DOCUMENT";
+
 export interface MeetingResponse {
   id: string;
   title: string;
@@ -70,6 +76,14 @@ export interface MeetingResponse {
   durationSeconds?: number | null;
   createdAt: string;
   errorMessage?: string | null;
+  sourceType?: SourceType;
+  sourceUrl?: string | null;
+}
+
+export interface MeetingImportRequest {
+  url: string;
+  title?: string;
+  tags?: string[];
 }
 
 export interface TranscriptSegment {
@@ -268,6 +282,47 @@ export interface CommitmentListQuery {
   page?: number;
   size?: number;
   status?: CommitmentStatus;
+}
+
+// ---- Sharing & follow-up ----
+export interface ShareCreateRequest {
+  includeTranscript?: boolean;
+  expiresInDays?: number;
+}
+
+export interface ShareResponse {
+  token: string;
+  url: string;
+  includeTranscript: boolean;
+  expiresAt?: string | null;
+  viewCount: number;
+  lastViewedAt?: string | null;
+  createdAt: string;
+}
+
+/** The anonymous view of a shared meeting — no ids, no audio, no owner. */
+export interface SharedMeeting {
+  title: string;
+  meetingDate: string;
+  durationSeconds?: number | null;
+  participants: string[];
+  shortSummary?: string | null;
+  detailedSummary?: string | null;
+  keyPoints: string[];
+  decisions: { decision: string; confidence: string; sourceSentence?: string | null }[];
+  actionItems: {
+    title: string;
+    ownerName?: string | null;
+    dueDate?: string | null;
+    priority: Priority;
+  }[];
+  risks: { risk: string; severity: string; sourceSentence?: string | null }[];
+  transcript?: string | null;
+}
+
+export interface EmailDraft {
+  subject: string;
+  body: string;
 }
 
 // ---- Billing & usage ----

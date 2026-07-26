@@ -1,6 +1,7 @@
 package com.recallix.entity;
 
 import com.recallix.domain.MeetingStatus;
+import com.recallix.domain.SourceType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -37,6 +38,14 @@ public class Meeting {
 
     @Column(name = "object_key")
     private String objectKey;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "source_type", nullable = false)
+    private SourceType sourceType = SourceType.AUDIO;
+
+    /** Only set for {@link SourceType#YOUTUBE}. */
+    @Column(name = "source_url")
+    private String sourceUrl;
 
     @Column(name = "duration_seconds")
     private Integer durationSeconds;
@@ -80,6 +89,12 @@ public class Meeting {
 
     public String getObjectKey() { return objectKey; }
     public void setObjectKey(String objectKey) { this.objectKey = objectKey; }
+
+    public SourceType getSourceType() { return sourceType; }
+    public void setSourceType(SourceType sourceType) { this.sourceType = sourceType; }
+
+    public String getSourceUrl() { return sourceUrl; }
+    public void setSourceUrl(String sourceUrl) { this.sourceUrl = sourceUrl; }
 
     public Integer getDurationSeconds() { return durationSeconds; }
     public void setDurationSeconds(Integer durationSeconds) { this.durationSeconds = durationSeconds; }

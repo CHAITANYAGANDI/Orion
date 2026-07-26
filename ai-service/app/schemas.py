@@ -28,6 +28,10 @@ MeetingStatus = Literal[
     "FAILED",
 ]
 
+# Where a meeting's content came from. AUDIO and YOUTUBE both transcribe;
+# DOCUMENT is already text and skips transcription entirely.
+SourceType = Literal["AUDIO", "YOUTUBE", "DOCUMENT"]
+
 
 class CamelModel(BaseModel):
     """Base model: camelCase JSON aliases, populate by field name or alias."""
@@ -82,6 +86,10 @@ class MeetingBriefResult(CamelModel):
     decisions: list[Decision] = Field(default_factory=list)
     action_items: list[ActionItem] = Field(default_factory=list)
     risks: list[Risk] = Field(default_factory=list)
+    # Only populated for URL imports, where the worker discovers the real title
+    # and length from the source. Spring uses them to replace its placeholder.
+    title: str | None = None
+    duration_seconds: int | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -190,6 +198,23 @@ class SemanticSearchResponse(CamelModel):
     hits: list[SemanticSearchHit] = Field(default_factory=list)
 
 
+class DraftEmailRequest(CamelModel):
+    """Everything the model needs to write a recap the user can actually send."""
+
+    title: str
+    short_summary: str = ""
+    key_points: list[str] = Field(default_factory=list)
+    decisions: list[str] = Field(default_factory=list)
+    action_items: list[str] = Field(default_factory=list)
+    # Optional steer: "keep it short", "address it to the client", etc.
+    tone: str | None = None
+
+
+class DraftEmailResponse(CamelModel):
+    subject: str
+    body: str
+
+
 class TranslateRequest(CamelModel):
     text: str
     target_language: str
@@ -292,6 +317,11 @@ class MeetingUploadedEvent(CamelModel):
     user_id: str | None = None
     audio_url: str | None = None
     object_key: str | None = None
+    # Where the content comes from. AUDIO is the original path and stays the
+    # default so events published before this field existed still validate.
+    source_type: SourceType = "AUDIO"
+    # Set for YOUTUBE; the object key carries the content for AUDIO/DOCUMENT.
+    source_url: str | None = None
 
 
 class ProcessingFailedEvent(CamelModel):

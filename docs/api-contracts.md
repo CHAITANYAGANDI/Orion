@@ -54,10 +54,26 @@ Paginated list envelope:
 ```
 
 ### Meetings
+
+A meeting's `sourceType` records how it arrived and changes what the response
+carries:
+
+| `sourceType` | How it arrives | Transcribed? | Has `segments`? |
+|---|---|---|---|
+| `AUDIO` | presigned upload, or the in-browser recorder | yes | yes |
+| `YOUTUBE` | `POST /meetings/import` — the worker downloads it | yes | yes |
+| `DOCUMENT` | presigned upload of `application/pdf` | no — text layer is read directly | no |
+
+`DOCUMENT` meetings have no timeline, so `segments` is empty and transcript
+deep-links (`?t=`) do not apply. `POST /meetings/import` accepts YouTube hosts
+only; anything else is `400`, enforced before the event is published *and*
+again in the worker.
+
 | Method | Endpoint | Body / Query | Response |
 |---|---|---|---|
 | POST | `/api/v1/meetings/upload-url` | `{ "filename", "contentType", "sizeBytes" }` | `{ "meetingId", "uploadUrl", "objectKey", "expiresInSeconds" }` |
 | POST | `/api/v1/meetings` | `MeetingCreateRequest` | `MeetingResponse` |
+| POST | `/api/v1/meetings/import` | `{ "url", "title"?, "tags"? }` | `201 MeetingResponse` |
 | GET  | `/api/v1/meetings` | `?page&size&search&tag&status` | `Page<MeetingResponse>` |
 | GET  | `/api/v1/meetings/{id}` | — | `MeetingResponse` |
 | GET  | `/api/v1/meetings/{id}/transcript` | — | `TranscriptResponse` |

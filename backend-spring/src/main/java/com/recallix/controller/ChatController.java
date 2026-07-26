@@ -2,11 +2,13 @@ package com.recallix.controller;
 
 import com.recallix.dto.ChatAskRequest;
 import com.recallix.dto.ChatMessageResponse;
+import com.recallix.dto.EmailDraftResponse;
 import com.recallix.dto.TranslateRequest;
 import com.recallix.dto.TranslateResponse;
 import com.recallix.dto.WorkspaceAskRequest;
 import com.recallix.security.SecurityUtils;
 import com.recallix.service.ChatService;
+import com.recallix.service.FollowUpService;
 import com.recallix.service.TranslationService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -28,10 +30,14 @@ public class ChatController {
 
     private final ChatService chat;
     private final TranslationService translation;
+    private final FollowUpService followUp;
 
-    public ChatController(ChatService chat, TranslationService translation) {
+    public ChatController(ChatService chat,
+                          TranslationService translation,
+                          FollowUpService followUp) {
         this.chat = chat;
         this.translation = translation;
+        this.followUp = followUp;
     }
 
     @GetMapping("/api/v1/meetings/{id}/chat")
@@ -47,6 +53,12 @@ public class ChatController {
     @PostMapping("/api/v1/meetings/{id}/translate")
     public TranslateResponse translate(@PathVariable String id, @Valid @RequestBody TranslateRequest req) {
         return translation.translateSummary(SecurityUtils.currentUserId(), id, req.targetLanguage());
+    }
+
+    /** Draft the recap email for this meeting, grounded in its brief. */
+    @PostMapping("/api/v1/meetings/{id}/follow-up-email")
+    public EmailDraftResponse followUpEmail(@PathVariable String id) {
+        return followUp.draft(SecurityUtils.currentUserId(), id);
     }
 
     // --- workspace-wide chat: grounded across every meeting the user owns --- //

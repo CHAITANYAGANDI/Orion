@@ -22,6 +22,8 @@ from typing import Awaitable, Callable
 
 from app.providers.ports import LlmPort, TranscriptionPort
 from app.schemas import (
+    DraftEmailRequest,
+    DraftEmailResponse,
     MeetingBriefResult,
     StatusEvent,
     SummaryResponse,
@@ -67,6 +69,9 @@ class Pipeline:
     async def translate(self, text: str, target_language: str) -> str:
         return await self._llm.translate(text, target_language)
 
+    async def draft_followup_email(self, brief: DraftEmailRequest) -> DraftEmailResponse:
+        return await self._llm.draft_followup_email(brief)
+
     # --- full pipeline ------------------------------------------------------ #
     async def process(
         self,
@@ -96,13 +101,67 @@ class Pipeline:
             TOPIC_TRANSCRIPTION_COMPLETED, "TRANSCRIBING", 40, "Transcript ready; preparing summary..."
         )
 
+        result = await self._analyze(meeting_id, transcript, emit, transcript_hook)
+        logger.info(
+            "Pipeline complete for %s in %.1fs (transcribe %.1fs, analyze %.1fs).",
+            meeting_id,
+            time.perf_counter() - started,
+            transcribed_at - started,
+            time.perf_counter() - transcribed_at,
+        )
+        return result
+
+    async def process_document(
+        self,
+        meeting_id: str,
+        text: str,
+        progress_hook: ProgressHook | None = None,
+        transcript_hook: TranscriptHook | None = None,
+        language: str = "en",
+    ) -> MeetingBriefResult:
+        """Analyse an already-textual source (a PDF's text layer).
+
+        Identical to `process` minus transcription: there is no audio, so there
+        are no segments and no timeline. Downstream code already treats
+        `segments` as optional, so a document brief simply renders without the
+        player and without transcript deep-links.
+        """
+
+        async def emit(topic: str, status: str, progress: int, message: str) -> None:
+            if progress_hook is None:
+                return
+            await progress_hook(
+                topic,
+                StatusEvent(meeting_id=meeting_id, status=status, progress=progress, message=message),
+            )
+
+        started = time.perf_counter()
+        await emit(TOPIC_TRANSCRIPTION_COMPLETED, "TRANSCRIBING", 40, "Document read; preparing summary...")
+        transcript = TranscriptResponse(transcript=text, language=language, segments=[])
+        result = await self._analyze(meeting_id, transcript, emit, transcript_hook)
+        logger.info(
+            "Document pipeline complete for %s in %.1fs (%d chars).",
+            meeting_id,
+            time.perf_counter() - started,
+            len(text),
+        )
+        return result
+
+    async def _analyze(
+        self,
+        meeting_id: str,
+        transcript: TranscriptResponse,
+        emit: Callable[[str, str, int, str], Awaitable[None]],
+        transcript_hook: TranscriptHook | None,
+    ) -> MeetingBriefResult:
+        """Shared tail of both pipelines: index, then extract everything at once."""
         # Let the caller start indexing now — it overlaps with the analysis below
         # so RAG chat is warm the moment the brief is ready.
         if transcript_hook is not None:
             await transcript_hook(transcript)
 
-        # 2) Analysis — summary + all three extractions are independent and run
-        #    concurrently. Cost is the slowest call, not the sum of four.
+        # Summary + all three extractions take the same text and are independent,
+        # so they run concurrently: cost is the slowest call, not the sum of four.
         await emit(TOPIC_SUMMARY_GENERATED, "SUMMARIZING", 60, "Summarizing and extracting insights...")
         text = transcript.transcript
         summary, action_items, decisions, risks = await asyncio.gather(
@@ -111,10 +170,13 @@ class Pipeline:
             self._llm.extract_decisions(text),
             self._llm.extract_risks(text),
         )
-        analyzed_at = time.perf_counter()
         await emit(TOPIC_ACTION_ITEMS_EXTRACTED, "EXTRACTING", 95, "Insights extracted; finalizing brief...")
 
-        result = MeetingBriefResult(
+        logger.info(
+            "Analysis for %s: %d actions, %d decisions, %d risks.",
+            meeting_id, len(action_items), len(decisions), len(risks),
+        )
+        return MeetingBriefResult(
             meeting_id=meeting_id,
             transcript=transcript.transcript,
             language=transcript.language,
@@ -126,15 +188,3 @@ class Pipeline:
             action_items=action_items,
             risks=risks,
         )
-        logger.info(
-            "Pipeline complete for %s in %.1fs (transcribe %.1fs, analyze %.1fs): "
-            "%d actions, %d decisions, %d risks.",
-            meeting_id,
-            analyzed_at - started,
-            transcribed_at - started,
-            analyzed_at - transcribed_at,
-            len(action_items),
-            len(decisions),
-            len(risks),
-        )
-        return result

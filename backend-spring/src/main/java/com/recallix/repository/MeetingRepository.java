@@ -15,6 +15,9 @@ public interface MeetingRepository extends JpaRepository<Meeting, String> {
 
     Optional<Meeting> findByObjectKeyAndUserId(String objectKey, String userId);
 
+    /** Backs the "you already imported that video" check (unique index in V6). */
+    Optional<Meeting> findByUserIdAndSourceUrl(String userId, String sourceUrl);
+
     long countByUserId(String userId);
 
     /**

@@ -29,6 +29,8 @@ from app.schemas import (
     CommitmentVerdict,
     Decision,
     DecisionRelation,
+    DraftEmailRequest,
+    DraftEmailResponse,
     Risk,
     Segment,
     SummaryResponse,
@@ -344,6 +346,23 @@ class MockLlmAdapter(LlmPort):
 
     async def translate(self, text: str, target_language: str) -> str:
         return f"[{target_language}] {text}"
+
+    async def draft_followup_email(self, brief: DraftEmailRequest) -> DraftEmailResponse:
+        """Assemble a recap from the brief's own words — no generation involved."""
+        lines: list[str] = ["Hi all,", "", f"Thanks for the time on {brief.title}."]
+        if brief.short_summary:
+            lines += ["", brief.short_summary]
+        if brief.decisions:
+            lines += ["", "What we decided:"]
+            lines += [f"  - {d}" for d in brief.decisions]
+        if brief.action_items:
+            lines += ["", "Next steps:"]
+            lines += [f"  - {a}" for a in brief.action_items]
+        if brief.key_points and not brief.decisions and not brief.action_items:
+            lines += ["", "Key points:"]
+            lines += [f"  - {k}" for k in brief.key_points]
+        lines += ["", "Shout if I've missed or misremembered anything.", "", "Best,"]
+        return DraftEmailResponse(subject=f"Recap: {brief.title}", body="\n".join(lines))
 
     async def judge_commitment(
         self, commitment: str, owner: str | None, passages: list[str]

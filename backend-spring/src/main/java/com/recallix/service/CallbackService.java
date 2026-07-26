@@ -118,6 +118,19 @@ public class CallbackService {
         meeting.setStatus(MeetingStatus.READY);
         meeting.setErrorMessage(null);
 
+        // A URL import starts with a placeholder title and no duration, because
+        // neither is known until the worker has fetched the video. Only the
+        // placeholder is overwritten — a title the user chose survives both the
+        // first run and any later reprocess.
+        if (result.title() != null && !result.title().isBlank()
+                && MeetingService.IMPORT_PLACEHOLDER_TITLE.equals(meeting.getTitle())) {
+            meeting.setTitle(result.title().trim());
+        }
+        if (result.durationSeconds() != null && result.durationSeconds() > 0
+                && meeting.getDurationSeconds() == null) {
+            meeting.setDurationSeconds(result.durationSeconds());
+        }
+
         if (meeting.getDurationSeconds() != null && meeting.getDurationSeconds() > 0) {
             usage.addAiMinutes(meeting.getUserId(), Math.round(meeting.getDurationSeconds() / 60.0f));
         }

@@ -17,7 +17,8 @@ import logging
 
 from app.callback import SpringCallbackClient
 from app.config import Settings
-from app.pipeline import Pipeline
+from app.ingest import extract_pdf_text, fetch_youtube
+from app.pipeline import TOPIC_TRANSCRIPTION_STARTED, Pipeline
 from app.schemas import (
     MeetingUploadedEvent,
     ProcessingFailedEvent,
@@ -155,6 +156,58 @@ class KafkaWorker:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Failed to emit to %s: %s", topic, exc)
 
+    async def _process_source(self, event, progress_hook, transcript_hook):
+        """Resolve the event's source, then run the matching pipeline.
+
+        Three sources converge here. AUDIO and YOUTUBE both end up as bytes and
+        transcribe; DOCUMENT is already text, so it enters the pipeline after
+        transcription rather than before it.
+        """
+        meeting_id = event.meeting_id
+
+        if event.source_type == "YOUTUBE":
+            await progress_hook(
+                TOPIC_TRANSCRIPTION_STARTED,
+                StatusEvent(
+                    meeting_id=meeting_id, status="TRANSCRIBING", progress=5,
+                    message="Downloading audio from YouTube...",
+                ),
+            )
+            source = await fetch_youtube(event.source_url or "", self._settings)
+            result = await self._pipeline.process(
+                meeting_id, source.audio or b"", source.filename, progress_hook, transcript_hook
+            )
+            # Spring created this meeting before anything was known about the
+            # video; hand back the real title and length so it can replace them.
+            result.title = source.title
+            result.duration_seconds = source.duration_seconds
+            return result
+
+        if event.source_type == "DOCUMENT":
+            await progress_hook(
+                TOPIC_TRANSCRIPTION_STARTED,
+                StatusEvent(
+                    meeting_id=meeting_id, status="TRANSCRIBING", progress=10,
+                    message="Reading document...",
+                ),
+            )
+            data, filename = await fetch_audio(
+                self._settings, audio_url=event.audio_url, object_key=event.object_key
+            )
+            source = extract_pdf_text(data, self._settings, filename)
+            # No title backfill here: Spring already derived one from the
+            # uploaded filename, and the user may have edited it since.
+            return await self._pipeline.process_document(
+                meeting_id, source.text or "", progress_hook, transcript_hook
+            )
+
+        audio, filename = await fetch_audio(
+            self._settings, audio_url=event.audio_url, object_key=event.object_key
+        )
+        return await self._pipeline.process(
+            meeting_id, audio, filename, progress_hook, transcript_hook
+        )
+
     async def _handle(self, event: MeetingUploadedEvent) -> None:
         meeting_id = event.meeting_id
         logger.info("Processing meeting_uploaded for %s.", meeting_id)
@@ -181,12 +234,7 @@ class KafkaWorker:
             )
 
         try:
-            audio, filename = await fetch_audio(
-                self._settings, audio_url=event.audio_url, object_key=event.object_key
-            )
-            result = await self._pipeline.process(
-                meeting_id, audio, filename, progress_hook, transcript_hook
-            )
+            result = await self._process_source(event, progress_hook, transcript_hook)
 
             # Persist final result + READY status.
             await self._callback.post_result(meeting_id, result)

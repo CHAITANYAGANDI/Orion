@@ -13,6 +13,8 @@ from app.schemas import (
     CommitmentVerdict,
     Decision,
     DecisionRelation,
+    DraftEmailRequest,
+    DraftEmailResponse,
     Risk,
     SummaryResponse,
     TranscriptResponse,
@@ -55,6 +57,16 @@ class LlmPort(ABC):
     @abstractmethod
     async def translate(self, text: str, target_language: str) -> str:
         """Translate text into the target language, preserving meaning."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def draft_followup_email(self, brief: DraftEmailRequest) -> DraftEmailResponse:
+        """Write a recap email the user can send without editing.
+
+        Grounded strictly in the supplied brief — a follow-up that invents a
+        commitment is worse than no follow-up at all, because the user forwards
+        it before reading it closely.
+        """
         raise NotImplementedError
 
     @abstractmethod

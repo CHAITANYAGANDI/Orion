@@ -24,6 +24,8 @@ from app.schemas import (
     CommitmentVerdict,
     Decision,
     DecisionRelation,
+    DraftEmailRequest,
+    DraftEmailResponse,
     Risk,
     Segment,
     SummaryResponse,
@@ -262,6 +264,43 @@ class OpenAiLlmAdapter(LlmPort):
             label="translate",
         )
 
+
+    async def draft_followup_email(self, brief: DraftEmailRequest) -> DraftEmailResponse:
+        async def _op() -> DraftEmailResponse:
+            system = (
+                "You write the follow-up email a participant sends after a meeting. "
+                "Use ONLY the supplied brief: never invent a decision, an owner, a "
+                "date or a commitment that is not listed — the sender will forward "
+                "this without checking it line by line. Write in plain professional "
+                "prose, no marketing tone, no filler. Keep it under 200 words. Lead "
+                "with what was decided, then who is doing what. Omit any section the "
+                "brief has nothing for rather than padding it. Respond with a single "
+                'JSON object: {"subject","body"}.'
+            )
+            parts = [f"Meeting: {brief.title}"]
+            if brief.short_summary:
+                parts.append(f"Summary: {brief.short_summary}")
+            if brief.decisions:
+                parts.append("Decisions:\n" + "\n".join(f"- {d}" for d in brief.decisions))
+            if brief.action_items:
+                parts.append("Action items:\n" + "\n".join(f"- {a}" for a in brief.action_items))
+            if brief.key_points:
+                parts.append("Key points:\n" + "\n".join(f"- {k}" for k in brief.key_points))
+            if brief.tone:
+                parts.append(f"Additional instruction: {brief.tone}")
+            data = await self._chat_json(system, "\n\n".join(parts))
+            return DraftEmailResponse(
+                subject=str(data.get("subject", f"Recap: {brief.title}")),
+                body=str(data.get("body", "")),
+            )
+
+        return await _with_retries(
+            _op,
+            attempts=self._settings.openai_max_retries + 1,
+            # An empty draft is honest; a fabricated one gets forwarded.
+            fallback=DraftEmailResponse(subject=f"Recap: {brief.title}", body=""),
+            label="draft_followup_email",
+        )
 
     async def judge_commitment(
         self, commitment: str, owner: str | None, passages: list[str]

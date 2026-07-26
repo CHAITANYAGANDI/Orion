@@ -1,6 +1,7 @@
 package com.recallix.dto;
 
 import com.recallix.domain.MeetingStatus;
+import com.recallix.domain.SourceType;
 import com.recallix.entity.Meeting;
 
 import java.time.Instant;
@@ -15,7 +16,10 @@ public record MeetingResponse(
         String audioUrl,
         Integer durationSeconds,
         Instant createdAt,
-        String errorMessage
+        String errorMessage,
+        /** Lets the UI drop the audio player and deep-links for text sources. */
+        SourceType sourceType,
+        String sourceUrl
 ) {
     public static MeetingResponse from(Meeting m) {
         return new MeetingResponse(
@@ -27,7 +31,9 @@ public record MeetingResponse(
                 m.getAudioUrl(),
                 m.getDurationSeconds(),
                 m.getCreatedAt(),
-                m.getErrorMessage()
+                m.getErrorMessage(),
+                m.getSourceType(),
+                m.getSourceUrl()
         );
     }
 }

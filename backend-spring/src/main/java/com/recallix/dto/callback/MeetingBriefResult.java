@@ -16,7 +16,14 @@ public record MeetingBriefResult(
         List<String> keyPoints,
         List<AiDecision> decisions,
         List<AiActionItem> actionItems,
-        List<AiRisk> risks
+        List<AiRisk> risks,
+        /**
+         * Only sent for URL imports, where the worker learns the real title and
+         * length from the video's metadata. Null for uploads, which already
+         * have both from the browser.
+         */
+        String title,
+        Integer durationSeconds
 ) {
     public List<AiSegment> segmentsOrEmpty() { return segments == null ? List.of() : segments; }
     public List<String> keyPointsOrEmpty() { return keyPoints == null ? List.of() : keyPoints; }

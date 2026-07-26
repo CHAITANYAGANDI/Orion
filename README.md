@@ -2,9 +2,11 @@
 
 > Turn meeting audio into accurate transcripts, concise summaries, decisions, risks, and trackable action items.
 
-Recallix AI is a production-style, multi-service SaaS. Upload meeting audio → it
-transcribes, summarizes, and extracts decisions / action items / risks, streams
-live progress over WebSockets, and lets you track and export the results.
+Recallix AI is a production-style, multi-service SaaS. Bring a meeting in —
+upload audio or video, record a tab live, paste a YouTube link, or drop in a PDF
+of typed-up minutes — and it transcribes, summarizes, and extracts decisions /
+action items / risks, streams live progress over WebSockets, and tracks
+commitments and decision drift *across* meetings.
 
 ## Architecture
 
@@ -78,6 +80,8 @@ so it takes a fourth upload to see.
 | Feature | Status |
 |---|---|
 | Audio upload (S3 presigned) | ✅ |
+| **YouTube import — paste a link, no upload** | ✅ |
+| **PDF import — summarise typed-up minutes** | ✅ |
 | Transcription (Whisper / mock) | ✅ |
 | Summary + key points | ✅ |
 | Action item / decision / risk extraction | ✅ |
@@ -93,7 +97,10 @@ so it takes a fourth upload to see.
 | Redis rate limiting + status cache | ✅ |
 | WebSocket live progress | ✅ |
 | Stripe billing (checkout + webhook) | ✅ (test mode) |
-| PDF / Markdown export | ✅ |
+| Markdown export · PDF via browser print | ✅ |
+| Read-only public share links (revocable) | ✅ |
+| AI-drafted follow-up email | ✅ |
+| Live in-browser recording (tab audio + mic) | ✅ |
 | Search & filters | ✅ |
 | Clerk auth (+ dev bypass) | ✅ |
 | Speaker diarization | ⚪ optional |
@@ -112,9 +119,13 @@ Each service has its own README with local (non-Docker) run instructions:
 - **Security**: Clerk JWT validation, per-user data isolation, private S3 buckets +
   short-lived presigned URLs, audit logs, plan-based file/usage limits.
 - **Testing**: pytest covers the ai-service — schema/camelCase contracts, the full
-  mock pipeline, and Meeting Memory's verdict and drift logic. JUnit covers the
-  Spring domain helpers and `MemoryService`. Run them with
-  `cd ai-service && pytest` and `cd backend-spring && mvn test`.
+  mock pipeline, Meeting Memory's verdict and drift logic, and the import
+  allowlist. JUnit covers the Spring domain helpers, `MemoryService`,
+  `ShareService` and URL imports. Run them with
+  `cd ai-service && pytest` (64) and `cd backend-spring && mvn test` (61).
+- **Server-side request forgery**: an imported URL is fetched by the worker, so
+  the host allowlist is enforced twice — in `MeetingService` before the event is
+  published, and in `app/ingest.py` before yt-dlp sees it.
 
 > **Test coverage is partial and stated honestly.** Testcontainers is declared in
 > `pom.xml` but no integration suite uses it yet, there are no frontend tests, and

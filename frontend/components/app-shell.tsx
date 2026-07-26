@@ -33,6 +33,7 @@ import {
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/record", label: "Record meeting", icon: Mic },
   { href: "/upload", label: "Upload meeting", icon: Upload },
   { href: "/ask", label: "Ask Recallix", icon: Sparkles },
   { href: "/search", label: "Search meetings", icon: Search },

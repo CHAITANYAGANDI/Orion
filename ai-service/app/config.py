@@ -83,6 +83,15 @@ class Settings(BaseSettings):
     # --- HTTP download ---
     download_timeout_seconds: float = 60.0
 
+    # --- Alternative sources (YouTube links, PDF documents) ---
+    # A 3-hour cap and a 200 MB cap between them exclude full conference
+    # recordings that would blow the transcription budget on one upload.
+    youtube_max_bytes: int = 200 * 1024 * 1024
+    youtube_max_duration_seconds: int = 3 * 60 * 60
+    # ~200k characters is roughly 50k tokens: long enough for real minutes,
+    # short enough to stay inside a single analysis call.
+    document_max_chars: int = 200_000
+
 
 @lru_cache
 def get_settings() -> Settings:

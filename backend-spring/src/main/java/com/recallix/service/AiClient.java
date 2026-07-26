@@ -107,6 +107,30 @@ public class AiClient {
         return hits;
     }
 
+    public record EmailDraft(String subject, String body) {}
+
+    /** Draft the follow-up email for a meeting, grounded in its brief. */
+    public EmailDraft draftEmail(String title,
+                                 String shortSummary,
+                                 List<String> keyPoints,
+                                 List<String> decisions,
+                                 List<String> actionItems) {
+        Map<String, Object> payload = new java.util.HashMap<>();
+        payload.put("title", title);
+        payload.put("shortSummary", shortSummary == null ? "" : shortSummary);
+        payload.put("keyPoints", keyPoints);
+        payload.put("decisions", decisions);
+        payload.put("actionItems", actionItems);
+
+        JsonNode body = client.post()
+                .uri("/ai/draft-email")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(payload)
+                .retrieve()
+                .body(JsonNode.class);
+        return new EmailDraft(text(body, "subject"), text(body, "body"));
+    }
+
     // --- Meeting Memory ----------------------------------------------------- //
 
     public record CommitmentProbe(String id, String text, String ownerName, String dueDate) {}

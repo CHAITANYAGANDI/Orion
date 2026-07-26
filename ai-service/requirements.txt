@@ -13,5 +13,9 @@ python-multipart>=0.0.9
 # RAG: async Postgres access for transcript chunk storage/retrieval.
 # Vectors are passed as `::vector` string casts, so no extra adapter is needed.
 psycopg[binary,pool]>=3.2
+# Alternative sources: YouTube audio download and PDF text extraction.
+# `bestaudio` is taken without post-processing, so ffmpeg is not required.
+yt-dlp>=2024.8.6
+pypdf>=4.3
 pytest>=8.2
 pytest-asyncio>=0.23

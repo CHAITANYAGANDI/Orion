@@ -1,10 +1,15 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { UploadCloud, FileAudio, Loader2, X, Mic, Square } from "lucide-react";
-import { useCreateUploadUrlMutation, useCreateMeetingMutation } from "@/lib/api";
+import { UploadCloud, FileAudio, FileText, Loader2, X, Mic, Youtube } from "lucide-react";
+import {
+  useCreateUploadUrlMutation,
+  useCreateMeetingMutation,
+  useImportMeetingMutation,
+} from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -14,6 +19,8 @@ import { formatDuration } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 type Phase = "idle" | "uploading" | "creating";
+
+const PDF = "application/pdf";
 
 export default function UploadPage() {
   const router = useRouter();
@@ -30,63 +37,19 @@ export default function UploadPage() {
   const [dragging, setDragging] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
-  // In-browser recording (MediaRecorder).
-  const [recording, setRecording] = React.useState(false);
-  const [elapsed, setElapsed] = React.useState(0);
-  const recorderRef = React.useRef<MediaRecorder | null>(null);
-  const chunksRef = React.useRef<Blob[]>([]);
-  const timerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
-
   const busy = phase !== "idle";
-
-  async function startRecording() {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      toast.error("Recording isn't supported in this browser.");
-      return;
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const rec = new MediaRecorder(stream);
-      chunksRef.current = [];
-      rec.ondataavailable = (e) => e.data.size > 0 && chunksRef.current.push(e.data);
-      rec.onstop = () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const type = rec.mimeType || "audio/webm";
-        const blob = new Blob(chunksRef.current, { type });
-        const ext = type.includes("ogg") ? "ogg" : "webm";
-        const recorded = new File([blob], `recording-${Date.now()}.${ext}`, { type });
-        onPick(recorded);
-      };
-      rec.start();
-      recorderRef.current = rec;
-      setRecording(true);
-      setElapsed(0);
-      timerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
-    } catch {
-      toast.error("Microphone access was denied.");
-    }
-  }
-
-  function stopRecording() {
-    recorderRef.current?.stop();
-    recorderRef.current = null;
-    if (timerRef.current) clearInterval(timerRef.current);
-    setRecording(false);
-  }
-
-  React.useEffect(() => () => {
-    if (timerRef.current) clearInterval(timerRef.current);
-  }, []);
 
   function onPick(f: File | null) {
     if (!f) return;
-    if (!/^(audio|video)\//.test(f.type)) {
-      toast.error("Please choose an audio or video file.");
+    if (!/^(audio|video)\//.test(f.type) && f.type !== PDF) {
+      toast.error("Please choose an audio, video or PDF file.");
       return;
     }
     setFile(f);
     if (!title) setTitle(f.name.replace(/\.[^.]+$/, ""));
-    probeDuration(f).then(setDuration).catch(() => setDuration(null));
+    // A PDF has no timeline to probe.
+    if (f.type === PDF) setDuration(null);
+    else probeDuration(f).then(setDuration).catch(() => setDuration(null));
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -131,9 +94,10 @@ export default function UploadPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Upload a meeting</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Add a meeting</h1>
         <p className="text-sm text-muted-foreground">
-          Audio or video. It uploads directly to private storage, then processing starts automatically.
+          Upload audio, video or a PDF — or import straight from a YouTube link.
+          Files go directly to private storage, then processing starts automatically.
         </p>
       </div>
 
@@ -167,14 +131,14 @@ export default function UploadPage() {
               <input
                 ref={inputRef}
                 type="file"
-                accept="audio/*,video/*"
+                accept="audio/*,video/*,application/pdf"
                 className="hidden"
                 onChange={(e) => onPick(e.target.files?.[0] ?? null)}
               />
               {file ? (
                 <div className="flex w-full items-center gap-3 text-left">
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                    <FileAudio className="h-5 w-5" />
+                    {file.type === PDF ? <FileText className="h-5 w-5" /> : <FileAudio className="h-5 w-5" />}
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium">{file.name}</p>
@@ -202,29 +166,25 @@ export default function UploadPage() {
                 <>
                   <UploadCloud className="h-8 w-8 text-muted-foreground" />
                   <p className="mt-2 font-medium">Drop a file or click to browse</p>
-                  <p className="text-xs text-muted-foreground">MP3, WAV, M4A, MP4 · up to your plan limit</p>
+                  <p className="text-xs text-muted-foreground">
+                    MP3, WAV, M4A, MP4 · or a PDF of typed-up notes
+                  </p>
                 </>
               )}
             </div>
 
-            {/* Record in-browser */}
-            <div className="flex items-center gap-3">
-              {!recording ? (
-                <Button type="button" variant="outline" size="sm" onClick={startRecording} disabled={busy}>
-                  <Mic className="h-4 w-4" /> Record audio
-                </Button>
-              ) : (
-                <Button type="button" variant="destructive" size="sm" onClick={stopRecording}>
-                  <Square className="h-4 w-4" /> Stop
-                </Button>
-              )}
-              {recording && (
-                <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-destructive" />
-                  Recording… {formatDuration(elapsed)}
-                </span>
-              )}
-              <span className="text-xs text-muted-foreground">or attach a file above</span>
+            {/* Live capture lives on its own page: it records the meeting tab as
+                well as the microphone, which is the difference between capturing
+                a meeting and capturing only your own half of it. */}
+            <div className="flex items-center gap-2 rounded-md border bg-muted/30 p-3 text-sm">
+              <Mic className="h-4 w-4 shrink-0 text-primary" />
+              <span className="text-muted-foreground">
+                Meeting happening now?{" "}
+                <Link href="/record" className="font-medium text-foreground underline underline-offset-2">
+                  Record it live
+                </Link>{" "}
+                — captures the meeting tab plus your mic.
+              </span>
             </div>
 
             <div className="grid gap-2">
@@ -259,7 +219,64 @@ export default function UploadPage() {
           </form>
         </CardContent>
       </Card>
+
+      <YouTubeImport disabled={busy} />
     </div>
+  );
+}
+
+/**
+ * Import from a YouTube link.
+ *
+ * Kept separate from the upload form because it shares none of its state: there
+ * is no file, no progress, and the title comes from the video itself rather
+ * than from the user.
+ */
+function YouTubeImport({ disabled }: { disabled: boolean }) {
+  const router = useRouter();
+  const [importMeeting, { isLoading }] = useImportMeetingMutation();
+  const [url, setUrl] = React.useState("");
+
+  async function onImport(e: React.FormEvent) {
+    e.preventDefault();
+    try {
+      const meeting = await importMeeting({ url: url.trim() }).unwrap();
+      toast.success("Importing — the video is downloading now.");
+      router.push(`/meetings/${meeting.id}`);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Youtube className="h-4 w-4 text-primary" /> Import from YouTube
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={onImport} className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Paste a link to a talk, webinar or recorded call. Recallix pulls the
+            audio and runs the same pipeline — title and length come from the video.
+          </p>
+          <div className="flex gap-2">
+            <Input
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://www.youtube.com/watch?v=…"
+              disabled={disabled || isLoading}
+              aria-label="YouTube URL"
+            />
+            <Button type="submit" disabled={disabled || isLoading || !url.trim()} className="shrink-0 gap-2">
+              {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Youtube className="h-4 w-4" />}
+              Import
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
   );
 }
 

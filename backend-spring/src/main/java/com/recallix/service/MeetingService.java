@@ -4,7 +4,9 @@ import com.recallix.common.ApiException;
 import com.recallix.common.IdGenerator;
 import com.recallix.config.KafkaTopicsConfig;
 import com.recallix.domain.MeetingStatus;
+import com.recallix.domain.SourceType;
 import com.recallix.dto.MeetingCreateRequest;
+import com.recallix.dto.MeetingImportRequest;
 import com.recallix.dto.DecisionResponse;
 import com.recallix.dto.MeetingResponse;
 import com.recallix.dto.PageResponse;
@@ -40,6 +42,23 @@ import java.util.Map;
 public class MeetingService {
 
     private static final List<String> ALLOWED_PREFIXES = List.of("audio/", "video/");
+    private static final String PDF = "application/pdf";
+
+    /**
+     * Stand-in title for a URL import, replaced by {@link CallbackService} once
+     * the worker reports the video's real title. Only this exact value is
+     * overwritten, so a title the user supplied is never lost.
+     */
+    public static final String IMPORT_PLACEHOLDER_TITLE = "YouTube import";
+
+    /**
+     * Hosts we accept for URL imports. The worker hands this straight to
+     * yt-dlp, which supports a thousand-odd sites; narrowing it here keeps a
+     * user-supplied URL from becoming a server-side request forgery primitive.
+     */
+    private static final List<String> YOUTUBE_HOSTS = List.of(
+            "youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com",
+            "youtu.be", "www.youtu.be");
 
     private final MeetingRepository meetings;
     private final MeetingTranscriptRepository transcripts;
@@ -91,6 +110,8 @@ public class MeetingService {
         meeting.setTitle(stripExtension(req.filename()));
         meeting.setStatus(MeetingStatus.CREATED);
         meeting.setObjectKey(objectKey);
+        // A PDF has no audio track, so the worker must skip transcription.
+        meeting.setSourceType(PDF.equals(req.contentType()) ? SourceType.DOCUMENT : SourceType.AUDIO);
         meetings.save(meeting);
 
         String uploadUrl = storage.presignUpload(objectKey, req.contentType());
@@ -118,6 +139,57 @@ public class MeetingService {
         return toResponse(meeting);
     }
 
+    /**
+     * Import a meeting from a URL. No upload, no presign — the worker fetches
+     * the audio itself, so the meeting goes straight to QUEUED.
+     */
+    @Transactional
+    public MeetingResponse importFromUrl(String userId, MeetingImportRequest req) {
+        String url = req.trimmedUrl();
+        validateYouTubeUrl(url);
+
+        // The DB has a partial unique index on (user_id, source_url); checking
+        // first turns a constraint violation into a useful message.
+        meetings.findByUserIdAndSourceUrl(userId, url).ifPresent(existing -> {
+            throw ApiException.badRequest("You already imported that video: " + existing.getTitle());
+        });
+
+        usage.incrementMeetingsOrThrow(userId);
+
+        Meeting meeting = new Meeting();
+        meeting.setId(IdGenerator.meeting());
+        meeting.setUserId(userId);
+        // Placeholder until the worker reports the video's real title.
+        meeting.setTitle(req.title() == null || req.title().isBlank()
+                ? IMPORT_PLACEHOLDER_TITLE : req.title().trim());
+        meeting.setStatus(MeetingStatus.QUEUED);
+        meeting.setSourceType(SourceType.YOUTUBE);
+        meeting.setSourceUrl(url);
+        meeting.setTags(req.tagsOrEmpty());
+        meetings.save(meeting);
+
+        enqueueProcessing(meeting);
+        audit.record(userId, "MEETING_IMPORTED", "meeting", meeting.getId());
+        return toResponse(meeting);
+    }
+
+    private void validateYouTubeUrl(String url) {
+        java.net.URI uri;
+        try {
+            uri = java.net.URI.create(url);
+        } catch (IllegalArgumentException e) {
+            throw ApiException.badRequest("That doesn't look like a valid URL");
+        }
+        String scheme = uri.getScheme();
+        if (scheme == null || !(scheme.equals("http") || scheme.equals("https"))) {
+            throw ApiException.badRequest("That doesn't look like a valid URL");
+        }
+        String host = uri.getHost();
+        if (host == null || YOUTUBE_HOSTS.stream().noneMatch(host.toLowerCase()::equals)) {
+            throw ApiException.badRequest("Only YouTube links can be imported right now");
+        }
+    }
+
     private void enqueueProcessing(Meeting meeting) {
         // The worker fetches by objectKey via its internal S3 endpoint. We send an
         // empty audioUrl on purpose: a browser-facing presigned URL points at the
@@ -126,7 +198,9 @@ public class MeetingService {
                 "meetingId", meeting.getId(),
                 "userId", meeting.getUserId(),
                 "audioUrl", "",
-                "objectKey", meeting.getObjectKey() == null ? "" : meeting.getObjectKey()
+                "objectKey", meeting.getObjectKey() == null ? "" : meeting.getObjectKey(),
+                "sourceType", meeting.getSourceType().name(),
+                "sourceUrl", meeting.getSourceUrl() == null ? "" : meeting.getSourceUrl()
         ));
     }
 
@@ -239,12 +313,17 @@ public class MeetingService {
         return new MeetingResponse(
                 m.getId(), m.getTitle(), m.getStatus(),
                 m.getParticipants(), m.getTags(), audioUrl,
-                m.getDurationSeconds(), m.getCreatedAt(), m.getErrorMessage());
+                m.getDurationSeconds(), m.getCreatedAt(), m.getErrorMessage(),
+                m.getSourceType(), m.getSourceUrl());
     }
 
     private void validateContentType(String contentType) {
-        if (contentType == null || ALLOWED_PREFIXES.stream().noneMatch(contentType::startsWith)) {
-            throw ApiException.badRequest("Only audio/* or video/* uploads are supported");
+        if (contentType == null) {
+            throw ApiException.badRequest("Only audio, video or PDF uploads are supported");
+        }
+        boolean media = ALLOWED_PREFIXES.stream().anyMatch(contentType::startsWith);
+        if (!media && !PDF.equals(contentType)) {
+            throw ApiException.badRequest("Only audio, video or PDF uploads are supported");
         }
     }
 

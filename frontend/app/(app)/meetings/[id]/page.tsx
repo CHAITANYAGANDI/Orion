@@ -19,6 +19,7 @@ import {
   Users,
   Check,
   Quote,
+  Youtube,
 } from "lucide-react";
 import {
   useGetMeetingQuery,
@@ -48,8 +49,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
 import { AudioPlayer, useAudioController } from "@/components/audio-player";
+import { ShareDialog } from "@/components/share-dialog";
+import { FollowUpEmail } from "@/components/follow-up-email";
+import { downloadMarkdown } from "@/lib/export-markdown";
 import { subscribeMeetingStatus } from "@/lib/ws";
 import {
   formatDateTime,
@@ -122,6 +132,19 @@ export default function MeetingDetailPage() {
   const [reprocess, reprocessState] = useReprocessMeetingMutation();
   const [remove, removeState] = useDeleteMeetingMutation();
 
+  function onExportMarkdown(includeTranscript: boolean) {
+    if (!meeting.data) return;
+    downloadMarkdown({
+      meeting: meeting.data,
+      summary: summary.data,
+      decisions: decisions.data,
+      actionItems: actions.data,
+      risks: risks.data,
+      segments: transcript.data?.segments,
+      includeTranscript,
+    });
+  }
+
   async function onReprocess() {
     try {
       await reprocess(id).unwrap();
@@ -156,6 +179,8 @@ export default function MeetingDetailPage() {
   }
 
   const m = meeting.data;
+  // A PDF was never spoken: no audio, no timeline, nothing to seek to.
+  const isDocument = m.sourceType === "DOCUMENT";
 
   return (
     <div className="space-y-6">
@@ -168,10 +193,24 @@ export default function MeetingDetailPage() {
           <h1 className="text-2xl font-bold tracking-tight">{m.title}</h1>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
             <StatusBadge status={status} />
-            <span className="inline-flex items-center gap-1">
-              <Clock className="h-3.5 w-3.5" /> {formatDuration(m.durationSeconds)}
-            </span>
+            {/* A document has no runtime, so a duration would be meaningless. */}
+            {!isDocument && (
+              <span className="inline-flex items-center gap-1">
+                <Clock className="h-3.5 w-3.5" /> {formatDuration(m.durationSeconds)}
+              </span>
+            )}
             <span>{formatDateTime(m.createdAt)}</span>
+            {isDocument && <Badge variant="outline">Document</Badge>}
+            {m.sourceType === "YOUTUBE" && m.sourceUrl && (
+              <a
+                href={m.sourceUrl}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-foreground"
+              >
+                <Youtube className="h-3.5 w-3.5" /> Watch on YouTube
+              </a>
+            )}
             {m.tags?.map((t) => (
               <Badge key={t} variant="secondary">{t}</Badge>
             ))}
@@ -183,9 +222,28 @@ export default function MeetingDetailPage() {
               <Button variant="outline" size="sm" asChild>
                 <Link href="/agent"><Bot className="h-4 w-4" /> Agent</Link>
               </Button>
-              <Button variant="outline" size="sm" onClick={() => window.print()}>
-                <Download className="h-4 w-4" /> Export
-              </Button>
+              <ShareDialog meetingId={id} />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="gap-2">
+                    <Download className="h-4 w-4" /> Export
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => onExportMarkdown(false)}>
+                    Markdown (.md)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => onExportMarkdown(true)}
+                    disabled={!transcript.data?.segments?.length}
+                  >
+                    Markdown with transcript
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => window.print()}>
+                    PDF (via print)
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </>
           )}
           <Button variant="outline" size="sm" onClick={onReprocess} disabled={reprocessState.isLoading || !terminal}>
@@ -198,8 +256,9 @@ export default function MeetingDetailPage() {
         </div>
       </div>
 
-      {/* Audio player (synced with transcript) */}
-      {ready && m.audioUrl && (
+      {/* Audio player (synced with transcript). A DOCUMENT's presigned URL
+          points at the source PDF, not audio, so the player must stay away. */}
+      {ready && m.audioUrl && !isDocument && (
         <div className="no-print">
           <AudioPlayer src={m.audioUrl} controller={audio} />
         </div>
@@ -238,6 +297,7 @@ export default function MeetingDetailPage() {
           {/* Ask-the-meeting RAG chat */}
           <TabsContent value="ask">
             <ChatPanel meetingId={id} onCite={(s) => audio.seekTo(s)} />
+            <FollowUpEmail meetingId={id} />
           </TabsContent>
 
           <TabsContent value="actions">
