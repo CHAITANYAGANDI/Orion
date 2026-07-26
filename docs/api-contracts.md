@@ -89,6 +89,28 @@ deep-link to `/meetings/{id}?t={start}`.
 Persistence note: `chat_messages.meeting_id` is `NULL` for workspace turns —
 that is what distinguishes the two conversations.
 
+### Meeting Memory (commitment ledger + decision drift)
+
+Populated automatically: when a meeting reaches `READY`, its action items are
+promoted to commitments, and the meeting is evaluated as evidence against every
+commitment still open from *earlier* meetings. Its decisions are embedded and
+compared against the user's earlier decisions.
+
+| Method | Endpoint | Body / Query | Response |
+|---|---|---|---|
+| GET | `/api/v1/commitments` | `?page&size&status` | `Page<CommitmentResponse>` |
+| GET | `/api/v1/commitments/{id}` | — | `CommitmentResponse` (with evidence trail) |
+| PATCH | `/api/v1/commitments/{id}` | `{ "status" }` | `CommitmentResponse` (manual override) |
+| GET | `/api/v1/decisions/drift` | `?includeAcknowledged` | `DecisionDriftResponse[]` |
+| POST | `/api/v1/decisions/drift/{id}/acknowledge` | — | `204` |
+| GET | `/api/v1/memory/stats` | — | `MemoryStatsResponse` |
+
+Commitment status is `OPEN | FULFILLED | SLIPPED | CANCELLED | DROPPED`.
+`DROPPED` means the promise went unmentioned across several later meetings.
+A `RESTATED` verdict records evidence without changing status — the promise was
+raised again but not resolved. Drift relations are `CONTRADICTS | SUPERSEDES |
+REAFFIRMS`; pairs judged unrelated are discarded rather than stored.
+
 ### Action items
 | Method | Endpoint | Body | Response |
 |---|---|---|---|
@@ -129,6 +151,7 @@ Base: `http://ai-service:8000`
 | POST | `/ai/chat` | `{ "meetingId","question" }` | `{ "answer","citations":[Citation] }` |
 | POST | `/ai/workspace-chat` | `{ "userId","question","meetingIds"? }` | `{ "answer","citations":[Citation] }` |
 | POST | `/ai/semantic-search` | `{ "userId","query","limit"? }` | `{ "hits":[SemanticSearchHit] }` |
+| POST | `/ai/memory/reconcile` | `{ "userId","meetingId","openCommitments":[],"decisions":[] }` | `{ "commitmentVerdicts":[],"decisionLinks":[] }` |
 | POST | `/ai/translate` | `{ "text","targetLanguage" }` | `{ "text","targetLanguage" }` |
 | GET  | `/health` | — | `{ "status":"ok","provider":"openai\|mock" }` |
 

@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from app.callback import SpringCallbackClient
 from app.config import get_settings
 from app.kafka_worker import KafkaWorker
+from app.memory import MemoryService
 from app.pipeline import Pipeline
 from app.providers.factory import AiProviderFactory
 from app.rag import RagService
@@ -43,6 +44,10 @@ async def lifespan(app: FastAPI):
     rag = RagService(settings, embedder, llm)
     await rag.start()
     app.state.rag = rag
+
+    # Meeting Memory reconciles commitments + decisions across meetings. It
+    # shares the RAG connection pool rather than opening its own.
+    app.state.memory = MemoryService(settings, rag, embedder, llm)
 
     # Start the Kafka worker (resilient; never crashes on broker outage).
     # It indexes each processed transcript into pgvector for the chat feature.

@@ -201,6 +201,83 @@ class TranslateResponse(CamelModel):
 
 
 # --------------------------------------------------------------------------- #
+# Meeting Memory — commitment ledger + decision drift
+# --------------------------------------------------------------------------- #
+# What a later meeting says about an earlier promise. NO_EVIDENCE is the common
+# case and is never persisted as evidence.
+CommitmentOutcome = Literal[
+    "FULFILLED", "SLIPPED", "RESTATED", "CANCELLED", "NO_EVIDENCE"
+]
+
+# How two semantically-close decisions relate. UNRELATED means retrieval found
+# shared vocabulary but the decisions do not actually interact.
+DecisionRelationKind = Literal["CONTRADICTS", "SUPERSEDES", "REAFFIRMS", "UNRELATED"]
+
+
+class CommitmentVerdict(CamelModel):
+    """The LLM's reading of one commitment against one later meeting."""
+
+    outcome: CommitmentOutcome = "NO_EVIDENCE"
+    rationale: str = ""
+    # Verbatim line that justifies the outcome; empty when NO_EVIDENCE.
+    quote: str = ""
+    confidence: Confidence = "medium"
+
+
+class DecisionRelation(CamelModel):
+    """The LLM's reading of a candidate decision pair."""
+
+    relation: DecisionRelationKind = "UNRELATED"
+    rationale: str = ""
+
+
+class CommitmentInput(CamelModel):
+    """An open commitment to reconcile against the meeting being processed."""
+
+    id: str
+    text: str
+    owner_name: str | None = None
+    due_date: str | None = None
+
+
+class DecisionInput(CamelModel):
+    """A decision recorded in the meeting being processed."""
+
+    id: str
+    text: str
+
+
+class ReconcileRequest(CamelModel):
+    user_id: str
+    meeting_id: str
+    open_commitments: list[CommitmentInput] = Field(default_factory=list)
+    decisions: list[DecisionInput] = Field(default_factory=list)
+
+
+class CommitmentVerdictResult(CamelModel):
+    commitment_id: str
+    outcome: CommitmentOutcome
+    rationale: str = ""
+    quote: str = ""
+    # Where in the meeting the evidence was found, for deep-linking.
+    start: float | None = None
+    confidence: Confidence = "medium"
+
+
+class DecisionLinkResult(CamelModel):
+    earlier_decision_id: str
+    later_decision_id: str
+    relation: DecisionRelationKind
+    rationale: str = ""
+    similarity: float = 0.0
+
+
+class ReconcileResponse(CamelModel):
+    commitment_verdicts: list[CommitmentVerdictResult] = Field(default_factory=list)
+    decision_links: list[DecisionLinkResult] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------- #
 # Kafka event shapes (§6)
 # --------------------------------------------------------------------------- #
 class StatusEvent(CamelModel):

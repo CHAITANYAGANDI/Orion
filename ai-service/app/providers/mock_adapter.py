@@ -14,7 +14,9 @@ import re
 from app.providers.ports import EmbeddingPort, LlmPort, TranscriptionPort
 from app.schemas import (
     ActionItem,
+    CommitmentVerdict,
     Decision,
+    DecisionRelation,
     Risk,
     Segment,
     SummaryResponse,
@@ -154,6 +156,63 @@ class MockLlmAdapter(LlmPort):
 
     async def translate(self, text: str, target_language: str) -> str:
         return f"[{target_language}] {text}"
+
+    async def judge_commitment(
+        self, commitment: str, owner: str | None, passages: list[str]
+    ) -> CommitmentVerdict:
+        """Keyword heuristic standing in for a real judgement.
+
+        Deliberately conservative: it only reports an outcome when a passage
+        both overlaps the commitment's vocabulary AND contains a completion or
+        delay cue, so keyless demos don't fabricate a ledger full of verdicts.
+        """
+        if not passages:
+            return CommitmentVerdict(outcome="NO_EVIDENCE")
+
+        keywords = {w for w in re.findall(r"[a-z]{4,}", commitment.lower())}
+        for passage in passages:
+            lowered = passage.lower()
+            overlap = sum(1 for k in keywords if k in lowered)
+            if overlap < 2:
+                continue
+            if any(c in lowered for c in ("done", "finished", "shipped", "completed", "merged")):
+                outcome, reason = "FULFILLED", "A later passage reports this as completed."
+            elif any(c in lowered for c in ("slip", "delay", "pushed", "behind", "next week")):
+                outcome, reason = "SLIPPED", "A later passage reports this as delayed."
+            elif any(c in lowered for c in ("drop", "cancel", "no longer", "scrapped")):
+                outcome, reason = "CANCELLED", "A later passage reports this as cancelled."
+            else:
+                outcome, reason = "RESTATED", "The commitment came up again without a resolution."
+            return CommitmentVerdict(
+                outcome=outcome,
+                rationale=reason,
+                quote=passage[:280],
+                confidence="medium",
+            )
+        return CommitmentVerdict(outcome="NO_EVIDENCE")
+
+    async def compare_decisions(self, earlier: str, later: str) -> DecisionRelation:
+        """Lexical stand-in: negation cues flip a near-duplicate into a conflict."""
+        a, b = earlier.lower(), later.lower()
+        if a.strip() == b.strip():
+            return DecisionRelation(
+                relation="REAFFIRMS", rationale="The later decision restates the earlier one."
+            )
+        negations = ("instead", "no longer", "not ", "rather than", "revert", "switch")
+        if any(n in b for n in negations):
+            return DecisionRelation(
+                relation="CONTRADICTS",
+                rationale="The later decision reverses the earlier one.",
+            )
+        # Strong vocabulary overlap on the same subject reads as a replacement.
+        words_a = {w for w in re.findall(r"[a-z]{4,}", a)}
+        words_b = {w for w in re.findall(r"[a-z]{4,}", b)}
+        if words_a and len(words_a & words_b) / len(words_a) > 0.5:
+            return DecisionRelation(
+                relation="SUPERSEDES",
+                rationale="The later decision revisits the same subject with a new outcome.",
+            )
+        return DecisionRelation(relation="UNRELATED")
 
 
 class MockEmbeddingAdapter(EmbeddingPort):

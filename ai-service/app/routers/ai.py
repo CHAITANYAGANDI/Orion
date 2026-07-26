@@ -12,6 +12,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.config import Settings, get_settings
+from app.memory import MemoryService
 from app.pipeline import Pipeline
 from app.rag import RagService
 from app.schemas import (
@@ -22,6 +23,8 @@ from app.schemas import (
     DecisionsResponse,
     MeetingBriefResult,
     ProcessMeetingRequest,
+    ReconcileRequest,
+    ReconcileResponse,
     RisksResponse,
     SemanticSearchHit,
     SemanticSearchRequest,
@@ -50,6 +53,11 @@ def get_pipeline(request: Request) -> Pipeline:
 def get_rag(request: Request) -> RagService:
     """Resolve the app-wide RagService built during startup."""
     return request.app.state.rag
+
+
+def get_memory(request: Request) -> MemoryService:
+    """Resolve the app-wide MemoryService built during startup."""
+    return request.app.state.memory
 
 
 @router.post("/transcribe", response_model=TranscriptResponse)
@@ -143,6 +151,21 @@ async def semantic_search(
     """Meaning-based search over the user's transcripts (best passage per meeting)."""
     hits = await rag.search(body.user_id, body.query, body.limit)
     return SemanticSearchResponse(hits=[SemanticSearchHit(**h) for h in hits])
+
+
+@router.post("/memory/reconcile", response_model=ReconcileResponse)
+async def memory_reconcile(
+    body: ReconcileRequest, memory: MemoryService = Depends(get_memory)
+) -> ReconcileResponse:
+    """Reconcile a freshly-processed meeting against the user's memory.
+
+    Returns only findings: commitments this meeting actually spoke to, and
+    decision pairs that genuinely interact. Both lists are routinely empty.
+    """
+    verdicts, links = await memory.reconcile(
+        body.user_id, body.meeting_id, body.open_commitments, body.decisions
+    )
+    return ReconcileResponse(commitment_verdicts=verdicts, decision_links=links)
 
 
 @router.post("/translate", response_model=TranslateResponse)

@@ -68,6 +68,8 @@ real pipeline set `AI_PROVIDER=openai` + `OPENAI_API_KEY`, and/or
 | Ask-the-meeting RAG chat (pgvector + citations) | ✅ |
 | **Ask-everything workspace chat (grounded across all meetings)** | ✅ |
 | **Semantic search — find meetings by what was said** | ✅ |
+| **Commitment ledger — promises tracked across meetings** | ✅ |
+| **Decision drift — flags decisions that contradict earlier ones** | ✅ |
 | Summary translation | ✅ |
 | Speaker renaming | ✅ |
 | Kafka async processing + Outbox | ✅ |

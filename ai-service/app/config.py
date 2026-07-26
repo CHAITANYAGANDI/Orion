@@ -54,6 +54,15 @@ class Settings(BaseSettings):
     # single-meeting chat above.
     rag_workspace_top_k: int = 10
     rag_search_limit: int = 20
+
+    # --- Meeting Memory (commitment ledger + decision drift) ---
+    # Passages of the new meeting shown to the LLM when judging one commitment.
+    memory_evidence_k: int = 4
+    # Prior decisions retrieved as drift candidates per new decision.
+    memory_drift_candidates: int = 3
+    # Cosine similarity floor before a decision pair is worth an LLM comparison.
+    # Below this the pair is almost always unrelated and not worth the tokens.
+    memory_drift_min_similarity: float = 0.72
     pg_host: str | None = None
     pg_port: int = 5432
     pg_database: str = "recallix"

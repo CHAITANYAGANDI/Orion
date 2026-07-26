@@ -195,6 +195,81 @@ export interface SpeakerRenameRequest {
   mapping: Record<string, string>;
 }
 
+// ---- Meeting Memory: commitment ledger + decision drift ----
+
+/** Inferred from what later meetings said; the user can always override it. */
+export type CommitmentStatus =
+  | "OPEN"
+  | "FULFILLED"
+  | "SLIPPED"
+  | "CANCELLED"
+  | "DROPPED";
+
+/** RESTATED = raised again with no resolution, so the commitment stays OPEN. */
+export type EvidenceVerdict = "FULFILLED" | "SLIPPED" | "RESTATED" | "CANCELLED";
+
+export type DriftRelation = "CONTRADICTS" | "SUPERSEDES" | "REAFFIRMS";
+
+export interface CommitmentEvidence {
+  id: string;
+  meetingId: string;
+  meetingTitle?: string | null;
+  verdict: EvidenceVerdict;
+  rationale?: string | null;
+  quote?: string | null;
+  start?: number | null;
+  confidence?: string | null;
+  createdAt: string;
+}
+
+export interface Commitment {
+  id: string;
+  text: string;
+  ownerName?: string | null;
+  dueDate?: string | null;
+  status: CommitmentStatus;
+  originMeetingId: string;
+  originMeetingTitle?: string | null;
+  actionItemId?: string | null;
+  /** How many later meetings have been checked against this promise. */
+  checksRun: number;
+  lastCheckedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  evidence: CommitmentEvidence[];
+}
+
+export interface DecisionDrift {
+  id: string;
+  relation: DriftRelation;
+  rationale?: string | null;
+  similarity?: number | null;
+  acknowledged: boolean;
+  createdAt: string;
+  earlierDecisionId: string;
+  earlierText: string;
+  earlierMeetingId: string;
+  earlierMeetingTitle?: string | null;
+  laterDecisionId: string;
+  laterText: string;
+  laterMeetingId: string;
+  laterMeetingTitle?: string | null;
+}
+
+export interface MemoryStats {
+  open: number;
+  fulfilled: number;
+  slipped: number;
+  dropped: number;
+  openContradictions: number;
+}
+
+export interface CommitmentListQuery {
+  page?: number;
+  size?: number;
+  status?: CommitmentStatus;
+}
+
 // ---- Billing & usage ----
 export interface CheckoutRequest {
   plan: "PRO" | "PREMIUM";

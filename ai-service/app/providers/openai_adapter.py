@@ -21,7 +21,9 @@ from app.config import Settings
 from app.providers.ports import EmbeddingPort, LlmPort, TranscriptionPort
 from app.schemas import (
     ActionItem,
+    CommitmentVerdict,
     Decision,
+    DecisionRelation,
     Risk,
     Segment,
     SummaryResponse,
@@ -258,6 +260,66 @@ class OpenAiLlmAdapter(LlmPort):
             attempts=self._settings.openai_max_retries + 1,
             fallback=text,
             label="translate",
+        )
+
+
+    async def judge_commitment(
+        self, commitment: str, owner: str | None, passages: list[str]
+    ) -> CommitmentVerdict:
+        async def _op() -> CommitmentVerdict:
+            excerpts = "\n\n".join(f"[{i + 1}] {p}" for i, p in enumerate(passages))
+            system = (
+                "You audit whether a promise made in an earlier meeting was kept, based "
+                "ONLY on excerpts from a LATER meeting. Choose exactly one outcome:\n"
+                "  FULFILLED  — the excerpts state the work is done.\n"
+                "  SLIPPED    — the excerpts state it is late, delayed, or rescheduled.\n"
+                "  CANCELLED  — the excerpts state it is no longer being done.\n"
+                "  RESTATED   — it is discussed again but with no resolution.\n"
+                "  NO_EVIDENCE— the excerpts do not speak to this commitment at all.\n"
+                "NO_EVIDENCE is the correct and common answer. Never infer progress from "
+                "silence or from topic similarity alone. Quote verbatim in `quote`; use an "
+                "empty string when the outcome is NO_EVIDENCE. Respond with a single JSON "
+                'object: {"outcome","rationale","quote","confidence"(high|medium|low)}.'
+            )
+            user = (
+                f"Commitment: {commitment}\n"
+                f"Owner: {owner or 'unknown'}\n\n"
+                f"Excerpts from the later meeting:\n{excerpts}"
+            )
+            data = await self._chat_json(system, user)
+            return CommitmentVerdict.model_validate(data)
+
+        return await _with_retries(
+            _op,
+            attempts=self._settings.openai_max_retries + 1,
+            # Degrade to "we learned nothing" rather than a false verdict.
+            fallback=CommitmentVerdict(outcome="NO_EVIDENCE"),
+            label="judge_commitment",
+        )
+
+    async def compare_decisions(self, earlier: str, later: str) -> DecisionRelation:
+        async def _op() -> DecisionRelation:
+            system = (
+                "You compare two decisions recorded from the same team at different times. "
+                "Choose exactly one relation:\n"
+                "  CONTRADICTS — they cannot both hold; the later reverses the earlier.\n"
+                "  SUPERSEDES  — same subject, the later replaces the earlier without "
+                "directly contradicting it.\n"
+                "  REAFFIRMS   — the later restates or confirms the earlier.\n"
+                "  UNRELATED   — they merely share vocabulary or subject matter.\n"
+                "UNRELATED is the correct answer whenever the decisions do not actually "
+                "interact. Be strict: a false contradiction is worse than a missed one. "
+                'Respond with a single JSON object: {"relation","rationale"}.'
+            )
+            user = f"Earlier decision: {earlier}\n\nLater decision: {later}"
+            data = await self._chat_json(system, user)
+            return DecisionRelation.model_validate(data)
+
+        return await _with_retries(
+            _op,
+            attempts=self._settings.openai_max_retries + 1,
+            fallback=DecisionRelation(relation="UNRELATED"),
+            label="compare_decisions",
         )
 
 

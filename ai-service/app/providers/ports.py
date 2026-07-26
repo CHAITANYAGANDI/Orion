@@ -10,7 +10,9 @@ from abc import ABC, abstractmethod
 
 from app.schemas import (
     ActionItem,
+    CommitmentVerdict,
     Decision,
+    DecisionRelation,
     Risk,
     SummaryResponse,
     TranscriptResponse,
@@ -53,6 +55,27 @@ class LlmPort(ABC):
     @abstractmethod
     async def translate(self, text: str, target_language: str) -> str:
         """Translate text into the target language, preserving meaning."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def judge_commitment(
+        self, commitment: str, owner: str | None, passages: list[str]
+    ) -> CommitmentVerdict:
+        """Decide what a later meeting says about an earlier promise.
+
+        `passages` are excerpts from ONE later meeting. Returns NO_EVIDENCE
+        unless the passages actually speak to the commitment — silence is the
+        expected outcome for most meetings and must not be over-read.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def compare_decisions(self, earlier: str, later: str) -> DecisionRelation:
+        """Adjudicate two semantically-close decisions made at different times.
+
+        Returns UNRELATED when the pair merely shares vocabulary — retrieval
+        finds candidates, this decides whether they actually conflict.
+        """
         raise NotImplementedError
 
 

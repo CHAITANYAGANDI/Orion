@@ -16,6 +16,7 @@ import com.recallix.entity.MeetingRisk;
 import com.recallix.entity.MeetingSummary;
 import com.recallix.entity.MeetingTranscript;
 import com.recallix.entity.TranscriptSegment;
+import com.recallix.event.MeetingReadyEvent;
 import com.recallix.repository.MeetingActionItemRepository;
 import com.recallix.repository.MeetingDecisionRepository;
 import com.recallix.repository.MeetingRepository;
@@ -25,6 +26,7 @@ import com.recallix.repository.MeetingTranscriptRepository;
 import com.recallix.repository.TranscriptSegmentRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,6 +51,7 @@ public class CallbackService {
     private final MeetingRiskRepository risks;
     private final StatusPublisher statusPublisher;
     private final UsageLimitService usage;
+    private final ApplicationEventPublisher events;
 
     public CallbackService(MeetingRepository meetings,
                            MeetingTranscriptRepository transcripts,
@@ -58,7 +61,8 @@ public class CallbackService {
                            MeetingActionItemRepository actionItems,
                            MeetingRiskRepository risks,
                            StatusPublisher statusPublisher,
-                           UsageLimitService usage) {
+                           UsageLimitService usage,
+                           ApplicationEventPublisher events) {
         this.meetings = meetings;
         this.transcripts = transcripts;
         this.segments = segments;
@@ -68,6 +72,7 @@ public class CallbackService {
         this.risks = risks;
         this.statusPublisher = statusPublisher;
         this.usage = usage;
+        this.events = events;
     }
 
     @Transactional
@@ -79,6 +84,12 @@ public class CallbackService {
             }
             if (status == MeetingStatus.FAILED) {
                 m.setErrorMessage(req.message());
+            }
+            // READY is the worker's last word: the brief is persisted AND the
+            // transcript is indexed into pgvector. Only now can Meeting Memory
+            // retrieve evidence from this meeting, so this is where it fires.
+            if (status == MeetingStatus.READY) {
+                events.publishEvent(new MeetingReadyEvent(meetingId, m.getUserId()));
             }
         });
         int progress = req.progress() == null ? 0 : req.progress();

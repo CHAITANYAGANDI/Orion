@@ -9,7 +9,12 @@ import type {
   ChatMessage,
   CheckoutRequest,
   CheckoutResponse,
+  Commitment,
+  CommitmentListQuery,
+  CommitmentStatus,
+  DecisionDrift,
   DecisionResponse,
+  MemoryStats,
   IntegrationProvider,
   IntegrationResponse,
   MeetingCreateRequest,
@@ -57,6 +62,9 @@ export const api = createApi({
     "Chat",
     "WorkspaceChat",
     "Transcript",
+    "Commitments",
+    "Drift",
+    "MemoryStats",
   ],
   endpoints: (builder) => ({
     // ---- Meetings ----
@@ -240,6 +248,56 @@ export const api = createApi({
       ],
     }),
 
+    // ---- Meeting Memory ----
+    getCommitments: builder.query<Page<Commitment>, CommitmentListQuery | void>({
+      query: (q) => {
+        const params = new URLSearchParams();
+        const query = q || {};
+        params.set("page", String(query.page ?? 0));
+        params.set("size", String(query.size ?? 50));
+        if (query.status) params.set("status", query.status);
+        return `/commitments?${params.toString()}`;
+      },
+      providesTags: [{ type: "Commitments", id: "LIST" }],
+    }),
+
+    patchCommitment: builder.mutation<
+      Commitment,
+      { id: string; status: CommitmentStatus }
+    >({
+      query: ({ id, status }) => ({
+        url: `/commitments/${id}`,
+        method: "PATCH",
+        body: { status },
+      }),
+      invalidatesTags: [
+        { type: "Commitments", id: "LIST" },
+        { type: "MemoryStats", id: "ME" },
+      ],
+    }),
+
+    getDecisionDrift: builder.query<DecisionDrift[], boolean | void>({
+      query: (includeAcknowledged) =>
+        `/decisions/drift?includeAcknowledged=${includeAcknowledged ? "true" : "false"}`,
+      providesTags: [{ type: "Drift", id: "LIST" }],
+    }),
+
+    acknowledgeDrift: builder.mutation<void, string>({
+      query: (id) => ({
+        url: `/decisions/drift/${id}/acknowledge`,
+        method: "POST",
+      }),
+      invalidatesTags: [
+        { type: "Drift", id: "LIST" },
+        { type: "MemoryStats", id: "ME" },
+      ],
+    }),
+
+    getMemoryStats: builder.query<MemoryStats, void>({
+      query: () => "/memory/stats",
+      providesTags: [{ type: "MemoryStats", id: "ME" }],
+    }),
+
     // ---- Billing & usage ----
     checkout: builder.mutation<CheckoutResponse, CheckoutRequest>({
       query: (body) => ({ url: "/billing/checkout", method: "POST", body }),
@@ -323,6 +381,11 @@ export const {
   useRenameSpeakersMutation,
   useGetActionItemsQuery,
   usePatchActionItemMutation,
+  useGetCommitmentsQuery,
+  usePatchCommitmentMutation,
+  useGetDecisionDriftQuery,
+  useAcknowledgeDriftMutation,
+  useGetMemoryStatsQuery,
   useCheckoutMutation,
   useGetUsageQuery,
   useGetIntegrationsQuery,

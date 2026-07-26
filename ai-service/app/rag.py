@@ -63,6 +63,15 @@ class RagService:
     def enabled(self) -> bool:
         return self._pool is not None
 
+    @property
+    def pool(self):  # type: ignore[no-untyped-def]
+        """The shared Postgres pool, or None when RAG is disabled.
+
+        Exposed so sibling services (e.g. MemoryService) reuse this pool rather
+        than opening a second one against the same database.
+        """
+        return self._pool
+
     # --- indexing ----------------------------------------------------------- #
     async def index(
         self,
