@@ -162,13 +162,16 @@ class Pipeline:
 
         # Summary + all three extractions take the same text and are independent,
         # so they run concurrently: cost is the slowest call, not the sum of four.
+        # The detected language rides along so the brief comes back in the
+        # language the meeting was actually held in.
         await emit(TOPIC_SUMMARY_GENERATED, "SUMMARIZING", 60, "Summarizing and extracting insights...")
         text = transcript.transcript
+        language = transcript.language or "en"
         summary, action_items, decisions, risks = await asyncio.gather(
-            self._llm.summarize(text),
-            self._llm.extract_action_items(text),
-            self._llm.extract_decisions(text),
-            self._llm.extract_risks(text),
+            self._llm.summarize(text, language),
+            self._llm.extract_action_items(text, language),
+            self._llm.extract_decisions(text, language),
+            self._llm.extract_risks(text, language),
         )
         await emit(TOPIC_ACTION_ITEMS_EXTRACTED, "EXTRACTING", 95, "Insights extracted; finalizing brief...")
 

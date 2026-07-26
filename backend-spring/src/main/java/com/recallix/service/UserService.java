@@ -45,4 +45,21 @@ public class UserService {
         UserEntity user = require(userId);
         user.setPlan(plan);
     }
+
+    /**
+     * Apply a partial preferences update. A null field is left alone; a blank
+     * {@code recapEmail} clears the override so recaps fall back to the
+     * account address.
+     */
+    @Transactional
+    public UserEntity updatePreferences(String userId, Boolean autoEmailRecap, String recapEmail) {
+        UserEntity user = require(userId);
+        if (autoEmailRecap != null) {
+            user.setAutoEmailRecap(autoEmailRecap);
+        }
+        if (recapEmail != null) {
+            user.setRecapEmail(recapEmail.isBlank() ? null : recapEmail.trim());
+        }
+        return user;
+    }
 }

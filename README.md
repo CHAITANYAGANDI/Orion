@@ -43,6 +43,7 @@ docker compose up --build
 - Spring API: http://localhost:8080/actuator/health · Swagger: http://localhost:8080/swagger-ui.html
 - AI service: http://localhost:8000/health · Docs: http://localhost:8000/docs
 - MinIO console: http://localhost:9001 (minioadmin / minioadmin)
+- **Mailpit** (catches every recap email): http://localhost:8025
 
 The stack runs end-to-end out of the box: **dev auth** (no Clerk account needed)
 and **mock AI** (deterministic transcript/summary, no OpenAI key). To enable the
@@ -100,6 +101,8 @@ so it takes a fourth upload to see.
 | Markdown export · PDF via browser print | ✅ |
 | Read-only public share links (revocable) | ✅ |
 | AI-drafted follow-up email | ✅ |
+| **Recap emailed automatically when processing finishes** | ✅ |
+| **Non-English meetings — brief written in the spoken language** | ✅ |
 | Live in-browser recording (tab audio + mic) | ✅ |
 | Search & filters | ✅ |
 | Clerk auth (+ dev bypass) | ✅ |
@@ -121,8 +124,11 @@ Each service has its own README with local (non-Docker) run instructions:
 - **Testing**: pytest covers the ai-service — schema/camelCase contracts, the full
   mock pipeline, Meeting Memory's verdict and drift logic, and the import
   allowlist. JUnit covers the Spring domain helpers, `MemoryService`,
-  `ShareService` and URL imports. Run them with
-  `cd ai-service && pytest` (64) and `cd backend-spring && mvn test` (61).
+  `ShareService`, URL imports and the recap email guards. Run them with
+  `cd ai-service && pytest` (64) and `cd backend-spring && mvn test` (76).
+- **Email in dev**: `docker compose` runs [Mailpit](http://localhost:8025), so the
+  recap feature is demoable with no SMTP account and no test ever mails a real
+  person. Point `SMTP_HOST`/`SMTP_PORT` at a real relay to send for real.
 - **Server-side request forgery**: an imported URL is fetched by the worker, so
   the host allowlist is enforced twice — in `MeetingService` before the event is
   published, and in `app/ingest.py` before yt-dlp sees it.

@@ -59,6 +59,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-websocket</artifactId>
         </dependency>
+        <!-- Recap email. Points at Mailpit in dev, so no SMTP account is needed. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
 
         <!-- Persistence -->
         <dependency>

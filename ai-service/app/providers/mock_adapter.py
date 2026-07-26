@@ -319,7 +319,10 @@ class MockTranscriptionAdapter(TranscriptionPort):
 class MockLlmAdapter(LlmPort):
     """Deterministic summary + extractions derived from the scripted meetings."""
 
-    async def summarize(self, transcript: str) -> SummaryResponse:
+    # `language` is accepted to satisfy the port but ignored: the scripts are
+    # fixed English text, and pretending to translate them would make the mock
+    # look like it does something it does not.
+    async def summarize(self, transcript: str, language: str = "en") -> SummaryResponse:
         script = script_for_transcript(transcript)
         return SummaryResponse(
             short_summary=script.short_summary,
@@ -327,13 +330,15 @@ class MockLlmAdapter(LlmPort):
             key_points=list(script.key_points),
         )
 
-    async def extract_action_items(self, transcript: str) -> list[ActionItem]:
+    async def extract_action_items(
+        self, transcript: str, language: str = "en"
+    ) -> list[ActionItem]:
         return list(script_for_transcript(transcript).action_items)
 
-    async def extract_decisions(self, transcript: str) -> list[Decision]:
+    async def extract_decisions(self, transcript: str, language: str = "en") -> list[Decision]:
         return list(script_for_transcript(transcript).decisions)
 
-    async def extract_risks(self, transcript: str) -> list[Risk]:
+    async def extract_risks(self, transcript: str, language: str = "en") -> list[Risk]:
         return list(script_for_transcript(transcript).risks)
 
     async def answer(self, question: str, context: list[str]) -> str:

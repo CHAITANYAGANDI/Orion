@@ -22,6 +22,8 @@ import type {
   IntegrationResponse,
   MeetingCreateRequest,
   MeetingImportRequest,
+  PreferencesResponse,
+  PreferencesUpdateRequest,
   MeetingListQuery,
   MeetingResponse,
   Page,
@@ -61,6 +63,7 @@ export const api = createApi({
     "ActionItem",
     "ActionItems",
     "Usage",
+    "Preferences",
     "Integrations",
     "AgentActions",
     "Chat",
@@ -111,6 +114,16 @@ export const api = createApi({
         { type: "Meetings", id: "LIST" },
         { type: "Usage", id: "ME" },
       ],
+    }),
+
+    getPreferences: builder.query<PreferencesResponse, void>({
+      query: () => "/preferences",
+      providesTags: [{ type: "Preferences", id: "ME" }],
+    }),
+
+    updatePreferences: builder.mutation<PreferencesResponse, PreferencesUpdateRequest>({
+      query: (body) => ({ url: "/preferences", method: "PATCH", body }),
+      invalidatesTags: [{ type: "Preferences", id: "ME" }],
     }),
 
     /** Import from a URL (YouTube) — no upload step; the worker fetches it. */
@@ -411,6 +424,8 @@ export const {
   useCreateUploadUrlMutation,
   useCreateMeetingMutation,
   useImportMeetingMutation,
+  useGetPreferencesQuery,
+  useUpdatePreferencesMutation,
   useGetTranscriptQuery,
   useGetSummaryQuery,
   useGetMeetingActionItemsQuery,

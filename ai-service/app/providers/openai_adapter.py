@@ -115,6 +115,44 @@ _EXTRACTION_SYSTEM = (
     "Respond with a single JSON object only."
 )
 
+# ISO-639-1 codes we can name explicitly. Naming the language works markedly
+# better than passing a bare code, which models sometimes misread.
+_LANGUAGE_NAMES = {
+    "en": "English", "es": "Spanish", "fr": "French", "de": "German",
+    "it": "Italian", "pt": "Portuguese", "nl": "Dutch", "pl": "Polish",
+    "ru": "Russian", "uk": "Ukrainian", "tr": "Turkish", "ar": "Arabic",
+    "he": "Hebrew", "hi": "Hindi", "bn": "Bengali", "ta": "Tamil",
+    "te": "Telugu", "mr": "Marathi", "gu": "Gujarati", "kn": "Kannada",
+    "ml": "Malayalam", "pa": "Punjabi", "ur": "Urdu", "zh": "Chinese",
+    "ja": "Japanese", "ko": "Korean", "vi": "Vietnamese", "th": "Thai",
+    "id": "Indonesian", "ms": "Malay", "sv": "Swedish", "da": "Danish",
+    "nb": "Norwegian", "no": "Norwegian", "fi": "Finnish", "cs": "Czech",
+    "el": "Greek", "ro": "Romanian", "hu": "Hungarian", "fa": "Persian",
+}
+
+
+def _language_instruction(language: str | None) -> str:
+    """Tell the model which language to write the brief in.
+
+    English is the no-op case: the base prompts are already English, and adding
+    a redundant instruction only costs tokens.
+
+    The `sourceSentence` carve-out matters. Those are verbatim quotes used to
+    show the user exactly what was said, and Meeting Memory matches against
+    them; a translated quote would be neither verbatim nor matchable.
+    """
+    code = (language or "en").strip().lower()[:2]
+    if not code or code == "en":
+        return ""
+    name = _LANGUAGE_NAMES.get(code)
+    target = name if name else f"the language with ISO code '{code}'"
+    return (
+        f" The transcript is in {target}. Write every summary, title, and "
+        f"description in {target} so the notes are readable by the people who "
+        "were in the meeting. Do NOT translate `sourceSentence` — it must stay "
+        "the exact words from the transcript."
+    )
+
 
 class OpenAiLlmAdapter(LlmPort):
     """Chat-completions summarization + JSON-mode structured extraction."""
@@ -140,13 +178,13 @@ class OpenAiLlmAdapter(LlmPort):
         content = resp.choices[0].message.content or "{}"
         return json.loads(content)
 
-    async def summarize(self, transcript: str) -> SummaryResponse:
+    async def summarize(self, transcript: str, language: str = "en") -> SummaryResponse:
         async def _op() -> SummaryResponse:
             system = (
                 "You summarize meeting transcripts. Return a JSON object with keys "
                 "`shortSummary` (1-2 sentences), `detailedSummary` (one paragraph), and "
                 "`keyPoints` (array of concise strings). Base everything strictly on the "
-                "transcript."
+                "transcript. " + _language_instruction(language)
             )
             data = await self._chat_json(system, f"Transcript:\n{transcript}")
             return SummaryResponse(
@@ -162,7 +200,9 @@ class OpenAiLlmAdapter(LlmPort):
             label="summarize",
         )
 
-    async def extract_action_items(self, transcript: str) -> list[ActionItem]:
+    async def extract_action_items(
+        self, transcript: str, language: str = "en"
+    ) -> list[ActionItem]:
         async def _op() -> list[ActionItem]:
             user = (
                 "Extract action items as JSON: "
@@ -170,7 +210,7 @@ class OpenAiLlmAdapter(LlmPort):
                 '(high|medium|low),"sourceSentence"}]}. '
                 "Use null for unknown owner/dueDate.\n\nTranscript:\n" + transcript
             )
-            data = await self._chat_json(_EXTRACTION_SYSTEM, user)
+            data = await self._chat_json(_EXTRACTION_SYSTEM + _language_instruction(language), user)
             return [ActionItem.model_validate(x) for x in data.get("actionItems", [])]
 
         return await _with_retries(
@@ -180,14 +220,14 @@ class OpenAiLlmAdapter(LlmPort):
             label="extract_action_items",
         )
 
-    async def extract_decisions(self, transcript: str) -> list[Decision]:
+    async def extract_decisions(self, transcript: str, language: str = "en") -> list[Decision]:
         async def _op() -> list[Decision]:
             user = (
                 "Extract decisions as JSON: "
                 '{"decisions":[{"decision","confidence"(high|medium|low),"sourceSentence"}]}.'
                 "\n\nTranscript:\n" + transcript
             )
-            data = await self._chat_json(_EXTRACTION_SYSTEM, user)
+            data = await self._chat_json(_EXTRACTION_SYSTEM + _language_instruction(language), user)
             return [Decision.model_validate(x) for x in data.get("decisions", [])]
 
         return await _with_retries(
@@ -197,14 +237,14 @@ class OpenAiLlmAdapter(LlmPort):
             label="extract_decisions",
         )
 
-    async def extract_risks(self, transcript: str) -> list[Risk]:
+    async def extract_risks(self, transcript: str, language: str = "en") -> list[Risk]:
         async def _op() -> list[Risk]:
             user = (
                 "Extract risks as JSON: "
                 '{"risks":[{"risk","severity"(high|medium|low),"sourceSentence"}]}.'
                 "\n\nTranscript:\n" + transcript
             )
-            data = await self._chat_json(_EXTRACTION_SYSTEM, user)
+            data = await self._chat_json(_EXTRACTION_SYSTEM + _language_instruction(language), user)
             return [Risk.model_validate(x) for x in data.get("risks", [])]
 
         return await _with_retries(

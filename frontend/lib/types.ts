@@ -78,6 +78,20 @@ export interface MeetingResponse {
   errorMessage?: string | null;
   sourceType?: SourceType;
   sourceUrl?: string | null;
+  /** Detected transcription language (ISO-639-1); absent until processed. */
+  language?: string | null;
+}
+
+export interface PreferencesResponse {
+  autoEmailRecap: boolean;
+  recapEmail: string | null;
+  /** Where recaps actually go — the override, or the account address. */
+  effectiveRecapEmail: string | null;
+}
+
+export interface PreferencesUpdateRequest {
+  autoEmailRecap?: boolean;
+  recapEmail?: string;
 }
 
 export interface MeetingImportRequest {

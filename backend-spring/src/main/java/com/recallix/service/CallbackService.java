@@ -117,6 +117,10 @@ public class CallbackService {
 
         meeting.setStatus(MeetingStatus.READY);
         meeting.setErrorMessage(null);
+        // Denormalised from the transcript so list views don't need a join.
+        if (result.language() != null && !result.language().isBlank()) {
+            meeting.setLanguage(result.language().trim());
+        }
 
         // A URL import starts with a placeholder title and no duration, because
         // neither is known until the worker has fetched the video. Only the

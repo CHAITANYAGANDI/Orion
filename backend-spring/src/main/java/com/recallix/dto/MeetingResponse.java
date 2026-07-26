@@ -19,7 +19,9 @@ public record MeetingResponse(
         String errorMessage,
         /** Lets the UI drop the audio player and deep-links for text sources. */
         SourceType sourceType,
-        String sourceUrl
+        String sourceUrl,
+        /** Detected transcription language (ISO-639-1); null until processed. */
+        String language
 ) {
     public static MeetingResponse from(Meeting m) {
         return new MeetingResponse(
@@ -33,7 +35,8 @@ public record MeetingResponse(
                 m.getCreatedAt(),
                 m.getErrorMessage(),
                 m.getSourceType(),
-                m.getSourceUrl()
+                m.getSourceUrl(),
+                m.getLanguage()
         );
     }
 }

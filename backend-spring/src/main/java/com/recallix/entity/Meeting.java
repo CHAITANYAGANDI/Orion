@@ -61,6 +61,14 @@ public class Meeting {
     @Column(name = "error_message")
     private String errorMessage;
 
+    /** Set once the recap has been mailed, so a reprocess does not re-send it. */
+    @Column(name = "recap_sent_at")
+    private Instant recapSentAt;
+
+    /** Detected transcription language, denormalised so list views stay one query. */
+    @Column(name = "language")
+    private String language;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -107,6 +115,12 @@ public class Meeting {
 
     public String getErrorMessage() { return errorMessage; }
     public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
+
+    public Instant getRecapSentAt() { return recapSentAt; }
+    public void setRecapSentAt(Instant recapSentAt) { this.recapSentAt = recapSentAt; }
+
+    public String getLanguage() { return language; }
+    public void setLanguage(String language) { this.language = language; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

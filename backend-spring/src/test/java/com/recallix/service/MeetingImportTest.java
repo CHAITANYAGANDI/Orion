@@ -52,6 +52,7 @@ import static org.mockito.Mockito.when;
 class MeetingImportTest {
 
     private static final String USER = "usr_1";
+    private static final String MEETING_ID = "mtg_1";
     private static final String VIDEO = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
 
     @Mock private MeetingRepository meetings;
@@ -204,6 +205,33 @@ class MeetingImportTest {
         when(meetings.findByUserIdAndSourceUrl("usr_2", VIDEO)).thenReturn(Optional.empty());
 
         assertThat(service.importFromUrl("usr_2", request(VIDEO))).isNotNull();
+    }
+
+    // --- reprocess ------------------------------------------------------------ //
+
+    @Test
+    @DisplayName("an imported meeting can be reprocessed even though nothing was uploaded")
+    void importedMeetingIsReprocessable() {
+        Meeting imported = new Meeting();
+        imported.setId(MEETING_ID);
+        imported.setUserId(USER);
+        imported.setSourceType(SourceType.YOUTUBE);
+        imported.setSourceUrl(VIDEO);   // no objectKey: the worker re-downloads
+        when(meetings.findByIdAndUserId(MEETING_ID, USER)).thenReturn(Optional.of(imported));
+
+        assertThat(service.reprocess(USER, MEETING_ID).status()).isEqualTo(MeetingStatus.QUEUED);
+    }
+
+    @Test
+    @DisplayName("a meeting with neither an upload nor a URL cannot be reprocessed")
+    void meetingWithNoSourceIsRefused() {
+        Meeting empty = new Meeting();
+        empty.setId(MEETING_ID);
+        empty.setUserId(USER);
+        when(meetings.findByIdAndUserId(MEETING_ID, USER)).thenReturn(Optional.of(empty));
+
+        assertThatThrownBy(() -> service.reprocess(USER, MEETING_ID))
+                .isInstanceOf(ApiException.class);
     }
 
     private static MeetingImportRequest request(String url) {

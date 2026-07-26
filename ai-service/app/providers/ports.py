@@ -31,22 +31,33 @@ class TranscriptionPort(ABC):
 
 
 class LlmPort(ABC):
-    """LLM port for summarization and structured extraction."""
+    """LLM port for summarization and structured extraction.
+
+    `language` is the ISO-639-1 code the transcription step detected. A brief
+    about a Spanish meeting should be written in Spanish — an English summary
+    of a Spanish conversation is useless to the person who was in the room.
+    It defaults to English so existing callers and tests are unaffected.
+
+    Note that `sourceSentence` is exempt: it is a verbatim quote and must stay
+    in whatever language it was spoken.
+    """
 
     @abstractmethod
-    async def summarize(self, transcript: str) -> SummaryResponse:
+    async def summarize(self, transcript: str, language: str = "en") -> SummaryResponse:
         raise NotImplementedError
 
     @abstractmethod
-    async def extract_action_items(self, transcript: str) -> list[ActionItem]:
+    async def extract_action_items(
+        self, transcript: str, language: str = "en"
+    ) -> list[ActionItem]:
         raise NotImplementedError
 
     @abstractmethod
-    async def extract_decisions(self, transcript: str) -> list[Decision]:
+    async def extract_decisions(self, transcript: str, language: str = "en") -> list[Decision]:
         raise NotImplementedError
 
     @abstractmethod
-    async def extract_risks(self, transcript: str) -> list[Risk]:
+    async def extract_risks(self, transcript: str, language: str = "en") -> list[Risk]:
         raise NotImplementedError
 
     @abstractmethod

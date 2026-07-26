@@ -74,6 +74,8 @@ again in the worker.
 | POST | `/api/v1/meetings/upload-url` | `{ "filename", "contentType", "sizeBytes" }` | `{ "meetingId", "uploadUrl", "objectKey", "expiresInSeconds" }` |
 | POST | `/api/v1/meetings` | `MeetingCreateRequest` | `MeetingResponse` |
 | POST | `/api/v1/meetings/import` | `{ "url", "title"?, "tags"? }` | `201 MeetingResponse` |
+| GET  | `/api/v1/preferences` | — | `PreferencesResponse` |
+| PATCH | `/api/v1/preferences` | `{ "autoEmailRecap"?, "recapEmail"? }` | `PreferencesResponse` |
 | GET  | `/api/v1/meetings` | `?page&size&search&tag&status` | `Page<MeetingResponse>` |
 | GET  | `/api/v1/meetings/{id}` | — | `MeetingResponse` |
 | GET  | `/api/v1/meetings/{id}/transcript` | — | `TranscriptResponse` |

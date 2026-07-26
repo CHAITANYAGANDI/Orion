@@ -1,10 +1,16 @@
 "use client";
 
+import * as React from "react";
 import { toast } from "sonner";
+import { Mail } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useAppDispatch, useAppSelector } from "@/lib/hooks";
-import { setNotifyEmail, setNotifyProcessingDone } from "@/lib/uiSlice";
-import { useGetUsageQuery } from "@/lib/api";
+import { setNotifyProcessingDone } from "@/lib/uiSlice";
+import {
+  useGetUsageQuery,
+  useGetPreferencesQuery,
+  useUpdatePreferencesMutation,
+} from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,22 +47,21 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
+      <RecapEmailCard />
+
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Notifications</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <ToggleRow
-            label="Email me a summary when processing finishes"
-            checked={ui.notifyEmail}
-            onChange={(v) => dispatch(setNotifyEmail(v))}
-          />
-          <ToggleRow
             label="Show a browser notification when a brief is ready"
             checked={ui.notifyProcessingDone}
             onChange={(v) => dispatch(setNotifyProcessingDone(v))}
           />
-          <p className="text-xs text-muted-foreground">Preferences are stored locally in this demo.</p>
+          <p className="text-xs text-muted-foreground">
+            This one is stored locally in your browser.
+          </p>
         </CardContent>
       </Card>
 
@@ -81,6 +86,95 @@ export default function SettingsPage() {
       </Card>
     </div>
   );
+}
+
+/**
+ * The recap email preference.
+ *
+ * Server-side, unlike the browser notification toggle below it: the decision is
+ * acted on by the worker callback long after the tab that set it has gone.
+ */
+function RecapEmailCard() {
+  const prefs = useGetPreferencesQuery();
+  const [update, { isLoading }] = useUpdatePreferencesMutation();
+  const [address, setAddress] = React.useState<string | null>(null);
+
+  // Only seed the input once, so typing isn't clobbered by a refetch.
+  const loaded = prefs.data;
+  React.useEffect(() => {
+    if (loaded && address === null) setAddress(loaded.recapEmail ?? "");
+  }, [loaded, address]);
+
+  async function save(patch: { autoEmailRecap?: boolean; recapEmail?: string }) {
+    try {
+      await update(patch).unwrap();
+      toast.success("Saved.");
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  }
+
+  const enabled = prefs.data?.autoEmailRecap ?? false;
+  const destination = prefs.data?.effectiveRecapEmail;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Mail className="h-4 w-4 text-primary" /> Recap email
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <ToggleRow
+          label="Email me the recap when a meeting finishes processing"
+          checked={enabled}
+          onChange={(v) => save({ autoEmailRecap: v })}
+        />
+
+        {enabled && (
+          <div className="grid gap-2">
+            <Label htmlFor="recap-email">Send to</Label>
+            <div className="flex gap-2">
+              <Input
+                id="recap-email"
+                type="email"
+                value={address ?? ""}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder={prefs.data?.effectiveRecapEmail ?? "you@example.com"}
+              />
+              <Button
+                variant="outline"
+                disabled={isLoading}
+                onClick={() => save({ recapEmail: address ?? "" })}
+                className="shrink-0"
+              >
+                Save
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {destination
+                ? `Recaps go to ${destination}.`
+                : "No address on file yet — add one above."}{" "}
+              Leave blank to use your account email.
+            </p>
+          </div>
+        )}
+
+        <p className="text-xs text-muted-foreground">
+          The recap is drafted from the meeting&apos;s decisions and action items,
+          the same as the draft on each meeting page. It is sent once per meeting.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function errorMessage(err: unknown): string {
+  if (typeof err === "object" && err && "data" in err) {
+    const data = (err as { data?: { message?: string } }).data;
+    if (data?.message) return data.message;
+  }
+  return "Couldn't save that.";
 }
 
 function ToggleRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {

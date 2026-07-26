@@ -282,8 +282,10 @@ public class MeetingService {
     @Transactional
     public ReprocessResponse reprocess(String userId, String meetingId) {
         Meeting meeting = require(userId, meetingId);
-        if (meeting.getObjectKey() == null) {
-            throw ApiException.badRequest("Meeting has no uploaded audio to reprocess");
+        // A URL import has no object key — the worker re-downloads from the
+        // source instead — so either one is enough to re-run the pipeline.
+        if (meeting.getObjectKey() == null && meeting.getSourceUrl() == null) {
+            throw ApiException.badRequest("Meeting has no source to reprocess");
         }
         meeting.setStatus(MeetingStatus.QUEUED);
         meeting.setErrorMessage(null);
@@ -314,7 +316,7 @@ public class MeetingService {
                 m.getId(), m.getTitle(), m.getStatus(),
                 m.getParticipants(), m.getTags(), audioUrl,
                 m.getDurationSeconds(), m.getCreatedAt(), m.getErrorMessage(),
-                m.getSourceType(), m.getSourceUrl());
+                m.getSourceType(), m.getSourceUrl(), m.getLanguage());
     }
 
     private void validateContentType(String contentType) {

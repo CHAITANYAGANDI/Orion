@@ -69,6 +69,7 @@ import {
   isTerminal,
   timecode,
 } from "@/lib/format";
+import { languageName } from "@/lib/language";
 import { cn } from "@/lib/utils";
 import type { MeetingStatus, StatusEvent, TranscriptSegment } from "@/lib/types";
 
@@ -200,6 +201,11 @@ export default function MeetingDetailPage() {
               </span>
             )}
             <span>{formatDateTime(m.createdAt)}</span>
+            {/* Only worth showing when it isn't the default — an "English"
+                badge on every meeting is noise. */}
+            {m.language && m.language.slice(0, 2).toLowerCase() !== "en" && (
+              <Badge variant="outline">{languageName(m.language)}</Badge>
+            )}
             {isDocument && <Badge variant="outline">Document</Badge>}
             {m.sourceType === "YOUTUBE" && m.sourceUrl && (
               <a

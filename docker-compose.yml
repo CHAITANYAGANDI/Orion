@@ -88,6 +88,19 @@ services:
       exit 0;
       "
 
+  # Catches every outgoing recap email and shows it at http://localhost:8025.
+  # Nothing leaves the machine, so the feature is demoable without an SMTP
+  # account and a stray test never mails a real person.
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # web UI
+    environment:
+      MP_MAX_MESSAGES: "500"
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+
   backend-spring:
     build: ./backend-spring
     ports:
@@ -101,6 +114,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/recallix
       SPRING_DATASOURCE_USERNAME: recallix
@@ -122,6 +137,13 @@ services:
       STRIPE_PRICE_PRO: ${STRIPE_PRICE_PRO:-}
       STRIPE_PRICE_PREMIUM: ${STRIPE_PRICE_PREMIUM:-}
       APP_FRONTEND_URL: http://localhost:3000
+      # Mailpit in dev; point these at a real relay to send for real.
+      SPRING_MAIL_HOST: ${SMTP_HOST:-mailpit}
+      SPRING_MAIL_PORT: ${SMTP_PORT:-1025}
+      SPRING_MAIL_USERNAME: ${SMTP_USERNAME:-}
+      SPRING_MAIL_PASSWORD: ${SMTP_PASSWORD:-}
+      RECALLIX_MAIL_FROM: ${MAIL_FROM:-recallix@localhost}
+      RECALLIX_MAIL_ENABLED: ${MAIL_ENABLED:-true}
 
   ai-service:
     build: ./ai-service
