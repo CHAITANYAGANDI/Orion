@@ -47,6 +47,23 @@ and **mock AI** (deterministic transcript/summary, no OpenAI key). To enable the
 real pipeline set `AI_PROVIDER=openai` + `OPENAI_API_KEY`, and/or
 `RECALLIX_AUTH_MODE=clerk` with Clerk env vars. See [.env.example](.env.example).
 
+### Demoing Meeting Memory without an API key
+
+The mock provider returns a three-meeting *narrative*, not one fixed transcript,
+so the cross-meeting features have something real to find. Upload any three
+audio files named `week1.*`, `week2.*`, `week3.*` — a digit in the filename picks
+the week, so the story replays in order:
+
+| Week | What happens | What memory detects |
+|---|---|---|
+| 1 | Three promises made; S3 + Whisper decided | 3 commitments opened |
+| 2 | JWT done, Kafka consumer slipped, Whisper → Deepgram | `FULFILLED`, `SLIPPED`, `CONTRADICTS` |
+| 3 | Mock-provider work cancelled, benchmark completed, S3 confirmed | `CANCELLED`, `FULFILLED`, `REAFFIRMS` |
+
+Files without a digit are hashed to a week, so reprocessing the same audio is
+stable. `DROPPED` needs a promise to go unmentioned across three later meetings,
+so it takes a fourth upload to see.
+
 ## Docs
 
 - [Architecture](docs/architecture.md)
@@ -54,7 +71,7 @@ real pipeline set `AI_PROVIDER=openai` + `OPENAI_API_KEY`, and/or
 - [Database schema](docs/database-schema.sql)
 - [Phase 2: AI Agent + MCP](docs/phase2-agent-mcp.md)
 - [Demo script](docs/demo-script.md)
-- [Load testing](docs/load-testing-report.md)
+- [Load testing](docs/load-testing-report.md) — test plan; not yet run
 
 ## Feature status
 
@@ -94,5 +111,13 @@ Each service has its own README with local (non-Docker) run instructions:
   Circuit Breaker (Resilience4j around AI calls).
 - **Security**: Clerk JWT validation, per-user data isolation, private S3 buckets +
   short-lived presigned URLs, audit logs, plan-based file/usage limits.
-- **Testing**: JUnit + Testcontainers (Postgres/Kafka/Redis), pytest (AI schemas),
-  k6 load scripts under `backend-spring/load-testing/`.
+- **Testing**: pytest covers the ai-service — schema/camelCase contracts, the full
+  mock pipeline, and Meeting Memory's verdict and drift logic. JUnit covers the
+  Spring domain helpers and `MemoryService`. Run them with
+  `cd ai-service && pytest` and `cd backend-spring && mvn test`.
+
+> **Test coverage is partial and stated honestly.** Testcontainers is declared in
+> `pom.xml` but no integration suite uses it yet, there are no frontend tests, and
+> the k6 load scripts described in [docs/load-testing-report.md](docs/load-testing-report.md)
+> have not been written. The OpenAI provider path is also unexercised — every test
+> runs against the mock provider.

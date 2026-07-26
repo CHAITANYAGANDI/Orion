@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     # single-meeting chat above.
     rag_workspace_top_k: int = 10
     rag_search_limit: int = 20
+    # Semantic search dedupes to one hit per meeting after the ANN scan, and the
+    # owner filter discards some candidates, so the inner scan fetches this
+    # multiple of the requested limit to avoid under-filling the result.
+    rag_search_overfetch: int = 8
 
     # --- Meeting Memory (commitment ledger + decision drift) ---
     # Passages of the new meeting shown to the LLM when judging one commitment.

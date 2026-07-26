@@ -122,7 +122,7 @@ public class MemoryService {
 
         int applied = applyVerdicts(meetingId, open, result.commitmentVerdicts());
         int linked = applyDecisionLinks(userId, result.decisionLinks());
-        markChecked(open, meetingId);
+        markChecked(open);
 
         log.info("Memory reconciled for meeting {}: {} promoted, {} verdicts, {} decision links.",
                 meetingId, promoted, applied, linked);
@@ -247,15 +247,26 @@ public class MemoryService {
     /**
      * Count this meeting as a check against every open commitment, and retire
      * the ones that have now gone unmentioned across several meetings.
+     *
+     * <p>Evidence is loaded for the whole batch in one query — checking each
+     * commitment individually made this O(n) round-trips against a list that
+     * grows with every meeting the user records.
      */
-    private void markChecked(List<Commitment> open, String meetingId) {
+    private void markChecked(List<Commitment> open) {
+        if (open.isEmpty()) {
+            return;
+        }
+        List<String> ids = open.stream().map(Commitment::getId).toList();
+        Set<String> withEvidence = evidence.findByCommitmentIdInOrderByCreatedAtAsc(ids).stream()
+                .map(CommitmentEvidence::getCommitmentId)
+                .collect(Collectors.toSet());
+
         Instant now = Instant.now();
         for (Commitment c : open) {
             c.setChecksRun(c.getChecksRun() + 1);
             c.setLastCheckedAt(now);
-            boolean silent = evidence.findByCommitmentIdOrderByCreatedAtAsc(c.getId()).isEmpty();
             if (Commitment.OPEN.equals(c.getStatus())
-                    && silent
+                    && !withEvidence.contains(c.getId())
                     && c.getChecksRun() >= DROP_AFTER_SILENT_CHECKS) {
                 c.setStatus(Commitment.DROPPED);
             }

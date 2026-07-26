@@ -231,36 +231,56 @@ class RagService:
     async def search(self, user_id: str, query: str, limit: int | None = None) -> list[dict]:
         """Semantic search across the user's transcripts.
 
-        Returns the best-matching passage per meeting (deduplicated via
-        DISTINCT ON) so results read as a list of meetings, not a list of
-        near-identical chunks from the same call.
+        Returns the best-matching passage per meeting so results read as a list
+        of meetings, not a list of near-identical chunks from the same call.
+
+        The query is deliberately staged. The inner CTE is a plain
+        `ORDER BY embedding <=> const LIMIT n`, which is the only shape the
+        ivfflat index can serve; deduplicating in that same query (an earlier
+        `DISTINCT ON ... ORDER BY meeting_id, distance`) forced a sequential scan
+        over every chunk the user owns. Dedup and the meetings join therefore
+        happen afterwards, over a small candidate set.
+
+        Because the owner filter is applied alongside the ANN scan, candidates
+        are over-fetched: the index returns nearest rows globally and some are
+        discarded, so a bare LIMIT would under-fill the result.
         """
         if not self.enabled:
             return []
 
         q_emb = (await self._embedder.embed([query]))[0]
         cap = limit or self._settings.rag_search_limit
+        candidate_cap = cap * self._settings.rag_search_overfetch
+        vec = _vec_literal(q_emb)
         try:
             async with self._pool.connection() as conn:  # type: ignore[union-attr]
                 async with conn.cursor() as cur:
                     await cur.execute(
                         """
-                        SELECT meeting_id, title, chunk_index, text,
-                               start_time, end_time, created_at, distance
-                          FROM (
-                            SELECT DISTINCT ON (c.meeting_id)
-                                   c.meeting_id, m.title, c.chunk_index, c.text,
-                                   c.start_time, c.end_time, m.created_at,
+                        WITH candidates AS (
+                            SELECT c.meeting_id, c.chunk_index, c.text,
+                                   c.start_time, c.end_time,
                                    c.embedding <=> %s::vector AS distance
                               FROM transcript_chunks c
-                              JOIN meetings m ON m.id = c.meeting_id
                              WHERE c.user_id = %s
-                             ORDER BY c.meeting_id, distance
-                          ) best
-                         ORDER BY distance
+                             ORDER BY c.embedding <=> %s::vector
+                             LIMIT %s
+                        ),
+                        best AS (
+                            SELECT DISTINCT ON (meeting_id)
+                                   meeting_id, chunk_index, text,
+                                   start_time, end_time, distance
+                              FROM candidates
+                             ORDER BY meeting_id, distance
+                        )
+                        SELECT b.meeting_id, m.title, b.chunk_index, b.text,
+                               b.start_time, b.end_time, m.created_at, b.distance
+                          FROM best b
+                          JOIN meetings m ON m.id = b.meeting_id
+                         ORDER BY b.distance
                          LIMIT %s
                         """,
-                        (_vec_literal(q_emb), user_id, cap),
+                        (vec, user_id, vec, candidate_cap, cap),
                     )
                     rows = await cur.fetchall()
         except Exception as exc:  # noqa: BLE001

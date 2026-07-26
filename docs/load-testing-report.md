@@ -1,9 +1,14 @@
 # Recallix AI — Load Testing
 
-Load tests use [k6](https://k6.io). Scripts live in `backend-spring/load-testing/`.
+> **Status: planned, not yet implemented.** This document is the test plan. The
+> k6 scripts described below have **not been written** and no load run has been
+> performed — the results table further down is an empty template, not findings.
+
+The intended harness is [k6](https://k6.io), with scripts to live under
+`backend-spring/load-testing/`:
 
 ```bash
-# with the stack running (docker compose up) and dev auth:
+# once the scripts exist, with the stack running (docker compose up) and dev auth:
 k6 run backend-spring/load-testing/list-meetings.js
 k6 run backend-spring/load-testing/create-meeting.js
 k6 run backend-spring/load-testing/rate-limit.js
