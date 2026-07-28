@@ -34,9 +34,13 @@ public class TenantAwareDataSource extends DelegatingDataSource {
      * One round trip, parameterised. String-concatenating a user id into SQL
      * executed before every query would be a poor place to introduce an
      * injection point.
+     *
+     * <p>Only the tenant is set. The system exemption used to be a second
+     * setting here, but a setting can be changed by any statement, so it is now
+     * carried by the connection's role instead — see
+     * {@link TenantRoutingDataSource}.
      */
-    private static final String APPLY_TENANT =
-            "SELECT set_config('app.user_id', ?, false), set_config('app.bypass', ?, false)";
+    private static final String APPLY_TENANT = "SELECT set_config('app.user_id', ?, false)";
 
     public TenantAwareDataSource(DataSource target) {
         super(target);
@@ -55,7 +59,6 @@ public class TenantAwareDataSource extends DelegatingDataSource {
     private static Connection apply(Connection connection) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(APPLY_TENANT)) {
             statement.setString(1, TenantContext.currentUserId());
-            statement.setString(2, TenantContext.isSystem() ? "on" : "off");
             statement.execute();
         } catch (SQLException e) {
             // A connection whose tenant could not be set is not safe to use: it

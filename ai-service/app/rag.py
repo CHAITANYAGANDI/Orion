@@ -74,24 +74,25 @@ class RagService:
         return self._pool
 
     @asynccontextmanager
-    async def connection(self, user_id: str | None = None, *, system: bool = False):
+    async def connection(self, user_id: str | None = None):
         """A pooled connection with its tenant stamped on it.
 
-        Every table this service touches is under row-level security (V9), so a
+        Every table this service touches is under row-level security, so a
         connection without `app.user_id` set reads nothing at all. That is the
         intended failure: a query that forgets its tenant returns empty rather
         than returning somebody else's meeting.
 
-        The settings are written on each checkout, never conditionally, because
-        the pool hands the same connection to the next caller — anything left
-        behind would be inherited. `system=True` is only for the indexing path,
-        which has to resolve a meeting's owner before it knows who that is.
+        The tenant is written on each checkout, never conditionally, because the
+        pool hands the same connection to the next caller — anything left behind
+        would be inherited.
+
+        There is deliberately no bypass. This service connects as the
+        unprivileged role, so nothing it can execute will lift the restriction:
+        every query here is confined to one user.
         """
         async with self._pool.connection() as conn:  # type: ignore[union-attr]
             await conn.execute(
-                "SELECT set_config('app.user_id', %s, false), "
-                "set_config('app.bypass', %s, false)",
-                (user_id or "", "on" if system else "off"),
+                "SELECT set_config('app.user_id', %s, false)", (user_id or "",)
             )
             yield conn
 
@@ -106,29 +107,30 @@ class RagService:
         """Chunk, embed and store one meeting's transcript.
 
         `user_id` is denormalised onto every row so workspace-wide retrieval can
-        filter by owner without joining `meetings`. When it is unknown (older
-        events that predate the field) it is resolved from the meeting row.
+        filter by owner without joining `meetings`.
+
+        It is now required. There used to be a fallback that resolved the owner
+        from the meeting row, but under row-level security that read needs a
+        privilege this service deliberately does not have — and granting it
+        would have handed the whole indexing path an escape from tenant
+        isolation to cover an event shape that no longer occurs. Skipping is the
+        safe failure: the meeting simply is not searchable until reprocessed.
         """
         if not self.enabled:
+            return
+        if not user_id:
+            logger.warning(
+                "No user_id for meeting %s; skipping indexing rather than "
+                "reading across tenants to find one.", meeting_id
+            )
             return
         chunks = self._chunk(transcript, segments)
         if not chunks:
             return
         embeddings = await self._embedder.embed([c["text"] for c in chunks])
         try:
-            # System context: when the owner is unknown this has to read the
-            # meeting row to find out who it is, which no tenant setting could
-            # yet permit. Indexing is worker-side infrastructure, never reached
-            # from a user request.
-            async with self.connection(user_id, system=True) as conn:
+            async with self.connection(user_id) as conn:
                 async with conn.cursor() as cur:
-                    if not user_id:
-                        await cur.execute(
-                            "SELECT user_id FROM meetings WHERE id = %s", (meeting_id,)
-                        )
-                        row = await cur.fetchone()
-                        user_id = row[0] if row else None
-
                     await cur.execute(
                         "DELETE FROM transcript_chunks WHERE meeting_id = %s", (meeting_id,)
                     )

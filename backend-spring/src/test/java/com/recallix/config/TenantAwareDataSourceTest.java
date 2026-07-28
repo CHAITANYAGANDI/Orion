@@ -19,6 +19,7 @@ import java.sql.SQLException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -62,7 +63,6 @@ class TenantAwareDataSourceTest {
         dataSource.getConnection();
 
         verify(statement).setString(1, "usr_alice");
-        verify(statement).setString(2, "off");
         verify(statement).execute();
     }
 
@@ -74,13 +74,15 @@ class TenantAwareDataSourceTest {
         dataSource.getConnection();
 
         verify(statement).setString(1, "");
-        verify(statement).setString(2, "off");
         verify(statement).execute();
     }
 
     @Test
-    @DisplayName("system context is stamped as a bypass")
-    void stampsSystemContext() throws SQLException {
+    @DisplayName("no bypass is ever written — the exemption is the role, not a setting")
+    void neverWritesABypassSetting() throws SQLException {
+        // A settable exemption is one an injected statement could switch on.
+        // System access now comes from connecting as a BYPASSRLS role instead,
+        // so nothing here may reintroduce a flag.
         TenantContext.runAsSystem(() -> {
             try {
                 dataSource.getConnection();
@@ -89,7 +91,7 @@ class TenantAwareDataSourceTest {
             }
         });
 
-        verify(statement).setString(2, "on");
+        verify(statement, never()).setString(eq(2), anyString());
     }
 
     @Test

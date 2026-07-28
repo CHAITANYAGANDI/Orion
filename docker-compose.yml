@@ -125,6 +125,11 @@ services:
       # Runtime: unprivileged, so row-level security binds.
       SPRING_DATASOURCE_USERNAME: ${APP_DB_USER:-recallix_app}
       SPRING_DATASOURCE_PASSWORD: ${APP_DB_PASSWORD:-recallix_app}
+      # System pool: BYPASSRLS, used only for worker callbacks, the outbox
+      # relay, Stripe webhooks, share links and provisioning. Routed to by
+      # connection, so no statement can grant itself this privilege.
+      RECALLIX_DATASOURCE_SYSTEM_USERNAME: ${SYS_DB_USER:-recallix_sys}
+      RECALLIX_DATASOURCE_SYSTEM_PASSWORD: ${SYS_DB_PASSWORD:-recallix_sys}
       # Migrations: schema owner.
       FLYWAY_USER: ${FLYWAY_USER:-recallix}
       FLYWAY_PASSWORD: ${FLYWAY_PASSWORD:-recallix}

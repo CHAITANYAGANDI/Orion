@@ -14,9 +14,6 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD:recallix_app}
     driver-class-name: org.postgresql.Driver
 
-  # Migrations run as the OWNER, which the app role deliberately is not: it can
-  # read and write rows but cannot alter a table or drop a policy to escape its
-  # own tenant.
   jpa:
     hibernate:
       ddl-auto: validate
