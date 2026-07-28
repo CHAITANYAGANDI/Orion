@@ -62,9 +62,20 @@ public class AuthenticationFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
         try {
-            String clerkUserId = resolveSubject(request);
+            Identity identity = resolveIdentity(request);
+            String clerkUserId = identity.subject();
             if (clerkUserId != null && !clerkUserId.isBlank()) {
-                String localUserId = userService.provision(clerkUserId, extractEmail(request));
+                // Provisioning looks the user up by clerk_user_id and may insert
+                // a row — both before the local user id exists, so neither can
+                // satisfy a tenant policy yet. This is the bootstrap case the
+                // system context exists for.
+                String localUserId = TenantContext.asSystem(
+                        () -> userService.provision(clerkUserId, identity.email()));
+
+                // From here on every connection this request borrows is stamped
+                // with this user, and row-level security does the rest.
+                TenantContext.setUserId(localUserId);
+
                 var auth = new UsernamePasswordAuthenticationToken(
                         localUserId, null, List.of(new SimpleGrantedAuthority("ROLE_USER")));
                 SecurityContextHolder.getContext().setAuthentication(auth);
@@ -77,23 +88,56 @@ public class AuthenticationFilter extends OncePerRequestFilter {
         chain.doFilter(request, response);
     }
 
-    private String resolveSubject(HttpServletRequest request) {
+    /**
+     * Claim names that may carry the address, in preference order. Clerk's
+     * default session token has no email at all — it has to be added through a
+     * JWT template — and which name it lands under depends on how that template
+     * was written, so several spellings are accepted.
+     */
+    private static final List<String> EMAIL_CLAIMS = List.of(
+            "email", "email_address", "primary_email_address", "primaryEmailAddress");
+
+    /**
+     * Resolve the caller and, where available, their email in a single decode.
+     *
+     * <p>The two are returned together because in clerk mode both come from the
+     * same JWT: decoding twice would double the verification cost on every
+     * request, and decoding once and discarding the email is what previously
+     * left every Clerk-authenticated user with a null address — silently
+     * disabling recap email in production while it worked fine in dev.
+     */
+    private record Identity(String subject, String email) {
+    }
+
+    private Identity resolveIdentity(HttpServletRequest request) {
         if ("clerk".equalsIgnoreCase(authMode)) {
             String header = request.getHeader("Authorization");
             if (header == null || !header.startsWith("Bearer ")) {
-                return null;
+                return new Identity(null, null);
             }
             Jwt jwt = decoder().decode(header.substring(7));
-            return jwt.getSubject();
+            return new Identity(jwt.getSubject(), emailClaim(jwt));
         }
         // dev mode
         String devUser = request.getHeader("X-Dev-User");
-        return (devUser == null || devUser.isBlank()) ? DEV_FALLBACK_USER : devUser;
+        String subject = (devUser == null || devUser.isBlank()) ? DEV_FALLBACK_USER : devUser;
+        String email = request.getHeader("X-Dev-Email");
+        return new Identity(subject, (email == null || email.isBlank()) ? null : email);
     }
 
-    private String extractEmail(HttpServletRequest request) {
-        String email = request.getHeader("X-Dev-Email");
-        return (email == null || email.isBlank()) ? null : email;
+    private static String emailClaim(Jwt jwt) {
+        for (String claim : EMAIL_CLAIMS) {
+            Object value = jwt.getClaim(claim);
+            if (value instanceof String s && !s.isBlank()) {
+                return s.trim();
+            }
+        }
+        // Not fatal: the user can still set a recap address by hand in Settings.
+        // Logged because the usual cause is a missing Clerk JWT template claim,
+        // which is invisible until somebody wonders why no email arrived.
+        log.debug("No email claim on the Clerk token; add one to the JWT template "
+                + "if recap email should work without manual entry.");
+        return null;
     }
 
     private JwtDecoder decoder() {

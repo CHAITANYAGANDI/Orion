@@ -45,11 +45,17 @@ public class AiClient {
     public record SearchHit(String meetingId, String meetingTitle, int chunkIndex,
                             String snippet, Double start, Double end, double score) {}
 
-    public ChatResult chat(String meetingId, String question) {
+    /**
+     * Ask a question about one meeting. {@code userId} is sent so the
+     * ai-service can satisfy row-level security on the transcript chunks —
+     * ownership is checked here too, but the database enforces it
+     * independently, so a bug in that check cannot become a cross-tenant read.
+     */
+    public ChatResult chat(String userId, String meetingId, String question) {
         JsonNode body = client.post()
                 .uri("/ai/chat")
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(Map.of("meetingId", meetingId, "question", question))
+                .body(Map.of("meetingId", meetingId, "question", question, "userId", userId))
                 .retrieve()
                 .body(JsonNode.class);
         return toChatResult(body);

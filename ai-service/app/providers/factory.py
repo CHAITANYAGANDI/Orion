@@ -20,12 +20,30 @@ class AiProviderFactory:
 
     @staticmethod
     def create_transcription(settings: Settings) -> TranscriptionPort:
-        if settings.ai_provider == "openai":
+        # Transcription is selected independently of the LLM so speech and
+        # analysis can come from different vendors — Deepgram diarizes, which
+        # Whisper does not. "auto" keeps the original behaviour of following
+        # `ai_provider`.
+        choice = settings.transcription_provider
+        if choice == "auto":
+            choice = settings.ai_provider
+
+        if choice == "deepgram":
+            from app.providers.deepgram_adapter import DeepgramTranscriptionAdapter
+
+            logger.info(
+                "Using Deepgram transcription adapter (%s, diarization on).",
+                settings.deepgram_model,
+            )
+            return DeepgramTranscriptionAdapter(settings)
+
+        if choice == "openai":
             # Imported lazily so the mock path never requires the OpenAI client.
             from app.providers.openai_adapter import OpenAiTranscriptionAdapter
 
             logger.info("Using OpenAI transcription adapter (%s).", settings.openai_transcribe_model)
             return OpenAiTranscriptionAdapter(settings)
+
         logger.info("Using mock transcription adapter.")
         return MockTranscriptionAdapter()
 

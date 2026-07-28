@@ -47,7 +47,7 @@ public class ChatService {
     public ChatMessageResponse ask(String userId, String meetingId, String question) {
         requireOwnedMeeting(userId, meetingId);
         persistTurn(userId, meetingId, "user", question, null);
-        AiClient.ChatResult result = ai.chat(meetingId, question);
+        AiClient.ChatResult result = ai.chat(userId, meetingId, question);
         return persistTurn(userId, meetingId, "assistant",
                 result.answer() == null ? "" : result.answer(), result.citations());
     }

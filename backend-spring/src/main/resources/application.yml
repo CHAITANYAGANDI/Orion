@@ -5,12 +5,18 @@ spring:
   application:
     name: recallix-backend-spring
 
+  # Runtime connections use the UNPRIVILEGED role. Row-level security is
+  # ignored by superusers and by anything holding BYPASSRLS, so connecting as
+  # the schema owner would leave every V9 policy enabled and enforcing nothing.
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/recallix}
-    username: ${SPRING_DATASOURCE_USERNAME:recallix}
-    password: ${SPRING_DATASOURCE_PASSWORD:recallix}
+    username: ${SPRING_DATASOURCE_USERNAME:recallix_app}
+    password: ${SPRING_DATASOURCE_PASSWORD:recallix_app}
     driver-class-name: org.postgresql.Driver
 
+  # Migrations run as the OWNER, which the app role deliberately is not: it can
+  # read and write rows but cannot alter a table or drop a policy to escape its
+  # own tenant.
   jpa:
     hibernate:
       ddl-auto: validate
@@ -21,10 +27,16 @@ spring:
           time_zone: UTC
         format_sql: false
 
+  # Migrations run as the schema OWNER, which the runtime role deliberately is
+  # not: the app can read and write rows but cannot alter a table or drop a
+  # policy to escape its own tenant.
   flyway:
     enabled: true
     baseline-on-migrate: true
     locations: classpath:db/migration
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/recallix}
+    user: ${FLYWAY_USER:recallix}
+    password: ${FLYWAY_PASSWORD:recallix}
 
   data:
     redis:

@@ -14,6 +14,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 AiProvider = Literal["mock", "openai"]
 
+# Transcription is chosen separately from the LLM. Whisper cannot diarize, so
+# the useful real-world combination is Deepgram for speech and OpenAI for
+# analysis — and during development, Deepgram for speech with the mock LLM,
+# which costs nothing and still exercises the real audio path.
+# "auto" follows `ai_provider`, which is what every existing deployment expects.
+TranscriptionProvider = Literal["auto", "mock", "openai", "deepgram"]
+
 
 class Settings(BaseSettings):
     """Runtime configuration for the ai-service."""
@@ -36,6 +43,19 @@ class Settings(BaseSettings):
 
     # --- AI provider selection ---
     ai_provider: AiProvider = "mock"
+    transcription_provider: TranscriptionProvider = "auto"
+
+    # --- Deepgram (speech-to-text with speaker diarization) ---
+    deepgram_api_key: str | None = None
+    deepgram_model: str = "nova-3"
+    # Blank means auto-detect, which is what a multilingual user wants. Set an
+    # ISO code (e.g. "es") when every meeting is in one language — detection is
+    # good but not free of mistakes, and a wrong guess corrupts the transcript.
+    deepgram_language: str = ""
+    # Transcription of a long recording is a single long request; Deepgram runs
+    # faster than real time, but an hour of audio still needs generous headroom.
+    deepgram_timeout_seconds: float = 300.0
+    deepgram_max_retries: int = 2
 
     # --- OpenAI ---
     openai_api_key: str | None = None

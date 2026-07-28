@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from contextlib import asynccontextmanager
 
 from app.config import Settings
 from app.providers.ports import EmbeddingPort, LlmPort
@@ -72,6 +73,28 @@ class RagService:
         """
         return self._pool
 
+    @asynccontextmanager
+    async def connection(self, user_id: str | None = None, *, system: bool = False):
+        """A pooled connection with its tenant stamped on it.
+
+        Every table this service touches is under row-level security (V9), so a
+        connection without `app.user_id` set reads nothing at all. That is the
+        intended failure: a query that forgets its tenant returns empty rather
+        than returning somebody else's meeting.
+
+        The settings are written on each checkout, never conditionally, because
+        the pool hands the same connection to the next caller — anything left
+        behind would be inherited. `system=True` is only for the indexing path,
+        which has to resolve a meeting's owner before it knows who that is.
+        """
+        async with self._pool.connection() as conn:  # type: ignore[union-attr]
+            await conn.execute(
+                "SELECT set_config('app.user_id', %s, false), "
+                "set_config('app.bypass', %s, false)",
+                (user_id or "", "on" if system else "off"),
+            )
+            yield conn
+
     # --- indexing ----------------------------------------------------------- #
     async def index(
         self,
@@ -93,7 +116,11 @@ class RagService:
             return
         embeddings = await self._embedder.embed([c["text"] for c in chunks])
         try:
-            async with self._pool.connection() as conn:  # type: ignore[union-attr]
+            # System context: when the owner is unknown this has to read the
+            # meeting row to find out who it is, which no tenant setting could
+            # yet permit. Indexing is worker-side infrastructure, never reached
+            # from a user request.
+            async with self.connection(user_id, system=True) as conn:
                 async with conn.cursor() as cur:
                     if not user_id:
                         await cur.execute(
@@ -130,12 +157,20 @@ class RagService:
             logger.warning("RAG indexing failed for %s: %s", meeting_id, exc)
 
     # --- retrieval + answer ------------------------------------------------- #
-    async def answer(self, meeting_id: str, question: str) -> tuple[str, list[dict]]:
+    async def answer(
+        self, meeting_id: str, question: str, user_id: str | None = None
+    ) -> tuple[str, list[dict]]:
+        """Answer a question about one meeting.
+
+        `user_id` is what row-level security checks. Spring has already verified
+        ownership before calling, but passing the owner means a bug there cannot
+        turn into a cross-tenant read: the database independently refuses.
+        """
         if not self.enabled:
             return ("RAG chat is not configured on this deployment.", [])
         q_emb = (await self._embedder.embed([question]))[0]
         try:
-            async with self._pool.connection() as conn:  # type: ignore[union-attr]
+            async with self.connection(user_id) as conn:
                 async with conn.cursor() as cur:
                     await cur.execute(
                         """
@@ -196,7 +231,7 @@ class RagService:
         params.append(top_k)
 
         try:
-            async with self._pool.connection() as conn:  # type: ignore[union-attr]
+            async with self.connection(user_id) as conn:
                 async with conn.cursor() as cur:
                     await cur.execute(sql, tuple(params))
                     rows = await cur.fetchall()
@@ -253,7 +288,7 @@ class RagService:
         candidate_cap = cap * self._settings.rag_search_overfetch
         vec = _vec_literal(q_emb)
         try:
-            async with self._pool.connection() as conn:  # type: ignore[union-attr]
+            async with self.connection(user_id) as conn:
                 async with conn.cursor() as cur:
                     await cur.execute(
                         """

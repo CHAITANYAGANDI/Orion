@@ -1,6 +1,7 @@
 package com.recallix.service;
 
 import com.recallix.event.MeetingReadyEvent;
+import com.recallix.security.TenantContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
@@ -31,12 +32,19 @@ public class MemoryReconciliationListener {
     @Async("memoryExecutor")
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onMeetingReady(MeetingReadyEvent event) {
+        // A fresh pool thread: the request's tenant did not come with it, so
+        // every query here would otherwise match nothing under row-level
+        // security. The event carries the owner, so set it explicitly rather
+        // than bypassing policies — this work is genuinely on one user's behalf.
+        TenantContext.setUserId(event.userId());
         try {
             memory.reconcileMeeting(event.meetingId(), event.userId());
         } catch (Exception e) {
             // Never propagate: the meeting is already complete and usable.
             log.warn("Memory reconciliation errored for meeting {}: {}",
                     event.meetingId(), e.toString(), e);
+        } finally {
+            TenantContext.clear();
         }
     }
 }

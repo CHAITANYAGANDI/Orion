@@ -14,6 +14,10 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Creates the unprivileged runtime role on a fresh volume. Without it the
+      # app would connect as a superuser, and superusers ignore row-level
+      # security entirely — see the script for why that matters.
+      - ./infra/postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U recallix"]
       interval: 5s
@@ -118,8 +122,12 @@ services:
         condition: service_started
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/recallix
-      SPRING_DATASOURCE_USERNAME: recallix
-      SPRING_DATASOURCE_PASSWORD: recallix
+      # Runtime: unprivileged, so row-level security binds.
+      SPRING_DATASOURCE_USERNAME: ${APP_DB_USER:-recallix_app}
+      SPRING_DATASOURCE_PASSWORD: ${APP_DB_PASSWORD:-recallix_app}
+      # Migrations: schema owner.
+      FLYWAY_USER: ${FLYWAY_USER:-recallix}
+      FLYWAY_PASSWORD: ${FLYWAY_PASSWORD:-recallix}
       SPRING_DATA_REDIS_HOST: redis
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       RECALLIX_AUTH_MODE: ${RECALLIX_AUTH_MODE:-dev}
@@ -158,6 +166,12 @@ services:
       OPENAI_TRANSCRIBE_MODEL: ${OPENAI_TRANSCRIBE_MODEL:-whisper-1}
       OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL:-gpt-4o-mini}
       OPENAI_EMBED_MODEL: ${OPENAI_EMBED_MODEL:-text-embedding-3-small}
+      # Speech-to-text is chosen separately from the LLM: Deepgram diarizes,
+      # Whisper does not.
+      TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER:-auto}
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+      DEEPGRAM_MODEL: ${DEEPGRAM_MODEL:-nova-3}
+      DEEPGRAM_LANGUAGE: ${DEEPGRAM_LANGUAGE:-}
       S3_ENDPOINT: http://minio:9000
       S3_ACCESS_KEY: minioadmin
       S3_SECRET_KEY: minioadmin
@@ -166,8 +180,10 @@ services:
       PG_HOST: postgres
       PG_PORT: "5432"
       PG_DATABASE: recallix
-      PG_USER: recallix
-      PG_PASSWORD: recallix
+      # Unprivileged, same reason as the backend: a superuser connection would
+      # silently ignore every row-level security policy.
+      PG_USER: ${APP_DB_USER:-recallix_app}
+      PG_PASSWORD: ${APP_DB_PASSWORD:-recallix_app}
     depends_on:
       kafka:
         condition: service_healthy

@@ -150,6 +150,11 @@ class HealthResponse(CamelModel):
 class ChatRequest(CamelModel):
     meeting_id: str
     question: str
+    # The owner, used to satisfy row-level security on transcript_chunks.
+    # Optional so the endpoint stays usable by hand, but Spring always sends it:
+    # without it retrieval finds nothing, which is the intended fail-closed
+    # behaviour rather than a fallback to reading everyone's transcripts.
+    user_id: str | None = None
 
 
 class Citation(CamelModel):

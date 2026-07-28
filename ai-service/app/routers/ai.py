@@ -127,7 +127,7 @@ async def process_meeting(
 @router.post("/chat", response_model=ChatResponse)
 async def chat(body: ChatRequest, rag: RagService = Depends(get_rag)) -> ChatResponse:
     """Answer a question grounded in one meeting's transcript (RAG over pgvector)."""
-    answer, citations = await rag.answer(body.meeting_id, body.question)
+    answer, citations = await rag.answer(body.meeting_id, body.question, body.user_id)
     return ChatResponse(answer=answer, citations=[Citation(**c) for c in citations])
 
 

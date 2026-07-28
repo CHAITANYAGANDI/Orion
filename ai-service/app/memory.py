@@ -68,7 +68,7 @@ class MemoryService:
             return ([], [])
 
         verdicts, links = await asyncio.gather(
-            self._reconcile_commitments(meeting_id, open_commitments),
+            self._reconcile_commitments(user_id, meeting_id, open_commitments),
             self._detect_drift(user_id, meeting_id, decisions),
             return_exceptions=True,
         )
@@ -82,7 +82,7 @@ class MemoryService:
 
     # --- commitments -------------------------------------------------------- #
     async def _reconcile_commitments(
-        self, meeting_id: str, commitments: list[CommitmentInput]
+        self, user_id: str, meeting_id: str, commitments: list[CommitmentInput]
     ) -> list[CommitmentVerdictResult]:
         if not commitments:
             return []
@@ -91,7 +91,7 @@ class MemoryService:
         embeddings = await self._embedder.embed([c.text for c in commitments])
 
         async def judge(commitment: CommitmentInput, emb: list[float]) -> CommitmentVerdictResult | None:
-            rows = await self._nearest_chunks(meeting_id, emb)
+            rows = await self._nearest_chunks(user_id, meeting_id, emb)
             if not rows:
                 return None
             verdict = await self._llm.judge_commitment(
@@ -122,11 +122,11 @@ class MemoryService:
         return verdicts
 
     async def _nearest_chunks(
-        self, meeting_id: str, embedding: list[float]
+        self, user_id: str, meeting_id: str, embedding: list[float]
     ) -> list[tuple[str, float | None]]:
         """The passages of one meeting closest to a commitment."""
         try:
-            async with self._rag.pool.connection() as conn:  # type: ignore[union-attr]
+            async with self._rag.connection(user_id) as conn:
                 async with conn.cursor() as cur:
                     await cur.execute(
                         """
@@ -197,7 +197,7 @@ class MemoryService:
     ) -> None:
         """Upsert this meeting's decision embeddings so future meetings can find them."""
         try:
-            async with self._rag.pool.connection() as conn:  # type: ignore[union-attr]
+            async with self._rag.connection(user_id) as conn:
                 async with conn.cursor() as cur:
                     for decision, emb in zip(decisions, embeddings):
                         await cur.execute(
@@ -220,7 +220,7 @@ class MemoryService:
     ) -> list[tuple[str, str, float]]:
         """The user's closest decisions from meetings OTHER than this one."""
         try:
-            async with self._rag.pool.connection() as conn:  # type: ignore[union-attr]
+            async with self._rag.connection(user_id) as conn:
                 async with conn.cursor() as cur:
                     await cur.execute(
                         """
