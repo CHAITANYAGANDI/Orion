@@ -43,7 +43,8 @@ class RagService:
         conninfo = (
             f"host={self._settings.pg_host} port={self._settings.pg_port} "
             f"dbname={self._settings.pg_database} user={self._settings.pg_user} "
-            f"password={self._settings.pg_password}"
+            f"password={self._settings.pg_password} "
+            f"sslmode={self._settings.pg_sslmode}"
         )
         self._pool = AsyncConnectionPool(conninfo, min_size=1, max_size=5, open=False)
         try:
@@ -341,32 +342,72 @@ class RagService:
 
     # --- helpers ------------------------------------------------------------ #
     def _chunk(self, transcript: str, segments: list[Segment]) -> list[dict]:
-        """Group consecutive segments into ~chunk_chars passages with time spans."""
-        budget = self._settings.rag_chunk_chars
-        chunks: list[dict] = []
+        """Group consecutive segments into overlapping, speaker-labelled passages.
 
-        if segments:
-            buf: list[str] = []
-            length = 0
-            start: float | None = None
-            end: float | None = None
-            for seg in segments:
-                text = (seg.text or "").strip()
-                if not text:
-                    continue
-                if start is None:
-                    start = seg.start
-                buf.append(text)
-                length += len(text) + 1
-                end = seg.end
-                if length >= budget:
-                    chunks.append({"text": " ".join(buf), "start": start, "end": end})
-                    buf, length, start, end = [], 0, None, None
-            if buf:
-                chunks.append({"text": " ".join(buf), "start": start, "end": end})
-        else:
+        Two things here decide how good retrieval is.
+
+        **The speaker prefix.** Each turn is rendered "Speaker 1: ..." exactly as
+        the transcript itself is (see the adapter's `_join`). Without it the
+        passage says only *what* was said, so "I'll have it by Friday" retrieves
+        with no way to tell who promised it — and first-person commitments are
+        most of what anyone asks a meeting about.
+
+        **The overlap.** Passages are cut on a character budget, and an answer
+        lying across a cut used to be split in half, leaving neither side able to
+        support it. Consecutive passages now share a tail, so a boundary no
+        longer falls in the middle of the only sentence that mattered.
+        """
+        budget = self._settings.rag_chunk_chars
+        overlap = min(self._settings.rag_chunk_overlap_chars, max(budget - 1, 0))
+
+        if not segments:
             text = (transcript or "").strip()
-            for i in range(0, len(text), budget):
-                chunks.append({"text": text[i : i + budget], "start": None, "end": None})
+            step = max(budget - overlap, 1)
+            return [
+                {"text": text[i : i + budget], "start": None, "end": None}
+                for i in range(0, len(text), step)
+                if text[i : i + budget].strip()
+            ]
+
+        turns = []
+        for seg in segments:
+            body = (seg.text or "").strip()
+            if not body:
+                continue
+            speaker = (seg.speaker or "").strip()
+            line = f"{speaker}: {body}" if speaker else body
+            turns.append({"line": line, "start": seg.start, "end": seg.end})
+
+        chunks: list[dict] = []
+        i = 0
+        while i < len(turns):
+            taken: list[dict] = []
+            length = 0
+            j = i
+            # Always take one turn, so a single turn longer than the budget
+            # still forms a chunk instead of stalling.
+            while j < len(turns) and (not taken or length < budget):
+                taken.append(turns[j])
+                length += len(turns[j]["line"]) + 1
+                j += 1
+
+            chunks.append({
+                "text": "\n".join(t["line"] for t in taken),
+                "start": taken[0]["start"],
+                "end": taken[-1]["end"],
+            })
+
+            if j >= len(turns):
+                break
+
+            # Rewind far enough to repeat ~`overlap` characters at the head of
+            # the next chunk. Never past `i + 1`: the rewind must not cancel out
+            # the advance, or the loop would emit the same chunk forever.
+            back = 0
+            k = j
+            while k > i + 1 and back < overlap:
+                k -= 1
+                back += len(turns[k]["line"]) + 1
+            i = k
 
         return [c for c in chunks if c["text"].strip()]

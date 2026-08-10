@@ -12,6 +12,20 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+
+# NEXT_PUBLIC_* values are inlined into the client bundle by `next build`, so
+# they have to be present HERE. Supplying them only at runtime leaves the built
+# bundle holding the fallbacks in lib/api.ts and lib/ws.ts — a deployed
+# frontend that calls http://localhost:8080 and never leaves dev auth mode.
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_WS_URL
+ARG NEXT_PUBLIC_AUTH_MODE
+ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} \
+    NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL} \
+    NEXT_PUBLIC_AUTH_MODE=${NEXT_PUBLIC_AUTH_MODE} \
+    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 

@@ -31,11 +31,15 @@ from app.schemas import (
     DecisionRelation,
     DraftEmailRequest,
     DraftEmailResponse,
+    OutlineGroup,
     Risk,
     Segment,
     SummaryResponse,
+    SummarySection,
+    SummaryTemplate,
     TranscriptResponse,
 )
+from app.templates import resolve
 
 
 @dataclass(frozen=True)
@@ -304,6 +308,30 @@ def script_for_transcript(transcript: str) -> MockScript:
     return _BY_TRANSCRIPT.get(transcript or "", SCRIPTS[0])
 
 
+def _mock_sections(tpl: SummaryTemplate, script: MockScript) -> list[SummarySection]:
+    """Fill a template's sections from the scripted brief.
+
+    Only the three sections the script actually has material for are populated;
+    the rest come back empty. That is deliberate — inventing plausible text for
+    a "Budget" section the script knows nothing about would make the mock look
+    like it understands the meeting, and would hide the empty-section case the
+    UI has to handle anyway for a real meeting where the topic never came up.
+    """
+    sections: list[SummarySection] = []
+    for spec in tpl.sections:
+        section = SummarySection(key=spec.key, title=spec.title, kind=spec.kind)
+        if spec.key == "overview":
+            section.text = script.detailed_summary
+        elif spec.key == "keyPoints":
+            section.bullets = list(script.key_points)
+        elif spec.key == "outline":
+            section.groups = [
+                OutlineGroup(heading="Discussion", bullets=list(script.key_points))
+            ]
+        sections.append(section)
+    return sections
+
+
 class MockTranscriptionAdapter(TranscriptionPort):
     """Returns one of the scripted sprint meetings."""
 
@@ -322,12 +350,25 @@ class MockLlmAdapter(LlmPort):
     # `language` is accepted to satisfy the port but ignored: the scripts are
     # fixed English text, and pretending to translate them would make the mock
     # look like it does something it does not.
-    async def summarize(self, transcript: str, language: str = "en") -> SummaryResponse:
+    async def summarize(
+        self,
+        transcript: str,
+        language: str = "en",
+        *,
+        duration_seconds: float | None = None,
+        speaker_count: int | None = None,
+        template: SummaryTemplate | None = None,
+    ) -> SummaryResponse:
+        # The scripted brief is fixed, so the recording facts are accepted and
+        # ignored: the mock exists to be deterministic, not descriptive.
         script = script_for_transcript(transcript)
+        tpl = template or resolve(None)
         return SummaryResponse(
             short_summary=script.short_summary,
             detailed_summary=script.detailed_summary,
             key_points=list(script.key_points),
+            sections=_mock_sections(tpl, script),
+            template_slug=tpl.slug,
         )
 
     async def extract_action_items(

@@ -90,9 +90,9 @@ async def test_pipeline_passes_the_detected_language_to_every_llm_call():
     seen: list[str] = []
 
     class RecordingLlm(MockLlmAdapter):
-        async def summarize(self, transcript, language="en"):
+        async def summarize(self, transcript, language="en", **facts):
             seen.append(("summarize", language))
-            return await super().summarize(transcript, language)
+            return await super().summarize(transcript, language, **facts)
 
         async def extract_action_items(self, transcript, language="en"):
             seen.append(("actions", language))
@@ -127,9 +127,9 @@ async def test_documents_default_to_english_when_no_language_is_known():
     seen: list[str] = []
 
     class RecordingLlm(MockLlmAdapter):
-        async def summarize(self, transcript, language="en"):
+        async def summarize(self, transcript, language="en", **facts):
             seen.append(language)
-            return await super().summarize(transcript, language)
+            return await super().summarize(transcript, language, **facts)
 
     pipeline = Pipeline(MockTranscriptionAdapter(), RecordingLlm())
     await pipeline.process_document("mtg_doc", "Minutes text.")

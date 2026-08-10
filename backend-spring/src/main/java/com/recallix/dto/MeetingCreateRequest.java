@@ -11,7 +11,12 @@ public record MeetingCreateRequest(
         List<String> participants,
         List<String> tags,
         String contentType,
-        Integer durationSeconds
+        Integer durationSeconds,
+        /**
+         * Which summary shape to write these notes in. Null means General, so a
+         * client that does not offer the picker still creates meetings.
+         */
+        String summaryTemplate
 ) {
     public List<String> participantsOrEmpty() {
         return participants == null ? List.of() : participants;

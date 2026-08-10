@@ -71,6 +71,8 @@ public class MeetingService {
     private final UsageLimitService usage;
     private final OutboxService outbox;
     private final AuditService audit;
+    private final AiClient ai;
+    private final SummaryTemplateService templates;
 
     public MeetingService(MeetingRepository meetings,
                           MeetingTranscriptRepository transcripts,
@@ -82,7 +84,9 @@ public class MeetingService {
                           StorageService storage,
                           UsageLimitService usage,
                           OutboxService outbox,
-                          AuditService audit) {
+                          AuditService audit,
+                          AiClient ai,
+                          SummaryTemplateService templates) {
         this.meetings = meetings;
         this.transcripts = transcripts;
         this.segments = segments;
@@ -94,6 +98,8 @@ public class MeetingService {
         this.usage = usage;
         this.outbox = outbox;
         this.audit = audit;
+        this.ai = ai;
+        this.templates = templates;
     }
 
     // --- upload + create ---------------------------------------------------- //
@@ -132,6 +138,7 @@ public class MeetingService {
         if (req.durationSeconds() != null) {
             meeting.setDurationSeconds(req.durationSeconds());
         }
+        meeting.setSummaryTemplate(templates.requireKnown(req.summaryTemplate()));
         meeting.setStatus(MeetingStatus.QUEUED);
 
         enqueueProcessing(meeting);
@@ -166,6 +173,7 @@ public class MeetingService {
         meeting.setSourceType(SourceType.YOUTUBE);
         meeting.setSourceUrl(url);
         meeting.setTags(req.tagsOrEmpty());
+        meeting.setSummaryTemplate(templates.requireKnown(req.summaryTemplate()));
         meetings.save(meeting);
 
         enqueueProcessing(meeting);
@@ -200,7 +208,12 @@ public class MeetingService {
                 "audioUrl", "",
                 "objectKey", meeting.getObjectKey() == null ? "" : meeting.getObjectKey(),
                 "sourceType", meeting.getSourceType().name(),
-                "sourceUrl", meeting.getSourceUrl() == null ? "" : meeting.getSourceUrl()
+                "sourceUrl", meeting.getSourceUrl() == null ? "" : meeting.getSourceUrl(),
+                // Sent with the job so the worker summarizes in the shape the
+                // user chose the first time, rather than producing General
+                // notes that then have to be rewritten.
+                "summaryTemplate", meeting.getSummaryTemplate() == null
+                        ? SummaryTemplateService.DEFAULT_SLUG : meeting.getSummaryTemplate()
         ));
     }
 
@@ -247,7 +260,68 @@ public class MeetingService {
         var summary = summaries.findFirstByMeetingIdOrderByCreatedAtDesc(meetingId)
                 .orElseThrow(() -> ApiException.notFound("Summary not ready"));
         return new SummaryResponse(meetingId, summary.getShortSummary(),
-                summary.getDetailedSummary(), summary.getKeyPoints());
+                summary.getDetailedSummary(), summary.getKeyPoints(),
+                summary.getSections(), summary.getTemplateSlug());
+    }
+
+    /**
+     * Rewrite an existing summary under a different template.
+     *
+     * <p>Deliberately not a reprocess: the transcript is already stored, so
+     * this re-runs only the summary call. Re-transcribing to change the shape
+     * of the notes would cost minutes and money for no new information — and
+     * would consume the user's quota a second time for a meeting they have
+     * already paid for.
+     *
+     * <p>The extractions are left alone for the same reason: action items,
+     * decisions and risks are facts about the meeting, not a presentation
+     * choice, so a template switch has no business changing them.
+     */
+    @Transactional
+    public SummaryResponse resummarize(String userId, String meetingId, String templateSlug) {
+        Meeting meeting = require(userId, meetingId);
+        var transcript = transcripts.findFirstByMeetingIdOrderByCreatedAtDesc(meetingId)
+                .orElseThrow(() -> ApiException.badRequest(
+                        "This meeting has no transcript yet, so there is nothing to summarize"));
+
+        String slug = templates.requireKnown(templateSlug);
+
+        // Distinct voices, not turns: the summary prompt uses this to say how
+        // many people were in the room.
+        Integer speakerCount = (int) segments.findByMeetingIdOrderByStartTimeAsc(meetingId)
+                .stream()
+                .map(com.recallix.entity.TranscriptSegment::getSpeaker)
+                .filter(s -> s != null && !s.isBlank())
+                .distinct()
+                .count();
+        if (speakerCount == 0) {
+            speakerCount = null;
+        }
+
+        AiClient.SummaryResult written = ai.summarize(
+                transcript.getTranscriptText(), slug, meeting.getDurationSeconds(), speakerCount);
+
+        var summary = summaries.findFirstByMeetingIdOrderByCreatedAtDesc(meetingId)
+                .orElseGet(() -> {
+                    var fresh = new com.recallix.entity.MeetingSummary();
+                    fresh.setId(IdGenerator.summary());
+                    fresh.setMeetingId(meetingId);
+                    return fresh;
+                });
+        summary.setShortSummary(written.shortSummary());
+        summary.setDetailedSummary(written.detailedSummary());
+        summary.setKeyPoints(written.keyPoints());
+        summary.setSections(written.sections());
+        summary.setTemplateSlug(written.templateSlug() == null ? slug : written.templateSlug());
+        summaries.save(summary);
+
+        // Remembered on the meeting so a later reprocess keeps this shape.
+        meeting.setSummaryTemplate(slug);
+        audit.record(userId, "SUMMARY_RESUMMARIZED", "meeting", meetingId);
+
+        return new SummaryResponse(meetingId, summary.getShortSummary(),
+                summary.getDetailedSummary(), summary.getKeyPoints(),
+                summary.getSections(), summary.getTemplateSlug());
     }
 
     @Transactional(readOnly = true)
@@ -316,7 +390,8 @@ public class MeetingService {
                 m.getId(), m.getTitle(), m.getStatus(),
                 m.getParticipants(), m.getTags(), audioUrl,
                 m.getDurationSeconds(), m.getCreatedAt(), m.getErrorMessage(),
-                m.getSourceType(), m.getSourceUrl(), m.getLanguage());
+                m.getSourceType(), m.getSourceUrl(), m.getLanguage(),
+                m.getSummaryTemplate());
     }
 
     private void validateContentType(String contentType) {

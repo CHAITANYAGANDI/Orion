@@ -1,5 +1,6 @@
 package com.recallix.entity;
 
+import com.recallix.domain.SummarySection;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -31,6 +32,18 @@ public class MeetingSummary {
     @Column(name = "key_points_json", columnDefinition = "jsonb")
     private List<String> keyPoints = new ArrayList<>();
 
+    /**
+     * The template's sections in order. Empty for summaries written before
+     * templates existed, which still render from the three fields above.
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "sections_json", columnDefinition = "jsonb")
+    private List<SummarySection> sections = new ArrayList<>();
+
+    /** Which template produced this summary; null for pre-template summaries. */
+    @Column(name = "template_slug")
+    private String templateSlug;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -48,6 +61,12 @@ public class MeetingSummary {
 
     public List<String> getKeyPoints() { return keyPoints; }
     public void setKeyPoints(List<String> keyPoints) { this.keyPoints = keyPoints; }
+
+    public List<SummarySection> getSections() { return sections; }
+    public void setSections(List<SummarySection> sections) { this.sections = sections; }
+
+    public String getTemplateSlug() { return templateSlug; }
+    public void setTemplateSlug(String templateSlug) { this.templateSlug = templateSlug; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

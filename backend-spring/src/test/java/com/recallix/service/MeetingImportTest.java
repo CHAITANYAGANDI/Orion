@@ -66,13 +66,18 @@ class MeetingImportTest {
     @Mock private UsageLimitService usage;
     @Mock private OutboxService outbox;
     @Mock private AuditService audit;
+    @Mock private AiClient ai;
+    @Mock private SummaryTemplateService templates;
 
     private MeetingService service;
 
     @BeforeEach
     void setUp() {
         service = new MeetingService(meetings, transcripts, segments, summaries, decisions,
-                actionItems, risks, storage, usage, outbox, audit);
+                actionItems, risks, storage, usage, outbox, audit, ai, templates);
+        // The picker's validation is exercised in SummaryTemplateServiceTest;
+        // here it stands in for "whatever the user chose is fine".
+        when(templates.requireKnown(any())).thenReturn("general");
         when(meetings.findByUserIdAndSourceUrl(anyString(), anyString())).thenReturn(Optional.empty());
         when(meetings.save(any(Meeting.class))).thenAnswer(inv -> inv.getArgument(0));
     }
@@ -166,7 +171,7 @@ class MeetingImportTest {
     @DisplayName("a title the user typed is kept, so the worker will not overwrite it")
     void suppliedTitleSurvives() {
         MeetingResponse res = service.importFromUrl(USER,
-                new MeetingImportRequest(VIDEO, "Team offsite recording", null));
+                new MeetingImportRequest(VIDEO, "Team offsite recording", null, null));
 
         assertThat(res.title()).isEqualTo("Team offsite recording");
         assertThat(res.title()).isNotEqualTo(MeetingService.IMPORT_PLACEHOLDER_TITLE);
@@ -235,6 +240,6 @@ class MeetingImportTest {
     }
 
     private static MeetingImportRequest request(String url) {
-        return new MeetingImportRequest(url, null, null);
+        return new MeetingImportRequest(url, null, null, null);
     }
 }

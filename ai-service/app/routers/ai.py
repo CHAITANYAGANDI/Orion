@@ -33,6 +33,7 @@ from app.schemas import (
     SemanticSearchResponse,
     SummarizeRequest,
     SummaryResponse,
+    SummaryTemplate,
     TranscribeRequest,
     TranscriptInput,
     TranscriptResponse,
@@ -41,6 +42,7 @@ from app.schemas import (
     WorkspaceChatRequest,
 )
 from app.storage import fetch_audio
+from app.templates import BUILT_IN, resolve
 
 logger = logging.getLogger("ai-service.router.ai")
 
@@ -74,12 +76,31 @@ async def transcribe(
     return await pipeline.transcribe(audio, filename)
 
 
+@router.get("/templates", response_model=list[SummaryTemplate])
+async def list_templates() -> list[SummaryTemplate]:
+    """The built-in templates, with the section instructions that shape them.
+
+    Served from here rather than duplicated in the backend so the wording and
+    the prompt it drives can never drift apart.
+    """
+    return BUILT_IN
+
+
 @router.post("/summarize", response_model=SummaryResponse)
 async def summarize(
     body: SummarizeRequest,
     pipeline: Pipeline = Depends(get_pipeline),
 ) -> SummaryResponse:
-    return await pipeline.summarize(body.transcript)
+    # A slug names a built-in and wins over an inline template: it is what
+    # Spring sends, and resolving it here is what keeps the section wording
+    # from having to be stored anywhere else.
+    template = resolve(body.template_slug) if body.template_slug else body.template
+    return await pipeline.summarize(
+        body.transcript,
+        duration_seconds=body.duration_seconds,
+        speaker_count=body.speaker_count,
+        template=template,
+    )
 
 
 @router.post("/extract-action-items", response_model=ActionItemsResponse)

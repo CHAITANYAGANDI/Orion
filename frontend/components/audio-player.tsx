@@ -15,10 +15,31 @@ export function useAudioController(): AudioController {
   const ref = React.useRef<HTMLAudioElement | null>(null);
   const [currentTime, setCurrentTime] = React.useState(0);
 
+  // `timeupdate` fires roughly four times a second, which is fine for marking
+  // which paragraph is playing but far too coarse to follow words: at normal
+  // speaking pace several words pass between events, so the highlight jumps
+  // in clumps. While playing, the clock is read every animation frame instead;
+  // `timeupdate` still covers seeking and pausing, when no frames are running.
+  React.useEffect(() => {
+    let frame = 0;
+
+    const tick = () => {
+      const el = ref.current;
+      if (el && !el.paused && !el.ended) {
+        setCurrentTime(el.currentTime);
+      }
+      frame = requestAnimationFrame(tick);
+    };
+
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
   const seekTo = React.useCallback((seconds: number) => {
     const el = ref.current;
     if (!el) return;
     el.currentTime = Math.max(0, seconds);
+    setCurrentTime(el.currentTime);
     void el.play().catch(() => {
       /* autoplay may be blocked; user can press play */
     });

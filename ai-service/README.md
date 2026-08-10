@@ -57,7 +57,8 @@ tests/               pytest (mock, offline)
 | `AI_PROVIDER` | `mock` | `mock` or `openai` |
 | `OPENAI_API_KEY` | — | required when `AI_PROVIDER=openai` |
 | `OPENAI_TRANSCRIBE_MODEL` | `whisper-1` | Whisper model |
-| `OPENAI_CHAT_MODEL` | `gpt-4o-mini` | chat model for summary/extraction |
+| `OPENAI_CHAT_MODEL` | `gpt-5.6-terra` | chat model for summary/extraction |
+| `OPENAI_EXTRACTION_MODEL` | `gpt-5.6-luna` | model for action items, decisions and risks |
 | `S3_ENDPOINT` | — | MinIO/S3 endpoint (for `objectKey` downloads) |
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | — | S3 credentials |
 | `S3_BUCKET` | `recallix` | audio bucket |

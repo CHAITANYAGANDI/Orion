@@ -21,7 +21,9 @@ public record MeetingResponse(
         SourceType sourceType,
         String sourceUrl,
         /** Detected transcription language (ISO-639-1); null until processed. */
-        String language
+        String language,
+        /** Which summary template this meeting's notes are written in. */
+        String summaryTemplate
 ) {
     public static MeetingResponse from(Meeting m) {
         return new MeetingResponse(
@@ -36,7 +38,8 @@ public record MeetingResponse(
                 m.getErrorMessage(),
                 m.getSourceType(),
                 m.getSourceUrl(),
-                m.getLanguage()
+                m.getLanguage(),
+                m.getSummaryTemplate()
         );
     }
 }

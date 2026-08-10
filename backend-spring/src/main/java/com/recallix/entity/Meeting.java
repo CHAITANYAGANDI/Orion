@@ -69,6 +69,15 @@ public class Meeting {
     @Column(name = "language")
     private String language;
 
+    /**
+     * Which summary shape this meeting is written in. Held on the meeting, not
+     * the summary, so the choice survives a reprocess and so the meeting can be
+     * re-summarized under a different template without re-transcribing it.
+     * Validated against the ai-service's list before being stored.
+     */
+    @Column(name = "summary_template", nullable = false)
+    private String summaryTemplate = "general";
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -121,6 +130,9 @@ public class Meeting {
 
     public String getLanguage() { return language; }
     public void setLanguage(String language) { this.language = language; }
+
+    public String getSummaryTemplate() { return summaryTemplate; }
+    public void setSummaryTemplate(String summaryTemplate) { this.summaryTemplate = summaryTemplate; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

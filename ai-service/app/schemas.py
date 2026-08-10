@@ -73,6 +73,48 @@ class Segment(CamelModel):
     text: str
 
 
+# --------------------------------------------------------------------------- #
+# Summary templates
+#
+# Defined before MeetingBriefResult because the brief carries the sections a
+# template produced.
+# --------------------------------------------------------------------------- #
+class TemplateSection(CamelModel):
+    """One section a template asks the summary to contain.
+
+    `kind` decides the shape the model must return and how the UI draws it:
+    `prose` is a paragraph, `bullets` a flat list, `outline` headed groups of
+    bullets — the walkthrough that makes a long meeting navigable.
+    """
+
+    key: str
+    title: str
+    kind: Literal["prose", "bullets", "outline"] = "prose"
+    instruction: str
+
+
+class SummaryTemplate(CamelModel):
+    slug: str
+    name: str
+    sections: list[TemplateSection] = Field(default_factory=list)
+
+
+class OutlineGroup(CamelModel):
+    heading: str
+    bullets: list[str] = Field(default_factory=list)
+
+
+class SummarySection(CamelModel):
+    """A section as written. Only the field matching `kind` is populated."""
+
+    key: str
+    title: str
+    kind: Literal["prose", "bullets", "outline"] = "prose"
+    text: str = ""
+    bullets: list[str] = Field(default_factory=list)
+    groups: list[OutlineGroup] = Field(default_factory=list)
+
+
 class MeetingBriefResult(CamelModel):
     """Full result — FastAPI -> Spring callback + /ai/process-meeting response."""
 
@@ -83,6 +125,11 @@ class MeetingBriefResult(CamelModel):
     short_summary: str
     detailed_summary: str
     key_points: list[str] = Field(default_factory=list)
+    # The template's sections as written, for Spring to persist. The three
+    # fields above stay populated from them so the export, share page and recap
+    # email keep working without knowing which template ran.
+    sections: list[SummarySection] = Field(default_factory=list)
+    template_slug: str | None = None
     decisions: list[Decision] = Field(default_factory=list)
     action_items: list[ActionItem] = Field(default_factory=list)
     risks: list[Risk] = Field(default_factory=list)
@@ -108,12 +155,30 @@ class TranscriptResponse(CamelModel):
 
 class SummarizeRequest(CamelModel):
     transcript: str
+    # Facts about the recording that the text cannot carry. Optional because a
+    # caller summarizing loose text has neither, and the notes simply open
+    # without them.
+    duration_seconds: float | None = None
+    speaker_count: int | None = None
+    # Two ways to ask for a shape. `template_slug` names a built-in and is what
+    # Spring sends, so the section instructions never have to be stored — or
+    # kept in step — outside this service. `template` passes one inline, for a
+    # caller experimenting with wording. Slug wins when both are given; absent
+    # both, the General shape is used, so a caller that knows nothing about
+    # templates keeps working.
+    template_slug: str | None = None
+    template: SummaryTemplate | None = None
 
 
 class SummaryResponse(CamelModel):
     short_summary: str
     detailed_summary: str
     key_points: list[str] = Field(default_factory=list)
+    # The template's sections as written. The three fields above are still
+    # populated from them, because export, the share page and the recap email
+    # all read those and must not care which template ran.
+    sections: list[SummarySection] = Field(default_factory=list)
+    template_slug: str | None = None
 
 
 class TranscriptInput(CamelModel):
@@ -327,6 +392,9 @@ class MeetingUploadedEvent(CamelModel):
     source_type: SourceType = "AUDIO"
     # Set for YOUTUBE; the object key carries the content for AUDIO/DOCUMENT.
     source_url: str | None = None
+    # Which summary shape the user picked. None means General, so an event
+    # published before this field existed still processes.
+    summary_template: str | None = None
 
 
 class ProcessingFailedEvent(CamelModel):

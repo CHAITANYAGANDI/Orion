@@ -35,6 +35,18 @@ def _json_serializer(value: dict) -> bytes:
     return json.dumps(value).encode("utf-8")
 
 
+def _default_ssl_context():
+    """A verifying TLS context using the system trust store.
+
+    Built here rather than left to aiokafka's default because that default is
+    an *unverified* context — fine against a broker on the same private
+    network, wrong against one reached over the public internet.
+    """
+    import ssl
+
+    return ssl.create_default_context()
+
+
 class KafkaWorker:
     """Background consumer/producer wired to the pipeline."""
 
@@ -78,15 +90,39 @@ class KafkaWorker:
             except Exception:  # noqa: BLE001
                 pass
 
+    def _security_kwargs(self) -> dict:
+        """Broker auth, shared by the consumer and the producer.
+
+        Returns nothing at all for a plaintext broker, so the local path builds
+        exactly the client it built before. SASL credentials are attached only
+        when the protocol asks for them: passing a username to a PLAINTEXT
+        client is an error rather than a no-op.
+        """
+        protocol = (self._settings.kafka_security_protocol or "PLAINTEXT").upper()
+        if protocol == "PLAINTEXT":
+            return {}
+        kwargs: dict = {"security_protocol": protocol}
+        if "SASL" in protocol:
+            kwargs["sasl_mechanism"] = self._settings.kafka_sasl_mechanism
+            kwargs["sasl_plain_username"] = self._settings.kafka_sasl_username
+            kwargs["sasl_plain_password"] = self._settings.kafka_sasl_password
+        if protocol.endswith("SSL"):
+            # aiokafka builds a default verifying context when handed None,
+            # which is what a managed broker with a public CA needs.
+            kwargs["ssl_context"] = _default_ssl_context()
+        return kwargs
+
     # --- resilient connect -------------------------------------------------- #
     async def _connect(self) -> bool:
         """Try to start consumer + producer. Returns True on success."""
         from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
+        security = self._security_kwargs()
         self._producer = AIOKafkaProducer(
             bootstrap_servers=self._settings.kafka_bootstrap_servers,
             value_serializer=_json_serializer,
             key_serializer=lambda k: (k or "").encode("utf-8"),
+            **security,
         )
         self._consumer = AIOKafkaConsumer(
             self._settings.kafka_topic_meeting_uploaded,
@@ -95,6 +131,7 @@ class KafkaWorker:
             value_deserializer=lambda v: json.loads(v.decode("utf-8")),
             enable_auto_commit=True,
             auto_offset_reset="earliest",
+            **security,
         )
         await self._producer.start()
         await self._consumer.start()
@@ -164,6 +201,7 @@ class KafkaWorker:
         transcription rather than before it.
         """
         meeting_id = event.meeting_id
+        template_slug = event.summary_template
 
         if event.source_type == "YOUTUBE":
             await progress_hook(
@@ -175,7 +213,8 @@ class KafkaWorker:
             )
             source = await fetch_youtube(event.source_url or "", self._settings)
             result = await self._pipeline.process(
-                meeting_id, source.audio or b"", source.filename, progress_hook, transcript_hook
+                meeting_id, source.audio or b"", source.filename, progress_hook,
+                transcript_hook, template_slug,
             )
             # Spring created this meeting before anything was known about the
             # video; hand back the real title and length so it can replace them.
@@ -198,14 +237,15 @@ class KafkaWorker:
             # No title backfill here: Spring already derived one from the
             # uploaded filename, and the user may have edited it since.
             return await self._pipeline.process_document(
-                meeting_id, source.text or "", progress_hook, transcript_hook
+                meeting_id, source.text or "", progress_hook, transcript_hook,
+                template_slug=template_slug,
             )
 
         audio, filename = await fetch_audio(
             self._settings, audio_url=event.audio_url, object_key=event.object_key
         )
         return await self._pipeline.process(
-            meeting_id, audio, filename, progress_hook, transcript_hook
+            meeting_id, audio, filename, progress_hook, transcript_hook, template_slug
         )
 
     async def _handle(self, event: MeetingUploadedEvent) -> None:

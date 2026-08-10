@@ -169,7 +169,10 @@ services:
       AI_PROVIDER: ${AI_PROVIDER:-mock}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_TRANSCRIBE_MODEL: ${OPENAI_TRANSCRIBE_MODEL:-whisper-1}
-      OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL:-gpt-4o-mini}
+      OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL:-gpt-5.6-terra}
+      # Structured extraction: smaller model, far more tokens-per-minute
+      # headroom, so it stops competing with the summary for the budget.
+      OPENAI_EXTRACTION_MODEL: ${OPENAI_EXTRACTION_MODEL:-gpt-5.6-luna}
       OPENAI_EMBED_MODEL: ${OPENAI_EMBED_MODEL:-text-embedding-3-small}
       # Speech-to-text is chosen separately from the LLM: Deepgram diarizes,
       # Whisper does not.
@@ -196,7 +199,15 @@ services:
         condition: service_healthy
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      # Inlined into the client bundle at build time; the runtime block below
+      # cannot substitute for these (see frontend/Dockerfile).
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-http://localhost:8080/ws}
+        NEXT_PUBLIC_AUTH_MODE: ${NEXT_PUBLIC_AUTH_MODE:-dev}
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
     ports:
       - "3000:3000"
     depends_on:

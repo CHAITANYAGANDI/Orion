@@ -36,6 +36,13 @@ class Settings(BaseSettings):
     kafka_bootstrap_servers: str = "localhost:9092"
     kafka_consumer_group: str = "ai-service"
     kafka_topic_meeting_uploaded: str = "meeting_uploaded"
+    # Local Kafka listens without auth. A managed broker needs SASL_SSL plus an
+    # API key/secret; the credentials are only applied when the protocol asks
+    # for them, so leaving these unset keeps the local path untouched.
+    kafka_security_protocol: str = "PLAINTEXT"
+    kafka_sasl_mechanism: str = "PLAIN"
+    kafka_sasl_username: str | None = None
+    kafka_sasl_password: str | None = None
 
     # --- Spring internal callback ---
     spring_callback_url: str = "http://localhost:8080"
@@ -60,16 +67,43 @@ class Settings(BaseSettings):
     # --- OpenAI ---
     openai_api_key: str | None = None
     openai_transcribe_model: str = "whisper-1"
-    openai_chat_model: str = "gpt-4o-mini"
+    # Writes the summary and attributes action items — the two passes needing
+    # judgement, and the ones a user reads. `gpt-5.6-sol` is the stronger
+    # sibling if the notes still read thin; it costs about 2.5x more.
+    openai_chat_model: str = "gpt-5.6-terra"
+    # Entity listing, decisions and risks: structured JSON against an explicit
+    # schema, which the cost-optimized model handles well for roughly a tenth
+    # of the price. Point this at `openai_chat_model` to put everything back on
+    # one model.
+    openai_extraction_model: str = "gpt-5.6-luna"
     openai_embed_model: str = "text-embedding-3-small"
     openai_timeout_seconds: float = 60.0
     openai_max_retries: int = 2
+    # Left unset, so the parameter is not sent at all. Extraction wants
+    # temperature 0 for repeatable output, but the current models accept only
+    # their default and reject an explicit 0 with a 400 — which surfaced as an
+    # entirely empty brief. Set a number here only for a model known to allow
+    # it.
+    openai_temperature: float | None = None
+    # How many chat calls may be in flight at once, counted per model. The
+    # brief needs five passes over the same transcript, and on a small
+    # tokens-per-minute allowance firing them together is refused outright.
+    # Four lets the whole fan-out through, which the current models' limits
+    # absorb comfortably; lower it if a 429 ever reappears in the logs.
+    openai_max_concurrent_calls: int = 4
 
     # --- RAG / pgvector ---
     # 1536 = OpenAI text-embedding-3-small; the mock embedder matches this dim.
     embed_dim: int = 1536
-    rag_top_k: int = 4
-    rag_chunk_chars: int = 700
+    # Eight passages of ~1200 chars gives the model roughly 10k characters to
+    # answer from. Four passages of 700 gave it under 3k — about half a page,
+    # which is why answers used to miss things that were plainly said.
+    rag_top_k: int = 8
+    rag_chunk_chars: int = 1200
+    # ~15%. Enough that a sentence cut by a boundary survives whole in the
+    # neighbouring passage, without duplicating so much that retrieval returns
+    # the same words several times over.
+    rag_chunk_overlap_chars: int = 180
     # Workspace-wide chat spans many meetings, so it needs a wider net than the
     # single-meeting chat above.
     rag_workspace_top_k: int = 10
@@ -92,6 +126,10 @@ class Settings(BaseSettings):
     pg_database: str = "recallix"
     pg_user: str = "recallix"
     pg_password: str = "recallix"
+    # "prefer" encrypts when the server offers it and falls back when it does
+    # not, which is what the local container needs. A managed Postgres (Neon)
+    # refuses unencrypted connections outright and wants "require".
+    pg_sslmode: str = "prefer"
 
     # --- S3 / MinIO ---
     s3_endpoint: str | None = None

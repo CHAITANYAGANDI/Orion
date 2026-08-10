@@ -17,7 +17,9 @@ public record MeetingImportRequest(
         @Size(max = 2048, message = "That URL is too long")
         String url,
         String title,
-        List<String> tags
+        List<String> tags,
+        /** Which summary shape to write the notes in; null means General. */
+        String summaryTemplate
 ) {
     public String trimmedUrl() {
         return url == null ? "" : url.trim();

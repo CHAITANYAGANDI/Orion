@@ -13,6 +13,7 @@ import asyncio
 import io
 import json
 import logging
+import re
 from typing import Any, Awaitable, Callable, TypeVar
 
 from openai import AsyncOpenAI
@@ -26,15 +27,56 @@ from app.schemas import (
     DecisionRelation,
     DraftEmailRequest,
     DraftEmailResponse,
+    OutlineGroup,
     Risk,
     Segment,
     SummaryResponse,
+    SummarySection,
+    SummaryTemplate,
     TranscriptResponse,
 )
+from app.templates import resolve
 
 logger = logging.getLogger("ai-service.openai")
 
 T = TypeVar("T")
+
+
+# A rate limit is not a failure, it is an instruction to wait. Capped so a
+# pathological value cannot wedge the pipeline behind one call.
+_RATE_LIMIT_MAX_WAIT = 65.0
+_RETRY_AFTER_PATTERN = re.compile(r"try again in ([0-9.]+)\s*s", re.IGNORECASE)
+
+
+def _rate_limit_wait(exc: Exception) -> float | None:
+    """How long the server asked us to wait, or None if this is not a 429.
+
+    Read from the `retry-after` header when present, otherwise from the
+    message, which is where OpenAI puts the precise figure ("try again in
+    21.52s"). A tenth of a second is added because retrying at the exact
+    boundary tends to be refused again.
+    """
+    if getattr(exc, "status_code", None) != 429 and type(exc).__name__ != "RateLimitError":
+        return None
+
+    header = None
+    response = getattr(exc, "response", None)
+    if response is not None:
+        try:
+            header = response.headers.get("retry-after")
+        except Exception:  # noqa: BLE001 — header shape varies by SDK version.
+            header = None
+    if header:
+        try:
+            return min(float(header) + 0.1, _RATE_LIMIT_MAX_WAIT)
+        except (TypeError, ValueError):
+            pass
+
+    match = _RETRY_AFTER_PATTERN.search(str(exc))
+    if match:
+        return min(float(match.group(1)) + 0.1, _RATE_LIMIT_MAX_WAIT)
+    # A 429 with no stated delay still deserves longer than the generic backoff.
+    return 20.0
 
 
 async def _with_retries(
@@ -48,18 +90,33 @@ async def _with_retries(
 
     On exhaustion, log and return `fallback` instead of raising — the
     circuit-breaker-ish behaviour required by the spec.
+
+    Rate limits are waited out rather than backed off from. The generic
+    backoff starts at half a second and triples by the third attempt, so a
+    limit that asks for twenty seconds used to burn every attempt inside three
+    — and return an empty brief for a meeting that had simply arrived too
+    quickly after the last one.
     """
     delay = 0.5
     for attempt in range(1, attempts + 1):
         try:
             return await op()
         except Exception as exc:  # noqa: BLE001 — deliberately broad; we degrade.
-            logger.warning("OpenAI %s failed (attempt %d/%d): %s", label, attempt, attempts, exc)
+            wait = _rate_limit_wait(exc)
+            logger.warning(
+                "OpenAI %s failed (attempt %d/%d)%s: %s",
+                label, attempt, attempts,
+                f"; rate limited, waiting {wait:.1f}s" if wait else "",
+                exc,
+            )
             if attempt >= attempts:
                 logger.error("OpenAI %s exhausted retries; returning fallback.", label)
                 return fallback
-            await asyncio.sleep(delay)
-            delay *= 2
+            if wait is not None:
+                await asyncio.sleep(wait)
+            else:
+                await asyncio.sleep(delay)
+                delay *= 2
     return fallback
 
 
@@ -115,6 +172,16 @@ _EXTRACTION_SYSTEM = (
     "Respond with a single JSON object only."
 )
 
+# The entity pass needs the same discipline WITHOUT the sourceSentence rule:
+# under that rule the model wraps each name in an object to carry the quote,
+# and a list of names is the whole point here.
+_ENTITY_SYSTEM = (
+    "You are a meticulous meeting-notes analyst. List ONLY what is explicitly "
+    "named in the transcript. Do not infer, invent, or generalize. Every array "
+    "element must be a plain string — the name alone, with no quote, no "
+    "explanation and no surrounding object. Respond with a single JSON object only."
+)
+
 # ISO-639-1 codes we can name explicitly. Naming the language works markedly
 # better than passing a bare code, which models sometimes misread.
 _LANGUAGE_NAMES = {
@@ -129,6 +196,104 @@ _LANGUAGE_NAMES = {
     "nb": "Norwegian", "no": "Norwegian", "fi": "Finnish", "cs": "Czech",
     "el": "Greek", "ro": "Romanian", "hu": "Hungarian", "fa": "Persian",
 }
+
+
+def _format_duration(seconds: float) -> str:
+    """Seconds as H:MM:SS, or M:SS under an hour — how a player shows it."""
+    total = int(round(seconds))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
+
+def _recording_facts(duration_seconds: float | None, speaker_count: int | None) -> str:
+    """State the length and turnout so the notes can open with them.
+
+    Neither is recoverable from the transcript text, and both are the first
+    thing a reader wants: how long this ran, and how many people were in it.
+    """
+    facts = []
+    if duration_seconds and duration_seconds > 0:
+        facts.append(f"length {_format_duration(duration_seconds)}")
+    if speaker_count and speaker_count > 0:
+        facts.append(f"{speaker_count} speaker{'s' if speaker_count != 1 else ''}")
+    if not facts:
+        return ""
+    return (
+        "Facts about the recording, not present in the transcript: "
+        + ", ".join(facts)
+        + ". Open `shortSummary` by stating these.\n\n"
+    )
+
+
+def _assemble(tpl: SummaryTemplate, data: dict[str, Any]) -> SummaryResponse:
+    """Map a template reply onto sections, and back onto the legacy fields.
+
+    `shortSummary`, `detailedSummary` and `keyPoints` are still populated
+    because the markdown export, the public share page and the recap email all
+    read them and none of them should have to know which template ran. They are
+    derived from whichever sections best correspond, so a template without a
+    key-points section simply leaves that list empty rather than breaking.
+
+    Every section is tolerant of the wrong shape arriving — a model that
+    returns a string where an array was asked for yields a one-item list rather
+    than an exception, because a slightly odd section is worth far more to the
+    reader than a failed brief.
+    """
+    sections: list[SummarySection] = []
+    for spec in tpl.sections:
+        raw = data.get(spec.key)
+        section = SummarySection(key=spec.key, title=spec.title, kind=spec.kind)
+
+        if spec.kind == "prose":
+            section.text = str(raw or "").strip()
+        elif spec.kind == "bullets":
+            items = raw if isinstance(raw, list) else ([raw] if raw else [])
+            section.bullets = [str(b).strip() for b in items if str(b or "").strip()]
+        else:  # outline
+            for group in raw if isinstance(raw, list) else []:
+                if not isinstance(group, dict):
+                    continue
+                heading = str(group.get("heading", "")).strip()
+                bullets = group.get("bullets")
+                bullets = bullets if isinstance(bullets, list) else []
+                cleaned = [str(b).strip() for b in bullets if str(b or "").strip()]
+                if heading or cleaned:
+                    section.groups.append(OutlineGroup(heading=heading, bullets=cleaned))
+
+        sections.append(section)
+
+    by_key = {s.key: s for s in sections}
+    overview = by_key.get("overview")
+    key_points = next((s for s in sections if s.kind == "bullets"), None)
+
+    # The flat rendering used by export and email: every section in order, its
+    # title followed by its content, so nothing a template added is lost to a
+    # reader who only ever sees the markdown.
+    detailed = "\n\n".join(_flatten(s) for s in sections if _flatten(s))
+
+    return SummaryResponse(
+        short_summary=(overview.text if overview else "") or (detailed.split("\n\n")[0] if detailed else ""),
+        detailed_summary=detailed,
+        key_points=list(key_points.bullets) if key_points else [],
+        sections=sections,
+        template_slug=tpl.slug,
+    )
+
+
+def _flatten(section: SummarySection) -> str:
+    """One section as plain text, for the markdown export and the recap email."""
+    if section.kind == "prose":
+        body = section.text
+    elif section.kind == "bullets":
+        body = "\n".join(f"- {b}" for b in section.bullets)
+    else:
+        body = "\n\n".join(
+            "\n".join([g.heading, *(f"- {b}" for b in g.bullets)]).strip()
+            for g in section.groups
+        )
+    body = body.strip()
+    return f"{section.title}\n{body}" if body else ""
 
 
 def _language_instruction(language: str | None) -> str:
@@ -164,39 +329,196 @@ class OpenAiLlmAdapter(LlmPort):
             timeout=settings.openai_timeout_seconds,
             max_retries=0,
         )
+        # The pipeline deliberately fans out summary and all three extractions
+        # at once, and each carries the whole transcript. On an account with a
+        # modest tokens-per-minute allowance that burst is refused outright —
+        # every call in the fan-out counts against the same minute.
+        #
+        # Gated per model, because that is how the allowance is granted: the
+        # extraction model having room to spare must not be spent throttling
+        # it alongside the summary model that has none.
+        self._gates: dict[str, asyncio.Semaphore] = {}
 
-    async def _chat_json(self, system: str, user: str) -> dict[str, Any]:
-        resp: Any = await self._client.chat.completions.create(
-            model=self._settings.openai_chat_model,
-            response_format={"type": "json_object"},
-            temperature=0,
-            messages=[
+    def _gate_for(self, model: str) -> asyncio.Semaphore:
+        gate = self._gates.get(model)
+        if gate is None:
+            gate = asyncio.Semaphore(max(1, self._settings.openai_max_concurrent_calls))
+            self._gates[model] = gate
+        return gate
+
+    async def _chat_json(
+        self, system: str, user: str, *, model: str | None = None
+    ) -> dict[str, Any]:
+        chosen = model or self._settings.openai_chat_model
+        kwargs: dict[str, Any] = {
+            "model": chosen,
+            "response_format": {"type": "json_object"},
+            "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-        )
+        }
+        # Only sent when explicitly configured: current models reject an
+        # explicit temperature and accept only their own default.
+        if self._settings.openai_temperature is not None:
+            kwargs["temperature"] = self._settings.openai_temperature
+
+        async with self._gate_for(chosen):
+            resp: Any = await self._client.chat.completions.create(**kwargs)
         content = resp.choices[0].message.content or "{}"
         return json.loads(content)
 
-    async def summarize(self, transcript: str, language: str = "en") -> SummaryResponse:
+    async def _chat_text(self, system: str, user: str, *, model: str | None = None) -> str:
+        """Plain-prose sibling of `_chat_json`, for answers and translations.
+
+        Shares the gate and the temperature handling deliberately: when these
+        were built inline they kept their own `temperature=0`, and the model
+        change that broke the brief would have silently broken RAG chat and
+        translation too.
+        """
+        chosen = model or self._settings.openai_chat_model
+        kwargs: dict[str, Any] = {
+            "model": chosen,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        }
+        if self._settings.openai_temperature is not None:
+            kwargs["temperature"] = self._settings.openai_temperature
+
+        async with self._gate_for(chosen):
+            resp: Any = await self._client.chat.completions.create(**kwargs)
+        return (resp.choices[0].message.content or "").strip()
+
+    async def _named_entities(self, transcript: str, language: str) -> list[str]:
+        """Every concrete thing the meeting named, pulled out on its own.
+
+        Asked separately because a model writing prose compresses, and the
+        first casualties are exactly the names that make notes worth reading —
+        the scanner nobody else has heard of, the one integration that shipped.
+        Listing them first, then handing the list back for the summary to draw
+        on, keeps them from being smoothed away.
+
+        Failure is not fatal: an empty list simply means the summary is written
+        the way it was before, so a flaky extra call degrades quality rather
+        than losing the brief.
+        """
+        user = (
+            "List the named things this meeting actually worked on, as JSON: "
+            '{"entities":["..."]}. Include a product, feature, tool, service, '
+            "vendor, integration, event or release only when it was proposed, "
+            "chosen, compared, scheduled, built or ruled on.\n"
+            "Exclude: people's names; generic nouns (docs, spreadsheets, "
+            "meeting); job titles and team names; and anything that came up "
+            "only in a joke, an aside or social chat. A film someone "
+            "recommended is not an entity.\n"
+            "Use the exact form the transcript uses, even when it looks "
+            "misspelt — it is a transcription of speech and the odd-looking "
+            "form is usually the real product name. Return at most 25, most "
+            "significant first, no duplicates."
+            "\n\nTranscript:\n" + transcript
+        )
+        data = await self._chat_json(
+            _ENTITY_SYSTEM + _language_instruction(language),
+            user,
+            model=self._settings.openai_extraction_model,
+        )
+
+        # Dedupe here rather than trusting the instruction: repeats crowd out
+        # the tail of the list, and the tail is where the unusual names live.
+        seen: set[str] = set()
+        entities: list[str] = []
+        for raw in data.get("entities", []):
+            # Tolerate {"name": ...} as well as a bare string. Asking for a
+            # plain list is not a guarantee of getting one, and a stringified
+            # dict reaching the summary prompt is worse than a dropped entity.
+            name = str(raw.get("name", "") if isinstance(raw, dict) else raw).strip()
+            key = name.casefold()
+            if name and key not in seen:
+                seen.add(key)
+                entities.append(name)
+        return entities[:25]
+
+    async def summarize(
+        self,
+        transcript: str,
+        language: str = "en",
+        *,
+        duration_seconds: float | None = None,
+        speaker_count: int | None = None,
+        template: SummaryTemplate | None = None,
+    ) -> SummaryResponse:
+        tpl = template or resolve(None)
+        entities = await _with_retries(
+            lambda: self._named_entities(transcript, language),
+            attempts=self._settings.openai_max_retries + 1,
+            fallback=[],
+            label="named_entities",
+        )
+
         async def _op() -> SummaryResponse:
+            # The template decides which sections exist and what each must
+            # contain; only the house rules that apply to every section live
+            # here. Sections are asked for by key so the reply can be mapped
+            # back without depending on the model echoing titles verbatim.
+            #
+            # Plain text within a section, deliberately: the UI renders prose
+            # into a <p> with `whitespace-pre-wrap`, so blank lines survive but
+            # markdown does not — a "##" would reach the user as literal "##".
+            shape = {
+                "prose": "a single string of plain prose",
+                "bullets": "an array of strings",
+                "outline": 'an array of {"heading": string, "bullets": [string]}',
+            }
+            spec = "\n".join(
+                f'- "{sec.key}" ({sec.title}) -> {shape[sec.kind]}. {sec.instruction}'
+                for sec in tpl.sections
+            )
             system = (
-                "You summarize meeting transcripts. Return a JSON object with keys "
-                "`shortSummary` (1-2 sentences), `detailedSummary` (one paragraph), and "
-                "`keyPoints` (array of concise strings). Base everything strictly on the "
-                "transcript. " + _language_instruction(language)
+                "You write meeting notes for someone who was not there and now "
+                "has to act. Return a JSON object whose keys are exactly: "
+                + ", ".join(f'"{sec.key}"' for sec in tpl.sections)
+                + ".\n\n"
+                + spec
+                + "\n\n"
+                "Keep every concrete detail the transcript states: product and "
+                "feature names, tool and vendor names, event names, numbers, "
+                "dates and deadlines, chosen wording. These are the whole value "
+                "of the notes — a summary that drops them is worthless. If a "
+                "deadline or a final wording was agreed, it must appear, quoted "
+                "exactly.\n"
+                "Where the meeting worked through candidates, options or "
+                "examples, name them outright rather than reporting that a list "
+                "existed.\n"
+                "Ignore small talk, jokes and asides that carry no decision, "
+                "except where a section explicitly asks for the whole meeting. "
+                "Base everything strictly on the transcript; never infer or "
+                "invent. Plain text only — no markdown, no '#', no '*', no "
+                "bullet characters; the bullets are the JSON array itself.\n"
+                "A section with nothing to report gets an empty string or an "
+                "empty array — never a sentence apologising for it."
+                + _language_instruction(language)
             )
-            data = await self._chat_json(system, f"Transcript:\n{transcript}")
-            return SummaryResponse(
-                short_summary=str(data.get("shortSummary", "")),
-                detailed_summary=str(data.get("detailedSummary", "")),
-                key_points=[str(k) for k in data.get("keyPoints", []) if k],
-            )
+
+            preamble = _recording_facts(duration_seconds, speaker_count)
+            if entities:
+                preamble += (
+                    "These were named in the meeting. Carry the ones that "
+                    "carry meaning into the notes, spelled as they are here, "
+                    "and ignore any that turn out to be incidental:\n"
+                    + ", ".join(entities)
+                    + "\n\n"
+                )
+            data = await self._chat_json(system, f"{preamble}Transcript:\n{transcript}")
+            return _assemble(tpl, data)
 
         return await _with_retries(
             _op,
             attempts=self._settings.openai_max_retries + 1,
-            fallback=SummaryResponse(short_summary="", detailed_summary="", key_points=[]),
+            fallback=SummaryResponse(
+                short_summary="", detailed_summary="", key_points=[], template_slug=tpl.slug
+            ),
             label="summarize",
         )
 
@@ -204,13 +526,41 @@ class OpenAiLlmAdapter(LlmPort):
         self, transcript: str, language: str = "en"
     ) -> list[ActionItem]:
         async def _op() -> list[ActionItem]:
+            # Defined for the same reason decisions and risks are: undefined,
+            # "action item" reads as a formally minuted task, and a meeting
+            # where people simply said what they would do yields nothing.
             user = (
                 "Extract action items as JSON: "
                 '{"actionItems":[{"taskTitle","ownerName","dueDate","priority"'
                 '(high|medium|low),"sourceSentence"}]}. '
-                "Use null for unknown owner/dueDate.\n\nTranscript:\n" + transcript
+                "Use null for unknown owner/dueDate.\n\n"
+                "An action item is anything someone undertook to do, was asked "
+                "to do, or was assigned. It counts however casually it was "
+                "said — 'I'll chase them tomorrow', 'can you comment on the "
+                "issue', 'I'm going to ping you on this', 'we should add X' — "
+                "and whether or not an owner or a date was given.\n"
+                "`taskTitle` states the task itself, understandable without "
+                "the transcript, and does NOT contain the owner's name.\n"
+                "`ownerName` is whoever is on the hook. Fill it whenever the "
+                "transcript shows who that is: someone addressed by name for "
+                "the task ('I'm going to ping you on this, Cormac' -> Cormac), "
+                "someone who volunteered ('I'll chase them tomorrow' -> that "
+                "speaker, when the line is attributed), or someone asked "
+                "directly ('Samia, can you...'). Use null only when the "
+                "transcript genuinely does not show who took it on — an owner "
+                "the transcript names is not a guess.\n"
+                "`dueDate` is whatever timing was said, in the words used "
+                "('Tuesday', 'end of day'), or null.\n"
+                "Exclude things already finished, hypotheticals nobody took "
+                "on, and social plans unrelated to the work — a film to watch "
+                "or a lunch to book is not an action item however sincerely it "
+                "was promised."
+                "\n\nTranscript:\n" + transcript
             )
-            data = await self._chat_json(_EXTRACTION_SYSTEM + _language_instruction(language), user)
+            data = await self._chat_json(
+                _EXTRACTION_SYSTEM + _language_instruction(language),
+                user,
+            )
             return [ActionItem.model_validate(x) for x in data.get("actionItems", [])]
 
         return await _with_retries(
@@ -222,12 +572,34 @@ class OpenAiLlmAdapter(LlmPort):
 
     async def extract_decisions(self, transcript: str, language: str = "en") -> list[Decision]:
         async def _op() -> list[Decision]:
+            # Without a definition the model reads the strict "do not infer"
+            # system prompt as demanding a formally announced decision, and
+            # returns nothing for a meeting that settled a dozen things. Real
+            # groups decide by assent — "yeah, let's go with that" — so the bar
+            # has to be described, not left to the model to guess.
             user = (
                 "Extract decisions as JSON: "
                 '{"decisions":[{"decision","confidence"(high|medium|low),"sourceSentence"}]}.'
+                "\n\nA decision is any point where the group settled on a "
+                "course of action: chose between options, agreed to an "
+                "approach, confirmed something previously agreed, or ruled "
+                "something out. It counts whether or not it was announced "
+                "formally — 'let's go with X', 'we'll do X for now', 'agreed', "
+                "or a proposal that drew assent and no objection are all "
+                "decisions. Settling on specific wording is a decision, and the "
+                "chosen wording must be quoted exactly.\n"
+                "Write each `decision` as a standalone statement of what was "
+                "chosen, understandable without the transcript — not a "
+                "description of the discussion. Use `confidence` high for "
+                "explicit agreement, medium for clear assent, low where it "
+                "stayed tentative. Exclude questions still open at the end."
                 "\n\nTranscript:\n" + transcript
             )
-            data = await self._chat_json(_EXTRACTION_SYSTEM + _language_instruction(language), user)
+            data = await self._chat_json(
+                _EXTRACTION_SYSTEM + _language_instruction(language),
+                user,
+                model=self._settings.openai_extraction_model,
+            )
             return [Decision.model_validate(x) for x in data.get("decisions", [])]
 
         return await _with_retries(
@@ -239,12 +611,29 @@ class OpenAiLlmAdapter(LlmPort):
 
     async def extract_risks(self, transcript: str, language: str = "en") -> list[Risk]:
         async def _op() -> list[Risk]:
+            # Same failure as decisions: undefined, "risk" reads as a formally
+            # logged risk register entry, and a meeting full of stated worries
+            # yields an empty list.
             user = (
                 "Extract risks as JSON: "
                 '{"risks":[{"risk","severity"(high|medium|low),"sourceSentence"}]}.'
+                "\n\nA risk is anything raised as a threat to the outcome: a "
+                "blocker, an unmet dependency, a deadline in doubt, an "
+                "unsigned or unresolved agreement, a resourcing or ownership "
+                "gap, a technical concern, or a stated worry about quality, "
+                "accuracy or how something will be received. It counts even if "
+                "the group went on to resolve or accept it, and even when "
+                "raised in passing rather than flagged as a risk.\n"
+                "Write each `risk` as a standalone statement of what could go "
+                "wrong and why. Use `severity` to reflect the stated stakes, "
+                "not the speaker's tone."
                 "\n\nTranscript:\n" + transcript
             )
-            data = await self._chat_json(_EXTRACTION_SYSTEM + _language_instruction(language), user)
+            data = await self._chat_json(
+                _EXTRACTION_SYSTEM + _language_instruction(language),
+                user,
+                model=self._settings.openai_extraction_model,
+            )
             return [Risk.model_validate(x) for x in data.get("risks", [])]
 
         return await _with_retries(
@@ -262,15 +651,9 @@ class OpenAiLlmAdapter(LlmPort):
                 "passages. If the answer is not in the passages, say you don't have that "
                 "information. Be concise and specific."
             )
-            resp: Any = await self._client.chat.completions.create(
-                model=self._settings.openai_chat_model,
-                temperature=0,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": f"Passages:\n{passages}\n\nQuestion: {question}"},
-                ],
+            return await self._chat_text(
+                system, f"Passages:\n{passages}\n\nQuestion: {question}"
             )
-            return (resp.choices[0].message.content or "").strip()
 
         return await _with_retries(
             _op,
@@ -281,21 +664,11 @@ class OpenAiLlmAdapter(LlmPort):
 
     async def translate(self, text: str, target_language: str) -> str:
         async def _op() -> str:
-            resp: Any = await self._client.chat.completions.create(
-                model=self._settings.openai_chat_model,
-                temperature=0,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            f"Translate the user's text into {target_language}. "
-                            "Preserve meaning, tone, names, and formatting. Output only the translation."
-                        ),
-                    },
-                    {"role": "user", "content": text},
-                ],
+            return await self._chat_text(
+                f"Translate the user's text into {target_language}. "
+                "Preserve meaning, tone, names, and formatting. Output only the translation.",
+                text,
             )
-            return (resp.choices[0].message.content or "").strip()
 
         return await _with_retries(
             _op,

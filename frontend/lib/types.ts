@@ -141,11 +141,47 @@ export interface TranscriptResponse {
   segments: TranscriptSegment[];
 }
 
+/** A heading with its bullets — the repeating unit of an `outline` section. */
+export interface OutlineGroup {
+  heading: string;
+  bullets: string[];
+}
+
+/**
+ * One section of a summary, as the template wrote it. Only the field matching
+ * `kind` carries content, so the renderer switches on `kind` rather than
+ * guessing from which arrays happen to be non-empty — an outline section with
+ * no groups is a real, renderable state (the topic never came up).
+ */
+export interface SummarySection {
+  key: string;
+  title: string;
+  kind: "prose" | "bullets" | "outline";
+  text: string;
+  bullets: string[];
+  groups: OutlineGroup[];
+}
+
 export interface SummaryResponse {
   meetingId: string;
   shortSummary: string;
   detailedSummary: string;
   keyPoints: string[];
+  /**
+   * The template-shaped summary. Empty for meetings summarized before
+   * templates existed — the three flat fields above still render those, and
+   * are what the export and share page read regardless.
+   */
+  sections?: SummarySection[];
+  templateSlug?: string | null;
+}
+
+/** One entry in the template picker. */
+export interface SummaryTemplateResponse {
+  slug: string;
+  name: string;
+  /** The headings this template produces — what actually explains the choice. */
+  sectionTitles: string[];
 }
 
 // Spring ActionItemResponse — uses `title` (NOT the AI-side `taskTitle`).

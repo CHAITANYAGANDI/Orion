@@ -1,0 +1,253 @@
+# Recallix on Render — three Docker services against managed backing stores.
+#
+#   Postgres  Neon          (already provisioned)
+#   Redis     managed URL   (already provisioned)
+#   Kafka     Confluent Cloud
+#   Storage   Cloudflare R2
+#
+# Nothing secret lives in this file. Every value marked `sync: false` is left
+# blank here and filled in the Render dashboard (or via an env group) so the
+# blueprint stays committable. See docs/deploy.md for how each one is obtained
+# and for the one-time database setup, which this file cannot do.
+#
+# Deliberately NOT declared here: `databases:` and a Render Redis. Both already
+# exist elsewhere, and declaring them would have Render provision a second,
+# empty copy alongside the ones actually holding the data.
+
+services:
+  # ---------------------------------------------------------------------------
+  # Backend — the only service that talks to every backing store, and the only
+  # one that runs migrations.
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: recallix-backend
+    runtime: docker
+    plan: starter          # 512 MB is not enough; the JVM heap below assumes 2 GB
+    dockerfilePath: ./backend-spring/Dockerfile
+    dockerContext: ./backend-spring
+    healthCheckPath: /actuator/health
+    envVars:
+      # --- JVM -------------------------------------------------------------
+      # Container-aware sizing. Without this the JVM sees the host's memory,
+      # sizes a heap it cannot have, and is OOM-killed under load.
+      - key: JAVA_TOOL_OPTIONS
+        value: -XX:MaxRAMPercentage=70 -XX:InitialRAMPercentage=40
+
+      # --- Postgres (Neon) --------------------------------------------------
+      # Runtime traffic goes through the POOLED endpoint; migrations do not.
+      # Flyway holds an advisory lock across several transactions and a
+      # transaction-mode pooler will not keep it — so FLYWAY_URL must point at
+      # the direct (non `-pooler`) host. docs/deploy.md spells this out.
+      #
+      # jdbc: form, and note `channel_binding` is a libpq parameter the JDBC
+      # driver does not understand — strip it when converting the Neon URL.
+      - key: SPRING_DATASOURCE_URL
+        sync: false        # jdbc:postgresql://<pooled-host>/neondb?sslmode=require
+      - key: SPRING_DATASOURCE_USERNAME
+        value: recallix_app
+      - key: SPRING_DATASOURCE_PASSWORD
+        sync: false
+      - key: RECALLIX_DATASOURCE_SYSTEM_USERNAME
+        value: recallix_sys
+      - key: RECALLIX_DATASOURCE_SYSTEM_PASSWORD
+        sync: false
+      - key: FLYWAY_URL
+        sync: false        # jdbc:postgresql://<DIRECT-host>/neondb?sslmode=require
+      - key: FLYWAY_USER
+        sync: false        # neondb_owner — the schema owner
+      - key: FLYWAY_PASSWORD
+        sync: false
+
+      # --- Redis ------------------------------------------------------------
+      - key: SPRING_DATA_REDIS_URL
+        sync: false        # rediss://...  (TLS)
+
+      # --- Kafka (Confluent Cloud) ------------------------------------------
+      - key: SPRING_KAFKA_BOOTSTRAP_SERVERS
+        sync: false        # pkc-xxxxx.<region>.aws.confluent.cloud:9092
+      - key: KAFKA_SECURITY_PROTOCOL
+        value: SASL_SSL
+      - key: KAFKA_SASL_MECHANISM
+        value: PLAIN
+      - key: KAFKA_SASL_JAAS_CONFIG
+        sync: false        # org.apache.kafka.common.security.plain.PlainLoginModule required username="KEY" password="SECRET";
+
+      # --- Auth -------------------------------------------------------------
+      # clerk, never dev. In dev mode an `X-Dev-User` header impersonates any
+      # user, and nothing about a running deployment reveals the mistake.
+      - key: RECALLIX_AUTH_MODE
+        value: clerk
+      - key: CLERK_ISSUER
+        sync: false
+      - key: CLERK_JWKS_URL
+        sync: false
+      - key: RECALLIX_INTERNAL_TOKEN
+        generateValue: true   # must match the ai-service value; see docs/deploy.md
+
+      # --- Storage (Cloudflare R2) ------------------------------------------
+      # R2 is S3-compatible and the client already uses path-style addressing
+      # with an endpoint override, so no code change is needed — only `auto`
+      # as the region, which is what R2 expects.
+      - key: S3_ENDPOINT
+        sync: false        # https://<account-id>.r2.cloudflarestorage.com
+      - key: S3_PUBLIC_ENDPOINT
+        sync: false        # same as S3_ENDPOINT unless a custom domain fronts the bucket
+      - key: S3_ACCESS_KEY
+        sync: false
+      - key: S3_SECRET_KEY
+        sync: false
+      - key: S3_BUCKET
+        value: recallix
+      - key: S3_REGION
+        value: auto
+
+      # --- Wiring -----------------------------------------------------------
+      - key: AI_SERVICE_URL
+        fromService:
+          type: pserv
+          name: recallix-ai
+          property: hostport
+      - key: APP_FRONTEND_URL
+        fromService:
+          type: web
+          name: recallix-frontend
+          property: host
+
+      # --- Stripe -----------------------------------------------------------
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_PRO
+        sync: false
+      - key: STRIPE_PRICE_PREMIUM
+        sync: false
+
+      # --- Mail -------------------------------------------------------------
+      # No SMTP relay is provisioned. Left disabled so the recap job logs and
+      # moves on instead of throwing on every completed meeting; set the host
+      # and flip this to true once a relay exists.
+      - key: RECALLIX_MAIL_ENABLED
+        value: "false"
+      - key: SPRING_MAIL_HOST
+        sync: false
+      - key: SPRING_MAIL_PORT
+        sync: false
+      - key: SPRING_MAIL_USERNAME
+        sync: false
+      - key: SPRING_MAIL_PASSWORD
+        sync: false
+      - key: SPRING_MAIL_AUTH
+        value: "true"
+      - key: SPRING_MAIL_STARTTLS
+        value: "true"
+      - key: RECALLIX_MAIL_FROM
+        sync: false
+
+  # ---------------------------------------------------------------------------
+  # AI service — private. It is reached only by the backend and by Kafka, and
+  # exposing it publicly would expose /internal-shaped surface for no reason.
+  # ---------------------------------------------------------------------------
+  - type: pserv
+    name: recallix-ai
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./ai-service/Dockerfile
+    dockerContext: ./ai-service
+    envVars:
+      - key: SPRING_CALLBACK_URL
+        fromService:
+          type: web
+          name: recallix-backend
+          property: host
+      - key: RECALLIX_INTERNAL_TOKEN
+        fromService:
+          type: web
+          name: recallix-backend
+          envVarKey: RECALLIX_INTERNAL_TOKEN
+
+      # --- Kafka ------------------------------------------------------------
+      - key: KAFKA_BOOTSTRAP_SERVERS
+        sync: false
+      - key: KAFKA_SECURITY_PROTOCOL
+        value: SASL_SSL
+      - key: KAFKA_SASL_MECHANISM
+        value: PLAIN
+      - key: KAFKA_SASL_USERNAME
+        sync: false        # Confluent API key
+      - key: KAFKA_SASL_PASSWORD
+        sync: false        # Confluent API secret
+
+      # --- Models -----------------------------------------------------------
+      - key: AI_PROVIDER
+        value: openai
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_TRANSCRIBE_MODEL
+        value: whisper-1
+      - key: OPENAI_CHAT_MODEL
+        value: gpt-5.6-terra
+      - key: OPENAI_EXTRACTION_MODEL
+        value: gpt-5.6-luna
+      - key: OPENAI_EMBED_MODEL
+        value: text-embedding-3-small
+      - key: TRANSCRIPTION_PROVIDER
+        value: deepgram
+      - key: DEEPGRAM_API_KEY
+        sync: false
+      - key: DEEPGRAM_MODEL
+        value: nova-3
+
+      # --- Storage ----------------------------------------------------------
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_ACCESS_KEY
+        sync: false
+      - key: S3_SECRET_KEY
+        sync: false
+      - key: S3_BUCKET
+        value: recallix
+      - key: S3_REGION
+        value: auto
+
+      # --- Postgres for RAG -------------------------------------------------
+      # The unprivileged role, same as the backend's tenant pool: this service
+      # must stay inside row-level security. Pooled endpoint is correct here —
+      # it runs no migrations.
+      - key: PG_HOST
+        sync: false        # pooled Neon host
+      - key: PG_PORT
+        value: "5432"
+      - key: PG_DATABASE
+        value: neondb
+      - key: PG_USER
+        value: recallix_app
+      - key: PG_PASSWORD
+        sync: false
+      - key: PG_SSLMODE
+        value: require
+
+  # ---------------------------------------------------------------------------
+  # Frontend. The NEXT_PUBLIC_* values are consumed at BUILD time — Render
+  # exposes service env vars to the Docker build as build args, which is what
+  # frontend/Dockerfile declares. Changing one of these requires a rebuild, not
+  # just a restart: a redeploy that only restarts keeps the old bundle.
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: recallix-frontend
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: ./frontend
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: recallix-backend
+          property: host
+      - key: NEXT_PUBLIC_WS_URL
+        sync: false        # wss://<backend-host>/ws
+      - key: NEXT_PUBLIC_AUTH_MODE
+        value: clerk
+      - key: NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+        sync: false

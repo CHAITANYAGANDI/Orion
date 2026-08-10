@@ -1,6 +1,7 @@
 package com.recallix.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.recallix.domain.SummarySection;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -111,6 +112,120 @@ public class AiClient {
             }
         }
         return hits;
+    }
+
+    // --- summary templates -------------------------------------------------- //
+
+    /**
+     * One selectable summary shape. Only what the picker needs: the section
+     * instructions stay in the ai-service, which is the only place that uses
+     * them, so there is nothing here to fall out of step with the prompt.
+     */
+    public record SummaryTemplateSummary(String slug, String name, List<String> sectionTitles) {}
+
+    /**
+     * The built-in templates. Fetched rather than mirrored so adding one is a
+     * change in exactly one file; the caller is expected to cache it, since the
+     * list only changes when the ai-service is redeployed.
+     */
+    public List<SummaryTemplateSummary> listTemplates() {
+        JsonNode body = client.get()
+                .uri("/ai/templates")
+                .retrieve()
+                .body(JsonNode.class);
+
+        List<SummaryTemplateSummary> out = new java.util.ArrayList<>();
+        if (body != null && body.isArray()) {
+            for (JsonNode t : body) {
+                List<String> titles = new java.util.ArrayList<>();
+                if (t.has("sections")) {
+                    for (JsonNode s : t.get("sections")) {
+                        titles.add(text(s, "title"));
+                    }
+                }
+                out.add(new SummaryTemplateSummary(text(t, "slug"), text(t, "name"), titles));
+            }
+        }
+        return out;
+    }
+
+    /** A summary as written, in the shape the requested template asked for. */
+    public record SummaryResult(String shortSummary,
+                                String detailedSummary,
+                                List<String> keyPoints,
+                                List<SummarySection> sections,
+                                String templateSlug) {}
+
+    /**
+     * Re-summarize an existing transcript under a named template.
+     *
+     * <p>Only the slug is sent: the ai-service resolves it to the section
+     * instructions, so the wording that shapes the prompt never has to be
+     * stored here. An unknown slug falls back to General there rather than
+     * failing — a meeting should still get notes.
+     */
+    public SummaryResult summarize(String transcript,
+                                   String templateSlug,
+                                   Integer durationSeconds,
+                                   Integer speakerCount) {
+        Map<String, Object> payload = new java.util.HashMap<>();
+        payload.put("transcript", transcript);
+        payload.put("templateSlug", templateSlug);
+        if (durationSeconds != null) {
+            payload.put("durationSeconds", durationSeconds);
+        }
+        if (speakerCount != null) {
+            payload.put("speakerCount", speakerCount);
+        }
+
+        JsonNode body = client.post()
+                .uri("/ai/summarize")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(payload)
+                .retrieve()
+                .body(JsonNode.class);
+
+        List<String> keyPoints = new java.util.ArrayList<>();
+        if (body != null && body.has("keyPoints")) {
+            for (JsonNode k : body.get("keyPoints")) {
+                keyPoints.add(k.asText());
+            }
+        }
+        List<SummarySection> sections = new java.util.ArrayList<>();
+        if (body != null && body.has("sections")) {
+            for (JsonNode s : body.get("sections")) {
+                sections.add(toSection(s));
+            }
+        }
+        return new SummaryResult(
+                text(body, "shortSummary"),
+                text(body, "detailedSummary"),
+                keyPoints,
+                sections,
+                body != null && body.hasNonNull("templateSlug") ? body.get("templateSlug").asText() : null);
+    }
+
+    private static SummarySection toSection(JsonNode s) {
+        List<String> bullets = new java.util.ArrayList<>();
+        if (s.has("bullets")) {
+            for (JsonNode b : s.get("bullets")) {
+                bullets.add(b.asText());
+            }
+        }
+        List<SummarySection.OutlineGroup> groups = new java.util.ArrayList<>();
+        if (s.has("groups")) {
+            for (JsonNode g : s.get("groups")) {
+                List<String> gb = new java.util.ArrayList<>();
+                if (g.has("bullets")) {
+                    for (JsonNode b : g.get("bullets")) {
+                        gb.add(b.asText());
+                    }
+                }
+                groups.add(new SummarySection.OutlineGroup(text(g, "heading"), gb));
+            }
+        }
+        return new SummarySection(
+                text(s, "key"), text(s, "title"), text(s, "kind"), text(s, "text"), bullets, groups);
     }
 
     public record EmailDraft(String subject, String body) {}

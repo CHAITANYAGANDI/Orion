@@ -15,6 +15,7 @@ import type {
   MeetingResponse,
   RiskResponse,
   SummaryResponse,
+  SummarySection,
   TranscriptSegment,
 } from "@/lib/types";
 import { timecode } from "@/lib/format";
@@ -29,6 +30,36 @@ export interface MeetingExport {
   includeTranscript?: boolean;
 }
 
+/**
+ * A template's sections as markdown.
+ *
+ * Empty sections are kept, with a line saying so. The heading is information:
+ * a "Budget" section with nothing under it tells the reader budget never came
+ * up, whereas dropping it leaves them unable to tell that from a template that
+ * never asked about budget at all.
+ */
+function sectionsToMarkdown(sections: SummarySection[]): string[] {
+  const out: string[] = [];
+  for (const s of sections) {
+    out.push(`## ${s.title}`, "");
+    if (s.kind === "prose") {
+      out.push(s.text?.trim() || "_Not discussed._", "");
+    } else if (s.kind === "bullets") {
+      if (s.bullets.length) out.push(...s.bullets.map((b) => `- ${b}`));
+      else out.push("_Not discussed._");
+      out.push("");
+    } else {
+      if (!s.groups.length) out.push("_Not discussed._", "");
+      for (const g of s.groups) {
+        out.push(`### ${g.heading}`, "");
+        out.push(...g.bullets.map((b) => `- ${b}`));
+        out.push("");
+      }
+    }
+  }
+  return out;
+}
+
 export function toMarkdown(data: MeetingExport): string {
   const { meeting, summary, decisions, actionItems, risks, segments } = data;
   const out: string[] = [];
@@ -40,16 +71,24 @@ export function toMarkdown(data: MeetingExport): string {
   if (meeting.participants?.length) meta.push(meeting.participants.join(", "));
   out.push(`*${meta.join(" · ")}*`, "");
 
-  if (summary?.shortSummary) {
-    out.push("## Summary", "", summary.shortSummary, "");
-  }
-  if (summary?.detailedSummary && summary.detailedSummary !== summary.shortSummary) {
-    out.push(summary.detailedSummary, "");
-  }
-  if (summary?.keyPoints?.length) {
-    out.push("## Key points", "");
-    out.push(...summary.keyPoints.map((k) => `- ${k}`));
-    out.push("");
+  // A template-shaped summary exports as its own sections, which is both
+  // better markdown and the only correct option: `detailedSummary` is a flat
+  // rendering of those same sections, so emitting both would print the key
+  // points twice and reduce the headings to plain lines.
+  if (summary?.sections?.length) {
+    out.push(...sectionsToMarkdown(summary.sections));
+  } else {
+    if (summary?.shortSummary) {
+      out.push("## Summary", "", summary.shortSummary, "");
+    }
+    if (summary?.detailedSummary && summary.detailedSummary !== summary.shortSummary) {
+      out.push(summary.detailedSummary, "");
+    }
+    if (summary?.keyPoints?.length) {
+      out.push("## Key points", "");
+      out.push(...summary.keyPoints.map((k) => `- ${k}`));
+      out.push("");
+    }
   }
   if (decisions?.length) {
     out.push("## Decisions", "");

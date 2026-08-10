@@ -34,7 +34,10 @@ import {
   useAskChatMutation,
   useTranslateSummaryMutation,
   useRenameSpeakersMutation,
+  useGetSummaryTemplatesQuery,
+  useResummarizeMutation,
 } from "@/lib/api";
+import type { SummaryResponse, SummarySection } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -398,6 +401,60 @@ export default function MeetingDetailPage() {
 /* ----------------------------- Summary panel ----------------------------- */
 const LANGUAGES = ["Spanish", "French", "German", "Hindi", "Japanese", "Portuguese", "Arabic"];
 
+/**
+ * One section, drawn by its `kind`.
+ *
+ * The switch is on `kind` rather than on which arrays are non-empty, so an
+ * empty section still renders its heading. That is the point: "Budget" with
+ * nothing under it tells the reader budget never came up, which is a finding.
+ * Inferring the shape from the data would silently hide it.
+ */
+function SummarySectionView({ section }: { section: SummarySection }) {
+  const empty =
+    !section.text?.trim() &&
+    section.bullets.length === 0 &&
+    section.groups.length === 0;
+
+  return (
+    <section>
+      <h3 className="mb-2 text-sm font-semibold tracking-tight">{section.title}</h3>
+
+      {empty ? (
+        <p className="text-sm italic text-muted-foreground">Not discussed.</p>
+      ) : section.kind === "prose" ? (
+        <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+          {section.text}
+        </p>
+      ) : section.kind === "bullets" ? (
+        <ul className="space-y-1.5 text-sm text-muted-foreground">
+          {section.bullets.map((b, i) => (
+            <li key={i} className="flex gap-2">
+              <span aria-hidden className="mt-[0.45rem] h-1 w-1 shrink-0 rounded-full bg-muted-foreground/60" />
+              <span>{b}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="space-y-4">
+          {section.groups.map((g, i) => (
+            <div key={i}>
+              <h4 className="mb-1.5 text-sm font-medium">{g.heading}</h4>
+              <ul className="space-y-1.5 text-sm text-muted-foreground">
+                {g.bullets.map((b, j) => (
+                  <li key={j} className="flex gap-2">
+                    <span aria-hidden className="mt-[0.45rem] h-1 w-1 shrink-0 rounded-full bg-muted-foreground/60" />
+                    <span>{b}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function SummaryPanel({
   meetingId,
   loading,
@@ -405,10 +462,12 @@ function SummaryPanel({
 }: {
   meetingId: string;
   loading: boolean;
-  summary?: { shortSummary: string; detailedSummary: string; keyPoints: string[] };
+  summary?: SummaryResponse;
 }) {
   const [translate, { data: translated, isLoading: translating, reset }] = useTranslateSummaryMutation();
   const [lang, setLang] = React.useState("Spanish");
+  const { data: templates } = useGetSummaryTemplatesQuery();
+  const [resummarize, { isLoading: rewriting }] = useResummarizeMutation();
 
   async function onTranslate() {
     try {
@@ -418,17 +477,54 @@ function SummaryPanel({
     }
   }
 
+  async function onTemplateChange(slug: string) {
+    // Drop any translation first: it belongs to the summary being replaced,
+    // and leaving it up would show translated text under new headings.
+    reset();
+    try {
+      await resummarize({ id: meetingId, template: slug }).unwrap();
+      toast.success("Summary rewritten.");
+    } catch {
+      toast.error("Could not rewrite the summary.");
+    }
+  }
+
   const view = translated ?? summary;
+  // Translation returns the flat fields only, so while one is showing we fall
+  // back to the classic layout rather than render half-translated sections.
+  const sections = translated ? [] : summary?.sections ?? [];
+  const current = summary?.templateSlug ?? "general";
 
   return (
     <Card>
-      <CardContent className="space-y-5 pt-6">
+      <CardContent className="space-y-6 pt-6">
         {loading ? (
           <Skeleton className="h-24 w-full" />
         ) : view ? (
           <>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {templates && templates.length > 0 && (
+                  <Select value={current} onValueChange={onTemplateChange} disabled={rewriting}>
+                    <SelectTrigger className="h-8 w-[190px]">
+                      {rewriting ? (
+                        <span className="flex items-center gap-2 text-muted-foreground">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          Rewriting...
+                        </span>
+                      ) : (
+                        <SelectValue />
+                      )}
+                    </SelectTrigger>
+                    <SelectContent>
+                      {templates.map((t) => (
+                        <SelectItem key={t.slug} value={t.slug}>
+                          {t.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
                 <Select value={lang} onValueChange={(v) => { setLang(v); reset(); }}>
                   <SelectTrigger className="h-8 w-[150px]"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -445,20 +541,32 @@ function SummaryPanel({
               )}
             </div>
 
-            <p className="text-base">{view.shortSummary}</p>
-            {view.keyPoints.length > 0 && (
-              <div>
-                <h3 className="mb-2 text-sm font-semibold text-muted-foreground">Key points</h3>
-                <ul className="list-inside list-disc space-y-1 text-sm">
-                  {view.keyPoints.map((k, i) => <li key={i}>{k}</li>)}
-                </ul>
+            {sections.length > 0 ? (
+              <div className="space-y-6">
+                {sections.map((s) => (
+                  <SummarySectionView key={s.key} section={s} />
+                ))}
               </div>
-            )}
-            {view.detailedSummary && (
-              <div>
-                <h3 className="mb-2 text-sm font-semibold text-muted-foreground">Detailed summary</h3>
-                <p className="whitespace-pre-wrap text-sm text-muted-foreground">{view.detailedSummary}</p>
-              </div>
+            ) : (
+              /* Summaries written before templates existed, and translations,
+                 which only carry the flat fields. */
+              <>
+                <p className="text-base">{view.shortSummary}</p>
+                {view.keyPoints.length > 0 && (
+                  <div>
+                    <h3 className="mb-2 text-sm font-semibold text-muted-foreground">Key points</h3>
+                    <ul className="list-inside list-disc space-y-1 text-sm">
+                      {view.keyPoints.map((k, i) => <li key={i}>{k}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {view.detailedSummary && (
+                  <div>
+                    <h3 className="mb-2 text-sm font-semibold text-muted-foreground">Detailed summary</h3>
+                    <p className="whitespace-pre-wrap text-sm text-muted-foreground">{view.detailedSummary}</p>
+                  </div>
+                )}
+              </>
             )}
           </>
         ) : (
@@ -595,6 +703,8 @@ function TranscriptPanel({
     return { map, total };
   }, [segments]);
 
+  const turns = React.useMemo(() => groupIntoTurns(segments), [segments]);
+
   async function saveNames() {
     const mapping: Record<string, string> = {};
     for (const [oldName, newName] of Object.entries(draft)) {
@@ -649,6 +759,16 @@ function TranscriptPanel({
               </div>
             ) : (
               <div className="space-y-1.5">
+                {/* One-line roll-call, ordered by who spoke most. The bars
+                    below give the detail; this answers "who was in this and
+                    who dominated it" at a glance. */}
+                <p className="pb-1 text-sm text-muted-foreground">
+                  {speakers
+                    .map((sp) => ({ sp, pct: Math.round(((talk.map.get(sp) || 0) / talk.total) * 100) }))
+                    .sort((a, b) => b.pct - a.pct)
+                    .map(({ sp, pct }) => `${sp} (${pct}%)`)
+                    .join(", ")}
+                </p>
                 {speakers.map((sp) => {
                   const secs = talk.map.get(sp) || 0;
                   const pct = Math.round((secs / talk.total) * 100);
@@ -669,32 +789,169 @@ function TranscriptPanel({
           </div>
         )}
 
-        {/* Transcript lines */}
+        {/* Transcript, grouped into turns.
+            Diarization emits an utterance per pause, so one person speaking for
+            a minute arrives as several segments. Rendered one row each, that
+            reads as a stack of fragments with the same name repeated down the
+            page; merged into a turn it reads as someone talking. Each utterance
+            stays individually seekable inside the turn, so nothing is lost. */}
         {segments.length > 0 ? (
-          <div className="space-y-1">
-            {segments.map((s, i) => {
-              const active = currentTime >= s.start && currentTime < s.end;
-              return (
-                <button
-                  key={i}
-                  onClick={() => onSeek(s.start)}
-                  className={cn(
-                    "flex w-full gap-3 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent/60",
-                    active && "bg-primary/10"
-                  )}
-                >
-                  <span className="shrink-0 font-mono text-xs text-muted-foreground">{timecode(s.start)}</span>
-                  <span className="shrink-0 font-medium">{s.speaker}:</span>
-                  <span>{s.text}</span>
-                </button>
-              );
-            })}
+          <div className="space-y-5">
+            {turns.map((turn, i) => (
+              <div key={i} className="flex gap-3">
+                <SpeakerAvatar name={turn.speaker} />
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-sm font-semibold">{turn.speaker}</span>
+                    <button
+                      onClick={() => onSeek(turn.start)}
+                      className="font-mono text-xs text-muted-foreground hover:text-foreground hover:underline"
+                      aria-label={`Play from ${timecode(turn.start)}`}
+                    >
+                      {timecode(turn.start)}
+                    </button>
+                  </div>
+                  <p className="text-sm leading-relaxed">
+                    {turn.segments.map((s, j) => {
+                      const active = currentTime >= s.start && currentTime < s.end;
+                      return (
+                        <span
+                          key={j}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => onSeek(s.start)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              onSeek(s.start);
+                            }
+                          }}
+                          className={cn(
+                            "cursor-pointer rounded px-0.5 transition-colors hover:bg-accent/60",
+                            active && "bg-primary/10"
+                          )}
+                        >
+                          {active ? (
+                            <SpokenWords text={s.text} start={s.start} end={s.end} at={currentTime} />
+                          ) : (
+                            s.text
+                          )}{" "}
+                        </span>
+                      );
+                    })}
+                  </p>
+                </div>
+              </div>
+            ))}
           </div>
         ) : (
           <p className="whitespace-pre-wrap text-sm">{fallbackText || "Transcript unavailable."}</p>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * The utterance currently being spoken, with the word at `at` highlighted.
+ *
+ * Word times are estimated by spreading the utterance's span across its words
+ * in proportion to their length, longer words taking proportionally longer to
+ * say. It is an approximation — a pause mid-sentence pushes the highlight
+ * ahead of the voice — but the error cannot accumulate, because every
+ * utterance boundary resnaps it to a real timestamp, and diarization breaks
+ * utterances on exactly those pauses. Exact timing would mean persisting
+ * Deepgram's per-word offsets, which are currently discarded.
+ *
+ * Only rendered for the active utterance, so this splits one short string per
+ * frame rather than the whole transcript.
+ */
+function SpokenWords({
+  text,
+  start,
+  end,
+  at,
+}: {
+  text: string;
+  start: number;
+  end: number;
+  at: number;
+}) {
+  const words = React.useMemo(() => {
+    // Each token keeps its trailing whitespace, so joining them reproduces the
+    // original text exactly and the weighting counts the gap between words.
+    const tokens = text.match(/\S+\s*/g) ?? [];
+    const chars = tokens.reduce((n, t) => n + t.length, 0) || 1;
+    const span = Math.max(end - start, 0.001);
+
+    let acc = 0;
+    return tokens.map((token) => {
+      const from = start + (acc / chars) * span;
+      acc += token.length;
+      return { token, from, to: start + (acc / chars) * span };
+    });
+  }, [text, start, end]);
+
+  return (
+    <>
+      {words.map((w, i) => (
+        <span
+          key={i}
+          className={cn(
+            "rounded transition-colors duration-75",
+            at >= w.from && at < w.to && "bg-primary/40 text-foreground"
+          )}
+        >
+          {w.token}
+        </span>
+      ))}
+    </>
+  );
+}
+
+type Turn = { speaker: string; start: number; segments: TranscriptSegment[] };
+
+/** Merge consecutive utterances by the same speaker into one turn. */
+function groupIntoTurns(segments: TranscriptSegment[]): Turn[] {
+  const turns: Turn[] = [];
+  for (const s of segments) {
+    const last = turns[turns.length - 1];
+    if (last && last.speaker === s.speaker) {
+      last.segments.push(s);
+    } else {
+      turns.push({ speaker: s.speaker, start: s.start, segments: [s] });
+    }
+  }
+  return turns;
+}
+
+// Fixed palette, picked by a hash of the name rather than by position, so a
+// speaker keeps their colour when renamed reorders the list — and so the same
+// person looks the same on every visit.
+const SPEAKER_COLORS = [
+  "bg-blue-500", "bg-amber-500", "bg-emerald-500", "bg-violet-500",
+  "bg-rose-500", "bg-cyan-500", "bg-orange-500", "bg-indigo-500",
+];
+
+function speakerColor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
+  return SPEAKER_COLORS[Math.abs(hash) % SPEAKER_COLORS.length];
+}
+
+/** Initial of the speaker's name — "Speaker 3" gives S, "Marcus" gives M. */
+function SpeakerAvatar({ name }: { name: string }) {
+  const initial = (name.trim()[0] || "?").toUpperCase();
+  return (
+    <div
+      className={cn(
+        "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white",
+        speakerColor(name)
+      )}
+      aria-hidden
+    >
+      {initial}
+    </div>
   );
 }
 

@@ -175,6 +175,8 @@ public class CallbackService {
         s.setShortSummary(result.shortSummary());
         s.setDetailedSummary(result.detailedSummary());
         s.setKeyPoints(result.keyPointsOrEmpty());
+        s.setSections(result.sectionsOrEmpty());
+        s.setTemplateSlug(result.templateSlug());
         summaries.save(s);
     }
 

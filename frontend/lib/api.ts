@@ -35,6 +35,7 @@ import type {
   SemanticSearchHit,
   SemanticSearchRequest,
   SummaryResponse,
+  SummaryTemplateResponse,
   TranscriptResponse,
   TranslateResult,
   UploadUrlRequest,
@@ -74,6 +75,8 @@ export const api = createApi({
     "Chat",
     "WorkspaceChat",
     "Transcript",
+    "Summary",
+    "SummaryTemplates",
     "Commitments",
     "Drift",
     "MemoryStats",
@@ -167,6 +170,33 @@ export const api = createApi({
 
     getSummary: builder.query<SummaryResponse, string>({
       query: (id) => `/meetings/${id}/summary`,
+      providesTags: (_r, _e, id) => [{ type: "Summary", id }],
+    }),
+
+    // ---- Summary templates ----
+    getSummaryTemplates: builder.query<SummaryTemplateResponse[], void>({
+      query: () => "/summary-templates",
+      providesTags: [{ type: "SummaryTemplates", id: "LIST" }],
+      // The set changes only when the ai-service is redeployed, so re-fetching
+      // it on every meeting page is pure waste.
+      keepUnusedDataFor: 3600,
+    }),
+
+    /**
+     * Rewrite a meeting's summary under a different template. Only the summary
+     * is invalidated: the transcript is reused and the extractions are left
+     * alone, so nothing else on the page changes.
+     */
+    resummarize: builder.mutation<SummaryResponse, { id: string; template: string }>({
+      query: ({ id, template }) => ({
+        url: `/meetings/${id}/summary`,
+        method: "POST",
+        body: { template },
+      }),
+      invalidatesTags: (_r, _e, arg) => [
+        { type: "Summary", id: arg.id },
+        { type: "Meeting", id: arg.id },
+      ],
     }),
 
     getMeetingActionItems: builder.query<ActionItemResponse[], string>({
@@ -457,6 +487,8 @@ export const {
   useGetCalendarEventsQuery,
   useGetTranscriptQuery,
   useGetSummaryQuery,
+  useGetSummaryTemplatesQuery,
+  useResummarizeMutation,
   useGetMeetingActionItemsQuery,
   useGetDecisionsQuery,
   useGetRisksQuery,

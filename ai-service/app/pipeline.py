@@ -27,8 +27,10 @@ from app.schemas import (
     MeetingBriefResult,
     StatusEvent,
     SummaryResponse,
+    SummaryTemplate,
     TranscriptResponse,
 )
+from app.templates import resolve
 
 logger = logging.getLogger("ai-service.pipeline")
 
@@ -43,6 +45,23 @@ TOPIC_SUMMARY_GENERATED = "summary_generated"
 TOPIC_ACTION_ITEMS_EXTRACTED = "action_items_extracted"
 
 
+def _duration_of(transcript: TranscriptResponse) -> float | None:
+    """How long the recording ran, taken from the last segment that ends.
+
+    `max` rather than the final segment's end: diarized segments are ordered by
+    start, and two speakers overlapping at the close can leave the last one
+    ending earlier than the one before it.
+    """
+    ends = [s.end for s in transcript.segments if s.end]
+    return max(ends) if ends else None
+
+
+def _speaker_count_of(transcript: TranscriptResponse) -> int | None:
+    """Distinct voices, not turns. None when nothing was diarized."""
+    speakers = {s.speaker for s in transcript.segments if s.speaker}
+    return len(speakers) or None
+
+
 class Pipeline:
     """Coordinates the transcription + LLM ports into a MeetingBriefResult."""
 
@@ -54,8 +73,20 @@ class Pipeline:
     async def transcribe(self, audio: bytes, filename: str) -> TranscriptResponse:
         return await self._transcription.transcribe(audio, filename)
 
-    async def summarize(self, transcript: str) -> SummaryResponse:
-        return await self._llm.summarize(transcript)
+    async def summarize(
+        self,
+        transcript: str,
+        *,
+        duration_seconds: float | None = None,
+        speaker_count: int | None = None,
+        template: SummaryTemplate | None = None,
+    ) -> SummaryResponse:
+        return await self._llm.summarize(
+            transcript,
+            duration_seconds=duration_seconds,
+            speaker_count=speaker_count,
+            template=template,
+        )
 
     async def extract_action_items(self, transcript: str):
         return await self._llm.extract_action_items(transcript)
@@ -80,6 +111,7 @@ class Pipeline:
         filename: str,
         progress_hook: ProgressHook | None = None,
         transcript_hook: TranscriptHook | None = None,
+        template_slug: str | None = None,
     ) -> MeetingBriefResult:
         """Run the full pipeline, emitting stage events through the hook."""
 
@@ -101,7 +133,7 @@ class Pipeline:
             TOPIC_TRANSCRIPTION_COMPLETED, "TRANSCRIBING", 40, "Transcript ready; preparing summary..."
         )
 
-        result = await self._analyze(meeting_id, transcript, emit, transcript_hook)
+        result = await self._analyze(meeting_id, transcript, emit, transcript_hook, template_slug)
         logger.info(
             "Pipeline complete for %s in %.1fs (transcribe %.1fs, analyze %.1fs).",
             meeting_id,
@@ -118,6 +150,7 @@ class Pipeline:
         progress_hook: ProgressHook | None = None,
         transcript_hook: TranscriptHook | None = None,
         language: str = "en",
+        template_slug: str | None = None,
     ) -> MeetingBriefResult:
         """Analyse an already-textual source (a PDF's text layer).
 
@@ -138,7 +171,7 @@ class Pipeline:
         started = time.perf_counter()
         await emit(TOPIC_TRANSCRIPTION_COMPLETED, "TRANSCRIBING", 40, "Document read; preparing summary...")
         transcript = TranscriptResponse(transcript=text, language=language, segments=[])
-        result = await self._analyze(meeting_id, transcript, emit, transcript_hook)
+        result = await self._analyze(meeting_id, transcript, emit, transcript_hook, template_slug)
         logger.info(
             "Document pipeline complete for %s in %.1fs (%d chars).",
             meeting_id,
@@ -153,6 +186,7 @@ class Pipeline:
         transcript: TranscriptResponse,
         emit: Callable[[str, str, int, str], Awaitable[None]],
         transcript_hook: TranscriptHook | None,
+        template_slug: str | None = None,
     ) -> MeetingBriefResult:
         """Shared tail of both pipelines: index, then extract everything at once."""
         # Let the caller start indexing now — it overlaps with the analysis below
@@ -167,8 +201,18 @@ class Pipeline:
         await emit(TOPIC_SUMMARY_GENERATED, "SUMMARIZING", 60, "Summarizing and extracting insights...")
         text = transcript.transcript
         language = transcript.language or "en"
+        # Resolved here rather than passed as a slug so an unknown one falls
+        # back to General at the boundary, and everything below this line deals
+        # in a template that certainly exists.
+        template = resolve(template_slug)
         summary, action_items, decisions, risks = await asyncio.gather(
-            self._llm.summarize(text, language),
+            self._llm.summarize(
+                text,
+                language,
+                duration_seconds=_duration_of(transcript),
+                speaker_count=_speaker_count_of(transcript),
+                template=template,
+            ),
             self._llm.extract_action_items(text, language),
             self._llm.extract_decisions(text, language),
             self._llm.extract_risks(text, language),
@@ -187,6 +231,8 @@ class Pipeline:
             short_summary=summary.short_summary,
             detailed_summary=summary.detailed_summary,
             key_points=summary.key_points,
+            sections=summary.sections,
+            template_slug=summary.template_slug or template.slug,
             decisions=decisions,
             action_items=action_items,
             risks=risks,

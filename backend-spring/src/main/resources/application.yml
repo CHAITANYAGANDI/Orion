@@ -31,7 +31,12 @@ spring:
     enabled: true
     baseline-on-migrate: true
     locations: classpath:db/migration
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/recallix}
+    # Defaults to the runtime URL, which is right locally where both point at
+    # the same server. Against a managed Postgres they must differ: Flyway
+    # holds an advisory lock across several transactions, and a transaction-mode
+    # connection pooler does not keep it — so FLYWAY_URL should name the direct
+    # endpoint while the runtime pool uses the pooled one.
+    url: ${FLYWAY_URL:${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/recallix}}
     user: ${FLYWAY_USER:recallix}
     password: ${FLYWAY_PASSWORD:recallix}
 
@@ -42,6 +47,15 @@ spring:
 
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    # Local Kafka listens without auth, so the default protocol is PLAINTEXT and
+    # the SASL settings below are inert — the client only reads them once the
+    # protocol selects SASL. A managed broker (Confluent, Redpanda, Aiven) needs
+    # KAFKA_SECURITY_PROTOCOL=SASL_SSL and a jaas config carrying the API key.
+    security:
+      protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+    properties:
+      sasl.mechanism: ${KAFKA_SASL_MECHANISM:PLAIN}
+      sasl.jaas.config: ${KAFKA_SASL_JAAS_CONFIG:}
     consumer:
       group-id: recallix-backend
       auto-offset-reset: earliest

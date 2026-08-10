@@ -17,6 +17,7 @@ from app.schemas import (
     DraftEmailResponse,
     Risk,
     SummaryResponse,
+    SummaryTemplate,
     TranscriptResponse,
 )
 
@@ -43,7 +44,25 @@ class LlmPort(ABC):
     """
 
     @abstractmethod
-    async def summarize(self, transcript: str, language: str = "en") -> SummaryResponse:
+    async def summarize(
+        self,
+        transcript: str,
+        language: str = "en",
+        *,
+        duration_seconds: float | None = None,
+        speaker_count: int | None = None,
+        template: SummaryTemplate | None = None,
+    ) -> SummaryResponse:
+        """Summarize a transcript.
+
+        `duration_seconds` and `speaker_count` are facts about the recording
+        that the transcript text cannot carry — how long the meeting ran and
+        how many people spoke. They are optional because a caller with only
+        loose text (the bare /ai/summarize endpoint) has neither.
+
+        `template` decides which sections the summary contains; None means the
+        built-in General shape.
+        """
         raise NotImplementedError
 
     @abstractmethod
