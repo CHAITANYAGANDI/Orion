@@ -12,7 +12,7 @@ import java.util.List;
  * DTO must not silently widen what is public.
  *
  * <p>The nested records exist for the same reason — the internal
- * {@code DecisionResponse}/{@code RiskResponse}/{@code ActionItemResponse} all
+ * {@code ActionItemResponse} and friends all
  * expose database identifiers that a share recipient has no business seeing.
  */
 public record SharedMeetingResponse(
@@ -23,15 +23,11 @@ public record SharedMeetingResponse(
         String shortSummary,
         String detailedSummary,
         List<String> keyPoints,
-        List<SharedDecision> decisions,
         List<SharedActionItem> actionItems,
-        List<SharedRisk> risks,
         /** Null unless the owner opted into sharing the verbatim transcript. */
         String transcript
 ) {
-    public record SharedDecision(String decision, String confidence, String sourceSentence) {}
 
     public record SharedActionItem(String title, String ownerName, String dueDate, String priority) {}
 
-    public record SharedRisk(String risk, String severity, String sourceSentence) {}
 }

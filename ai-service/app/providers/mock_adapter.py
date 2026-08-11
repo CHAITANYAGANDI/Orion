@@ -5,11 +5,10 @@ These let the whole service run with **no API key** (the default,
 look believable in demos and are safe to assert against in tests.
 
 The mock is a *narrative*, not a single fixed transcript: three sprint meetings
-that reference each other. Week 1 makes promises and decisions; week 2 reports
-one done and one slipped, and reverses a decision; week 3 cancels one promise,
-completes another, and reaffirms an earlier decision. That arc is what makes
-Meeting Memory demoable without an API key — a single repeated transcript can
-only ever produce RESTATED verdicts and identical decisions.
+that reference each other. Week 1 makes promises; week 2 reports one done and
+one slipped; week 3 cancels one and completes another. Distinct transcripts
+matter because a single repeated one makes every meeting look identical, which
+hides exactly the bugs a demo is meant to surface.
 
 Script selection is deterministic and stateless: a digit in the filename picks
 the week (`week2.wav`, `standup3.wav`), otherwise the audio bytes are hashed.
@@ -26,13 +25,9 @@ from dataclasses import dataclass
 from app.providers.ports import EmbeddingPort, LlmPort, TranscriptionPort
 from app.schemas import (
     ActionItem,
-    CommitmentVerdict,
-    Decision,
-    DecisionRelation,
     DraftEmailRequest,
     DraftEmailResponse,
     OutlineGroup,
-    Risk,
     Segment,
     SummaryResponse,
     SummarySection,
@@ -51,8 +46,6 @@ class MockScript:
     detailed_summary: str
     key_points: tuple[str, ...] = ()
     action_items: tuple[ActionItem, ...] = ()
-    decisions: tuple[Decision, ...] = ()
-    risks: tuple[Risk, ...] = ()
 
     @property
     def transcript(self) -> str:
@@ -77,7 +70,7 @@ class MockScript:
 
 
 # --------------------------------------------------------------------------- #
-# Week 1 — promises made, decisions taken
+# Week 1 — promises made
 # --------------------------------------------------------------------------- #
 _WEEK_1 = MockScript(
     lines=(
@@ -137,34 +130,10 @@ _WEEK_1 = MockScript(
             source_sentence="Marco should add a mock provider so the demo runs without any API keys.",
         ),
     ),
-    decisions=(
-        Decision(
-            decision="Store the meeting audio in S3 using presigned URLs.",
-            confidence="high",
-            source_sentence="Agreed, let's store the meeting audio in S3 via presigned URLs.",
-        ),
-        Decision(
-            decision="Use OpenAI Whisper for transcription instead of the in-house model.",
-            confidence="high",
-            source_sentence="We also decided to use OpenAI Whisper for transcription instead of the in-house model.",
-        ),
-    ),
-    risks=(
-        Risk(
-            risk="Large audio files may slow down transcription and exceed timeouts.",
-            severity="medium",
-            source_sentence="One concern: large audio files may slow down transcription and blow past our timeouts.",
-        ),
-        Risk(
-            risk="No fallback if the OpenAI API is unavailable; processing could stall.",
-            severity="high",
-            source_sentence="Risk: if the OpenAI API is down we have no fallback, processing could stall.",
-        ),
-    ),
 )
 
 # --------------------------------------------------------------------------- #
-# Week 2 — one promise kept, one slipped, one decision reversed
+# Week 2 — one promise kept, one slipped
 # --------------------------------------------------------------------------- #
 _WEEK_2 = MockScript(
     lines=(
@@ -205,24 +174,10 @@ _WEEK_2 = MockScript(
             source_sentence="Ana will benchmark Deepgram latency by Thursday.",
         ),
     ),
-    decisions=(
-        Decision(
-            decision="Use Deepgram for transcription instead of OpenAI Whisper.",
-            confidence="high",
-            source_sentence="Agreed, use Deepgram for transcription instead of OpenAI Whisper.",
-        ),
-    ),
-    risks=(
-        Risk(
-            risk="Switching transcription vendors late could destabilise the pipeline.",
-            severity="high",
-            source_sentence="Risk: swapping transcription vendors this late could destabilise the pipeline.",
-        ),
-    ),
 )
 
 # --------------------------------------------------------------------------- #
-# Week 3 — one promise cancelled, one completed, one decision reaffirmed
+# Week 3 — one promise cancelled, one completed
 # --------------------------------------------------------------------------- #
 _WEEK_3 = MockScript(
     lines=(
@@ -258,22 +213,6 @@ _WEEK_3 = MockScript(
             due_date="Monday",
             priority="medium",
             source_sentence="Dev will write the migration guide by Monday.",
-        ),
-    ),
-    decisions=(
-        # Deliberately word-for-word identical to week 1 so the drift pass has an
-        # unambiguous REAFFIRMS to find alongside week 2's CONTRADICTS.
-        Decision(
-            decision="Store the meeting audio in S3 using presigned URLs.",
-            confidence="high",
-            source_sentence="On storage, confirmed: store the meeting audio in S3 using presigned URLs.",
-        ),
-    ),
-    risks=(
-        Risk(
-            risk="The migration guide could be delayed if the vendor swap takes longer.",
-            severity="medium",
-            source_sentence="Risk: the migration guide could be delayed if the vendor swap takes longer.",
         ),
     ),
 )
@@ -376,11 +315,7 @@ class MockLlmAdapter(LlmPort):
     ) -> list[ActionItem]:
         return list(script_for_transcript(transcript).action_items)
 
-    async def extract_decisions(self, transcript: str, language: str = "en") -> list[Decision]:
-        return list(script_for_transcript(transcript).decisions)
 
-    async def extract_risks(self, transcript: str, language: str = "en") -> list[Risk]:
-        return list(script_for_transcript(transcript).risks)
 
     async def answer(self, question: str, context: list[str]) -> str:
         # No real generation in mock mode — compose a grounded-looking answer
@@ -398,91 +333,14 @@ class MockLlmAdapter(LlmPort):
         lines: list[str] = ["Hi all,", "", f"Thanks for the time on {brief.title}."]
         if brief.short_summary:
             lines += ["", brief.short_summary]
-        if brief.decisions:
-            lines += ["", "What we decided:"]
-            lines += [f"  - {d}" for d in brief.decisions]
         if brief.action_items:
             lines += ["", "Next steps:"]
             lines += [f"  - {a}" for a in brief.action_items]
-        if brief.key_points and not brief.decisions and not brief.action_items:
+        if brief.key_points and not brief.action_items:
             lines += ["", "Key points:"]
             lines += [f"  - {k}" for k in brief.key_points]
         lines += ["", "Shout if I've missed or misremembered anything.", "", "Best,"]
         return DraftEmailResponse(subject=f"Recap: {brief.title}", body="\n".join(lines))
-
-    async def judge_commitment(
-        self, commitment: str, owner: str | None, passages: list[str]
-    ) -> CommitmentVerdict:
-        """Keyword heuristic standing in for a real judgement.
-
-        Scores individual *sentences* rather than whole passages: a retrieved
-        chunk usually contains the entire meeting, so classifying at passage
-        level would let an unrelated "done" anywhere in the meeting resolve every
-        open commitment. Deliberately conservative — an outcome requires both
-        vocabulary overlap with the commitment and an explicit status cue.
-        """
-        sentence, overlap = _best_matching_sentence(commitment, passages)
-        if sentence is None or overlap < 2:
-            return CommitmentVerdict(outcome="NO_EVIDENCE")
-
-        lowered = sentence.lower()
-        if any(c in lowered for c in ("done", "finished", "shipped", "completed", "merged")):
-            outcome, reason = "FULFILLED", "A later meeting reports this as completed."
-        elif any(c in lowered for c in ("slip", "delay", "pushed", "behind", "not land")):
-            outcome, reason = "SLIPPED", "A later meeting reports this as delayed."
-        elif any(c in lowered for c in ("drop", "cancel", "no longer", "scrapped")):
-            outcome, reason = "CANCELLED", "A later meeting reports this as cancelled."
-        else:
-            outcome, reason = "RESTATED", "The commitment came up again without a resolution."
-        return CommitmentVerdict(
-            outcome=outcome,
-            rationale=reason,
-            quote=sentence[:280],
-            confidence="medium",
-        )
-
-    async def compare_decisions(self, earlier: str, later: str) -> DecisionRelation:
-        """Lexical stand-in: negation cues flip a near-duplicate into a conflict."""
-        a, b = earlier.lower().strip(), later.lower().strip()
-        if a == b:
-            return DecisionRelation(
-                relation="REAFFIRMS", rationale="The later decision restates the earlier one."
-            )
-        if any(n in b for n in ("instead", "no longer", "rather than", "revert", "moving off")):
-            return DecisionRelation(
-                relation="CONTRADICTS",
-                rationale="The later decision reverses the earlier one.",
-            )
-        words_a = {w for w in re.findall(r"[a-z]{4,}", a)}
-        words_b = {w for w in re.findall(r"[a-z]{4,}", b)}
-        if words_a and len(words_a & words_b) / len(words_a) > 0.5:
-            return DecisionRelation(
-                relation="SUPERSEDES",
-                rationale="The later decision revisits the same subject with a new outcome.",
-            )
-        return DecisionRelation(relation="UNRELATED")
-
-
-def _best_matching_sentence(
-    commitment: str, passages: list[str]
-) -> tuple[str | None, int]:
-    """The single sentence across all passages with the most vocabulary in common."""
-    keywords = {w for w in re.findall(r"[a-z]{4,}", commitment.lower())}
-    if not keywords:
-        return (None, 0)
-
-    best: str | None = None
-    best_overlap = 0
-    for passage in passages:
-        for raw in re.split(r"(?<=[.!?])\s+", passage or ""):
-            sentence = raw.strip()
-            if not sentence:
-                continue
-            lowered = sentence.lower()
-            overlap = sum(1 for k in keywords if k in lowered)
-            if overlap > best_overlap:
-                best, best_overlap = sentence, overlap
-    return (best, best_overlap)
 
 
 class MockEmbeddingAdapter(EmbeddingPort):

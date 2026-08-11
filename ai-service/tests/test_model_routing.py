@@ -11,6 +11,10 @@ so it is pinned here.
 
 from __future__ import annotations
 
+# `_named_entities` is reached through the private name on purpose: it is the
+# only pass still routed to the extraction model, and these tests are about
+# which model a call lands on rather than about the pass itself.
+
 import asyncio
 
 import pytest
@@ -54,19 +58,10 @@ def _adapter(recorder, **overrides) -> OpenAiLlmAdapter:
 
 
 @pytest.mark.asyncio
-async def test_decisions_and_risks_use_the_extraction_model():
-    rec = _Recorder()
-    a = _adapter(rec)
-    await a.extract_decisions(TRANSCRIPT)
-    await a.extract_risks(TRANSCRIPT)
-    assert rec.models == ["cheap-model"] * 2
-
-
-@pytest.mark.asyncio
 async def test_action_items_stay_on_the_strong_model():
     """Naming who took a task on is a judgement the small model declines to
-    make — it returns the tasks with every owner null, and the commitment
-    ledger is built entirely from that name."""
+    make — it returns the tasks with every owner null, and an action item
+    without an owner is barely worth extracting."""
     rec = _Recorder()
     a = _adapter(rec)
     await a.extract_action_items(TRANSCRIPT)
@@ -88,7 +83,7 @@ async def test_pointing_both_settings_at_one_model_puts_everything_back():
     rec = _Recorder()
     settings = Settings(openai_chat_model="only-model", openai_extraction_model="only-model")
     a = OpenAiLlmAdapter(settings, client=rec)
-    await a.extract_decisions(TRANSCRIPT)
+    await a.extract_action_items(TRANSCRIPT)
     await a.summarize(TRANSCRIPT)
     assert set(rec.models) == {"only-model"}
 
@@ -122,7 +117,7 @@ async def test_the_gate_bounds_calls_in_flight():
 
     rec = _Slow()
     a = _adapter(rec, openai_max_concurrent_calls=2)
-    await asyncio.gather(*(a.extract_decisions(TRANSCRIPT) for _ in range(6)))
+    await asyncio.gather(*(a._named_entities(TRANSCRIPT, "en") for _ in range(6)))
 
     assert peak <= 2
 
@@ -134,7 +129,7 @@ async def test_the_two_models_do_not_share_a_budget():
     a = _adapter(rec, openai_max_concurrent_calls=1)
 
     await asyncio.gather(
-        *(a.extract_decisions(TRANSCRIPT) for _ in range(3)),
+        *(a._named_entities(TRANSCRIPT, "en") for _ in range(3)),
         a.extract_action_items(TRANSCRIPT),
     )
     assert rec.models.count("cheap-model") == 3
@@ -146,7 +141,7 @@ async def test_a_zero_setting_still_allows_progress():
     """Misconfiguration must not deadlock the pipeline."""
     rec = _Recorder()
     a = _adapter(rec, openai_max_concurrent_calls=0)
-    await a.extract_risks(TRANSCRIPT)
+    await a._named_entities(TRANSCRIPT, "en")
     assert rec.models == ["cheap-model"]
 
 
@@ -162,7 +157,7 @@ async def test_temperature_is_omitted_unless_configured():
             return await super().create(**kwargs)
 
     a = _adapter(_Capture())
-    await a.extract_decisions(TRANSCRIPT)
+    await a._named_entities(TRANSCRIPT, "en")
     assert "temperature" not in sent
 
 
@@ -176,7 +171,7 @@ async def test_temperature_is_sent_when_explicitly_set():
             return await super().create(**kwargs)
 
     a = _adapter(_Capture(), openai_temperature=0)
-    await a.extract_decisions(TRANSCRIPT)
+    await a._named_entities(TRANSCRIPT, "en")
     assert sent["temperature"] == 0
 
 

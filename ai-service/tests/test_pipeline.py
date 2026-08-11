@@ -17,8 +17,6 @@ def test_process_meeting_matches_schema_and_is_camel_case(client):
         "detailedSummary",
         "keyPoints",
         "actionItems",
-        "decisions",
-        "risks",
         "segments",
     ]:
         assert camel in raw, f"missing camelCase key {camel}"
@@ -31,12 +29,6 @@ def test_process_meeting_matches_schema_and_is_camel_case(client):
     assert "taskTitle" in item and "sourceSentence" in item
     assert "task_title" not in item
 
-    decision = raw["decisions"][0]
-    assert "sourceSentence" in decision and "confidence" in decision
-
-    risk = raw["risks"][0]
-    assert "severity" in risk and "sourceSentence" in risk
-
     seg = raw["segments"][0]
     assert {"start", "end", "speaker", "text"} <= set(seg.keys())
 
@@ -46,9 +38,7 @@ def test_process_meeting_matches_schema_and_is_camel_case(client):
     assert parsed.transcript
     assert parsed.short_summary
     assert len(parsed.action_items) >= 1
-    assert len(parsed.decisions) >= 1
-    assert len(parsed.risks) >= 1
-    # Priorities/confidence/severity are within the allowed literal set.
+    # Priority is within the allowed literal set.
     assert parsed.action_items[0].priority in {"high", "medium", "low"}
 
 

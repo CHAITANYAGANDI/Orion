@@ -51,7 +51,7 @@ export default function IntegrationsPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Integrations</h1>
         <p className="text-sm text-muted-foreground">
-          Connect the apps the agent can act in. Every external action still requires your approval.
+          Connect the apps you work in. Nothing is written to them yet — connecting only stores the link.
         </p>
       </div>
 

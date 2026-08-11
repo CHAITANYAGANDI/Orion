@@ -11,9 +11,7 @@
 
 import type {
   ActionItemResponse,
-  DecisionResponse,
   MeetingResponse,
-  RiskResponse,
   SummaryResponse,
   SummarySection,
   TranscriptSegment,
@@ -23,9 +21,7 @@ import { timecode } from "@/lib/format";
 export interface MeetingExport {
   meeting: MeetingResponse;
   summary?: SummaryResponse | null;
-  decisions?: DecisionResponse[];
   actionItems?: ActionItemResponse[];
-  risks?: RiskResponse[];
   segments?: TranscriptSegment[];
   includeTranscript?: boolean;
 }
@@ -61,7 +57,7 @@ function sectionsToMarkdown(sections: SummarySection[]): string[] {
 }
 
 export function toMarkdown(data: MeetingExport): string {
-  const { meeting, summary, decisions, actionItems, risks, segments } = data;
+  const { meeting, summary, actionItems, segments } = data;
   const out: string[] = [];
 
   out.push(`# ${meeting.title}`, "");
@@ -90,14 +86,6 @@ export function toMarkdown(data: MeetingExport): string {
       out.push("");
     }
   }
-  if (decisions?.length) {
-    out.push("## Decisions", "");
-    for (const d of decisions) {
-      out.push(`- **${d.decision}**${d.confidence ? ` _(${d.confidence} confidence)_` : ""}`);
-      if (d.sourceSentence) out.push(`  > ${d.sourceSentence}`);
-    }
-    out.push("");
-  }
   if (actionItems?.length) {
     out.push("## Action items", "");
     for (const a of actionItems) {
@@ -107,14 +95,6 @@ export function toMarkdown(data: MeetingExport): string {
         .filter(Boolean)
         .join(" · ");
       out.push(`- [${done}] ${a.title}${bits ? ` — _${bits}_` : ""}`);
-    }
-    out.push("");
-  }
-  if (risks?.length) {
-    out.push("## Risks", "");
-    for (const r of risks) {
-      out.push(`- **${r.risk}**${r.severity ? ` _(${r.severity})_` : ""}`);
-      if (r.sourceSentence) out.push(`  > ${r.sourceSentence}`);
     }
     out.push("");
   }

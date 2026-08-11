@@ -12,15 +12,10 @@ import org.springframework.transaction.event.TransactionalEventListener;
 /**
  * Mails the recap once a meeting is ready.
  *
- * <p>Separate bean for the same reason as {@link MemoryReconciliationListener}:
- * {@code @Async} means this runs outside the publishing transaction, so the
- * service has to be called through its Spring proxy for {@code @Transactional}
- * to take effect. AFTER_COMMIT also guarantees the brief the draft is built
- * from is actually visible.
- *
- * <p>Shares the {@code memoryExecutor} pool with reconciliation. Both are
- * post-commit background work on the same event, both are bounded, and its
- * CallerRuns policy is the right back-pressure for either.
+ * <p>Its own bean because {@code @Async} means this runs outside the publishing
+ * transaction, so the service has to be called through its Spring proxy for
+ * {@code @Transactional} to take effect. AFTER_COMMIT also guarantees the brief
+ * the draft is built from is actually visible.
  */
 @Component
 public class RecapEmailListener {
@@ -33,7 +28,7 @@ public class RecapEmailListener {
         this.recaps = recaps;
     }
 
-    @Async("memoryExecutor")
+    @Async("postCommitExecutor")
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onMeetingReady(MeetingReadyEvent event) {
         // Async: a different thread, so the request's tenant did not follow.

@@ -6,9 +6,9 @@ surfaced through an optional `progress_hook(topic, StatusEvent)` so the worker
 can fan each stage out to Kafka + the Spring callback, while HTTP callers can
 ignore it.
 
-Latency note: summarization and the three extractions all take the same
-transcript and are independent of one another, so they run concurrently — the
-analysis stage costs the slowest single call rather than the sum of four. The
+Latency note: summarization and action-item extraction take the same transcript
+and are independent of one another, so they run concurrently — the analysis
+stage costs the slower of the two rather than their sum. The
 `transcript_hook` fires the moment the transcript exists, which lets the worker
 start RAG indexing in the background while analysis is still running.
 """
@@ -90,12 +90,6 @@ class Pipeline:
 
     async def extract_action_items(self, transcript: str):
         return await self._llm.extract_action_items(transcript)
-
-    async def extract_decisions(self, transcript: str):
-        return await self._llm.extract_decisions(transcript)
-
-    async def extract_risks(self, transcript: str):
-        return await self._llm.extract_risks(transcript)
 
     async def translate(self, text: str, target_language: str) -> str:
         return await self._llm.translate(text, target_language)
@@ -194,8 +188,8 @@ class Pipeline:
         if transcript_hook is not None:
             await transcript_hook(transcript)
 
-        # Summary + all three extractions take the same text and are independent,
-        # so they run concurrently: cost is the slowest call, not the sum of four.
+        # Summary and extraction take the same text and are independent, so
+        # they run concurrently: cost is the slower call, not the sum.
         # The detected language rides along so the brief comes back in the
         # language the meeting was actually held in.
         await emit(TOPIC_SUMMARY_GENERATED, "SUMMARIZING", 60, "Summarizing and extracting insights...")
@@ -205,7 +199,7 @@ class Pipeline:
         # back to General at the boundary, and everything below this line deals
         # in a template that certainly exists.
         template = resolve(template_slug)
-        summary, action_items, decisions, risks = await asyncio.gather(
+        summary, action_items = await asyncio.gather(
             self._llm.summarize(
                 text,
                 language,
@@ -214,14 +208,11 @@ class Pipeline:
                 template=template,
             ),
             self._llm.extract_action_items(text, language),
-            self._llm.extract_decisions(text, language),
-            self._llm.extract_risks(text, language),
         )
         await emit(TOPIC_ACTION_ITEMS_EXTRACTED, "EXTRACTING", 95, "Insights extracted; finalizing brief...")
 
         logger.info(
-            "Analysis for %s: %d actions, %d decisions, %d risks.",
-            meeting_id, len(action_items), len(decisions), len(risks),
+            "Analysis for %s: %d action item(s).", meeting_id, len(action_items),
         )
         return MeetingBriefResult(
             meeting_id=meeting_id,
@@ -233,7 +224,5 @@ class Pipeline:
             key_points=summary.key_points,
             sections=summary.sections,
             template_slug=summary.template_slug or template.slug,
-            decisions=decisions,
             action_items=action_items,
-            risks=risks,
         )

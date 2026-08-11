@@ -127,11 +127,24 @@ export interface MeetingImportRequest {
   tags?: string[];
 }
 
+/** One spoken word with its own timing, in seconds. */
+export interface SpokenWord {
+  text: string;
+  start: number;
+  end: number;
+}
+
 export interface TranscriptSegment {
   start: number;
   end: number;
   speaker: string;
   text: string;
+  /**
+   * Real per-word timings from the transcription provider. Empty for
+   * transcripts recorded before these were persisted, where the highlight
+   * falls back to estimating from the segment span.
+   */
+  words?: SpokenWord[];
 }
 
 export interface TranscriptResponse {
@@ -205,22 +218,6 @@ export interface ActionItemPatchRequest {
   status?: ActionItemStatus;
 }
 
-export interface DecisionResponse {
-  id?: string;
-  meetingId?: string;
-  decision: string;
-  confidence: Confidence;
-  sourceSentence?: string | null;
-}
-
-export interface RiskResponse {
-  id?: string;
-  meetingId?: string;
-  risk: string;
-  severity: Severity;
-  sourceSentence?: string | null;
-}
-
 export interface ReprocessResponse {
   meetingId: string;
   status: MeetingStatus;
@@ -286,81 +283,6 @@ export interface SpeakerRenameRequest {
   mapping: Record<string, string>;
 }
 
-// ---- Meeting Memory: commitment ledger + decision drift ----
-
-/** Inferred from what later meetings said; the user can always override it. */
-export type CommitmentStatus =
-  | "OPEN"
-  | "FULFILLED"
-  | "SLIPPED"
-  | "CANCELLED"
-  | "DROPPED";
-
-/** RESTATED = raised again with no resolution, so the commitment stays OPEN. */
-export type EvidenceVerdict = "FULFILLED" | "SLIPPED" | "RESTATED" | "CANCELLED";
-
-export type DriftRelation = "CONTRADICTS" | "SUPERSEDES" | "REAFFIRMS";
-
-export interface CommitmentEvidence {
-  id: string;
-  meetingId: string;
-  meetingTitle?: string | null;
-  verdict: EvidenceVerdict;
-  rationale?: string | null;
-  quote?: string | null;
-  start?: number | null;
-  confidence?: string | null;
-  createdAt: string;
-}
-
-export interface Commitment {
-  id: string;
-  text: string;
-  ownerName?: string | null;
-  dueDate?: string | null;
-  status: CommitmentStatus;
-  originMeetingId: string;
-  originMeetingTitle?: string | null;
-  actionItemId?: string | null;
-  /** How many later meetings have been checked against this promise. */
-  checksRun: number;
-  lastCheckedAt?: string | null;
-  createdAt: string;
-  updatedAt: string;
-  evidence: CommitmentEvidence[];
-}
-
-export interface DecisionDrift {
-  id: string;
-  relation: DriftRelation;
-  rationale?: string | null;
-  similarity?: number | null;
-  acknowledged: boolean;
-  createdAt: string;
-  earlierDecisionId: string;
-  earlierText: string;
-  earlierMeetingId: string;
-  earlierMeetingTitle?: string | null;
-  laterDecisionId: string;
-  laterText: string;
-  laterMeetingId: string;
-  laterMeetingTitle?: string | null;
-}
-
-export interface MemoryStats {
-  open: number;
-  fulfilled: number;
-  slipped: number;
-  dropped: number;
-  openContradictions: number;
-}
-
-export interface CommitmentListQuery {
-  page?: number;
-  size?: number;
-  status?: CommitmentStatus;
-}
-
 // ---- Sharing & follow-up ----
 export interface ShareCreateRequest {
   includeTranscript?: boolean;
@@ -386,14 +308,12 @@ export interface SharedMeeting {
   shortSummary?: string | null;
   detailedSummary?: string | null;
   keyPoints: string[];
-  decisions: { decision: string; confidence: string; sourceSentence?: string | null }[];
   actionItems: {
     title: string;
     ownerName?: string | null;
     dueDate?: string | null;
     priority: Priority;
   }[];
-  risks: { risk: string; severity: string; sourceSentence?: string | null }[];
   transcript?: string | null;
 }
 
@@ -462,27 +382,3 @@ export interface IntegrationResponse {
   connectedAt?: string | null;
 }
 
-export type AgentActionStatus =
-  | "DRAFT"
-  | "APPROVED"
-  | "EXECUTED"
-  | "FAILED"
-  | "REJECTED";
-
-export interface AgentAction {
-  id: string;
-  meetingId: string;
-  type: string; // CREATE_NOTION_NOTE | DRAFT_EMAIL | CREATE_TASKS | CREATE_CALENDAR_EVENT ...
-  provider: string;
-  title?: string;
-  subject?: string;
-  body?: string;
-  taskCount?: number;
-  status: AgentActionStatus;
-}
-
-export interface AgentPlanResponse {
-  meetingId: string;
-  requiresApproval: boolean;
-  actions: AgentAction[];
-}

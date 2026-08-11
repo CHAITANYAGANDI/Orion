@@ -234,13 +234,11 @@ public class AiClient {
     public EmailDraft draftEmail(String title,
                                  String shortSummary,
                                  List<String> keyPoints,
-                                 List<String> decisions,
                                  List<String> actionItems) {
         Map<String, Object> payload = new java.util.HashMap<>();
         payload.put("title", title);
         payload.put("shortSummary", shortSummary == null ? "" : shortSummary);
         payload.put("keyPoints", keyPoints);
-        payload.put("decisions", decisions);
         payload.put("actionItems", actionItems);
 
         JsonNode body = client.post()
@@ -250,87 +248,6 @@ public class AiClient {
                 .retrieve()
                 .body(JsonNode.class);
         return new EmailDraft(text(body, "subject"), text(body, "body"));
-    }
-
-    // --- Meeting Memory ----------------------------------------------------- //
-
-    public record CommitmentProbe(String id, String text, String ownerName, String dueDate) {}
-
-    public record DecisionProbe(String id, String text) {}
-
-    public record CommitmentVerdict(String commitmentId, String outcome, String rationale,
-                                    String quote, Double start, String confidence) {}
-
-    public record DecisionLinkResult(String earlierDecisionId, String laterDecisionId,
-                                     String relation, String rationale, double similarity) {}
-
-    public record ReconcileResult(List<CommitmentVerdict> commitmentVerdicts,
-                                  List<DecisionLinkResult> decisionLinks) {
-        public static ReconcileResult empty() {
-            return new ReconcileResult(List.of(), List.of());
-        }
-    }
-
-    /**
-     * Reconcile a freshly-processed meeting against the user's memory: which
-     * open commitments this meeting spoke to, and which of its decisions
-     * interact with earlier ones. Both lists are routinely empty.
-     */
-    public ReconcileResult reconcile(String userId,
-                                     String meetingId,
-                                     List<CommitmentProbe> openCommitments,
-                                     List<DecisionProbe> decisions) {
-        Map<String, Object> payload = new java.util.HashMap<>();
-        payload.put("userId", userId);
-        payload.put("meetingId", meetingId);
-        payload.put("openCommitments", openCommitments.stream()
-                .map(c -> {
-                    Map<String, Object> m = new java.util.HashMap<>();
-                    m.put("id", c.id());
-                    m.put("text", c.text());
-                    m.put("ownerName", c.ownerName());
-                    m.put("dueDate", c.dueDate());
-                    return m;
-                })
-                .toList());
-        payload.put("decisions", decisions.stream()
-                .map(d -> Map.of("id", d.id(), "text", d.text()))
-                .toList());
-
-        JsonNode body = client.post()
-                .uri("/ai/memory/reconcile")
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(payload)
-                .retrieve()
-                .body(JsonNode.class);
-        if (body == null) {
-            return ReconcileResult.empty();
-        }
-
-        List<CommitmentVerdict> verdicts = new java.util.ArrayList<>();
-        if (body.has("commitmentVerdicts")) {
-            for (JsonNode v : body.get("commitmentVerdicts")) {
-                verdicts.add(new CommitmentVerdict(
-                        text(v, "commitmentId"),
-                        text(v, "outcome"),
-                        text(v, "rationale"),
-                        text(v, "quote"),
-                        v.hasNonNull("start") ? v.get("start").asDouble() : null,
-                        text(v, "confidence")));
-            }
-        }
-        List<DecisionLinkResult> links = new java.util.ArrayList<>();
-        if (body.has("decisionLinks")) {
-            for (JsonNode l : body.get("decisionLinks")) {
-                links.add(new DecisionLinkResult(
-                        text(l, "earlierDecisionId"),
-                        text(l, "laterDecisionId"),
-                        text(l, "relation"),
-                        text(l, "rationale"),
-                        l.hasNonNull("similarity") ? l.get("similarity").asDouble() : 0.0));
-            }
-        }
-        return new ReconcileResult(verdicts, links);
     }
 
     private static ChatResult toChatResult(JsonNode body) {

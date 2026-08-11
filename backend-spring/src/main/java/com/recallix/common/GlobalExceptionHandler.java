@@ -11,6 +11,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.stream.Collectors;
 
@@ -39,6 +40,25 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException ex,
                                                             HttpServletRequest request) {
         return build(HttpStatus.FORBIDDEN, "FORBIDDEN", "Access denied", request);
+    }
+
+    /**
+     * A URL that maps to nothing is a 404, not a 500.
+     *
+     * <p>Without this, the catch-all below turns every unknown path into
+     * "an unexpected error occurred", which tells a client the server broke
+     * when in fact it answered correctly — and buries a real 500 among the
+     * noise of typos and stale links. It also logs at ERROR, so a crawler can
+     * fill the log with alarms about nothing.
+     *
+     * <p>Logged at DEBUG because a request for a route that does not exist is
+     * normal traffic, not a fault.
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNotFound(NoResourceFoundException ex,
+                                                        HttpServletRequest request) {
+        log.debug("No handler for {} {}", request.getMethod(), request.getRequestURI());
+        return build(HttpStatus.NOT_FOUND, "NOT_FOUND", "Not found", request);
     }
 
     @ExceptionHandler(Exception.class)

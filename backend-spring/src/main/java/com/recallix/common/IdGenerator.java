@@ -29,9 +29,7 @@ public final class IdGenerator {
     public static String transcript()  { return generate("txr_"); }
     public static String segment()     { return generate("seg_"); }
     public static String summary()     { return generate("sum_"); }
-    public static String decision()    { return generate("dec_"); }
     public static String actionItem()  { return generate("ai_"); }
-    public static String risk()        { return generate("rsk_"); }
     public static String usage()       { return generate("usg_"); }
     public static String subscription(){ return generate("sub_"); }
     public static String audit()       { return generate("aud_"); }

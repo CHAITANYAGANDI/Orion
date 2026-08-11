@@ -9,9 +9,7 @@ import com.recallix.entity.Meeting;
 import com.recallix.entity.MeetingShare;
 import com.recallix.entity.MeetingSummary;
 import com.recallix.repository.MeetingActionItemRepository;
-import com.recallix.repository.MeetingDecisionRepository;
 import com.recallix.repository.MeetingRepository;
-import com.recallix.repository.MeetingRiskRepository;
 import com.recallix.repository.MeetingShareRepository;
 import com.recallix.repository.MeetingSummaryRepository;
 import com.recallix.repository.MeetingTranscriptRepository;
@@ -47,26 +45,20 @@ public class ShareService {
     private final MeetingShareRepository shares;
     private final MeetingRepository meetings;
     private final MeetingSummaryRepository summaries;
-    private final MeetingDecisionRepository decisions;
     private final MeetingActionItemRepository actionItems;
-    private final MeetingRiskRepository risks;
     private final MeetingTranscriptRepository transcripts;
     private final String frontendUrl;
 
     public ShareService(MeetingShareRepository shares,
                         MeetingRepository meetings,
                         MeetingSummaryRepository summaries,
-                        MeetingDecisionRepository decisions,
                         MeetingActionItemRepository actionItems,
-                        MeetingRiskRepository risks,
                         MeetingTranscriptRepository transcripts,
                         @Value("${app.frontend-url:http://localhost:3000}") String frontendUrl) {
         this.shares = shares;
         this.meetings = meetings;
         this.summaries = summaries;
-        this.decisions = decisions;
         this.actionItems = actionItems;
-        this.risks = risks;
         this.transcripts = transcripts;
         this.frontendUrl = stripTrailingSlash(frontendUrl);
     }
@@ -143,11 +135,6 @@ public class ShareService {
         String meetingId = meeting.getId();
         MeetingSummary summary = summaries.findFirstByMeetingIdOrderByCreatedAtDesc(meetingId).orElse(null);
 
-        List<SharedMeetingResponse.SharedDecision> sharedDecisions =
-                decisions.findByMeetingId(meetingId).stream()
-                        .map(d -> new SharedMeetingResponse.SharedDecision(
-                                d.getDecisionText(), d.getConfidence(), d.getSourceSentence()))
-                        .toList();
 
         List<SharedMeetingResponse.SharedActionItem> sharedActions =
                 actionItems.findByMeetingId(meetingId).stream()
@@ -155,11 +142,6 @@ public class ShareService {
                                 a.getTitle(), a.getOwnerName(), a.getDueDate(), a.getPriority()))
                         .toList();
 
-        List<SharedMeetingResponse.SharedRisk> sharedRisks =
-                risks.findByMeetingId(meetingId).stream()
-                        .map(r -> new SharedMeetingResponse.SharedRisk(
-                                r.getRiskText(), r.getSeverity(), r.getSourceSentence()))
-                        .toList();
 
         String transcript = null;
         if (share.isIncludeTranscript()) {
@@ -176,9 +158,7 @@ public class ShareService {
                 summary == null ? null : summary.getShortSummary(),
                 summary == null ? null : summary.getDetailedSummary(),
                 summary == null ? List.of() : summary.getKeyPoints(),
-                sharedDecisions,
                 sharedActions,
-                sharedRisks,
                 transcript);
     }
 

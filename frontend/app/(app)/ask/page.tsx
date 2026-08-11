@@ -34,9 +34,9 @@ import type { Citation } from "@/lib/types";
 
 const SUGGESTIONS = [
   "What did we decide about pricing across all my calls?",
-  "Which commitments have I made that are still open?",
+  "What did I say I would do?",
   "Summarise everything I discussed with the design team.",
-  "What risks have come up more than once?",
+  "What has come up more than once?",
 ];
 
 export default function AskPage() {

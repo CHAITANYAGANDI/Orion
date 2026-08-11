@@ -10,12 +10,8 @@ from abc import ABC, abstractmethod
 
 from app.schemas import (
     ActionItem,
-    CommitmentVerdict,
-    Decision,
-    DecisionRelation,
     DraftEmailRequest,
     DraftEmailResponse,
-    Risk,
     SummaryResponse,
     SummaryTemplate,
     TranscriptResponse,
@@ -72,14 +68,6 @@ class LlmPort(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def extract_decisions(self, transcript: str, language: str = "en") -> list[Decision]:
-        raise NotImplementedError
-
-    @abstractmethod
-    async def extract_risks(self, transcript: str, language: str = "en") -> list[Risk]:
-        raise NotImplementedError
-
-    @abstractmethod
     async def answer(self, question: str, context: list[str]) -> str:
         """Answer a question grounded ONLY in the provided context passages."""
         raise NotImplementedError
@@ -96,27 +84,6 @@ class LlmPort(ABC):
         Grounded strictly in the supplied brief — a follow-up that invents a
         commitment is worse than no follow-up at all, because the user forwards
         it before reading it closely.
-        """
-        raise NotImplementedError
-
-    @abstractmethod
-    async def judge_commitment(
-        self, commitment: str, owner: str | None, passages: list[str]
-    ) -> CommitmentVerdict:
-        """Decide what a later meeting says about an earlier promise.
-
-        `passages` are excerpts from ONE later meeting. Returns NO_EVIDENCE
-        unless the passages actually speak to the commitment — silence is the
-        expected outcome for most meetings and must not be over-read.
-        """
-        raise NotImplementedError
-
-    @abstractmethod
-    async def compare_decisions(self, earlier: str, later: str) -> DecisionRelation:
-        """Adjudicate two semantically-close decisions made at different times.
-
-        Returns UNRELATED when the pair merely shares vocabulary — retrieval
-        finds candidates, this decides whether they actually conflict.
         """
         raise NotImplementedError
 

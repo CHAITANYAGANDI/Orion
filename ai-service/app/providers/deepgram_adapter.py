@@ -22,7 +22,7 @@ import httpx
 
 from app.config import Settings
 from app.providers.ports import TranscriptionPort
-from app.schemas import Segment, TranscriptResponse
+from app.schemas import Segment, TranscriptResponse, Word
 
 logger = logging.getLogger("ai-service.deepgram")
 
@@ -150,6 +150,30 @@ def _language_of(channel: dict[str, Any], payload: dict[str, Any]) -> str:
     return "en"
 
 
+def _words_of(words: Any) -> list[Word]:
+    """Per-word timings, which drive the highlight and click-to-seek.
+
+    Deepgram nests these inside each utterance. Without them the UI has to
+    spread an utterance's span evenly across its text, which runs ahead of the
+    voice wherever the speaker pauses.
+    """
+    if not isinstance(words, list):
+        return []
+    out: list[Word] = []
+    for word in words:
+        if not isinstance(word, dict):
+            continue
+        text = str(word.get("punctuated_word") or word.get("word") or "").strip()
+        if not text:
+            continue
+        out.append(Word(
+            text=text,
+            start=_as_float(word.get("start")),
+            end=_as_float(word.get("end")),
+        ))
+    return out
+
+
 def _segments_from_utterances(utterances: Any) -> list[Segment]:
     """Primary path: Deepgram has already grouped words into speaker turns."""
     if not isinstance(utterances, list):
@@ -166,6 +190,7 @@ def _segments_from_utterances(utterances: Any) -> list[Segment]:
             end=_as_float(utterance.get("end")),
             speaker=speaker_label(utterance.get("speaker")),
             text=text,
+            words=_words_of(utterance.get("words")),
         ))
     return out
 
@@ -182,7 +207,7 @@ def _segments_from_words(words: Any) -> list[Segment]:
 
     out: list[Segment] = []
     current_speaker: Any = _MISSING
-    buffer: list[str] = []
+    buffer: list[Word] = []
     start = 0.0
     end = 0.0
 
@@ -197,27 +222,33 @@ def _segments_from_words(words: Any) -> list[Segment]:
         speaker = word.get("speaker")
 
         if speaker != current_speaker and buffer:
-            out.append(Segment(
-                start=start, end=end,
-                speaker=speaker_label(current_speaker),
-                text=" ".join(buffer),
-            ))
+            out.append(_turn(start, end, current_speaker, buffer))
             buffer = []
 
         if not buffer:
             start = _as_float(word.get("start"))
             current_speaker = speaker
 
-        buffer.append(text)
+        buffer.append(Word(
+            text=text,
+            start=_as_float(word.get("start")),
+            end=_as_float(word.get("end")),
+        ))
         end = _as_float(word.get("end"))
 
     if buffer:
-        out.append(Segment(
-            start=start, end=end,
-            speaker=speaker_label(current_speaker),
-            text=" ".join(buffer),
-        ))
+        out.append(_turn(start, end, current_speaker, buffer))
     return out
+
+
+def _turn(start: float, end: float, speaker: Any, words: list[Word]) -> Segment:
+    return Segment(
+        start=start,
+        end=end,
+        speaker=speaker_label(speaker),
+        text=" ".join(w.text for w in words),
+        words=list(words),
+    )
 
 
 class _Missing:

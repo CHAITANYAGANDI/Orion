@@ -15,11 +15,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 AiProvider = Literal["mock", "openai"]
 
 # Transcription is chosen separately from the LLM. Whisper cannot diarize, so
-# the useful real-world combination is Deepgram for speech and OpenAI for
-# analysis — and during development, Deepgram for speech with the mock LLM,
-# which costs nothing and still exercises the real audio path.
+# the useful real-world combination is a diarizing vendor for speech and OpenAI
+# for analysis — and during development, that vendor for speech with the mock
+# LLM, which costs nothing and still exercises the real audio path.
 # "auto" follows `ai_provider`, which is what every existing deployment expects.
-TranscriptionProvider = Literal["auto", "mock", "openai", "deepgram"]
+TranscriptionProvider = Literal["auto", "mock", "openai", "deepgram", "assemblyai"]
 
 
 class Settings(BaseSettings):
@@ -64,6 +64,27 @@ class Settings(BaseSettings):
     deepgram_timeout_seconds: float = 300.0
     deepgram_max_retries: int = 2
 
+    # --- AssemblyAI (speech-to-text with speaker diarization) ---
+    # Preferred over Deepgram for meetings: better speaker-attributed accuracy,
+    # and the whole recording is diarized in one pass, so speaker identity holds
+    # across a long meeting instead of restarting per chunk.
+    assemblyai_api_key: str | None = None
+    assemblyai_model: str = "universal-3-5-pro"
+    # `speech_models` is a priority list. If the detected language is not
+    # supported by the first model, AssemblyAI routes to this one rather than
+    # failing the job; blank disables the fallback.
+    assemblyai_fallback_model: str = "universal-2"
+    # Blank means auto-detect, which is what a multilingual user wants. Set an
+    # ISO code (e.g. "es") when every meeting is in one language — detection is
+    # good but not free of mistakes, and a wrong guess corrupts the transcript.
+    assemblyai_language: str = ""
+    # The API is asynchronous, so this bounds the whole upload/submit/poll
+    # cycle rather than one request. Generous: an hour of audio queued behind
+    # other jobs should wait, not fail.
+    assemblyai_timeout_seconds: float = 900.0
+    assemblyai_poll_interval_seconds: float = 3.0
+    assemblyai_max_retries: int = 2
+
     # --- OpenAI ---
     openai_api_key: str | None = None
     openai_transcribe_model: str = "whisper-1"
@@ -71,7 +92,7 @@ class Settings(BaseSettings):
     # judgement, and the ones a user reads. `gpt-5.6-sol` is the stronger
     # sibling if the notes still read thin; it costs about 2.5x more.
     openai_chat_model: str = "gpt-5.6-terra"
-    # Entity listing, decisions and risks: structured JSON against an explicit
+    # Entity listing: structured JSON against an explicit
     # schema, which the cost-optimized model handles well for roughly a tenth
     # of the price. Point this at `openai_chat_model` to put everything back on
     # one model.
@@ -113,14 +134,9 @@ class Settings(BaseSettings):
     # multiple of the requested limit to avoid under-filling the result.
     rag_search_overfetch: int = 8
 
-    # --- Meeting Memory (commitment ledger + decision drift) ---
+    # --- Meeting Memory (commitment ledger) ---
     # Passages of the new meeting shown to the LLM when judging one commitment.
     memory_evidence_k: int = 4
-    # Prior decisions retrieved as drift candidates per new decision.
-    memory_drift_candidates: int = 3
-    # Cosine similarity floor before a decision pair is worth an LLM comparison.
-    # Below this the pair is almost always unrelated and not worth the tokens.
-    memory_drift_min_similarity: float = 0.72
     pg_host: str | None = None
     pg_port: int = 5432
     pg_database: str = "recallix"

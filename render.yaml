@@ -192,11 +192,13 @@ services:
       - key: OPENAI_EMBED_MODEL
         value: text-embedding-3-small
       - key: TRANSCRIPTION_PROVIDER
-        value: deepgram
-      - key: DEEPGRAM_API_KEY
+        value: assemblyai
+      - key: ASSEMBLYAI_API_KEY
         sync: false
-      - key: DEEPGRAM_MODEL
-        value: nova-3
+      - key: ASSEMBLYAI_MODEL
+        value: universal-3-5-pro
+      - key: ASSEMBLYAI_FALLBACK_MODEL
+        value: universal-2
 
       # --- Storage ----------------------------------------------------------
       - key: S3_ENDPOINT

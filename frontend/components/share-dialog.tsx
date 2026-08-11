@@ -163,7 +163,7 @@ export function ShareDialog({ meetingId }: { meetingId: string }) {
                 <span>
                   Include the full transcript
                   <span className="block text-xs text-muted-foreground">
-                    Otherwise only the summary, decisions, action items and risks
+                    Otherwise only the summary and action items
                     are shared.
                   </span>
                 </span>

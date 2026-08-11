@@ -7,11 +7,9 @@ import com.recallix.domain.MeetingStatus;
 import com.recallix.domain.SourceType;
 import com.recallix.dto.MeetingCreateRequest;
 import com.recallix.dto.MeetingImportRequest;
-import com.recallix.dto.DecisionResponse;
 import com.recallix.dto.MeetingResponse;
 import com.recallix.dto.PageResponse;
 import com.recallix.dto.ReprocessResponse;
-import com.recallix.dto.RiskResponse;
 import com.recallix.dto.SegmentDto;
 import com.recallix.dto.SummaryResponse;
 import com.recallix.dto.TranscriptResponse;
@@ -19,9 +17,7 @@ import com.recallix.dto.UploadUrlRequest;
 import com.recallix.dto.UploadUrlResponse;
 import com.recallix.entity.Meeting;
 import com.recallix.repository.MeetingActionItemRepository;
-import com.recallix.repository.MeetingDecisionRepository;
 import com.recallix.repository.MeetingRepository;
-import com.recallix.repository.MeetingRiskRepository;
 import com.recallix.repository.MeetingSummaryRepository;
 import com.recallix.repository.MeetingTranscriptRepository;
 import com.recallix.repository.TranscriptSegmentRepository;
@@ -64,9 +60,7 @@ public class MeetingService {
     private final MeetingTranscriptRepository transcripts;
     private final TranscriptSegmentRepository segments;
     private final MeetingSummaryRepository summaries;
-    private final MeetingDecisionRepository decisions;
     private final MeetingActionItemRepository actionItems;
-    private final MeetingRiskRepository risks;
     private final StorageService storage;
     private final UsageLimitService usage;
     private final OutboxService outbox;
@@ -78,9 +72,7 @@ public class MeetingService {
                           MeetingTranscriptRepository transcripts,
                           TranscriptSegmentRepository segments,
                           MeetingSummaryRepository summaries,
-                          MeetingDecisionRepository decisions,
                           MeetingActionItemRepository actionItems,
-                          MeetingRiskRepository risks,
                           StorageService storage,
                           UsageLimitService usage,
                           OutboxService outbox,
@@ -91,9 +83,7 @@ public class MeetingService {
         this.transcripts = transcripts;
         this.segments = segments;
         this.summaries = summaries;
-        this.decisions = decisions;
         this.actionItems = actionItems;
-        this.risks = risks;
         this.storage = storage;
         this.usage = usage;
         this.outbox = outbox;
@@ -273,9 +263,9 @@ public class MeetingService {
      * would consume the user's quota a second time for a meeting they have
      * already paid for.
      *
-     * <p>The extractions are left alone for the same reason: action items,
-     * decisions and risks are facts about the meeting, not a presentation
-     * choice, so a template switch has no business changing them.
+     * <p>The action items are left alone for the same reason: they are facts
+     * about the meeting, not a presentation choice, so a template switch has
+     * no business changing them.
      */
     @Transactional
     public SummaryResponse resummarize(String userId, String meetingId, String templateSlug) {
@@ -324,18 +314,6 @@ public class MeetingService {
                 summary.getSections(), summary.getTemplateSlug());
     }
 
-    @Transactional(readOnly = true)
-    public List<DecisionResponse> getDecisions(String userId, String meetingId) {
-        require(userId, meetingId);
-        return decisions.findByMeetingId(meetingId).stream().map(DecisionResponse::from).toList();
-    }
-
-    @Transactional(readOnly = true)
-    public List<RiskResponse> getRisks(String userId, String meetingId) {
-        require(userId, meetingId);
-        return risks.findByMeetingId(meetingId).stream().map(RiskResponse::from).toList();
-    }
-
     /** Rename transcript speaker labels (e.g. {"S1":"Alice"}); returns updated segments. */
     @Transactional
     public TranscriptResponse renameSpeakers(String userId, String meetingId, Map<String, String> mapping) {
@@ -374,9 +352,7 @@ public class MeetingService {
         transcripts.deleteByMeetingId(meetingId);
         segments.deleteByMeetingId(meetingId);
         summaries.deleteByMeetingId(meetingId);
-        decisions.deleteByMeetingId(meetingId);
         actionItems.deleteByMeetingId(meetingId);
-        risks.deleteByMeetingId(meetingId);
         storage.delete(meeting.getObjectKey());
         meetings.delete(meeting);
         audit.record(userId, "MEETING_DELETED", "meeting", meetingId);

@@ -10,9 +10,7 @@ import com.recallix.entity.MeetingShare;
 import com.recallix.entity.MeetingSummary;
 import com.recallix.entity.MeetingTranscript;
 import com.recallix.repository.MeetingActionItemRepository;
-import com.recallix.repository.MeetingDecisionRepository;
 import com.recallix.repository.MeetingRepository;
-import com.recallix.repository.MeetingRiskRepository;
 import com.recallix.repository.MeetingShareRepository;
 import com.recallix.repository.MeetingSummaryRepository;
 import com.recallix.repository.MeetingTranscriptRepository;
@@ -34,7 +32,6 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
@@ -56,25 +53,21 @@ class ShareServiceTest {
     @Mock private MeetingShareRepository shares;
     @Mock private MeetingRepository meetings;
     @Mock private MeetingSummaryRepository summaries;
-    @Mock private MeetingDecisionRepository decisions;
     @Mock private MeetingActionItemRepository actionItems;
-    @Mock private MeetingRiskRepository risks;
     @Mock private MeetingTranscriptRepository transcripts;
 
     private ShareService service;
 
     @BeforeEach
     void setUp() {
-        service = new ShareService(shares, meetings, summaries, decisions,
-                actionItems, risks, transcripts, BASE);
+        service = new ShareService(shares, meetings, summaries,
+                actionItems, transcripts, BASE);
         when(meetings.findByIdAndUserId(MEETING, USER)).thenReturn(Optional.of(meeting()));
         when(meetings.findById(MEETING)).thenReturn(Optional.of(meeting()));
         when(shares.findByMeetingIdAndRevokedFalse(anyString())).thenReturn(Optional.empty());
         when(summaries.findFirstByMeetingIdOrderByCreatedAtDesc(anyString()))
                 .thenReturn(Optional.of(summary()));
-        when(decisions.findByMeetingId(anyString())).thenReturn(List.of());
         when(actionItems.findByMeetingId(anyString())).thenReturn(List.of());
-        when(risks.findByMeetingId(anyString())).thenReturn(List.of());
         when(transcripts.findFirstByMeetingIdOrderByCreatedAtDesc(anyString()))
                 .thenReturn(Optional.of(transcript()));
     }

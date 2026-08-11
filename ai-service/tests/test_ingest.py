@@ -169,7 +169,6 @@ async def test_document_pipeline_still_extracts_everything():
     result = await pipeline.process_document("mtg_doc", SCRIPTS[0].transcript)
 
     assert result.action_items, "documents should still yield action items"
-    assert result.decisions, "documents should still yield decisions"
 
 
 @pytest.mark.asyncio

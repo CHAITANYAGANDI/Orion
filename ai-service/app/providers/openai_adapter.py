@@ -22,13 +22,9 @@ from app.config import Settings
 from app.providers.ports import EmbeddingPort, LlmPort, TranscriptionPort
 from app.schemas import (
     ActionItem,
-    CommitmentVerdict,
-    Decision,
-    DecisionRelation,
     DraftEmailRequest,
     DraftEmailResponse,
     OutlineGroup,
-    Risk,
     Segment,
     SummaryResponse,
     SummarySection,
@@ -526,7 +522,7 @@ class OpenAiLlmAdapter(LlmPort):
         self, transcript: str, language: str = "en"
     ) -> list[ActionItem]:
         async def _op() -> list[ActionItem]:
-            # Defined for the same reason decisions and risks are: undefined,
+            # Defined because, left undefined,
             # "action item" reads as a formally minuted task, and a meeting
             # where people simply said what they would do yields nothing.
             user = (
@@ -570,79 +566,6 @@ class OpenAiLlmAdapter(LlmPort):
             label="extract_action_items",
         )
 
-    async def extract_decisions(self, transcript: str, language: str = "en") -> list[Decision]:
-        async def _op() -> list[Decision]:
-            # Without a definition the model reads the strict "do not infer"
-            # system prompt as demanding a formally announced decision, and
-            # returns nothing for a meeting that settled a dozen things. Real
-            # groups decide by assent — "yeah, let's go with that" — so the bar
-            # has to be described, not left to the model to guess.
-            user = (
-                "Extract decisions as JSON: "
-                '{"decisions":[{"decision","confidence"(high|medium|low),"sourceSentence"}]}.'
-                "\n\nA decision is any point where the group settled on a "
-                "course of action: chose between options, agreed to an "
-                "approach, confirmed something previously agreed, or ruled "
-                "something out. It counts whether or not it was announced "
-                "formally — 'let's go with X', 'we'll do X for now', 'agreed', "
-                "or a proposal that drew assent and no objection are all "
-                "decisions. Settling on specific wording is a decision, and the "
-                "chosen wording must be quoted exactly.\n"
-                "Write each `decision` as a standalone statement of what was "
-                "chosen, understandable without the transcript — not a "
-                "description of the discussion. Use `confidence` high for "
-                "explicit agreement, medium for clear assent, low where it "
-                "stayed tentative. Exclude questions still open at the end."
-                "\n\nTranscript:\n" + transcript
-            )
-            data = await self._chat_json(
-                _EXTRACTION_SYSTEM + _language_instruction(language),
-                user,
-                model=self._settings.openai_extraction_model,
-            )
-            return [Decision.model_validate(x) for x in data.get("decisions", [])]
-
-        return await _with_retries(
-            _op,
-            attempts=self._settings.openai_max_retries + 1,
-            fallback=[],
-            label="extract_decisions",
-        )
-
-    async def extract_risks(self, transcript: str, language: str = "en") -> list[Risk]:
-        async def _op() -> list[Risk]:
-            # Same failure as decisions: undefined, "risk" reads as a formally
-            # logged risk register entry, and a meeting full of stated worries
-            # yields an empty list.
-            user = (
-                "Extract risks as JSON: "
-                '{"risks":[{"risk","severity"(high|medium|low),"sourceSentence"}]}.'
-                "\n\nA risk is anything raised as a threat to the outcome: a "
-                "blocker, an unmet dependency, a deadline in doubt, an "
-                "unsigned or unresolved agreement, a resourcing or ownership "
-                "gap, a technical concern, or a stated worry about quality, "
-                "accuracy or how something will be received. It counts even if "
-                "the group went on to resolve or accept it, and even when "
-                "raised in passing rather than flagged as a risk.\n"
-                "Write each `risk` as a standalone statement of what could go "
-                "wrong and why. Use `severity` to reflect the stated stakes, "
-                "not the speaker's tone."
-                "\n\nTranscript:\n" + transcript
-            )
-            data = await self._chat_json(
-                _EXTRACTION_SYSTEM + _language_instruction(language),
-                user,
-                model=self._settings.openai_extraction_model,
-            )
-            return [Risk.model_validate(x) for x in data.get("risks", [])]
-
-        return await _with_retries(
-            _op,
-            attempts=self._settings.openai_max_retries + 1,
-            fallback=[],
-            label="extract_risks",
-        )
-
     async def answer(self, question: str, context: list[str]) -> str:
         async def _op() -> str:
             passages = "\n\n".join(f"[{i + 1}] {c}" for i, c in enumerate(context))
@@ -682,19 +605,17 @@ class OpenAiLlmAdapter(LlmPort):
         async def _op() -> DraftEmailResponse:
             system = (
                 "You write the follow-up email a participant sends after a meeting. "
-                "Use ONLY the supplied brief: never invent a decision, an owner, a "
-                "date or a commitment that is not listed — the sender will forward "
+                "Use ONLY the supplied brief: never invent an owner, a date or a "
+                "task that is not listed — the sender will forward "
                 "this without checking it line by line. Write in plain professional "
                 "prose, no marketing tone, no filler. Keep it under 200 words. Lead "
-                "with what was decided, then who is doing what. Omit any section the "
+                "with what came out of the meeting, then who is doing what. Omit any section the "
                 "brief has nothing for rather than padding it. Respond with a single "
                 'JSON object: {"subject","body"}.'
             )
             parts = [f"Meeting: {brief.title}"]
             if brief.short_summary:
                 parts.append(f"Summary: {brief.short_summary}")
-            if brief.decisions:
-                parts.append("Decisions:\n" + "\n".join(f"- {d}" for d in brief.decisions))
             if brief.action_items:
                 parts.append("Action items:\n" + "\n".join(f"- {a}" for a in brief.action_items))
             if brief.key_points:
@@ -715,64 +636,7 @@ class OpenAiLlmAdapter(LlmPort):
             label="draft_followup_email",
         )
 
-    async def judge_commitment(
-        self, commitment: str, owner: str | None, passages: list[str]
-    ) -> CommitmentVerdict:
-        async def _op() -> CommitmentVerdict:
-            excerpts = "\n\n".join(f"[{i + 1}] {p}" for i, p in enumerate(passages))
-            system = (
-                "You audit whether a promise made in an earlier meeting was kept, based "
-                "ONLY on excerpts from a LATER meeting. Choose exactly one outcome:\n"
-                "  FULFILLED  — the excerpts state the work is done.\n"
-                "  SLIPPED    — the excerpts state it is late, delayed, or rescheduled.\n"
-                "  CANCELLED  — the excerpts state it is no longer being done.\n"
-                "  RESTATED   — it is discussed again but with no resolution.\n"
-                "  NO_EVIDENCE— the excerpts do not speak to this commitment at all.\n"
-                "NO_EVIDENCE is the correct and common answer. Never infer progress from "
-                "silence or from topic similarity alone. Quote verbatim in `quote`; use an "
-                "empty string when the outcome is NO_EVIDENCE. Respond with a single JSON "
-                'object: {"outcome","rationale","quote","confidence"(high|medium|low)}.'
-            )
-            user = (
-                f"Commitment: {commitment}\n"
-                f"Owner: {owner or 'unknown'}\n\n"
-                f"Excerpts from the later meeting:\n{excerpts}"
-            )
-            data = await self._chat_json(system, user)
-            return CommitmentVerdict.model_validate(data)
 
-        return await _with_retries(
-            _op,
-            attempts=self._settings.openai_max_retries + 1,
-            # Degrade to "we learned nothing" rather than a false verdict.
-            fallback=CommitmentVerdict(outcome="NO_EVIDENCE"),
-            label="judge_commitment",
-        )
-
-    async def compare_decisions(self, earlier: str, later: str) -> DecisionRelation:
-        async def _op() -> DecisionRelation:
-            system = (
-                "You compare two decisions recorded from the same team at different times. "
-                "Choose exactly one relation:\n"
-                "  CONTRADICTS — they cannot both hold; the later reverses the earlier.\n"
-                "  SUPERSEDES  — same subject, the later replaces the earlier without "
-                "directly contradicting it.\n"
-                "  REAFFIRMS   — the later restates or confirms the earlier.\n"
-                "  UNRELATED   — they merely share vocabulary or subject matter.\n"
-                "UNRELATED is the correct answer whenever the decisions do not actually "
-                "interact. Be strict: a false contradiction is worse than a missed one. "
-                'Respond with a single JSON object: {"relation","rationale"}.'
-            )
-            user = f"Earlier decision: {earlier}\n\nLater decision: {later}"
-            data = await self._chat_json(system, user)
-            return DecisionRelation.model_validate(data)
-
-        return await _with_retries(
-            _op,
-            attempts=self._settings.openai_max_retries + 1,
-            fallback=DecisionRelation(relation="UNRELATED"),
-            label="compare_decisions",
-        )
 
 
 class OpenAiEmbeddingAdapter(EmbeddingPort):

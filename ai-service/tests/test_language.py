@@ -82,7 +82,7 @@ def test_case_is_normalised():
 
 @pytest.mark.asyncio
 async def test_pipeline_passes_the_detected_language_to_every_llm_call():
-    """The plumbing: a detected language must reach all four analysis calls."""
+    """The plumbing: a detected language must reach both analysis calls."""
     from app.pipeline import Pipeline
     from app.providers.mock_adapter import MockLlmAdapter, MockTranscriptionAdapter
     from app.schemas import TranscriptResponse
@@ -98,14 +98,6 @@ async def test_pipeline_passes_the_detected_language_to_every_llm_call():
             seen.append(("actions", language))
             return await super().extract_action_items(transcript, language)
 
-        async def extract_decisions(self, transcript, language="en"):
-            seen.append(("decisions", language))
-            return await super().extract_decisions(transcript, language)
-
-        async def extract_risks(self, transcript, language="en"):
-            seen.append(("risks", language))
-            return await super().extract_risks(transcript, language)
-
     class SpanishTranscriber(MockTranscriptionAdapter):
         async def transcribe(self, audio, filename):
             return TranscriptResponse(
@@ -115,7 +107,7 @@ async def test_pipeline_passes_the_detected_language_to_every_llm_call():
     pipeline = Pipeline(SpanishTranscriber(), RecordingLlm())
     await pipeline.process("mtg_es", b"", "reunion.mp3")
 
-    assert len(seen) == 4, "all four analysis calls must receive the language"
+    assert len(seen) == 2, "both analysis calls must receive the language"
     assert {language for _, language in seen} == {"es"}
 
 

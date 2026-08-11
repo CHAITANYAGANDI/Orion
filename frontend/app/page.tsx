@@ -16,7 +16,7 @@ import { Badge } from "@/components/ui/badge";
 const FEATURES = [
   { icon: FileText, title: "Accurate transcripts", body: "Upload audio or video and get a clean, timestamped transcript in seconds." },
   { icon: ListChecks, title: "Action items & owners", body: "Every task, owner, due date and priority extracted with the source sentence." },
-  { icon: Zap, title: "Decisions & risks", body: "See what was decided, by whom, and the blockers that need attention." },
+  { icon: Zap, title: "Summary templates", body: "Notes shaped to the meeting — a 1:1, an interview and a standup each read differently." },
   { icon: Bot, title: "Agent follow-ups", body: "With approval, draft emails, create tasks, schedule meetings and Notion notes." },
   { icon: ShieldCheck, title: "Private by design", body: "Scoped access per user, presigned uploads, audit logs and data deletion." },
   { icon: Mic, title: "Live progress", body: "Watch transcription → summary → extraction stream in real time over WebSockets." },
@@ -24,7 +24,7 @@ const FEATURES = [
 
 const STEPS = [
   { n: "1", title: "Upload audio", body: "Drag in a recording. It goes straight to private storage via a presigned URL." },
-  { n: "2", title: "AI processes it", body: "Transcribe, summarize, and extract decisions, action items and risks — asynchronously." },
+  { n: "2", title: "AI processes it", body: "Transcribe, summarize, and extract action items — asynchronously." },
   { n: "3", title: "Track & export", body: "Turn items into tasks, search past meetings, and export a clean brief." },
 ];
 
@@ -59,7 +59,7 @@ export default function LandingPage() {
         <div className="relative mx-auto max-w-6xl px-4 py-24 text-center">
           <Badge className="mb-4">AI meeting notes & action items in seconds</Badge>
           <h1 className="mx-auto max-w-3xl text-balance text-4xl font-bold tracking-tight sm:text-6xl">
-            Turn meeting audio into decisions, tasks, and clean summaries
+            Turn meeting audio into tasks and clean summaries
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-balance text-lg text-muted-foreground">
             Recallix AI transcribes your meetings, summarizes the discussion, and extracts every

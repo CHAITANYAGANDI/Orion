@@ -5,7 +5,6 @@ import com.recallix.dto.EmailDraftResponse;
 import com.recallix.entity.Meeting;
 import com.recallix.entity.MeetingSummary;
 import com.recallix.repository.MeetingActionItemRepository;
-import com.recallix.repository.MeetingDecisionRepository;
 import com.recallix.repository.MeetingRepository;
 import com.recallix.repository.MeetingSummaryRepository;
 import org.springframework.stereotype.Service;
@@ -25,18 +24,15 @@ public class FollowUpService {
 
     private final MeetingRepository meetings;
     private final MeetingSummaryRepository summaries;
-    private final MeetingDecisionRepository decisions;
     private final MeetingActionItemRepository actionItems;
     private final AiClient ai;
 
     public FollowUpService(MeetingRepository meetings,
                            MeetingSummaryRepository summaries,
-                           MeetingDecisionRepository decisions,
                            MeetingActionItemRepository actionItems,
                            AiClient ai) {
         this.meetings = meetings;
         this.summaries = summaries;
-        this.decisions = decisions;
         this.actionItems = actionItems;
         this.ai = ai;
     }
@@ -50,10 +46,6 @@ public class FollowUpService {
                 .findFirstByMeetingIdOrderByCreatedAtDesc(meetingId)
                 .orElse(null);
 
-        List<String> decisionTexts = decisions.findByMeetingId(meetingId).stream()
-                .map(d -> d.getDecisionText())
-                .filter(t -> t != null && !t.isBlank())
-                .toList();
 
         // Owner and due date matter in a recap — "Priya: ship the consumer (Wed)"
         // is actionable in a way the bare title is not.
@@ -62,7 +54,7 @@ public class FollowUpService {
                 .filter(t -> !t.isBlank())
                 .toList();
 
-        if (summary == null && decisionTexts.isEmpty() && actionTexts.isEmpty()) {
+        if (summary == null && actionTexts.isEmpty()) {
             throw ApiException.badRequest("This meeting has no brief to draft from yet");
         }
 
@@ -70,7 +62,6 @@ public class FollowUpService {
                 meeting.getTitle(),
                 summary == null ? "" : summary.getShortSummary(),
                 summary == null ? List.of() : summary.getKeyPoints(),
-                decisionTexts,
                 actionTexts);
 
         return new EmailDraftResponse(draft.subject(), draft.body());

@@ -14,7 +14,6 @@ from pydantic.alias_generators import to_camel
 
 Priority = Literal["high", "medium", "low"]
 Confidence = Literal["high", "medium", "low"]
-Severity = Literal["high", "medium", "low"]
 
 # Meeting lifecycle status (api-contracts.md §5 MeetingResponse).
 MeetingStatus = Literal[
@@ -54,16 +53,20 @@ class ActionItem(CamelModel):
     source_sentence: str
 
 
-class Decision(CamelModel):
-    decision: str
-    confidence: Confidence = "medium"
-    source_sentence: str
+class Word(CamelModel):
+    """One spoken word with its own timing, in seconds.
 
+    Kept because a word's position inside an utterance cannot be inferred from
+    the utterance's span: speech pauses, and a highlight that assumes an even
+    rate runs ahead of the voice. Diarized utterances used to be short enough
+    that the error stayed small, but a provider that groups a whole speaker
+    turn can hand back thirty seconds in one segment, and over that distance
+    the estimate is visibly wrong.
+    """
 
-class Risk(CamelModel):
-    risk: str
-    severity: Severity = "medium"
-    source_sentence: str
+    text: str
+    start: float
+    end: float
 
 
 class Segment(CamelModel):
@@ -71,6 +74,10 @@ class Segment(CamelModel):
     end: float
     speaker: str
     text: str
+    # Empty when the provider gives no per-word timings; callers fall back to
+    # estimating from the segment span, which is what every transcript recorded
+    # before this field existed still does.
+    words: list[Word] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #
@@ -130,9 +137,7 @@ class MeetingBriefResult(CamelModel):
     # email keep working without knowing which template ran.
     sections: list[SummarySection] = Field(default_factory=list)
     template_slug: str | None = None
-    decisions: list[Decision] = Field(default_factory=list)
     action_items: list[ActionItem] = Field(default_factory=list)
-    risks: list[Risk] = Field(default_factory=list)
     # Only populated for URL imports, where the worker discovers the real title
     # and length from the source. Spring uses them to replace its placeholder.
     title: str | None = None
@@ -187,14 +192,6 @@ class TranscriptInput(CamelModel):
 
 class ActionItemsResponse(CamelModel):
     action_items: list[ActionItem] = Field(default_factory=list)
-
-
-class DecisionsResponse(CamelModel):
-    decisions: list[Decision] = Field(default_factory=list)
-
-
-class RisksResponse(CamelModel):
-    risks: list[Risk] = Field(default_factory=list)
 
 
 class ProcessMeetingRequest(CamelModel):
@@ -274,7 +271,6 @@ class DraftEmailRequest(CamelModel):
     title: str
     short_summary: str = ""
     key_points: list[str] = Field(default_factory=list)
-    decisions: list[str] = Field(default_factory=list)
     action_items: list[str] = Field(default_factory=list)
     # Optional steer: "keep it short", "address it to the client", etc.
     tone: str | None = None
@@ -293,83 +289,6 @@ class TranslateRequest(CamelModel):
 class TranslateResponse(CamelModel):
     text: str
     target_language: str
-
-
-# --------------------------------------------------------------------------- #
-# Meeting Memory — commitment ledger + decision drift
-# --------------------------------------------------------------------------- #
-# What a later meeting says about an earlier promise. NO_EVIDENCE is the common
-# case and is never persisted as evidence.
-CommitmentOutcome = Literal[
-    "FULFILLED", "SLIPPED", "RESTATED", "CANCELLED", "NO_EVIDENCE"
-]
-
-# How two semantically-close decisions relate. UNRELATED means retrieval found
-# shared vocabulary but the decisions do not actually interact.
-DecisionRelationKind = Literal["CONTRADICTS", "SUPERSEDES", "REAFFIRMS", "UNRELATED"]
-
-
-class CommitmentVerdict(CamelModel):
-    """The LLM's reading of one commitment against one later meeting."""
-
-    outcome: CommitmentOutcome = "NO_EVIDENCE"
-    rationale: str = ""
-    # Verbatim line that justifies the outcome; empty when NO_EVIDENCE.
-    quote: str = ""
-    confidence: Confidence = "medium"
-
-
-class DecisionRelation(CamelModel):
-    """The LLM's reading of a candidate decision pair."""
-
-    relation: DecisionRelationKind = "UNRELATED"
-    rationale: str = ""
-
-
-class CommitmentInput(CamelModel):
-    """An open commitment to reconcile against the meeting being processed."""
-
-    id: str
-    text: str
-    owner_name: str | None = None
-    due_date: str | None = None
-
-
-class DecisionInput(CamelModel):
-    """A decision recorded in the meeting being processed."""
-
-    id: str
-    text: str
-
-
-class ReconcileRequest(CamelModel):
-    user_id: str
-    meeting_id: str
-    open_commitments: list[CommitmentInput] = Field(default_factory=list)
-    decisions: list[DecisionInput] = Field(default_factory=list)
-
-
-class CommitmentVerdictResult(CamelModel):
-    commitment_id: str
-    outcome: CommitmentOutcome
-    rationale: str = ""
-    quote: str = ""
-    # Where in the meeting the evidence was found, for deep-linking.
-    start: float | None = None
-    confidence: Confidence = "medium"
-
-
-class DecisionLinkResult(CamelModel):
-    earlier_decision_id: str
-    later_decision_id: str
-    relation: DecisionRelationKind
-    rationale: str = ""
-    similarity: float = 0.0
-
-
-class ReconcileResponse(CamelModel):
-    commitment_verdicts: list[CommitmentVerdictResult] = Field(default_factory=list)
-    decision_links: list[DecisionLinkResult] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #
@@ -400,36 +319,3 @@ class MeetingUploadedEvent(CamelModel):
 class ProcessingFailedEvent(CamelModel):
     meeting_id: str
     error: str
-
-
-# --------------------------------------------------------------------------- #
-# Phase 2 — agent scaffolding (docs/phase2-agent-mcp.md)
-# --------------------------------------------------------------------------- #
-class PlanActionsRequest(CamelModel):
-    meeting_id: str
-    brief: MeetingBriefResult | None = None
-    instruction: str = "Create sensible follow-ups from this meeting."
-
-
-class PlannedAction(CamelModel):
-    type: str
-    provider: str
-    status: str = "DRAFT"
-    title: str | None = None
-    subject: str | None = None
-    task_count: int | None = None
-
-
-class ActionPlan(CamelModel):
-    meeting_id: str
-    requires_approval: bool = True
-    actions: list[PlannedAction] = Field(default_factory=list)
-
-
-class ValidateActionRequest(CamelModel):
-    action: PlannedAction
-
-
-class ValidateActionResponse(CamelModel):
-    valid: bool
-    reason: str

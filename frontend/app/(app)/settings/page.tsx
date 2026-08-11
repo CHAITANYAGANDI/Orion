@@ -161,7 +161,7 @@ function RecapEmailCard() {
         )}
 
         <p className="text-xs text-muted-foreground">
-          The recap is drafted from the meeting&apos;s decisions and action items,
+          The recap is drafted from the meeting&apos;s summary and action items,
           the same as the draft on each meeting page. It is sent once per meeting.
         </p>
       </CardContent>

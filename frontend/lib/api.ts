@@ -4,18 +4,10 @@ import type {
   ActionItemListQuery,
   ActionItemPatchRequest,
   ActionItemResponse,
-  AgentAction,
-  AgentPlanResponse,
   ChatMessage,
   CheckoutRequest,
   CheckoutResponse,
-  Commitment,
-  CommitmentListQuery,
-  CommitmentStatus,
-  DecisionDrift,
-  DecisionResponse,
   EmailDraft,
-  MemoryStats,
   ShareCreateRequest,
   ShareResponse,
   IntegrationProvider,
@@ -31,7 +23,6 @@ import type {
   MeetingResponse,
   Page,
   ReprocessResponse,
-  RiskResponse,
   SemanticSearchHit,
   SemanticSearchRequest,
   SummaryResponse,
@@ -71,15 +62,11 @@ export const api = createApi({
     "Calendars",
     "CalendarEvents",
     "Integrations",
-    "AgentActions",
     "Chat",
     "WorkspaceChat",
     "Transcript",
     "Summary",
     "SummaryTemplates",
-    "Commitments",
-    "Drift",
-    "MemoryStats",
     "Share",
   ],
   endpoints: (builder) => ({
@@ -204,14 +191,6 @@ export const api = createApi({
       providesTags: [{ type: "ActionItems", id: "LIST" }],
     }),
 
-    getDecisions: builder.query<DecisionResponse[], string>({
-      query: (id) => `/meetings/${id}/decisions`,
-    }),
-
-    getRisks: builder.query<RiskResponse[], string>({
-      query: (id) => `/meetings/${id}/risks`,
-    }),
-
     reprocessMeeting: builder.mutation<ReprocessResponse, string>({
       query: (id) => ({ url: `/meetings/${id}/reprocess`, method: "POST" }),
       invalidatesTags: (_r, _e, id) => [
@@ -330,56 +309,6 @@ export const api = createApi({
       ],
     }),
 
-    // ---- Meeting Memory ----
-    getCommitments: builder.query<Page<Commitment>, CommitmentListQuery | void>({
-      query: (q) => {
-        const params = new URLSearchParams();
-        const query = q || {};
-        params.set("page", String(query.page ?? 0));
-        params.set("size", String(query.size ?? 50));
-        if (query.status) params.set("status", query.status);
-        return `/commitments?${params.toString()}`;
-      },
-      providesTags: [{ type: "Commitments", id: "LIST" }],
-    }),
-
-    patchCommitment: builder.mutation<
-      Commitment,
-      { id: string; status: CommitmentStatus }
-    >({
-      query: ({ id, status }) => ({
-        url: `/commitments/${id}`,
-        method: "PATCH",
-        body: { status },
-      }),
-      invalidatesTags: [
-        { type: "Commitments", id: "LIST" },
-        { type: "MemoryStats", id: "ME" },
-      ],
-    }),
-
-    getDecisionDrift: builder.query<DecisionDrift[], boolean | void>({
-      query: (includeAcknowledged) =>
-        `/decisions/drift?includeAcknowledged=${includeAcknowledged ? "true" : "false"}`,
-      providesTags: [{ type: "Drift", id: "LIST" }],
-    }),
-
-    acknowledgeDrift: builder.mutation<void, string>({
-      query: (id) => ({
-        url: `/decisions/drift/${id}/acknowledge`,
-        method: "POST",
-      }),
-      invalidatesTags: [
-        { type: "Drift", id: "LIST" },
-        { type: "MemoryStats", id: "ME" },
-      ],
-    }),
-
-    getMemoryStats: builder.query<MemoryStats, void>({
-      query: () => "/memory/stats",
-      providesTags: [{ type: "MemoryStats", id: "ME" }],
-    }),
-
     // ---- Sharing ----
     getShare: builder.query<ShareResponse | null, string>({
       // 204 (never shared) arrives as an empty body; normalise it to null.
@@ -447,29 +376,6 @@ export const api = createApi({
       invalidatesTags: [{ type: "Integrations", id: "LIST" }],
     }),
 
-    // ---- Phase 2: Agent ----
-    planAgent: builder.mutation<AgentPlanResponse, string>({
-      query: (meetingId) => ({
-        url: `/meetings/${meetingId}/agent/plan`,
-        method: "POST",
-      }),
-      invalidatesTags: [{ type: "AgentActions", id: "LIST" }],
-    }),
-
-    getAgentActions: builder.query<AgentAction[], void>({
-      query: () => "/agent/actions",
-      providesTags: [{ type: "AgentActions", id: "LIST" }],
-    }),
-
-    approveAgentAction: builder.mutation<AgentAction, string>({
-      query: (id) => ({ url: `/agent/actions/${id}/approve`, method: "POST" }),
-      invalidatesTags: [{ type: "AgentActions", id: "LIST" }],
-    }),
-
-    executeAgentAction: builder.mutation<AgentAction, string>({
-      query: (id) => ({ url: `/agent/actions/${id}/execute`, method: "POST" }),
-      invalidatesTags: [{ type: "AgentActions", id: "LIST" }],
-    }),
   }),
 });
 
@@ -490,8 +396,6 @@ export const {
   useGetSummaryTemplatesQuery,
   useResummarizeMutation,
   useGetMeetingActionItemsQuery,
-  useGetDecisionsQuery,
-  useGetRisksQuery,
   useReprocessMeetingMutation,
   useDeleteMeetingMutation,
   useGetChatQuery,
@@ -504,11 +408,6 @@ export const {
   useRenameSpeakersMutation,
   useGetActionItemsQuery,
   usePatchActionItemMutation,
-  useGetCommitmentsQuery,
-  usePatchCommitmentMutation,
-  useGetDecisionDriftQuery,
-  useAcknowledgeDriftMutation,
-  useGetMemoryStatsQuery,
   useGetShareQuery,
   useCreateShareMutation,
   useRevokeShareMutation,
@@ -518,8 +417,4 @@ export const {
   useGetIntegrationsQuery,
   useConnectIntegrationMutation,
   useDisconnectIntegrationMutation,
-  usePlanAgentMutation,
-  useGetAgentActionsQuery,
-  useApproveAgentActionMutation,
-  useExecuteAgentActionMutation,
 } = api;

@@ -9,7 +9,6 @@ import {
   RefreshCw,
   Trash2,
   Download,
-  Bot,
   Loader2,
   AlertTriangle,
   Clock,
@@ -26,8 +25,6 @@ import {
   useGetSummaryQuery,
   useGetTranscriptQuery,
   useGetMeetingActionItemsQuery,
-  useGetDecisionsQuery,
-  useGetRisksQuery,
   useReprocessMeetingMutation,
   useDeleteMeetingMutation,
   useGetChatQuery,
@@ -37,7 +34,7 @@ import {
   useGetSummaryTemplatesQuery,
   useResummarizeMutation,
 } from "@/lib/api";
-import type { SummaryResponse, SummarySection } from "@/lib/types";
+import type { SpokenWord, SummaryResponse, SummarySection } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -130,8 +127,6 @@ export default function MeetingDetailPage() {
   const summary = useGetSummaryQuery(id, { skip: !ready });
   const transcript = useGetTranscriptQuery(id, { skip: !ready });
   const actions = useGetMeetingActionItemsQuery(id, { skip: !ready });
-  const decisions = useGetDecisionsQuery(id, { skip: !ready });
-  const risks = useGetRisksQuery(id, { skip: !ready });
 
   const [reprocess, reprocessState] = useReprocessMeetingMutation();
   const [remove, removeState] = useDeleteMeetingMutation();
@@ -141,9 +136,7 @@ export default function MeetingDetailPage() {
     downloadMarkdown({
       meeting: meeting.data,
       summary: summary.data,
-      decisions: decisions.data,
       actionItems: actions.data,
-      risks: risks.data,
       segments: transcript.data?.segments,
       includeTranscript,
     });
@@ -228,9 +221,6 @@ export default function MeetingDetailPage() {
         <div className="flex items-center gap-2 no-print">
           {ready && (
             <>
-              <Button variant="outline" size="sm" asChild>
-                <Link href="/agent"><Bot className="h-4 w-4" /> Agent</Link>
-              </Button>
               <ShareDialog meetingId={id} />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -293,8 +283,6 @@ export default function MeetingDetailPage() {
             <TabsTrigger value="summary">Summary</TabsTrigger>
             <TabsTrigger value="ask"><Sparkles className="mr-1 h-3.5 w-3.5" /> Ask</TabsTrigger>
             <TabsTrigger value="actions">Action items {actions.data ? `(${actions.data.length})` : ""}</TabsTrigger>
-            <TabsTrigger value="decisions">Decisions {decisions.data ? `(${decisions.data.length})` : ""}</TabsTrigger>
-            <TabsTrigger value="risks">Risks {risks.data ? `(${risks.data.length})` : ""}</TabsTrigger>
             <TabsTrigger value="transcript">Transcript</TabsTrigger>
           </TabsList>
 
@@ -337,51 +325,6 @@ export default function MeetingDetailPage() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="decisions">
-            <Card>
-              <CardContent className="pt-6">
-                {decisions.data && decisions.data.length > 0 ? (
-                  <ul className="space-y-3">
-                    {decisions.data.map((d, i) => (
-                      <li key={d.id ?? i} className="rounded-md border p-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="font-medium">{d.decision}</p>
-                          <Badge variant="outline" className="capitalize">{d.confidence}</Badge>
-                        </div>
-                        {d.sourceSentence && <p className="mt-1 text-xs italic text-muted-foreground">“{d.sourceSentence}”</p>}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <EmptyText>No decisions were captured.</EmptyText>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="risks">
-            <Card>
-              <CardContent className="pt-6">
-                {risks.data && risks.data.length > 0 ? (
-                  <ul className="space-y-3">
-                    {risks.data.map((r, i) => (
-                      <li key={r.id ?? i} className="rounded-md border p-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="font-medium">{r.risk}</p>
-                          <Badge variant={r.severity === "high" ? "destructive" : "warning"} className="capitalize">{r.severity}</Badge>
-                        </div>
-                        {r.sourceSentence && <p className="mt-1 text-xs italic text-muted-foreground">“{r.sourceSentence}”</p>}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <EmptyText>No risks or blockers were flagged.</EmptyText>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Transcript: synced + speakers + talk-time */}
           <TabsContent value="transcript">
             <TranscriptPanel
               meetingId={id}
@@ -389,7 +332,11 @@ export default function MeetingDetailPage() {
               segments={transcript.data?.segments ?? []}
               fallbackText={transcript.data?.transcript}
               currentTime={audio.currentTime}
-              onSeek={(s) => audio.seekTo(s)}
+              // Passed straight through rather than wrapped in a closure:
+              // `seekTo` is a stable useCallback, and a fresh arrow here would
+              // change identity 60 times a second, defeating the memo that
+              // keeps inactive utterances from re-rendering every frame.
+              onSeek={audio.seekTo}
             />
           </TabsContent>
         </Tabs>
@@ -817,25 +764,24 @@ function TranscriptPanel({
                       return (
                         <span
                           key={j}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => onSeek(s.start)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              onSeek(s.start);
-                            }
-                          }}
                           className={cn(
-                            "cursor-pointer rounded px-0.5 transition-colors hover:bg-accent/60",
+                            "rounded px-0.5 transition-colors",
                             active && "bg-primary/10"
                           )}
                         >
-                          {active ? (
-                            <SpokenWords text={s.text} start={s.start} end={s.end} at={currentTime} />
-                          ) : (
-                            s.text
-                          )}{" "}
+                          {/* Every utterance renders its words, not just the
+                              playing one, so any word in the transcript can be
+                              clicked to play from it. Inactive utterances are
+                              handed a constant `at`, which lets the memo skip
+                              them while the active one re-renders per frame. */}
+                          <SpokenWords
+                            text={s.text}
+                            start={s.start}
+                            end={s.end}
+                            words={s.words}
+                            at={active ? currentTime : -1}
+                            onSeek={onSeek}
+                          />
                         </span>
                       );
                     })}
@@ -853,52 +799,83 @@ function TranscriptPanel({
 }
 
 /**
- * The utterance currently being spoken, with the word at `at` highlighted.
+ * The utterance currently being spoken, with the word at `at` highlighted and
+ * every word clickable to play from it.
  *
- * Word times are estimated by spreading the utterance's span across its words
- * in proportion to their length, longer words taking proportionally longer to
- * say. It is an approximation — a pause mid-sentence pushes the highlight
- * ahead of the voice — but the error cannot accumulate, because every
- * utterance boundary resnaps it to a real timestamp, and diarization breaks
- * utterances on exactly those pauses. Exact timing would mean persisting
- * Deepgram's per-word offsets, which are currently discarded.
+ * Uses the provider's real per-word timings when the transcript has them.
+ * Failing that it estimates, spreading the utterance's span across its words
+ * in proportion to their length. The estimate assumes speech has no pauses, so
+ * it runs ahead of the voice — tolerable when diarization broke utterances on
+ * every pause, badly wrong when a provider groups a whole speaker turn and one
+ * segment covers half a minute. Only transcripts recorded before word timings
+ * were persisted take that path now.
  *
- * Only rendered for the active utterance, so this splits one short string per
- * frame rather than the whole transcript.
+ * Memoized, and that is load-bearing rather than an optimisation. Every
+ * utterance renders its words so that any of them can be clicked, which for an
+ * hour-long meeting is thousands of spans. The clock ticks ~60 times a second,
+ * so without the memo the whole transcript would re-render on every frame.
+ * Inactive utterances are passed a constant `at`, so their props never change
+ * and only the one being spoken does any work.
  */
-function SpokenWords({
+const SpokenWords = React.memo(function SpokenWords({
   text,
   start,
   end,
+  words,
   at,
+  onSeek,
 }: {
   text: string;
   start: number;
   end: number;
+  words?: SpokenWord[];
   at: number;
+  onSeek: (t: number) => void;
 }) {
-  const words = React.useMemo(() => {
-    // Each token keeps its trailing whitespace, so joining them reproduces the
-    // original text exactly and the weighting counts the gap between words.
-    const tokens = text.match(/\S+\s*/g) ?? [];
-    const chars = tokens.reduce((n, t) => n + t.length, 0) || 1;
+  const tokens = React.useMemo(() => {
+    if (words && words.length > 0) {
+      // A trailing space per word so the line reads normally; the provider
+      // strips whitespace from each token.
+      return words.map((w) => ({ token: w.text + " ", from: w.start, to: w.end }));
+    }
+
+    // Fallback. Each token keeps its trailing whitespace, so joining them
+    // reproduces the original text exactly and the weighting counts the gap
+    // between words.
+    const raw = text.match(/\S+\s*/g) ?? [];
+    const chars = raw.reduce((n, t) => n + t.length, 0) || 1;
     const span = Math.max(end - start, 0.001);
 
     let acc = 0;
-    return tokens.map((token) => {
+    return raw.map((token) => {
       const from = start + (acc / chars) * span;
       acc += token.length;
       return { token, from, to: start + (acc / chars) * span };
     });
-  }, [text, start, end]);
+  }, [text, start, end, words]);
 
   return (
     <>
-      {words.map((w, i) => (
+      {tokens.map((w, i) => (
         <span
           key={i}
+          role="button"
+          tabIndex={0}
+          // Stops the enclosing utterance handler from also firing and seeking
+          // to the start of the sentence instead of to this word.
+          onClick={(e) => {
+            e.stopPropagation();
+            onSeek(w.from);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              e.stopPropagation();
+              onSeek(w.from);
+            }
+          }}
           className={cn(
-            "rounded transition-colors duration-75",
+            "cursor-pointer rounded transition-colors duration-75 hover:bg-primary/20",
             at >= w.from && at < w.to && "bg-primary/40 text-foreground"
           )}
         >
@@ -907,7 +884,7 @@ function SpokenWords({
       ))}
     </>
   );
-}
+});
 
 type Turn = { speaker: string; start: number; segments: TranscriptSegment[] };
 

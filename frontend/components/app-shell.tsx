@@ -9,14 +9,12 @@ import {
   Search,
   ListChecks,
   Plug,
-  Bot,
   CreditCard,
   Settings as SettingsIcon,
   Menu,
   Mic,
   LogOut,
   Sparkles,
-  Brain,
   CalendarDays,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -40,8 +38,6 @@ const NAV = [
   { href: "/ask", label: "Ask Recallix", icon: Sparkles },
   { href: "/search", label: "Search meetings", icon: Search },
   { href: "/action-items", label: "Action items", icon: ListChecks },
-  { href: "/memory", label: "Meeting memory", icon: Brain },
-  { href: "/agent", label: "Agent actions", icon: Bot },
   { href: "/integrations", label: "Integrations", icon: Plug },
   { href: "/billing", label: "Billing", icon: CreditCard },
   { href: "/settings", label: "Settings", icon: SettingsIcon },

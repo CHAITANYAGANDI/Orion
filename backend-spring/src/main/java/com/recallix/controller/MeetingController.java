@@ -1,14 +1,12 @@
 package com.recallix.controller;
 
 import com.recallix.domain.MeetingStatus;
-import com.recallix.dto.DecisionResponse;
 import com.recallix.dto.MeetingCreateRequest;
 import com.recallix.dto.MeetingImportRequest;
 import com.recallix.dto.MeetingResponse;
 import com.recallix.dto.PageResponse;
 import com.recallix.dto.ReprocessResponse;
 import com.recallix.dto.ResummarizeRequest;
-import com.recallix.dto.RiskResponse;
 import com.recallix.dto.SpeakerRenameRequest;
 import com.recallix.dto.SummaryResponse;
 import com.recallix.dto.TranscriptResponse;
@@ -29,8 +27,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/meetings")
@@ -88,24 +84,13 @@ public class MeetingController {
      * Rewrite the summary under a different template.
      *
      * <p>Separate from reprocess, and much cheaper: the transcript is reused,
-     * so only the summary call runs again. The extractions are untouched —
-     * action items and decisions are facts about the meeting, not a choice of
-     * layout.
+     * so only the summary call runs again. The action items are untouched —
+     * they are facts about the meeting, not a choice of layout.
      */
     @PostMapping("/{id}/summary")
     public SummaryResponse resummarize(@PathVariable String id,
                                        @Valid @RequestBody ResummarizeRequest req) {
         return meetings.resummarize(SecurityUtils.currentUserId(), id, req.template());
-    }
-
-    @GetMapping("/{id}/decisions")
-    public List<DecisionResponse> decisions(@PathVariable String id) {
-        return meetings.getDecisions(SecurityUtils.currentUserId(), id);
-    }
-
-    @GetMapping("/{id}/risks")
-    public List<RiskResponse> risks(@PathVariable String id) {
-        return meetings.getRisks(SecurityUtils.currentUserId(), id);
     }
 
     @PatchMapping("/{id}/speakers")

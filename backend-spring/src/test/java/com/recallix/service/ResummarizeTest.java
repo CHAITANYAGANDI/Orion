@@ -9,9 +9,7 @@ import com.recallix.entity.MeetingSummary;
 import com.recallix.entity.MeetingTranscript;
 import com.recallix.entity.TranscriptSegment;
 import com.recallix.repository.MeetingActionItemRepository;
-import com.recallix.repository.MeetingDecisionRepository;
 import com.recallix.repository.MeetingRepository;
-import com.recallix.repository.MeetingRiskRepository;
 import com.recallix.repository.MeetingSummaryRepository;
 import com.recallix.repository.MeetingTranscriptRepository;
 import com.recallix.repository.TranscriptSegmentRepository;
@@ -44,8 +42,8 @@ import static org.mockito.Mockito.when;
  * <p>The point of this path is what it does <em>not</em> do. Re-transcribing to
  * change the shape of the notes would cost minutes and money for no new
  * information, and re-extracting would let a presentation choice silently
- * rewrite the meeting's action items — so both are absent, and these tests say
- * so out loud.
+ * rewrite the meeting's action items — so both are absent, and these tests
+ * say so out loud.
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -58,9 +56,7 @@ class ResummarizeTest {
     @Mock private MeetingTranscriptRepository transcripts;
     @Mock private TranscriptSegmentRepository segments;
     @Mock private MeetingSummaryRepository summaries;
-    @Mock private MeetingDecisionRepository decisions;
     @Mock private MeetingActionItemRepository actionItems;
-    @Mock private MeetingRiskRepository risks;
     @Mock private StorageService storage;
     @Mock private UsageLimitService usage;
     @Mock private OutboxService outbox;
@@ -73,8 +69,8 @@ class ResummarizeTest {
 
     @BeforeEach
     void setUp() {
-        service = new MeetingService(meetings, transcripts, segments, summaries, decisions,
-                actionItems, risks, storage, usage, outbox, audit, ai, templates);
+        service = new MeetingService(meetings, transcripts, segments, summaries,
+                actionItems, storage, usage, outbox, audit, ai, templates);
 
         meeting = new Meeting();
         meeting.setId(MEETING);
@@ -160,15 +156,13 @@ class ResummarizeTest {
     }
 
     @Test
-    @DisplayName("the extractions are left untouched")
+    @DisplayName("the action items are left untouched")
     void extractionsAreNotRewritten() {
         service.resummarize(USER, MEETING, "sales-bant");
 
-        // Action items, decisions and risks are facts about the meeting. A
-        // change of layout has no business rewriting them.
+        // Action items are facts about the meeting. A change of layout has no
+        // business rewriting them.
         verify(actionItems, never()).deleteByMeetingId(anyString());
-        verify(decisions, never()).deleteByMeetingId(anyString());
-        verify(risks, never()).deleteByMeetingId(anyString());
     }
 
     @Test

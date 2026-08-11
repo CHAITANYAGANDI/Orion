@@ -115,21 +115,6 @@ export default function SharedMeetingPage() {
               </Card>
             )}
 
-            {meeting.decisions?.length > 0 && (
-              <Section title="Decisions" icon={CheckCircle2}>
-                {meeting.decisions.map((d, i) => (
-                  <li key={i} className="space-y-1">
-                    <p className="font-medium">{d.decision}</p>
-                    {d.sourceSentence && (
-                      <p className="border-l-2 border-border pl-2 text-xs italic text-muted-foreground">
-                        “{d.sourceSentence}”
-                      </p>
-                    )}
-                  </li>
-                ))}
-              </Section>
-            )}
-
             {meeting.actionItems?.length > 0 && (
               <Section title="Action items" icon={Clock}>
                 {meeting.actionItems.map((a, i) => (
@@ -139,19 +124,6 @@ export default function SharedMeetingPage() {
                       {a.ownerName ? ` · ${a.ownerName}` : ""}
                       {a.dueDate ? ` · due ${a.dueDate}` : ""}
                     </span>
-                  </li>
-                ))}
-              </Section>
-            )}
-
-            {meeting.risks?.length > 0 && (
-              <Section title="Risks" icon={AlertTriangle}>
-                {meeting.risks.map((r, i) => (
-                  <li key={i}>
-                    <span className="font-medium">{r.risk}</span>
-                    {r.severity && (
-                      <span className="text-muted-foreground"> · {r.severity}</span>
-                    )}
                   </li>
                 ))}
               </Section>

@@ -5,7 +5,6 @@ import com.recallix.common.IdGenerator;
 import com.recallix.domain.Plan;
 import com.recallix.dto.UsageResponse;
 import com.recallix.entity.UsageLimit;
-import com.recallix.entity.UserEntity;
 import com.recallix.repository.UsageLimitRepository;
 import com.recallix.repository.UserRepository;
 import org.springframework.stereotype.Service;

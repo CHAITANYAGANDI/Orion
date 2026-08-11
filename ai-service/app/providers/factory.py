@@ -28,6 +28,15 @@ class AiProviderFactory:
         if choice == "auto":
             choice = settings.ai_provider
 
+        if choice == "assemblyai":
+            from app.providers.assemblyai_adapter import AssemblyAiTranscriptionAdapter
+
+            logger.info(
+                "Using AssemblyAI transcription adapter (%s, diarization on).",
+                settings.assemblyai_model,
+            )
+            return AssemblyAiTranscriptionAdapter(settings)
+
         if choice == "deepgram":
             from app.providers.deepgram_adapter import DeepgramTranscriptionAdapter
 

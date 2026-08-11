@@ -60,7 +60,7 @@ export function FollowUpEmail({ meetingId }: { meetingId: string }) {
         {!ready ? (
           <div className="flex flex-col items-start gap-3">
             <p className="text-sm text-muted-foreground">
-              Draft a recap from this meeting&apos;s decisions and action items —
+              Draft a recap from this meeting&apos;s summary and action items —
               editable before you send it.
             </p>
             <Button onClick={generate} disabled={isLoading} className="gap-2">
