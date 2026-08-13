@@ -119,16 +119,16 @@ class ResummarizeTest {
                 List.of("Budget signed off"),
                 List.of(new SummarySection("budget", "Budget", "bullets", "",
                         List.of("Signed off at 40k"), List.of())),
-                "sales-bant");
+                "sprint-planning");
     }
 
     @Test
     @DisplayName("the stored transcript is reused instead of being regenerated")
     void transcriptIsReused() {
-        service.resummarize(USER, MEETING, "sales-bant");
+        service.resummarize(USER, MEETING, "sprint-planning");
 
         verify(ai).summarize(eq("Speaker 1: We should decide on the budget."),
-                eq("sales-bant"), eq(1800), eq(2));
+                eq("sprint-planning"), eq(1800), eq(2));
         // Nothing is enqueued: a reprocess would re-download and re-transcribe.
         verify(outbox, never()).enqueue(eq(KafkaTopicsConfig.MEETING_UPLOADED), anyString(), any());
     }
@@ -136,7 +136,7 @@ class ResummarizeTest {
     @Test
     @DisplayName("distinct voices are counted, not turns")
     void speakerCountIsDistinct() {
-        service.resummarize(USER, MEETING, "sales-bant");
+        service.resummarize(USER, MEETING, "sprint-planning");
         // Three segments, two speakers.
         verify(ai).summarize(anyString(), anyString(), any(), eq(2));
     }
@@ -144,23 +144,23 @@ class ResummarizeTest {
     @Test
     @DisplayName("the new sections replace the old summary in place")
     void sectionsAreStored() {
-        SummaryResponse response = service.resummarize(USER, MEETING, "sales-bant");
+        SummaryResponse response = service.resummarize(USER, MEETING, "sprint-planning");
 
         ArgumentCaptor<MeetingSummary> saved = ArgumentCaptor.forClass(MeetingSummary.class);
         verify(summaries).save(saved.capture());
         assertThat(saved.getValue().getId()).isEqualTo("sum_1");
-        assertThat(saved.getValue().getTemplateSlug()).isEqualTo("sales-bant");
+        assertThat(saved.getValue().getTemplateSlug()).isEqualTo("sprint-planning");
         assertThat(saved.getValue().getSections()).singleElement()
                 .extracting(SummarySection::title).isEqualTo("Budget");
 
-        assertThat(response.templateSlug()).isEqualTo("sales-bant");
+        assertThat(response.templateSlug()).isEqualTo("sprint-planning");
         assertThat(response.shortSummary()).isEqualTo("The team agreed the budget.");
     }
 
     @Test
     @DisplayName("the action items are left untouched")
     void extractionsAreNotRewritten() {
-        service.resummarize(USER, MEETING, "sales-bant");
+        service.resummarize(USER, MEETING, "sprint-planning");
 
         // Action items are facts about the meeting. A change of layout has no
         // business rewriting them.
@@ -170,14 +170,14 @@ class ResummarizeTest {
     @Test
     @DisplayName("the choice is remembered on the meeting so a reprocess keeps it")
     void choiceIsRemembered() {
-        service.resummarize(USER, MEETING, "sales-bant");
-        assertThat(meeting.getSummaryTemplate()).isEqualTo("sales-bant");
+        service.resummarize(USER, MEETING, "sprint-planning");
+        assertThat(meeting.getSummaryTemplate()).isEqualTo("sprint-planning");
     }
 
     @Test
     @DisplayName("the meeting quota is not charged again")
     void quotaIsNotCharged() {
-        service.resummarize(USER, MEETING, "sales-bant");
+        service.resummarize(USER, MEETING, "sprint-planning");
         // The user already paid for this meeting; re-shaping its notes is not a
         // second meeting.
         verify(usage, never()).incrementMeetingsOrThrow(anyString());
@@ -189,7 +189,7 @@ class ResummarizeTest {
         when(transcripts.findFirstByMeetingIdOrderByCreatedAtDesc(MEETING))
                 .thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.resummarize(USER, MEETING, "sales-bant"))
+        assertThatThrownBy(() -> service.resummarize(USER, MEETING, "sprint-planning"))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("no transcript");
         verify(ai, never()).summarize(anyString(), anyString(), any(), any());
@@ -200,7 +200,7 @@ class ResummarizeTest {
     void otherUsersMeetingIsNotFound() {
         when(meetings.findByIdAndUserId(MEETING, "usr_2")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.resummarize("usr_2", MEETING, "sales-bant"))
+        assertThatThrownBy(() -> service.resummarize("usr_2", MEETING, "sprint-planning"))
                 .isInstanceOf(ApiException.class);
         verify(ai, never()).summarize(anyString(), anyString(), any(), any());
     }
@@ -210,7 +210,7 @@ class ResummarizeTest {
     void undiarizedMeetingSendsNullCount() {
         when(segments.findByMeetingIdOrderByStartTimeAsc(MEETING)).thenReturn(List.of());
 
-        service.resummarize(USER, MEETING, "sales-bant");
+        service.resummarize(USER, MEETING, "sprint-planning");
 
         // Zero would be a claim that nobody spoke; absent says we do not know.
         verify(ai).summarize(anyString(), anyString(), any(), isNull());
@@ -221,7 +221,7 @@ class ResummarizeTest {
     void missingSummaryIsCreated() {
         when(summaries.findFirstByMeetingIdOrderByCreatedAtDesc(MEETING)).thenReturn(Optional.empty());
 
-        service.resummarize(USER, MEETING, "sales-bant");
+        service.resummarize(USER, MEETING, "sprint-planning");
 
         ArgumentCaptor<MeetingSummary> saved = ArgumentCaptor.forClass(MeetingSummary.class);
         verify(summaries).save(saved.capture());

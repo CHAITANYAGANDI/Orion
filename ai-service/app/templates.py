@@ -107,167 +107,290 @@ def _template(slug: str, name: str, *extra: TemplateSection) -> SummaryTemplate:
 
 
 BUILT_IN: list[SummaryTemplate] = [
-    _template("general", "General", _KEY_POINTS),
     _template(
-        "team-meeting",
-        "Team Meeting",
-        _KEY_POINTS,
+        "general",
+        "General Meeting",
         TemplateSection(
-            key="blockers",
-            title="Blockers and dependencies",
+            key="decisions",
+            title="Decisions",
             kind="bullets",
             instruction=(
-                "Anything stated as blocking progress or waiting on someone "
-                "else, with who is waiting and on what. Empty list if none."
+                "Each decision the meeting actually settled, stated as the "
+                "outcome rather than the debate, and attributed where the "
+                "transcript says who decided. A question left open is not a "
+                "decision — leave it out and let Next steps carry it."
+            ),
+        ),
+    ),
+    _template(
+        "daily-standup",
+        "Daily Stand-up",
+        TemplateSection(
+            key="yesterday",
+            title="Yesterday",
+            kind="bullets",
+            instruction=(
+                "What each person reported finishing or moving forward since "
+                "the last stand-up. One bullet per person, named."
+            ),
+        ),
+        TemplateSection(
+            key="today",
+            title="Today",
+            kind="bullets",
+            instruction=(
+                "What each person said they will work on next. One bullet per "
+                "person, named."
+            ),
+        ),
+        TemplateSection(
+            key="blockers",
+            title="Blockers",
+            kind="bullets",
+            instruction=(
+                "Anything stated as blocking someone, with who is blocked and "
+                "on what or whom. Empty list when nobody raised one — an "
+                "invented blocker sends people chasing a problem that does not "
+                "exist."
+            ),
+        ),
+    ),
+    _template(
+        "sprint-planning",
+        "Sprint Planning",
+        TemplateSection(
+            key="stories",
+            title="Stories",
+            kind="bullets",
+            instruction=(
+                "One bullet per story or ticket taken into the sprint, each "
+                "carrying its owner and estimate in the same bullet as the "
+                "story they belong to. Separate lists of stories, owners and "
+                "estimates cannot be lined back up by a reader. Say plainly "
+                "when an owner or estimate was not stated rather than guessing "
+                "one."
+            ),
+        ),
+        TemplateSection(
+            key="risks",
+            title="Risks and unknowns",
+            kind="bullets",
+            instruction=(
+                "What the team named as likely to go wrong or still unknown, "
+                "including dependencies outside the team. Empty list if none "
+                "was raised."
             ),
         ),
     ),
     _template(
         "one-on-one",
-        "1:1",
+        "1:1 Meeting",
         TemplateSection(
             key="topics",
-            title="Topics raised",
+            title="Topics",
             kind="bullets",
-            instruction="What the person brought up, in their framing, one bullet each.",
+            instruction=(
+                "What was brought up, in the framing the person used rather "
+                "than a manager's summary of it."
+            ),
         ),
         TemplateSection(
             key="feedback",
-            title="Feedback exchanged",
+            title="Feedback",
             kind="bullets",
             instruction=(
                 "Feedback given or received, in either direction, attributed. "
-                "Empty list if none was exchanged."
+                "Empty list when none was exchanged."
             ),
         ),
         TemplateSection(
-            key="growth",
-            title="Growth and career",
+            key="commitments",
+            title="Commitments",
             kind="bullets",
             instruction=(
-                "Anything about development, progression, or longer-term "
-                "goals. Empty list if the conversation stayed operational."
+                "What either person committed to, with the owner and timing "
+                "where stated. Only commitments someone actually made — not "
+                "ideas that were merely discussed."
             ),
         ),
     ),
     _template(
-        "candidate-interview",
-        "Candidate Interview",
+        "project-review",
+        "Project Review",
         TemplateSection(
-            key="background",
-            title="Background",
-            kind="bullets",
-            instruction="The candidate's stated experience, roles and relevant history.",
-        ),
-        TemplateSection(
-            key="strengths",
-            title="Strengths demonstrated",
+            key="progress",
+            title="Progress",
             kind="bullets",
             instruction=(
-                "Specific evidence from their answers, each tied to what they "
-                "actually said rather than an impression."
+                "What has moved since the last review, stated as completed "
+                "work rather than as activity."
             ),
         ),
         TemplateSection(
-            key="concerns",
-            title="Concerns and gaps",
+            key="risks",
+            title="Risks",
             kind="bullets",
             instruction=(
-                "Anything raised as a reservation, or a question answered "
-                "thinly. Report only what the transcript supports — never "
-                "infer a judgement nobody voiced."
+                "Threats to the plan that were named, with their likely impact "
+                "where it was discussed. Empty list if none was raised."
             ),
         ),
         TemplateSection(
-            key="candidateQuestions",
-            title="Questions the candidate asked",
+            key="blockers",
+            title="Blockers",
             kind="bullets",
-            instruction="What they wanted to know, which shows what they care about.",
+            instruction=(
+                "What is stopping work right now, and who or what it waits on. "
+                "Distinct from a risk: a blocker is already happening."
+            ),
         ),
     ),
     _template(
-        "sales-discovery",
-        "Sales - Discovery",
+        "interview",
+        "Interview",
         TemplateSection(
-            key="painPoints",
-            title="Pain points",
-            kind="bullets",
-            instruction="Problems the prospect described, in their own words where possible.",
+            key="questionsAndResponses",
+            title="Questions and responses",
+            kind="outline",
+            instruction=(
+                "One heading per question the interviewer asked, worded as it "
+                "was asked, with the candidate's answer as the bullets beneath "
+                "it. Paired this way deliberately: a list of questions and a "
+                "separate list of answers cannot be matched back up by anyone "
+                "reading them later."
+            ),
         ),
         TemplateSection(
-            key="currentStack",
-            title="Current stack and process",
+            key="observations",
+            title="Observations",
             kind="bullets",
-            instruction="Tools, vendors and workflows they said they use today.",
+            instruction=(
+                "What the answers showed, each tied to something the candidate "
+                "actually said. Never infer a judgement nobody voiced, and "
+                "never score the candidate — report the evidence and leave the "
+                "conclusion to the reader."
+            ),
         ),
+    ),
+    _template(
+        "brainstorm",
+        "Brainstorm",
+        TemplateSection(
+            key="ideas",
+            title="Ideas raised",
+            kind="bullets",
+            instruction=(
+                "Every distinct idea put forward, including the ones dismissed. "
+                "A record that keeps only the winners destroys the reason the "
+                "others were set aside, which is the thing people come back for."
+            ),
+        ),
+        TemplateSection(
+            key="themes",
+            title="Themes",
+            kind="bullets",
+            instruction=(
+                "The groupings the ideas fall into, named. Empty list when the "
+                "ideas did not cluster into anything."
+            ),
+        ),
+        TemplateSection(
+            key="selected",
+            title="Selected ideas",
+            kind="bullets",
+            instruction=(
+                "The ideas the group chose to take forward, with the reason "
+                "given for each. Empty list when nothing was selected — say "
+                "that rather than promoting whichever idea got the most airtime."
+            ),
+        ),
+    ),
+    _template(
+        "client-meeting",
+        "Client Meeting",
         TemplateSection(
             key="requirements",
             title="Requirements",
             kind="bullets",
-            instruction="What they said a solution must do, including any stated constraints.",
-        ),
-    ),
-    _template(
-        "sales-bant",
-        "Sales - BANT",
-        TemplateSection(
-            key="budget",
-            title="Budget",
-            kind="bullets",
             instruction=(
-                "What was said about budget, spend or cost. Say plainly that "
-                "budget was not discussed rather than inferring a figure."
+                "What the client said they need, in their own words where the "
+                "phrasing matters, separating firm requirements from "
+                "preferences wherever they said which was which."
             ),
         ),
         TemplateSection(
-            key="authority",
-            title="Authority",
+            key="concerns",
+            title="Concerns",
             kind="bullets",
-            instruction="Who decides, who else must approve, and how they described the process.",
-        ),
-        TemplateSection(
-            key="need",
-            title="Need",
-            kind="bullets",
-            instruction="The problem they are trying to solve and why it matters to them now.",
-        ),
-        TemplateSection(
-            key="timing",
-            title="Timing",
-            kind="bullets",
-            instruction="Dates, deadlines, renewal windows or events driving the timeline.",
-        ),
-    ),
-    _template(
-        "team-standup",
-        "Team Standup",
-        TemplateSection(
-            key="perPerson",
-            title="Per person",
-            kind="outline",
             instruction=(
-                "One heading per participant, bullets under each for what they "
-                "reported: done, in progress, and anything blocking them."
+                "Objections, hesitations and risks the client raised, however "
+                "lightly. A concern mentioned once and moved past is still the "
+                "thing that stalls a deal, so record it."
             ),
         ),
     ),
     _template(
-        "user-research-interview",
-        "User Research Interview",
+        "retrospective",
+        "Retrospective",
         TemplateSection(
-            key="behaviours",
-            title="Observed behaviour",
+            key="wentWell",
+            title="What went well",
             kind="bullets",
             instruction=(
-                "What the participant said they actually do today, as distinct "
-                "from what they say they want."
+                "What the team said worked, attributed where someone credited "
+                "a person or a change."
             ),
         ),
         TemplateSection(
-            key="frustrations",
-            title="Frustrations",
+            key="didntGoWell",
+            title="What didn't go well",
             kind="bullets",
-            instruction="Friction they described, quoting their phrasing where it is vivid.",
+            instruction=(
+                "What the team said did not work. Report the problem as it was "
+                "described, without softening it and without assigning blame "
+                "the team did not assign."
+            ),
+        ),
+        TemplateSection(
+            key="improvements",
+            title="Improvements to try",
+            kind="bullets",
+            instruction=(
+                "Changes the team agreed to try, with an owner where one was "
+                "named. Only agreed changes — a suggestion nobody took up "
+                "belongs under what didn't go well, not here."
+            ),
+        ),
+    ),
+    _template(
+        "weekly-sync",
+        "Weekly Sync",
+        TemplateSection(
+            key="progress",
+            title="Progress",
+            kind="bullets",
+            instruction=(
+                "What moved this week, organised per person or per workstream "
+                "as the meeting itself was organised."
+            ),
+        ),
+        TemplateSection(
+            key="decisions",
+            title="Decisions",
+            kind="bullets",
+            instruction=(
+                "What was settled, stated as the outcome. Empty list when the "
+                "sync decided nothing, which is common and fine."
+            ),
+        ),
+        TemplateSection(
+            key="openItems",
+            title="Open items",
+            kind="bullets",
+            instruction=(
+                "Questions raised and left unresolved, with who needs to "
+                "resolve them. This is the section people come back for."
+            ),
         ),
     ),
 ]

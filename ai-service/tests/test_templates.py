@@ -109,11 +109,11 @@ def _run(slug):
 
 
 def test_the_chosen_template_reaches_the_summarizer():
-    llm, _ = _run("sales-bant")
+    llm, _ = _run("sprint-planning")
     assert llm.template is not None
-    assert llm.template.slug == "sales-bant"
+    assert llm.template.slug == "sprint-planning"
     # Resolved, not passed as a bare slug: the summarizer needs the wording.
-    assert any(s.key == "budget" for s in llm.template.sections)
+    assert any(s.key == "stories" for s in llm.template.sections)
 
 
 def test_an_unknown_slug_still_summarizes():
@@ -149,13 +149,13 @@ def test_an_event_without_a_template_still_validates():
 
 def test_the_event_carries_the_choice():
     event = MeetingUploadedEvent.model_validate(
-        {"meetingId": "mtg_1", "summaryTemplate": "team-standup"}
+        {"meetingId": "mtg_1", "summaryTemplate": "daily-standup"}
     )
-    assert event.summary_template == "team-standup"
+    assert event.summary_template == "daily-standup"
 
 
 def test_summarize_request_accepts_a_slug():
     """Spring sends only the slug, so the instructions never leave this service."""
-    req = SummarizeRequest.model_validate({"transcript": "x", "templateSlug": "sales-discovery"})
-    assert req.template_slug == "sales-discovery"
+    req = SummarizeRequest.model_validate({"transcript": "x", "templateSlug": "client-meeting"})
+    assert req.template_slug == "client-meeting"
     assert req.template is None

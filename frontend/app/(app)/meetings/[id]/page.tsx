@@ -464,6 +464,27 @@ function SummaryPanel({
   // a claim about the exact words spoken, so displaying it beside translated
   // prose would invite reading it as a translated quote.
   const quotes = translated ? [] : summary?.quotes ?? [];
+  /**
+   * The topics covered, taken from the outline's headings.
+   *
+   * Every template ends with an outline whose headings are the topics in the
+   * order they came up, so this is a read of something already generated rather
+   * than a second opinion about it. Empty for summaries written before
+   * templates existed, which have no outline to read.
+   */
+  const topics = React.useMemo(
+    () =>
+      sections
+        // Keyed on `outline`, not on kind: a template may use the outline
+        // *shape* for something that is not the walkthrough — Interview pairs
+        // each question with its answer that way — and those headings are
+        // questions, not topics the meeting covered.
+        .filter((s) => s.key === "outline")
+        .flatMap((s) => s.groups.map((g) => g.heading))
+        .map((h) => h.trim())
+        .filter(Boolean),
+    [sections],
+  );
   const current = summary?.templateSlug ?? "general";
 
   return (
@@ -514,6 +535,31 @@ function SummaryPanel({
 
             {sections.length > 0 ? (
               <div className="space-y-6">
+                {/* What was covered, at a glance.
+                    Derived from the outline's headings rather than generated
+                    separately. Asking the model for a second list of topics
+                    would cost another section and — worse — could disagree with
+                    the outline, leaving two answers to "what was discussed".
+                    The headings already are the topics, in the order they came
+                    up; this just makes them scannable without reading the
+                    walkthrough. */}
+                {topics.length > 0 && (
+                  <div>
+                    <h3 className="mb-2 text-sm font-semibold text-muted-foreground">
+                      Topics discussed
+                    </h3>
+                    <div className="flex flex-wrap gap-1.5">
+                      {topics.map((t, i) => (
+                        <span
+                          key={i}
+                          className="rounded-full border bg-muted/50 px-2.5 py-1 text-xs"
+                        >
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {sections.map((s) => (
                   <SummarySectionView key={s.key} section={s} />
                 ))}
