@@ -16,9 +16,6 @@ import type {
   MeetingImportRequest,
   PreferencesResponse,
   PreferencesUpdateRequest,
-  CalendarSubscriptionResponse,
-  CalendarSubscribeRequest,
-  CalendarEventResponse,
   MeetingListQuery,
   MeetingResponse,
   Page,
@@ -60,8 +57,6 @@ export const api = createApi({
     "ActionItems",
     "Usage",
     "Preferences",
-    "Calendars",
-    "CalendarEvents",
     "Integrations",
     "Chat",
     "WorkspaceChat",
@@ -110,26 +105,6 @@ export const api = createApi({
         { type: "Meetings", id: "LIST" },
         { type: "Usage", id: "ME" },
       ],
-    }),
-
-    getCalendars: builder.query<CalendarSubscriptionResponse[], void>({
-      query: () => "/calendars",
-      providesTags: [{ type: "Calendars", id: "LIST" }],
-    }),
-
-    subscribeCalendar: builder.mutation<CalendarSubscriptionResponse, CalendarSubscribeRequest>({
-      query: (body) => ({ url: "/calendars", method: "POST", body }),
-      invalidatesTags: [{ type: "Calendars", id: "LIST" }, { type: "CalendarEvents", id: "LIST" }],
-    }),
-
-    unsubscribeCalendar: builder.mutation<void, string>({
-      query: (id) => ({ url: `/calendars/${id}`, method: "DELETE" }),
-      invalidatesTags: [{ type: "Calendars", id: "LIST" }, { type: "CalendarEvents", id: "LIST" }],
-    }),
-
-    getCalendarEvents: builder.query<CalendarEventResponse[], number | void>({
-      query: (days) => `/calendars/events?days=${days ?? 7}`,
-      providesTags: [{ type: "CalendarEvents", id: "LIST" }],
     }),
 
     getPreferences: builder.query<PreferencesResponse, void>({
@@ -408,10 +383,6 @@ export const {
   useImportMeetingMutation,
   useGetPreferencesQuery,
   useUpdatePreferencesMutation,
-  useGetCalendarsQuery,
-  useSubscribeCalendarMutation,
-  useUnsubscribeCalendarMutation,
-  useGetCalendarEventsQuery,
   useGetTranscriptQuery,
   useGetSummaryQuery,
   useGetSummaryTemplatesQuery,

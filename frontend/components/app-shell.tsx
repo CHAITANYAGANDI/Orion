@@ -15,7 +15,6 @@ import {
   Mic,
   LogOut,
   Sparkles,
-  CalendarDays,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
@@ -34,7 +33,6 @@ import {
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/record", label: "Record meeting", icon: Mic },
   { href: "/upload", label: "Upload meeting", icon: Upload },
   { href: "/ask", label: "Ask Recallix", icon: Sparkles },

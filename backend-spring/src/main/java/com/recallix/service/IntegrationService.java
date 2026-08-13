@@ -21,14 +21,12 @@ public class IntegrationService {
 
     /** Supported providers (docs/phase2-agent-mcp.md). */
     public static final List<String> PROVIDERS = List.of(
-            "notion", "gmail", "google_calendar", "outlook_mail", "outlook_calendar", "microsoft_tasks");
+            "notion", "gmail", "outlook_mail", "microsoft_tasks");
 
     private static final Map<String, List<String>> DEFAULT_SCOPES = Map.of(
             "notion", List.of("notes.write"),
             "gmail", List.of("gmail.compose"),
-            "google_calendar", List.of("calendar.events"),
             "outlook_mail", List.of("Mail.Send"),
-            "outlook_calendar", List.of("Calendars.ReadWrite"),
             "microsoft_tasks", List.of("Tasks.ReadWrite"));
 
     private final AgentConnectionRepository connections;

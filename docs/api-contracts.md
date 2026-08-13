@@ -53,23 +53,6 @@ Paginated list envelope:
 { "content": [ ... ], "page": 0, "size": 20, "totalElements": 57, "totalPages": 3 }
 ```
 
-### Calendars
-
-Read-only iCal (ICS) subscription rather than per-provider OAuth: one mechanism
-covers Google, Outlook, Apple and Fastmail with no app registration or client
-secret. Feeds are fetched on demand, not polled.
-
-The iCal URL is a **bearer secret** — it grants read access to the whole
-calendar — so it is stored server-side and never returned; `redactedUrl` carries
-only the host. `webcal://` is rewritten to `https://`. The URL is validated
-against `UrlSafetyGuard` before it is persisted, and redirects are refused
-rather than followed, since a redirect target would bypass that check.
-
-Recurrence support is partial by design: `DAILY` and `WEEKLY` (with `INTERVAL`,
-`COUNT`, `UNTIL`, `BYDAY`) are expanded and `EXDATE` is honoured. `MONTHLY` and
-`YEARLY` yield only their first occurrence — a rule the parser cannot expand
-costs one event rather than producing a wrong series.
-
 ### Meetings
 
 A meeting's `sourceType` records how it arrived and changes what the response
@@ -91,10 +74,6 @@ again in the worker.
 | POST | `/api/v1/meetings/upload-url` | `{ "filename", "contentType", "sizeBytes" }` | `{ "meetingId", "uploadUrl", "objectKey", "expiresInSeconds" }` |
 | POST | `/api/v1/meetings` | `MeetingCreateRequest` | `MeetingResponse` |
 | POST | `/api/v1/meetings/import` | `{ "url", "title"?, "tags"? }` | `201 MeetingResponse` |
-| GET  | `/api/v1/calendars` | — | `CalendarSubscriptionResponse[]` |
-| POST | `/api/v1/calendars` | `{ "url", "label"? }` | `201 CalendarSubscriptionResponse` |
-| DELETE | `/api/v1/calendars/{id}` | — | `204` |
-| GET  | `/api/v1/calendars/events` | `?days` (1–30, default 7) | `CalendarEventResponse[]` |
 | GET  | `/api/v1/preferences` | — | `PreferencesResponse` |
 | PATCH | `/api/v1/preferences` | `{ "autoEmailRecap"?, "recapEmail"? }` | `PreferencesResponse` |
 | GET  | `/api/v1/meetings` | `?page&size&search&tag&status` | `Page<MeetingResponse>` |

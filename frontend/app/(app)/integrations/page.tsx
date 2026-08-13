@@ -17,9 +17,7 @@ import type { IntegrationProvider } from "@/lib/types";
 const META: Record<IntegrationProvider, { name: string; desc: string }> = {
   notion: { name: "Notion", desc: "Create meeting notes, to-do lists and decision logs." },
   gmail: { name: "Gmail", desc: "Draft and send follow-up emails after approval." },
-  google_calendar: { name: "Google Calendar", desc: "Schedule follow-up meetings from outcomes." },
   outlook_mail: { name: "Outlook Mail", desc: "Draft and send Microsoft work emails." },
-  outlook_calendar: { name: "Outlook Calendar", desc: "Create Microsoft calendar meetings." },
   microsoft_tasks: { name: "Microsoft Tasks", desc: "Create tasks from action items." },
 };
 
