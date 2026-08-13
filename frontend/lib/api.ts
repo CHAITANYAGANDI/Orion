@@ -10,8 +10,6 @@ import type {
   EmailDraft,
   ShareCreateRequest,
   ShareResponse,
-  IntegrationProvider,
-  IntegrationResponse,
   MeetingCreateRequest,
   MeetingImportRequest,
   PreferencesResponse,
@@ -57,7 +55,6 @@ export const api = createApi({
     "ActionItems",
     "Usage",
     "Preferences",
-    "Integrations",
     "Chat",
     "WorkspaceChat",
     "Transcript",
@@ -347,31 +344,6 @@ export const api = createApi({
       providesTags: [{ type: "Usage", id: "ME" }],
     }),
 
-    // ---- Phase 2: Integrations ----
-    getIntegrations: builder.query<IntegrationResponse[], void>({
-      query: () => "/integrations",
-      providesTags: [{ type: "Integrations", id: "LIST" }],
-    }),
-
-    connectIntegration: builder.mutation<
-      IntegrationResponse,
-      IntegrationProvider
-    >({
-      query: (provider) => ({
-        url: `/integrations/${provider}/connect`,
-        method: "POST",
-      }),
-      invalidatesTags: [{ type: "Integrations", id: "LIST" }],
-    }),
-
-    disconnectIntegration: builder.mutation<void, IntegrationProvider>({
-      query: (provider) => ({
-        url: `/integrations/${provider}`,
-        method: "DELETE",
-      }),
-      invalidatesTags: [{ type: "Integrations", id: "LIST" }],
-    }),
-
   }),
 });
 
@@ -407,7 +379,4 @@ export const {
   useDraftFollowUpEmailMutation,
   useCheckoutMutation,
   useGetUsageQuery,
-  useGetIntegrationsQuery,
-  useConnectIntegrationMutation,
-  useDisconnectIntegrationMutation,
 } = api;

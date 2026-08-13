@@ -107,7 +107,6 @@ so it takes a fourth upload to see.
 | Search & filters | ✅ |
 | Clerk auth (+ dev bypass) | ✅ |
 | Speaker diarization | ⚪ optional |
-| AI Agent + MCP integrations | 🟡 Phase 2 scaffold (approval workflow, draft plans) |
 
 ## Development
 

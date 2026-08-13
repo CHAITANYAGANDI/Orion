@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 const PLANS = [
   { id: "FREE", name: "Free", price: "$0", features: ["5 meetings / month", "60 AI minutes", "Transcripts & summaries"] },
   { id: "PRO", name: "Pro", price: "$19", features: ["50 meetings / month", "600 AI minutes", "Exports & search", "Agent follow-ups"] },
-  { id: "PREMIUM", name: "Premium", price: "$49", features: ["Unlimited meetings", "Unlimited AI minutes", "Priority processing", "All integrations"] },
+  { id: "PREMIUM", name: "Premium", price: "$49", features: ["Unlimited meetings", "Unlimited AI minutes", "Priority processing", "Priority support"] },
 ];
 
 /** Reads ?upgraded / ?status query params. Isolated so useSearchParams sits

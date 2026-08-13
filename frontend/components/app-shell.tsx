@@ -8,7 +8,6 @@ import {
   Upload,
   Search,
   ListChecks,
-  Plug,
   CreditCard,
   Settings as SettingsIcon,
   Menu,
@@ -38,7 +37,6 @@ const NAV = [
   { href: "/ask", label: "Ask Recallix", icon: Sparkles },
   { href: "/search", label: "Search meetings", icon: Search },
   { href: "/action-items", label: "Action items", icon: ListChecks },
-  { href: "/integrations", label: "Integrations", icon: Plug },
   { href: "/billing", label: "Billing", icon: CreditCard },
   { href: "/settings", label: "Settings", icon: SettingsIcon },
 ];

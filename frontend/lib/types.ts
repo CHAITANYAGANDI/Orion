@@ -351,19 +351,3 @@ export interface ActionItemListQuery {
   status?: ActionItemStatus;
   priority?: Priority;
 }
-
-// ---- Phase 2: Agent + Integrations (scaffold) ----
-export type IntegrationProvider =
-  | "notion"
-  | "gmail"
-  | "outlook_mail"
-  | "microsoft_tasks";
-
-export type IntegrationStatus = "CONNECTED" | "DISCONNECTED";
-
-export interface IntegrationResponse {
-  provider: IntegrationProvider;
-  status: IntegrationStatus;
-  connectedAt?: string | null;
-}
-

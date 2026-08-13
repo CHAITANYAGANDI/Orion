@@ -129,7 +129,7 @@ export default function LandingPage() {
           {[
             { name: "Free", price: "$0", features: ["5 meetings / month", "60 AI minutes", "Transcripts & summaries"] },
             { name: "Pro", price: "$19", features: ["50 meetings / month", "600 AI minutes", "Exports & search", "Agent follow-ups"], highlight: true },
-            { name: "Premium", price: "$49", features: ["Unlimited meetings", "Unlimited AI minutes", "Priority processing", "All integrations"] },
+            { name: "Premium", price: "$49", features: ["Unlimited meetings", "Unlimited AI minutes", "Priority processing", "Priority support"] },
           ].map((p) => (
             <Card key={p.name} className={p.highlight ? "border-primary shadow-md" : ""}>
               <CardContent className="pt-6">
