@@ -128,6 +128,20 @@ class SummarySection(CamelModel):
     groups: list[OutlineGroup] = Field(default_factory=list)
 
 
+class Quotation(CamelModel):
+    """One line reproduced exactly as spoken, with where to hear it.
+
+    Every quotation on this model has been matched back against the transcript
+    by `app.quotes` — the model's candidates never reach a reader unchecked.
+    `speaker` and `start` come from the segment it was found in rather than
+    from the model, so the quote is clickable to the moment it was said.
+    """
+
+    text: str
+    speaker: str = ""
+    start: float = 0.0
+
+
 class MeetingBriefResult(CamelModel):
     """Full result — FastAPI -> Spring callback + /ai/process-meeting response."""
 
@@ -144,6 +158,9 @@ class MeetingBriefResult(CamelModel):
     sections: list[SummarySection] = Field(default_factory=list)
     template_slug: str | None = None
     action_items: list[ActionItem] = Field(default_factory=list)
+    # Verified against the transcript before they get here; anything the model
+    # could not have copied from it has already been dropped.
+    quotes: list[Quotation] = Field(default_factory=list)
     # Only populated for URL imports, where the worker discovers the real title
     # and length from the source. Spring uses them to replace its placeholder.
     title: str | None = None

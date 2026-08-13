@@ -275,7 +275,7 @@ public class MeetingService {
                 .orElseThrow(() -> ApiException.notFound("Summary not ready"));
         return new SummaryResponse(meetingId, summary.getShortSummary(),
                 summary.getDetailedSummary(), summary.getKeyPoints(),
-                summary.getSections(), summary.getTemplateSlug());
+                summary.getSections(), summary.getQuotes(), summary.getTemplateSlug());
     }
 
     /**
@@ -335,7 +335,7 @@ public class MeetingService {
 
         return new SummaryResponse(meetingId, summary.getShortSummary(),
                 summary.getDetailedSummary(), summary.getKeyPoints(),
-                summary.getSections(), summary.getTemplateSlug());
+                summary.getSections(), summary.getQuotes(), summary.getTemplateSlug());
     }
 
     /** Rename transcript speaker labels (e.g. {"S1":"Alice"}); returns updated segments. */

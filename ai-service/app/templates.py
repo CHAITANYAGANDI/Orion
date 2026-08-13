@@ -60,14 +60,50 @@ _KEY_POINTS = TemplateSection(
 )
 
 
-def _template(slug: str, name: str, *extra: TemplateSection) -> SummaryTemplate:
-    """Every template opens with an Overview and closes with an Outline.
+_NEXT_STEPS = TemplateSection(
+    key="nextSteps",
+    title="Next steps",
+    kind="bullets",
+    instruction=(
+        "3-6 bullets on what happens after this meeting. Distinct from the "
+        "action items: those are tasks with an owner, these are the state of "
+        "play — what is now unblocked, what is waiting on whom, what the next "
+        "checkpoint is. Say 'nothing was agreed' rather than inventing one if "
+        "the meeting ended without a forward plan."
+    ),
+)
 
-    The middle is what makes each one different. Keeping the two ends fixed
-    means switching template never loses the summary someone was relying on —
-    it changes what is added around it.
+_QUOTES = TemplateSection(
+    key="quotes",
+    title="Key quotations",
+    kind="bullets",
+    instruction=(
+        "3-6 lines worth carrying into a readout, each reproduced EXACTLY as "
+        "spoken — copy the words from the transcript, do not tidy grammar, "
+        "shorten, merge two sentences, or paraphrase. A line that cannot be "
+        "copied verbatim must be left out. Do not add speaker names or "
+        "timestamps; those are attached afterwards from the transcript itself."
+    ),
+)
+
+
+def _template(slug: str, name: str, *extra: TemplateSection) -> SummaryTemplate:
+    """Every template opens with an Overview and closes the same way.
+
+    The middle is what makes each one different. Keeping the ends fixed means
+    switching template never loses the summary someone was relying on — it
+    changes what is added around it.
+
+    Next steps and quotations sit in that fixed spine because they are useful
+    for every kind of meeting, and because quotations in particular are only
+    trustworthy when they go through the verification in `app.quotes` — which
+    they do exactly once, here, rather than per template.
     """
-    return SummaryTemplate(slug=slug, name=name, sections=[_OVERVIEW, *extra, _OUTLINE])
+    return SummaryTemplate(
+        slug=slug,
+        name=name,
+        sections=[_OVERVIEW, *extra, _NEXT_STEPS, _QUOTES, _OUTLINE],
+    )
 
 
 BUILT_IN: list[SummaryTemplate] = [
@@ -170,12 +206,6 @@ BUILT_IN: list[SummaryTemplate] = [
             kind="bullets",
             instruction="What they said a solution must do, including any stated constraints.",
         ),
-        TemplateSection(
-            key="nextSteps",
-            title="Next steps",
-            kind="bullets",
-            instruction="What either side agreed to do next, with timing where stated.",
-        ),
     ),
     _template(
         "sales-bant",
@@ -238,15 +268,6 @@ BUILT_IN: list[SummaryTemplate] = [
             title="Frustrations",
             kind="bullets",
             instruction="Friction they described, quoting their phrasing where it is vivid.",
-        ),
-        TemplateSection(
-            key="quotes",
-            title="Notable quotes",
-            kind="bullets",
-            instruction=(
-                "Verbatim lines worth carrying into a readout, each quoted "
-                "exactly and attributed."
-            ),
         ),
     ),
 ]

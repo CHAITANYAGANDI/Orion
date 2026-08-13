@@ -218,6 +218,20 @@ export interface SummarySection {
   groups: OutlineGroup[];
 }
 
+/**
+ * One line reproduced exactly as spoken, with where to hear it.
+ *
+ * Every quotation reaching the client has been matched back against the
+ * transcript by the worker — the model's candidates never arrive unchecked —
+ * and `speaker`/`start` come from the segment it was found in, so the quote is
+ * clickable to the moment it was said.
+ */
+export interface Quotation {
+  text: string;
+  speaker: string;
+  start: number;
+}
+
 export interface SummaryResponse {
   meetingId: string;
   shortSummary: string;
@@ -229,6 +243,8 @@ export interface SummaryResponse {
    * are what the export and share page read regardless.
    */
   sections?: SummarySection[];
+  /** Verified quotations. Empty for summaries generated before they existed. */
+  quotes?: Quotation[];
   templateSlug?: string | null;
 }
 

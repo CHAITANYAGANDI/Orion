@@ -299,7 +299,12 @@ export default function MeetingDetailPage() {
 
           {/* Summary + translation */}
           <TabsContent value="summary">
-            <SummaryPanel meetingId={id} loading={summary.isLoading} summary={summary.data} />
+            <SummaryPanel
+              meetingId={id}
+              loading={summary.isLoading}
+              summary={summary.data}
+              onSeek={audio.seekTo}
+            />
           </TabsContent>
 
           {/* Ask-the-meeting RAG chat */}
@@ -418,10 +423,13 @@ function SummaryPanel({
   meetingId,
   loading,
   summary,
+  onSeek,
 }: {
   meetingId: string;
   loading: boolean;
   summary?: SummaryResponse;
+  /** Plays from a quotation's moment. Shared with the transcript and chat. */
+  onSeek: (seconds: number) => void;
 }) {
   const [translate, { data: translated, isLoading: translating, reset }] = useTranslateSummaryMutation();
   const [lang, setLang] = React.useState("Spanish");
@@ -452,6 +460,10 @@ function SummaryPanel({
   // Translation returns the flat fields only, so while one is showing we fall
   // back to the classic layout rather than render half-translated sections.
   const sections = translated ? [] : summary?.sections ?? [];
+  // Hidden alongside the sections while a translation is showing: a quotation is
+  // a claim about the exact words spoken, so displaying it beside translated
+  // prose would invite reading it as a translated quote.
+  const quotes = translated ? [] : summary?.quotes ?? [];
   const current = summary?.templateSlug ?? "general";
 
   return (
@@ -505,6 +517,34 @@ function SummaryPanel({
                 {sections.map((s) => (
                   <SummarySectionView key={s.key} section={s} />
                 ))}
+                {/* Rendered from its own field rather than as a section: these
+                    carry a speaker and a timestamp, which the section shapes
+                    cannot express, and they are the one part of a brief that
+                    claims to be exact — so they are shown as evidence, playable
+                    at the moment they were said. Hidden entirely when nothing
+                    verified, which is a normal outcome rather than a failure. */}
+                {quotes.length > 0 && (
+                  <div>
+                    <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
+                      <Quote className="h-4 w-4" /> Key quotations
+                    </h3>
+                    <div className="space-y-2">
+                      {quotes.map((q, i) => (
+                        <button
+                          key={i}
+                          onClick={() => onSeek(q.start)}
+                          className="block w-full rounded-md border-l-2 border-primary/40 bg-muted/40 px-3 py-2 text-left transition-colors hover:bg-muted"
+                          title={`Play from ${timecode(q.start)}`}
+                        >
+                          <span className="block text-sm italic">“{q.text}”</span>
+                          <span className="mt-1 block text-xs text-muted-foreground">
+                            {q.speaker || "Unknown speaker"} · {timecode(q.start)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               /* Summaries written before templates existed, and translations,

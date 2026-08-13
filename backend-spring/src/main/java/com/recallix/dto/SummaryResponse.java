@@ -1,5 +1,6 @@
 package com.recallix.dto;
 
+import com.recallix.domain.Quotation;
 import com.recallix.domain.SummarySection;
 
 import java.util.List;
@@ -19,6 +20,11 @@ public record SummaryResponse(
         String detailedSummary,
         List<String> keyPoints,
         List<SummarySection> sections,
+        /**
+         * Verified quotations, each with the moment it was said so the UI can
+         * play from it. Empty for summaries generated before V22.
+         */
+        List<Quotation> quotes,
         String templateSlug
 ) {
 }

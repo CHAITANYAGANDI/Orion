@@ -1,5 +1,6 @@
 package com.recallix.dto.callback;
 
+import com.recallix.domain.Quotation;
 import com.recallix.domain.SummarySection;
 
 import java.util.List;
@@ -22,6 +23,12 @@ public record MeetingBriefResult(
          * above are still populated in that case, so the brief renders.
          */
         List<SummarySection> sections,
+        /**
+         * Quotations the worker already verified against the transcript.
+         * Absent from an older worker's payload, and legitimately empty when
+         * nothing the model produced could be found in the transcript.
+         */
+        List<Quotation> quotes,
         String templateSlug,
         List<AiActionItem> actionItems,
         /**
@@ -35,5 +42,7 @@ public record MeetingBriefResult(
     public List<AiSegment> segmentsOrEmpty() { return segments == null ? List.of() : segments; }
     public List<String> keyPointsOrEmpty() { return keyPoints == null ? List.of() : keyPoints; }
     public List<SummarySection> sectionsOrEmpty() { return sections == null ? List.of() : sections; }
+
+    public List<Quotation> quotesOrEmpty() { return quotes == null ? List.of() : quotes; }
     public List<AiActionItem> actionItemsOrEmpty() { return actionItems == null ? List.of() : actionItems; }
 }

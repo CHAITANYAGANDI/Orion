@@ -21,11 +21,13 @@ import time
 from typing import Awaitable, Callable
 
 from app.language import annotate_segments
+from app.quotes import verify_quotes
 from app.providers.ports import LlmPort, TranscriptionPort
 from app.schemas import (
     DraftEmailRequest,
     DraftEmailResponse,
     MeetingBriefResult,
+    Quotation,
     StatusEvent,
     SummaryResponse,
     SummaryTemplate,
@@ -222,6 +224,20 @@ class Pipeline:
         logger.info(
             "Analysis for %s: %d action item(s).", meeting_id, len(action_items),
         )
+        # Quotations claim to be exact, so the model's candidates are matched
+        # back against the transcript and anything it could not have copied from
+        # there is dropped. The raw section is removed rather than rendered
+        # alongside: two versions of "the quotes", one checked and one not, is
+        # exactly the ambiguity this is meant to remove.
+        raw_quotes: list[str] = []
+        kept_sections = []
+        for section in summary.sections:
+            if section.key == "quotes":
+                raw_quotes = section.bullets
+                continue
+            kept_sections.append(section)
+        quotes = [Quotation(**q) for q in verify_quotes(raw_quotes, transcript.segments)]
+
         return MeetingBriefResult(
             meeting_id=meeting_id,
             transcript=transcript.transcript,
@@ -230,7 +246,8 @@ class Pipeline:
             short_summary=summary.short_summary,
             detailed_summary=summary.detailed_summary,
             key_points=summary.key_points,
-            sections=summary.sections,
+            sections=kept_sections,
             template_slug=summary.template_slug or template.slug,
             action_items=action_items,
+            quotes=quotes,
         )

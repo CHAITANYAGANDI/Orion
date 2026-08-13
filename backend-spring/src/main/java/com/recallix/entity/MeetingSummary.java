@@ -5,6 +5,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import com.recallix.domain.Quotation;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -40,6 +41,15 @@ public class MeetingSummary {
     @Column(name = "sections_json", columnDefinition = "jsonb")
     private List<SummarySection> sections = new ArrayList<>();
 
+    /**
+     * Quotations already verified against the transcript by the worker. Empty
+     * for summaries generated before V22, and whenever nothing verified — which
+     * is a normal outcome, not a failure.
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "quotes_json", columnDefinition = "jsonb")
+    private List<Quotation> quotes = new ArrayList<>();
+
     /** Which template produced this summary; null for pre-template summaries. */
     @Column(name = "template_slug")
     private String templateSlug;
@@ -70,4 +80,7 @@ public class MeetingSummary {
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+
+    public List<Quotation> getQuotes() { return quotes; }
+    public void setQuotes(List<Quotation> quotes) { this.quotes = quotes; }
 }
