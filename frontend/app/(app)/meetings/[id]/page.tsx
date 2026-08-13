@@ -19,6 +19,7 @@ import {
   Check,
   Quote,
   Youtube,
+  Pencil,
 } from "lucide-react";
 import {
   useGetMeetingQuery,
@@ -31,6 +32,7 @@ import {
   useAskChatMutation,
   useTranslateSummaryMutation,
   useRenameSpeakersMutation,
+  useEditSegmentsMutation,
   useGetSummaryTemplatesQuery,
   useResummarizeMutation,
 } from "@/lib/api";
@@ -633,6 +635,36 @@ function TranscriptPanel({
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState<Record<string, string>>({});
 
+  const [editSegments, { isLoading: savingText }] = useEditSegmentsMutation();
+  // Which line is open for editing, and the text as typed. Held by segment id
+  // rather than index so a refetch that reorders nothing still cannot move the
+  // edit onto a different line.
+  const [openLine, setOpenLine] = React.useState<string | null>(null);
+  const [lineDraft, setLineDraft] = React.useState("");
+
+  function beginEdit(segment: TranscriptSegment) {
+    if (!segment.id) return;
+    setOpenLine(segment.id);
+    setLineDraft(segment.text);
+  }
+
+  async function saveLine(original: string) {
+    const text = lineDraft.trim();
+    if (!openLine || !text || text === original) {
+      setOpenLine(null);
+      return;
+    }
+    try {
+      await editSegments({ id: meetingId, edits: [{ id: openLine, text }] }).unwrap();
+      // Deliberately quiet about the summary: it was written from the old
+      // wording and is now slightly stale, which is the user's call to fix.
+      toast.success("Transcript updated.");
+      setOpenLine(null);
+    } catch {
+      toast.error("Could not save that correction.");
+    }
+  }
+
   const speakers = React.useMemo(() => {
     const set = new Set<string>();
     segments.forEach((s) => s.speaker && set.add(s.speaker));
@@ -761,11 +793,50 @@ function TranscriptPanel({
                   <p className="text-sm leading-relaxed">
                     {turn.segments.map((s, j) => {
                       const active = currentTime >= s.start && currentTime < s.end;
+                      // Editing one line replaces just that line, so the rest
+                      // of the turn stays readable and still seekable while a
+                      // correction is being typed.
+                      if (s.id && openLine === s.id) {
+                        return (
+                          <span key={j} className="block py-1">
+                            <textarea
+                              autoFocus
+                              rows={Math.max(2, Math.ceil(lineDraft.length / 70))}
+                              value={lineDraft}
+                              onChange={(e) => setLineDraft(e.target.value)}
+                              onKeyDown={(e) => {
+                                // Enter saves; Shift+Enter is a newline, and
+                                // Escape abandons the edit without saving.
+                                if (e.key === "Enter" && !e.shiftKey) {
+                                  e.preventDefault();
+                                  void saveLine(s.text);
+                                } else if (e.key === "Escape") {
+                                  e.preventDefault();
+                                  setOpenLine(null);
+                                }
+                              }}
+                              className="w-full resize-y rounded-md border bg-background p-2 text-sm leading-relaxed outline-none focus:ring-2 focus:ring-ring"
+                            />
+                            <span className="mt-1 flex items-center gap-2">
+                              <Button size="sm" onClick={() => void saveLine(s.text)} disabled={savingText}>
+                                {savingText ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                                Save
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={() => setOpenLine(null)}>
+                                Cancel
+                              </Button>
+                              <span className="text-xs text-muted-foreground">
+                                Enter to save · Esc to cancel
+                              </span>
+                            </span>
+                          </span>
+                        );
+                      }
                       return (
                         <span
                           key={j}
                           className={cn(
-                            "rounded px-0.5 transition-colors",
+                            "group/line rounded px-0.5 transition-colors",
                             active && "bg-primary/10"
                           )}
                         >
@@ -782,6 +853,18 @@ function TranscriptPanel({
                             at={active ? currentTime : -1}
                             onSeek={onSeek}
                           />
+                          {/* Shown on hover so it never competes with reading,
+                              but always reachable by keyboard. */}
+                          {s.id && (
+                            <button
+                              onClick={() => beginEdit(s)}
+                              aria-label="Correct this line"
+                              title="Correct this line"
+                              className="ml-0.5 rounded p-0.5 align-middle text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus:opacity-100 group-hover/line:opacity-100"
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                          )}
                         </span>
                       );
                     })}

@@ -9,6 +9,7 @@ import com.recallix.dto.ReprocessResponse;
 import com.recallix.dto.ResummarizeRequest;
 import com.recallix.dto.SpeakerRenameRequest;
 import com.recallix.dto.SummaryResponse;
+import com.recallix.dto.TranscriptEditRequest;
 import com.recallix.dto.TranscriptResponse;
 import com.recallix.dto.UploadUrlRequest;
 import com.recallix.dto.UploadUrlResponse;
@@ -97,6 +98,19 @@ public class MeetingController {
     public TranscriptResponse renameSpeakers(@PathVariable String id,
                                              @Valid @RequestBody SpeakerRenameRequest req) {
         return meetings.renameSpeakers(SecurityUtils.currentUserId(), id, req.mapping());
+    }
+
+    /**
+     * Correct what the transcriber heard, a batch of segments at a time.
+     *
+     * <p>Saving re-indexes the meeting so chat and search read the corrected
+     * text. The summary is not regenerated — that is the separate re-summarize
+     * call, so a typo fix does not silently cost a model call.
+     */
+    @PatchMapping("/{id}/segments")
+    public TranscriptResponse editSegments(@PathVariable String id,
+                                           @Valid @RequestBody TranscriptEditRequest req) {
+        return meetings.editSegments(SecurityUtils.currentUserId(), id, req.edits());
     }
 
     @PostMapping("/{id}/reprocess")

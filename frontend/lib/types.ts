@@ -135,6 +135,8 @@ export interface SpokenWord {
 }
 
 export interface TranscriptSegment {
+  /** Addresses this segment when correcting its text. */
+  id?: string;
   start: number;
   end: number;
   speaker: string;
@@ -276,6 +278,12 @@ export interface TranslateResult {
   shortSummary: string;
   detailedSummary: string;
   keyPoints: string[];
+}
+
+/** One corrected line. Text only — timings come from the recording. */
+export interface SegmentEdit {
+  id: string;
+  text: string;
 }
 
 // ---- Speaker rename ----

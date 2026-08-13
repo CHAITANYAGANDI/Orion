@@ -2,6 +2,7 @@ package com.recallix.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.recallix.domain.SummarySection;
+import com.recallix.dto.SegmentDto;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -226,6 +227,41 @@ public class AiClient {
         }
         return new SummarySection(
                 text(s, "key"), text(s, "title"), text(s, "kind"), text(s, "text"), bullets, groups);
+    }
+
+    /**
+     * Re-index a meeting's transcript into pgvector, replacing what was there.
+     *
+     * <p>Called after the transcript is edited. Retrieval reads the indexed
+     * chunks, not the segments, so an edit that is not re-indexed is invisible
+     * to "ask this meeting" and to semantic search — the user corrects a name
+     * and chat carries on answering with the old one.
+     *
+     * <p>The owner is sent because row-level security checks it; the ai-service
+     * has no privilege to look one up.
+     */
+    public void reindex(String userId, String meetingId, String transcript, List<SegmentDto> segments) {
+        Map<String, Object> payload = new java.util.HashMap<>();
+        payload.put("userId", userId);
+        payload.put("meetingId", meetingId);
+        payload.put("transcript", transcript);
+        payload.put("segments", segments.stream()
+                .map(seg -> {
+                    Map<String, Object> m = new java.util.HashMap<>();
+                    m.put("start", seg.start());
+                    m.put("end", seg.end());
+                    m.put("speaker", seg.speaker());
+                    m.put("text", seg.text());
+                    return m;
+                })
+                .toList());
+
+        client.post()
+                .uri("/ai/index")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(payload)
+                .retrieve()
+                .toBodilessEntity();
     }
 
     public record EmailDraft(String subject, String body) {}

@@ -24,6 +24,7 @@ import type {
   Page,
   ReprocessResponse,
   SemanticSearchHit,
+  SegmentEdit,
   SemanticSearchRequest,
   SummaryResponse,
   SummaryTemplateResponse,
@@ -247,6 +248,26 @@ export const api = createApi({
       }),
     }),
 
+    /**
+     * Correct what the transcriber heard. Invalidates the transcript and the
+     * meeting's chat: saving re-indexes the meeting, so previous answers were
+     * grounded in text that no longer exists.
+     */
+    editSegments: builder.mutation<
+      TranscriptResponse,
+      { id: string; edits: SegmentEdit[] }
+    >({
+      query: ({ id, edits }) => ({
+        url: `/meetings/${id}/segments`,
+        method: "PATCH",
+        body: { edits },
+      }),
+      invalidatesTags: (_r, _e, arg) => [
+        { type: "Transcript", id: arg.id },
+        { type: "Chat", id: arg.id },
+      ],
+    }),
+
     // ---- Speaker rename ----
     renameSpeakers: builder.mutation<
       TranscriptResponse,
@@ -406,6 +427,7 @@ export const {
   useSemanticSearchMutation,
   useTranslateSummaryMutation,
   useRenameSpeakersMutation,
+  useEditSegmentsMutation,
   useGetActionItemsQuery,
   usePatchActionItemMutation,
   useGetShareQuery,

@@ -12,15 +12,19 @@ import com.recallix.dto.PageResponse;
 import com.recallix.dto.ReprocessResponse;
 import com.recallix.dto.SegmentDto;
 import com.recallix.dto.SummaryResponse;
+import com.recallix.dto.TranscriptEditRequest;
 import com.recallix.dto.TranscriptResponse;
 import com.recallix.dto.UploadUrlRequest;
 import com.recallix.dto.UploadUrlResponse;
 import com.recallix.entity.Meeting;
+import com.recallix.entity.TranscriptSegment;
 import com.recallix.repository.MeetingActionItemRepository;
 import com.recallix.repository.MeetingRepository;
 import com.recallix.repository.MeetingSummaryRepository;
 import com.recallix.repository.MeetingTranscriptRepository;
 import com.recallix.repository.TranscriptSegmentRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -28,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Core meeting lifecycle: presigned upload, record creation (with quota check),
@@ -36,6 +41,8 @@ import java.util.Map;
  */
 @Service
 public class MeetingService {
+
+    private static final Logger log = LoggerFactory.getLogger(MeetingService.class);
 
     private static final List<String> ALLOWED_PREFIXES = List.of("audio/", "video/");
     private static final String PDF = "application/pdf";
@@ -280,7 +287,7 @@ public class MeetingService {
         // many people were in the room.
         Integer speakerCount = (int) segments.findByMeetingIdOrderByStartTimeAsc(meetingId)
                 .stream()
-                .map(com.recallix.entity.TranscriptSegment::getSpeaker)
+                .map(TranscriptSegment::getSpeaker)
                 .filter(s -> s != null && !s.isBlank())
                 .distinct()
                 .count();
@@ -319,14 +326,126 @@ public class MeetingService {
     public TranscriptResponse renameSpeakers(String userId, String meetingId, Map<String, String> mapping) {
         require(userId, meetingId);
         var segs = segments.findByMeetingIdOrderByStartTimeAsc(meetingId);
+        boolean changed = false;
         for (var seg : segs) {
             String mapped = mapping.get(seg.getSpeaker());
             if (mapped != null && !mapped.isBlank()) {
                 seg.setSpeaker(mapped.trim());
+                changed = true;
             }
+        }
+        // Retrieval passages are stored as "Speaker 1: ...", so a rename that
+        // is not re-indexed leaves chat answering with the old label — and
+        // citing a name the transcript no longer shows anywhere.
+        if (changed) {
+            reindex(userId, meetingId, segs);
         }
         audit.record(userId, "SPEAKERS_RENAMED", "meeting", meetingId);
         return getTranscript(userId, meetingId);
+    }
+
+    /**
+     * Correct what the transcriber heard.
+     *
+     * <p>Transcription is very good and still wrong about names, jargon and
+     * anything said over a cough. Those errors are load-bearing: the corrected
+     * text is what the summary is written from, what chat retrieves, and what
+     * the export hands to someone who was not in the room.
+     *
+     * <p>Three things follow from an edit, and each is a correctness issue
+     * rather than a nicety:
+     *
+     * <ul>
+     *   <li>The flat transcript is rebuilt from the segments, because it is a
+     *       denormalised copy and the export reads it.
+     *   <li>The edited segment's word timings are dropped. They describe words
+     *       that were spoken; once the text says something else they point at
+     *       the wrong ones, and a highlight that lands on the wrong word is
+     *       worse than one estimated from the segment span — which is what the
+     *       UI falls back to.
+     *   <li>The meeting is re-indexed, because retrieval reads chunks rather
+     *       than segments. Skipping it means the user corrects a name and chat
+     *       carries on using the old one.
+     * </ul>
+     *
+     * <p>The summary and action items are deliberately <em>not</em> regenerated.
+     * That costs a model call per save and would surprise someone who fixed a
+     * typo; re-summarizing is a button they already have, and it is their call
+     * whether a correction was material enough to be worth it.
+     */
+    @Transactional
+    public TranscriptResponse editSegments(String userId, String meetingId,
+                                           List<TranscriptEditRequest.SegmentEdit> edits) {
+        require(userId, meetingId);
+        var segs = segments.findByMeetingIdOrderByStartTimeAsc(meetingId);
+        Map<String, TranscriptSegment> byId = segs.stream()
+                .collect(Collectors.toMap(
+                        TranscriptSegment::getId, s -> s, (a, b) -> a));
+
+        boolean changed = false;
+        for (var edit : edits) {
+            var seg = byId.get(edit.id());
+            // Addressed by id, so an unknown one means the client is working
+            // from a stale transcript. Refused rather than ignored: silently
+            // dropping half a batch would leave the user believing corrections
+            // landed that did not.
+            if (seg == null) {
+                throw ApiException.badRequest(
+                        "That segment is not part of this meeting; reload the transcript and try again");
+            }
+            String text = edit.text().trim();
+            if (text.equals(seg.getText())) {
+                continue;
+            }
+            seg.setText(text);
+            seg.setWords(List.of());
+            changed = true;
+        }
+
+        if (!changed) {
+            return getTranscript(userId, meetingId);
+        }
+
+        transcripts.findFirstByMeetingIdOrderByCreatedAtDesc(meetingId)
+                .ifPresent(t -> t.setTranscriptText(joinSegments(segs)));
+        reindex(userId, meetingId, segs);
+        audit.record(userId, "TRANSCRIPT_EDITED", "meeting", meetingId);
+        return getTranscript(userId, meetingId);
+    }
+
+    /**
+     * Rebuild the flat transcript from its segments.
+     *
+     * <p>Same "Speaker: text" shape the worker produces, so an edited
+     * transcript and a freshly-processed one read identically — the export and
+     * the re-summarize path cannot tell which they were handed.
+     */
+    private static String joinSegments(List<TranscriptSegment> segs) {
+        return segs.stream()
+                .map(s -> (s.getSpeaker() == null || s.getSpeaker().isBlank())
+                        ? s.getText()
+                        : s.getSpeaker() + ": " + s.getText())
+                .filter(line -> line != null && !line.isBlank())
+                .collect(Collectors.joining("\n"));
+    }
+
+    /**
+     * Push the current segments back into pgvector.
+     *
+     * <p>Failure is logged and swallowed: the edit itself is already correct and
+     * committed, and refusing to save a correction because the search index
+     * could not be updated would be the wrong trade. The stale index is
+     * repaired by the next edit or a reprocess.
+     */
+    private void reindex(String userId, String meetingId,
+                         List<TranscriptSegment> segs) {
+        try {
+            ai.reindex(userId, meetingId, joinSegments(segs),
+                    segs.stream().map(SegmentDto::from).toList());
+        } catch (Exception e) {
+            log.warn("Re-indexing meeting {} failed; chat may answer from stale text: {}",
+                    meetingId, e.toString());
+        }
     }
 
     // --- reprocess + delete ------------------------------------------------- //

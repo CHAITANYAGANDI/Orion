@@ -21,6 +21,8 @@ from app.schemas import (
     Citation,
     DraftEmailRequest,
     DraftEmailResponse,
+    IndexRequest,
+    IndexResponse,
     MeetingBriefResult,
     ProcessMeetingRequest,
     SemanticSearchHit,
@@ -115,6 +117,19 @@ async def process_meeting(
     )
     # No progress_hook here: HTTP callers get the result synchronously.
     return await pipeline.process(body.meeting_id, audio, filename)
+
+
+@router.post("/index", response_model=IndexResponse)
+async def index(body: IndexRequest, rag: RagService = Depends(get_rag)) -> IndexResponse:
+    """Re-index a meeting's transcript, replacing whatever was stored before.
+
+    Called by Spring after a user edits the transcript. Without it, "ask this
+    meeting" keeps answering from the text the user just corrected — retrieval
+    reads the chunks, not the segments, so an edit that is not re-indexed is
+    invisible to chat and to search.
+    """
+    await rag.index(body.meeting_id, body.user_id, body.transcript, body.segments)
+    return IndexResponse(indexed=True)
 
 
 @router.post("/chat", response_model=ChatResponse)

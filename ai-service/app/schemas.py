@@ -194,6 +194,28 @@ class ActionItemsResponse(CamelModel):
     action_items: list[ActionItem] = Field(default_factory=list)
 
 
+class IndexRequest(CamelModel):
+    """Re-index one meeting's transcript into pgvector.
+
+    Sent after a transcript is edited. Indexing is delete-then-insert, so this
+    is idempotent and replaces the meeting's chunks wholesale rather than
+    appending — an edited passage must not stay retrievable in its old form.
+
+    `user_id` is required for the same reason it is on the first index: it is
+    what row-level security checks, and this service has no privilege to look
+    an owner up.
+    """
+
+    meeting_id: str
+    user_id: str
+    transcript: str
+    segments: list[Segment] = Field(default_factory=list)
+
+
+class IndexResponse(CamelModel):
+    indexed: bool
+
+
 class ProcessMeetingRequest(CamelModel):
     meeting_id: str
     audio_url: str | None = None

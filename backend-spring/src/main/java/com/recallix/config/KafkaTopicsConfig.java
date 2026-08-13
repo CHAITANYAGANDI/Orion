@@ -21,8 +21,18 @@ public class KafkaTopicsConfig {
     public static final String PAYMENT_SUCCESSFUL = "payment_successful";
     public static final String USAGE_LIMIT_REACHED = "usage_limit_reached";
 
+    /**
+     * One partition, broker-default replication.
+     *
+     * <p>{@code replicas(-1)} means "whatever the broker defaults to" rather than
+     * a literal factor, and the difference matters on a managed broker: Confluent
+     * Cloud enforces a replication factor of 3 and rejects an explicit 1 with
+     * POLICY_VIOLATION, so hardcoding 1 would fail every topic creation there
+     * while working locally. KafkaAdmin only logs that failure, so the first
+     * symptom would be uploads that never reach the worker.
+     */
     private NewTopic topic(String name) {
-        return TopicBuilder.name(name).partitions(1).replicas(1).build();
+        return TopicBuilder.name(name).partitions(1).replicas(-1).build();
     }
 
     @Bean NewTopic meetingUploadedTopic() { return topic(MEETING_UPLOADED); }

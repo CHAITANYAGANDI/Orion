@@ -105,34 +105,95 @@ ALTER ROLE recallix_app BYPASSRLS;      -- MUST be denied
 
 ## 2. Confluent Cloud
 
-Create a cluster, then an API key/secret scoped to it.
+Only **one** of the eight topics is load-bearing. `meeting_uploaded` carries job
+dispatch from the backend's outbox to the ai-service worker; break it and nothing
+transcribes. The other seven are consumed by `KafkaStatusConsumer`, which only
+logs — the status updates the UI actually shows travel over the internal HTTP
+callbacks, not Kafka. Worth knowing when you are deciding how much to spend here.
 
-Create the topics the services expect — `spring.kafka.listener.missing-topics-fatal`
-is `false`, so a missing topic degrades quietly instead of failing loudly:
+### Create the cluster
 
-- `meeting_uploaded`
-- `meeting_processing_failed`
-- the per-stage status topics emitted by the pipeline
-- `payment_successful`
+A **Basic** cluster in the region nearest the Render services. Basic bills on
+consumption and costs nothing at rest, which for one message per meeting is the
+right shape.
 
-Then wire the credentials. The two services take the same secret in different
-shapes — the backend as a JAAS string, the ai-service as a username/password
-pair:
+### Create the topics
+
+Create all eight with **1 partition** each, leaving the replication factor at the
+default:
+
+```
+meeting_uploaded            transcription_started      transcription_completed
+summary_generated           action_items_extracted     meeting_processing_failed
+payment_successful          usage_limit_reached
+```
+
+Confluent Cloud enforces a replication factor of **3** and rejects an explicit 1
+with `POLICY_VIOLATION`, so `KafkaTopicsConfig` asks for `replicas(-1)` — Kafka's
+sentinel for "broker default", which resolves to 1 on the local single-node
+broker and 3 here. Do not change it back to a literal.
+
+Creating them by hand is still worth doing: `KafkaAdmin` only *logs* a failed
+topic creation, and `spring.kafka.listener.missing-topics-fatal` is `false`, so a
+topic that never got created produces a healthy-looking backend whose uploads
+never reach the worker.
+
+### Create the API key
+
+One key scoped to the cluster (**Global access** is fine for a single-tenant
+deployment; granular access needs ACLs for both service accounts on all eight
+topics plus the `recallix-backend` and `ai-service` consumer groups). **The
+secret is shown once** — copy both halves before closing the dialog.
+
+Confluent's own docs note it can take ~90 seconds for a new key to propagate; an
+immediate deploy can fail authentication and then succeed on retry.
+
+### Wire the credentials
+
+The bootstrap server is on the cluster's *Cluster settings* page and looks like
+`pkc-xxxxx.<region>.aws.confluent.cloud:9092` — port **9092**, same as plaintext
+Kafka, so the port is not a hint that TLS is off.
+
+The two services take the same secret in different shapes — the backend as a JAAS
+string, the ai-service as a username/password pair:
 
 ```bash
-# backend
+# backend  (note the SPRING_ prefix on the bootstrap var — the ai-service has none)
+SPRING_KAFKA_BOOTSTRAP_SERVERS=pkc-xxxxx.<region>.aws.confluent.cloud:9092
 KAFKA_SECURITY_PROTOCOL=SASL_SSL
 KAFKA_SASL_MECHANISM=PLAIN
 KAFKA_SASL_JAAS_CONFIG=org.apache.kafka.common.security.plain.PlainLoginModule required username="API_KEY" password="API_SECRET";
 
 # ai-service
+KAFKA_BOOTSTRAP_SERVERS=pkc-xxxxx.<region>.aws.confluent.cloud:9092
 KAFKA_SECURITY_PROTOCOL=SASL_SSL
 KAFKA_SASL_MECHANISM=PLAIN
 KAFKA_SASL_USERNAME=API_KEY
 KAFKA_SASL_PASSWORD=API_SECRET
 ```
 
-The trailing semicolon in the JAAS string is required.
+Two things bite here. The **trailing semicolon** in the JAAS string is required —
+without it the client fails to parse the login module and reports it as an
+authentication failure, which sends you looking at the wrong thing. And the
+bootstrap variable is `SPRING_KAFKA_BOOTSTRAP_SERVERS` on the backend but plain
+`KAFKA_BOOTSTRAP_SERVERS` on the ai-service; setting the wrong one leaves that
+service quietly pointed at `localhost:9092`.
+
+### Verify
+
+Do not trust green service badges — both services degrade rather than crash when
+Kafka is unreachable. Check the logs for the positive signal:
+
+- ai-service: `Kafka worker connected to pkc-… ; consuming 'meeting_uploaded'.`
+  Its absence, or a repeating `Kafka unavailable (…); retrying in Ns.`, is the
+  failure.
+- backend: no `Failed to create topics` warnings from `KafkaAdmin` at startup.
+
+Then upload one meeting end to end. If it sticks at `QUEUED`, dispatch is broken —
+confirm with `SELECT count(*) FROM outbox_events WHERE published = FALSE;`. That is
+the designed behaviour — `OutboxPublisher` retries and preserves order, so a
+Kafka outage queues meetings rather than losing them, and they drain once the
+credentials are right.
 
 ---
 
