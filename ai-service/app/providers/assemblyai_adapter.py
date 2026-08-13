@@ -45,6 +45,11 @@ TRANSCRIPT_URL = f"{BASE_URL}/transcript"
 
 _EMPTY = TranscriptResponse(transcript="", language="en", segments=[])
 
+# AssemblyAI documents a 1000-term ceiling for word_boost. The lower cap here
+# matches the Deepgram adapter and reflects the same trade: every extra term is
+# another word the model is biased toward, so an unbounded list boosts nothing.
+MAX_BOOST_TERMS = 100
+
 
 class AssemblyAiTranscriptionAdapter(TranscriptionPort):
     """Transcription via AssemblyAI's async API, with diarization on."""
@@ -60,12 +65,14 @@ class AssemblyAiTranscriptionAdapter(TranscriptionPort):
             )
 
     # --- the port ----------------------------------------------------------- #
-    async def transcribe(self, audio: bytes, filename: str) -> TranscriptResponse:
+    async def transcribe(
+        self, audio: bytes, filename: str, vocabulary: list[str] | None = None
+    ) -> TranscriptResponse:
         attempts = self._settings.assemblyai_max_retries + 1
         delay = 1.0
         for attempt in range(1, attempts + 1):
             try:
-                return await self._run(audio)
+                return await self._run(audio, vocabulary)
             except Exception as exc:  # noqa: BLE001 — httpx raises a wide range.
                 logger.warning(
                     "AssemblyAI transcribe attempt %d/%d failed: %s", attempt, attempts, exc
@@ -80,16 +87,23 @@ class AssemblyAiTranscriptionAdapter(TranscriptionPort):
                 delay *= 2
         return _EMPTY
 
-    async def _run(self, audio: bytes) -> TranscriptResponse:
+    async def _run(
+        self, audio: bytes, vocabulary: list[str] | None = None
+    ) -> TranscriptResponse:
         if self._client is not None:
-            return await self._transcribe_with(self._client, audio)
+            return await self._transcribe_with(self._client, audio, vocabulary)
         timeout = httpx.Timeout(self._settings.assemblyai_timeout_seconds, connect=15.0)
         async with httpx.AsyncClient(timeout=timeout) as client:
-            return await self._transcribe_with(client, audio)
+            return await self._transcribe_with(client, audio, vocabulary)
 
-    async def _transcribe_with(self, client: httpx.AsyncClient, audio: bytes) -> TranscriptResponse:
+    async def _transcribe_with(
+        self,
+        client: httpx.AsyncClient,
+        audio: bytes,
+        vocabulary: list[str] | None = None,
+    ) -> TranscriptResponse:
         upload_url = await self._upload(client, audio)
-        job_id = await self._submit(client, upload_url)
+        job_id = await self._submit(client, upload_url, vocabulary)
         payload = await self._poll(client, job_id)
         return parse_response(payload)
 
@@ -106,7 +120,12 @@ class AssemblyAiTranscriptionAdapter(TranscriptionPort):
         logger.info("Uploaded %.1f MB to AssemblyAI.", len(audio) / 1_048_576)
         return str(upload_url)
 
-    async def _submit(self, client: httpx.AsyncClient, upload_url: str) -> str:
+    async def _submit(
+        self,
+        client: httpx.AsyncClient,
+        upload_url: str,
+        vocabulary: list[str] | None = None,
+    ) -> str:
         settings = self._settings
         # A priority list, not a single model: if the detected language is not
         # supported by the first, AssemblyAI routes to the next rather than
@@ -131,6 +150,13 @@ class AssemblyAiTranscriptionAdapter(TranscriptionPort):
             body["language_code"] = settings.assemblyai_language
         else:
             body["language_detection"] = True
+
+        boost = word_boost(vocabulary)
+        if boost:
+            body["word_boost"] = boost
+            # "high" because the terms are ones the user explicitly told us they
+            # say — the default weighting is tuned for speculative hints.
+            body["boost_param"] = "high"
 
         response = await client.post(TRANSCRIPT_URL, headers=self._headers(), json=body)
         response.raise_for_status()
@@ -171,6 +197,32 @@ class AssemblyAiTranscriptionAdapter(TranscriptionPort):
 # --------------------------------------------------------------------------- #
 # Response mapping — pure, so it can be tested without a network or a key.
 # --------------------------------------------------------------------------- #
+
+def word_boost(vocabulary: list[str] | None) -> list[str]:
+    """The user's vocabulary as AssemblyAI's `word_boost` list.
+
+    AssemblyAI documents a 1000-term ceiling and treats each entry as a word or
+    short phrase. The list is de-duplicated case-insensitively because a term
+    appearing twice weights it twice, which is not what the user asked for by
+    adding it once.
+    """
+    if not vocabulary:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in vocabulary:
+        term = str(raw or "").strip()
+        if not term:
+            continue
+        key = term.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(term)
+        if len(out) >= MAX_BOOST_TERMS:
+            break
+    return out
+
 
 def parse_response(payload: dict[str, Any]) -> TranscriptResponse:
     """Map AssemblyAI's response onto the shape the rest of the pipeline expects."""

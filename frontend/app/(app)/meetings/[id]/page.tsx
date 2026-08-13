@@ -20,6 +20,8 @@ import {
   Quote,
   Youtube,
   Pencil,
+  Search,
+  X,
 } from "lucide-react";
 import {
   useGetMeetingQuery,
@@ -32,11 +34,18 @@ import {
   useAskChatMutation,
   useTranslateSummaryMutation,
   useRenameSpeakersMutation,
+  useRematchSpeakerMutation,
+  useGetKnownSpeakersQuery,
   useEditSegmentsMutation,
   useGetSummaryTemplatesQuery,
   useResummarizeMutation,
 } from "@/lib/api";
-import type { SpokenWord, SummaryResponse, SummarySection } from "@/lib/types";
+import type {
+  SpeakerStats,
+  SpokenWord,
+  SummaryResponse,
+  SummarySection,
+} from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -332,6 +341,7 @@ export default function MeetingDetailPage() {
               meetingId={id}
               loading={transcript.isLoading}
               segments={transcript.data?.segments ?? []}
+              speakerStats={transcript.data?.speakers ?? []}
               fallbackText={transcript.data?.transcript}
               currentTime={audio.currentTime}
               // Passed straight through rather than wrapped in a closure:
@@ -620,6 +630,7 @@ function TranscriptPanel({
   meetingId,
   loading,
   segments,
+  speakerStats,
   fallbackText,
   currentTime,
   onSeek,
@@ -627,13 +638,28 @@ function TranscriptPanel({
   meetingId: string;
   loading: boolean;
   segments: TranscriptSegment[];
+  /**
+   * Talk-time as the server computed it. Preferred over recomputing here so
+   * the figures in the UI, the API and an export cannot disagree; the local
+   * fallback below covers a cached response from before this field existed.
+   */
+  speakerStats: SpeakerStats[];
   fallbackText?: string;
   currentTime: number;
   onSeek: (s: number) => void;
 }) {
   const [renameSpeakers, { isLoading: renaming }] = useRenameSpeakersMutation();
+  const [rematchSpeaker, { isLoading: merging }] = useRematchSpeakerMutation();
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState<Record<string, string>>({});
+  // Which label the user is folding away, and into whom.
+  const [mergeFrom, setMergeFrom] = React.useState("");
+  const [mergeInto, setMergeInto] = React.useState("");
+
+  // Names this user has used before. Offered as autocomplete rather than a
+  // forced choice: a new person in the meeting must not be harder to name than
+  // a familiar one.
+  const knownSpeakers = useGetKnownSpeakersQuery();
 
   const [editSegments, { isLoading: savingText }] = useEditSegmentsMutation();
   // Which line is open for editing, and the text as typed. Held by segment id
@@ -671,7 +697,24 @@ function TranscriptPanel({
     return Array.from(set);
   }, [segments]);
 
+  /**
+   * Talk-time, server-computed where available.
+   *
+   * The local sum is kept only as a fallback for a cached transcript fetched
+   * before the server returned these — two independent implementations of the
+   * same percentage is exactly how the number in the UI ends up disagreeing
+   * with the number in an export.
+   */
   const talk = React.useMemo(() => {
+    if (speakerStats.length > 0) {
+      const map = new Map<string, number>();
+      let total = 0;
+      for (const stat of speakerStats) {
+        map.set(stat.speaker, stat.speakingSeconds);
+        total += stat.speakingSeconds;
+      }
+      return { map, total };
+    }
     const map = new Map<string, number>();
     let total = 0;
     for (const s of segments) {
@@ -680,9 +723,41 @@ function TranscriptPanel({
       total += d;
     }
     return { map, total };
-  }, [segments]);
+  }, [segments, speakerStats]);
 
-  const turns = React.useMemo(() => groupIntoTurns(segments), [segments]);
+  const allTurns = React.useMemo(() => groupIntoTurns(segments), [segments]);
+
+  /**
+   * Find-in-transcript.
+   *
+   * The browser's own Ctrl-F is the obvious answer and it is not good enough
+   * here: a two-hour transcript is thousands of lines, and finding the fifth
+   * mention means pressing Enter five times with no idea how many there are.
+   * This filters to the turns that match and says how many, so "did anyone
+   * mention the migration?" is answered by looking rather than by scrolling.
+   *
+   * Speaker names are searched too — "what did Priya say?" is the same question
+   * shaped differently.
+   */
+  const [query, setQuery] = React.useState("");
+  const needle = query.trim().toLowerCase();
+
+  const turns = React.useMemo(() => {
+    if (!needle) return allTurns;
+    return allTurns.filter(
+      (t) =>
+        t.speaker.toLowerCase().includes(needle) ||
+        t.segments.some((s) => s.text.toLowerCase().includes(needle)),
+    );
+  }, [allTurns, needle]);
+
+  // Counted over utterances rather than turns: a turn is a display grouping, so
+  // counting those would report a number that changes with how text happens to
+  // be grouped rather than with how often the word was said.
+  const matchCount = React.useMemo(() => {
+    if (!needle) return 0;
+    return segments.filter((s) => s.text.toLowerCase().includes(needle)).length;
+  }, [segments, needle]);
 
   async function saveNames() {
     const mapping: Record<string, string> = {};
@@ -703,11 +778,83 @@ function TranscriptPanel({
     }
   }
 
+  /**
+   * Fold one diarization label into another.
+   *
+   * Renaming both to the same name would leave the turns separate, so the
+   * transcript reads as though the person keeps interrupting themselves. This
+   * merges them into one speaker.
+   */
+  async function mergeSpeakers() {
+    if (!mergeFrom || !mergeInto || mergeFrom === mergeInto) return;
+    try {
+      await rematchSpeaker({
+        id: meetingId,
+        fromSpeaker: mergeFrom,
+        toSpeaker: mergeInto,
+      }).unwrap();
+      toast.success(`${mergeFrom} merged into ${mergeInto}.`);
+      setMergeFrom("");
+      setMergeInto("");
+    } catch {
+      toast.error("Could not merge those speakers.");
+    }
+  }
+
+  /** Move a single mis-attributed turn to whoever actually said it. */
+  async function reassignTurn(segmentIds: string[], toSpeaker: string) {
+    if (segmentIds.length === 0 || !toSpeaker) return;
+    try {
+      await rematchSpeaker({ id: meetingId, toSpeaker, segmentIds }).unwrap();
+      toast.success(`Reassigned to ${toSpeaker}.`);
+    } catch {
+      toast.error("Could not reassign that turn.");
+    }
+  }
+
   if (loading) return <Card><CardContent className="pt-6"><Skeleton className="h-40 w-full" /></CardContent></Card>;
 
   return (
     <Card>
       <CardContent className="space-y-5 pt-6">
+        {/* Find in transcript. Above everything else because it changes what
+            the rest of the panel shows. */}
+        {segments.length > 0 && (
+          <div className="space-y-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                className="h-9 pl-8 pr-8"
+                placeholder="Find in transcript…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setQuery("");
+                }}
+                aria-label="Find in transcript"
+              />
+              {query && (
+                <button
+                  onClick={() => setQuery("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                  aria-label="Clear search"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+            {needle && (
+              <p className="text-xs text-muted-foreground">
+                {matchCount === 0
+                  ? "No matches."
+                  : `${matchCount} ${matchCount === 1 ? "match" : "matches"} in ${turns.length} ${
+                      turns.length === 1 ? "turn" : "turns"
+                    }. Click any word to play from there.`}
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Talk-time */}
         {speakers.length > 0 && talk.total > 0 && (
           <div className="space-y-2">
@@ -720,21 +867,78 @@ function TranscriptPanel({
               </Button>
             </div>
             {editing ? (
-              <div className="space-y-2">
-                {speakers.map((sp) => (
-                  <div key={sp} className="flex items-center gap-2">
-                    <span className="w-16 shrink-0 text-sm text-muted-foreground">{sp}</span>
-                    <Input
-                      className="h-8"
-                      placeholder="New name"
-                      value={draft[sp] ?? ""}
-                      onChange={(e) => setDraft((d) => ({ ...d, [sp]: e.target.value }))}
-                    />
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  {speakers.map((sp) => (
+                    <div key={sp} className="flex items-center gap-2">
+                      <span className="w-16 shrink-0 text-sm text-muted-foreground">{sp}</span>
+                      <Input
+                        className="h-8"
+                        placeholder="New name"
+                        // A plain datalist rather than a combobox: the field
+                        // still accepts anything typed, so someone new to this
+                        // workspace is no harder to name than a regular.
+                        list="recallix-known-speakers"
+                        value={draft[sp] ?? ""}
+                        onChange={(e) => setDraft((d) => ({ ...d, [sp]: e.target.value }))}
+                      />
+                    </div>
+                  ))}
+                  <datalist id="recallix-known-speakers">
+                    {(knownSpeakers.data ?? []).map((k) => (
+                      <option key={k.id} value={k.displayName} />
+                    ))}
+                  </datalist>
+                  <Button size="sm" onClick={saveNames} disabled={renaming}>
+                    {renaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save
+                  </Button>
+                </div>
+
+                {/* Merging is a different repair from renaming: this one is for
+                    when diarization split a single person across two labels,
+                    which renaming both cannot fix. */}
+                {speakers.length > 1 && (
+                  <div className="space-y-2 border-t pt-3">
+                    <p className="text-sm font-medium">Same person twice?</p>
+                    <p className="text-xs text-muted-foreground">
+                      Merge one label into another when the transcriber split one
+                      voice across two speakers.
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select
+                        className="h-8 rounded-md border bg-background px-2 text-sm"
+                        value={mergeFrom}
+                        onChange={(e) => setMergeFrom(e.target.value)}
+                      >
+                        <option value="">Merge…</option>
+                        {speakers.map((sp) => (
+                          <option key={sp} value={sp}>{sp}</option>
+                        ))}
+                      </select>
+                      <span className="text-sm text-muted-foreground">into</span>
+                      <select
+                        className="h-8 rounded-md border bg-background px-2 text-sm"
+                        value={mergeInto}
+                        onChange={(e) => setMergeInto(e.target.value)}
+                      >
+                        <option value="">Choose…</option>
+                        {speakers
+                          .filter((sp) => sp !== mergeFrom)
+                          .map((sp) => (
+                            <option key={sp} value={sp}>{sp}</option>
+                          ))}
+                      </select>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={mergeSpeakers}
+                        disabled={merging || !mergeFrom || !mergeInto}
+                      >
+                        {merging ? <Loader2 className="h-4 w-4 animate-spin" /> : "Merge"}
+                      </Button>
+                    </div>
                   </div>
-                ))}
-                <Button size="sm" onClick={saveNames} disabled={renaming}>
-                  {renaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save
-                </Button>
+                )}
               </div>
             ) : (
               <div className="space-y-1.5">
@@ -777,7 +981,7 @@ function TranscriptPanel({
         {segments.length > 0 ? (
           <div className="space-y-5">
             {turns.map((turn, i) => (
-              <div key={i} className="flex gap-3">
+              <div key={i} className="group flex gap-3">
                 <SpeakerAvatar name={turn.speaker} />
                 <div className="min-w-0 flex-1 space-y-1">
                   <div className="flex items-baseline gap-2">
@@ -789,6 +993,34 @@ function TranscriptPanel({
                     >
                       {timecode(turn.start)}
                     </button>
+                    {/* Per-turn reassignment, for the handovers where two people
+                        overlap and the whole turn landed on the wrong one. A
+                        label-wide rename cannot express this: it would move
+                        every other turn with it. Hidden until hover so it does
+                        not compete with reading. */}
+                    {speakers.length > 1 && turn.segments.some((s) => s.id) && (
+                      <select
+                        className="ml-auto h-6 rounded border bg-background px-1 text-xs text-muted-foreground opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100"
+                        value=""
+                        disabled={merging}
+                        aria-label={`Reassign this turn from ${turn.speaker}`}
+                        onChange={(e) => {
+                          const to = e.target.value;
+                          if (!to) return;
+                          reassignTurn(
+                            turn.segments.map((s) => s.id).filter((id): id is string => Boolean(id)),
+                            to,
+                          );
+                        }}
+                      >
+                        <option value="">Wrong speaker?</option>
+                        {speakers
+                          .filter((sp) => sp !== turn.speaker)
+                          .map((sp) => (
+                            <option key={sp} value={sp}>Move to {sp}</option>
+                          ))}
+                      </select>
+                    )}
                   </div>
                   <p className="text-sm leading-relaxed">
                     {turn.segments.map((s, j) => {
@@ -852,7 +1084,19 @@ function TranscriptPanel({
                             words={s.words}
                             at={active ? currentTime : -1}
                             onSeek={onSeek}
+                            match={needle}
                           />
+                          {/* Only lines that differ from the meeting's language
+                              carry this, so it stays a signal. In a monolingual
+                              meeting nothing renders here at all. */}
+                          {s.language && (
+                            <span
+                              className="ml-1 rounded bg-muted px-1 py-0.5 align-middle text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+                              title={`Spoken in ${languageName(s.language)}`}
+                            >
+                              {s.language}
+                            </span>
+                          )}
                           {/* Shown on hover so it never competes with reading,
                               but always reachable by keyboard. */}
                           {s.id && (
@@ -872,6 +1116,13 @@ function TranscriptPanel({
                 </div>
               </div>
             ))}
+            {/* Searched, matched nothing. Without this the panel just empties,
+                which reads as a transcript that failed to load. */}
+            {needle && turns.length === 0 && (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                Nothing in this transcript matches “{query.trim()}”.
+              </p>
+            )}
           </div>
         ) : (
           <p className="whitespace-pre-wrap text-sm">{fallbackText || "Transcript unavailable."}</p>
@@ -907,6 +1158,7 @@ const SpokenWords = React.memo(function SpokenWords({
   words,
   at,
   onSeek,
+  match,
 }: {
   text: string;
   start: number;
@@ -914,6 +1166,12 @@ const SpokenWords = React.memo(function SpokenWords({
   words?: SpokenWord[];
   at: number;
   onSeek: (t: number) => void;
+  /**
+   * Lower-cased search term, or empty. A word containing it is tinted, so a hit
+   * is visible in place rather than only as a filtered-down list — which is
+   * what tells you *why* a turn matched.
+   */
+  match?: string;
 }) {
   const tokens = React.useMemo(() => {
     if (words && words.length > 0) {
@@ -959,6 +1217,11 @@ const SpokenWords = React.memo(function SpokenWords({
           }}
           className={cn(
             "cursor-pointer rounded transition-colors duration-75 hover:bg-primary/20",
+            // Search hits use amber, never the primary tint: the playback
+            // highlight already owns that colour, and two meanings sharing one
+            // colour would make the moving cursor unreadable while searching.
+            match && w.token.toLowerCase().includes(match) &&
+              "bg-amber-400/40 text-foreground dark:bg-amber-400/30",
             at >= w.from && at < w.to && "bg-primary/40 text-foreground"
           )}
         >

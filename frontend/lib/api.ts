@@ -8,8 +8,12 @@ import type {
   CheckoutRequest,
   CheckoutResponse,
   EmailDraft,
+  KnownSpeaker,
   ShareCreateRequest,
   ShareResponse,
+  SpeakerRematch,
+  VocabularyTerm,
+  VocabularyTermInput,
   MeetingCreateRequest,
   MeetingImportRequest,
   PreferencesResponse,
@@ -61,6 +65,8 @@ export const api = createApi({
     "Summary",
     "SummaryTemplates",
     "Share",
+    "Vocabulary",
+    "KnownSpeakers",
   ],
   endpoints: (builder) => ({
     // ---- Meetings ----
@@ -250,7 +256,75 @@ export const api = createApi({
         method: "PATCH",
         body: { mapping },
       }),
-      invalidatesTags: (_r, _e, arg) => [{ type: "Transcript", id: arg.id }],
+      // KnownSpeakers too: a rename records the names for next time, so the
+      // suggestion list is stale the moment this succeeds.
+      invalidatesTags: (_r, _e, arg) => [
+        { type: "Transcript", id: arg.id },
+        { type: "KnownSpeakers", id: "LIST" },
+      ],
+    }),
+
+    /**
+     * Fix diarization: merge a label that was split across two speakers, or
+     * move individual turns to whoever actually said them.
+     *
+     * Invalidates chat as well as the transcript — a rematch re-indexes the
+     * meeting, so earlier answers attributed quotes to a speaker the transcript
+     * no longer names.
+     */
+    rematchSpeaker: builder.mutation<
+      TranscriptResponse,
+      { id: string } & SpeakerRematch
+    >({
+      query: ({ id, ...body }) => ({
+        url: `/meetings/${id}/speakers/rematch`,
+        method: "PATCH",
+        body,
+      }),
+      invalidatesTags: (_r, _e, arg) => [
+        { type: "Transcript", id: arg.id },
+        { type: "Chat", id: arg.id },
+        { type: "KnownSpeakers", id: "LIST" },
+      ],
+    }),
+
+    // ---- Known speakers ----
+    getKnownSpeakers: builder.query<KnownSpeaker[], void>({
+      query: () => ({ url: "/speakers" }),
+      providesTags: [{ type: "KnownSpeakers", id: "LIST" }],
+    }),
+
+    deleteKnownSpeaker: builder.mutation<void, string>({
+      query: (id) => ({ url: `/speakers/${id}`, method: "DELETE" }),
+      invalidatesTags: [{ type: "KnownSpeakers", id: "LIST" }],
+    }),
+
+    // ---- Custom vocabulary ----
+    getVocabulary: builder.query<VocabularyTerm[], void>({
+      query: () => ({ url: "/vocabulary" }),
+      providesTags: [{ type: "Vocabulary", id: "LIST" }],
+    }),
+
+    createVocabularyTerm: builder.mutation<VocabularyTerm, VocabularyTermInput>({
+      query: (body) => ({ url: "/vocabulary", method: "POST", body }),
+      invalidatesTags: [{ type: "Vocabulary", id: "LIST" }],
+    }),
+
+    updateVocabularyTerm: builder.mutation<
+      VocabularyTerm,
+      { id: string } & VocabularyTermInput
+    >({
+      query: ({ id, ...body }) => ({
+        url: `/vocabulary/${id}`,
+        method: "PUT",
+        body,
+      }),
+      invalidatesTags: [{ type: "Vocabulary", id: "LIST" }],
+    }),
+
+    deleteVocabularyTerm: builder.mutation<void, string>({
+      query: (id) => ({ url: `/vocabulary/${id}`, method: "DELETE" }),
+      invalidatesTags: [{ type: "Vocabulary", id: "LIST" }],
     }),
 
     deleteMeeting: builder.mutation<void, string>({
@@ -370,6 +444,13 @@ export const {
   useSemanticSearchMutation,
   useTranslateSummaryMutation,
   useRenameSpeakersMutation,
+  useRematchSpeakerMutation,
+  useGetKnownSpeakersQuery,
+  useDeleteKnownSpeakerMutation,
+  useGetVocabularyQuery,
+  useCreateVocabularyTermMutation,
+  useUpdateVocabularyTermMutation,
+  useDeleteVocabularyTermMutation,
   useEditSegmentsMutation,
   useGetActionItemsQuery,
   usePatchActionItemMutation,

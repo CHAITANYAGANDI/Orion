@@ -69,7 +69,9 @@ def test_unknown_slug_falls_back_to_general():
 
 # --- the wiring ------------------------------------------------------------ #
 class _StubTranscription:
-    async def transcribe(self, audio: bytes, filename: str) -> TranscriptResponse:
+    async def transcribe(
+        self, audio: bytes, filename: str, vocabulary: list[str] | None = None
+    ) -> TranscriptResponse:
         return TranscriptResponse(transcript="Hello.", language="en", segments=[])
 
 

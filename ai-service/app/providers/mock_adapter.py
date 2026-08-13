@@ -274,7 +274,11 @@ def _mock_sections(tpl: SummaryTemplate, script: MockScript) -> list[SummarySect
 class MockTranscriptionAdapter(TranscriptionPort):
     """Returns one of the scripted sprint meetings."""
 
-    async def transcribe(self, audio: bytes, filename: str) -> TranscriptResponse:
+    async def transcribe(
+        self, audio: bytes, filename: str, vocabulary: list[str] | None = None
+    ) -> TranscriptResponse:
+        # Vocabulary is accepted and ignored: the scripts are fixed text, so
+        # there is nothing for a boosting hint to change.
         script = select_script(filename, audio)
         return TranscriptResponse(
             transcript=script.transcript,

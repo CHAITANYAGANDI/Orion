@@ -17,7 +17,13 @@ public record SegmentDto(
          * Per-word timings. Empty for transcripts recorded before V13, which
          * the client renders by estimating from the segment span instead.
          */
-        List<SpokenWord> words
+        List<SpokenWord> words,
+        /**
+         * Set only when this line is in a different language from the meeting's.
+         * Null for the overwhelmingly common monolingual case, so the UI marks
+         * exceptions rather than tagging every line.
+         */
+        String language
 ) {
     public static SegmentDto from(TranscriptSegment s) {
         return new SegmentDto(
@@ -26,7 +32,8 @@ public record SegmentDto(
                 s.getEndTime() == null ? 0.0 : s.getEndTime(),
                 s.getSpeaker(),
                 s.getText(),
-                s.getWords() == null ? List.of() : s.getWords()
+                s.getWords() == null ? List.of() : s.getWords(),
+                s.getLanguage()
         );
     }
 }

@@ -22,8 +22,19 @@ class TranscriptionPort(ABC):
     """Speech-to-text port (Whisper-style)."""
 
     @abstractmethod
-    async def transcribe(self, audio: bytes, filename: str) -> TranscriptResponse:
-        """Transcribe raw audio bytes into text + segments."""
+    async def transcribe(
+        self, audio: bytes, filename: str, vocabulary: list[str] | None = None
+    ) -> TranscriptResponse:
+        """Transcribe raw audio bytes into text + segments.
+
+        `vocabulary` carries the user's boosting hints — product names, people,
+        jargon, acronyms. They raise the probability of a term being recognised
+        without forcing it, so adding "Kubernetes" makes it more likely to be
+        heard and does not rewrite "coordinates" into it. Adapters whose
+        provider cannot express boosting ignore the argument.
+
+        Optional with a default so existing callers and tests are unaffected.
+        """
         raise NotImplementedError
 
 

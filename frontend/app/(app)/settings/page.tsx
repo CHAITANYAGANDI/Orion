@@ -11,6 +11,8 @@ import {
   useGetPreferencesQuery,
   useUpdatePreferencesMutation,
 } from "@/lib/api";
+import { KnownSpeakersCard } from "@/components/known-speakers-card";
+import { VocabularyCard } from "@/components/vocabulary-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,6 +50,10 @@ export default function SettingsPage() {
       </Card>
 
       <RecapEmailCard />
+
+      <VocabularyCard />
+
+      <KnownSpeakersCard />
 
       <Card>
         <CardHeader>

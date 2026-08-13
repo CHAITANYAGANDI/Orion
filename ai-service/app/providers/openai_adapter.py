@@ -116,6 +116,34 @@ async def _with_retries(
     return fallback
 
 
+def prompt_hint(vocabulary: list[str] | None, limit: int = 200) -> str:
+    """The user's vocabulary as a Whisper decoding prompt.
+
+    Whisper's prompt is capped at 224 tokens and silently truncates past it, so
+    the list is bounded here — a prompt that runs off the end would drop terms
+    without saying so. Kept well under the ceiling because the tail of the list
+    is worth less than a prompt that certainly fits.
+    """
+    if not vocabulary:
+        return ""
+    terms: list[str] = []
+    seen: set[str] = set()
+    for raw in vocabulary:
+        term = str(raw or "").strip()
+        if not term:
+            continue
+        key = term.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        terms.append(term)
+        if len(terms) >= limit:
+            break
+    if not terms:
+        return ""
+    return "Vocabulary used in this recording: " + ", ".join(terms) + "."
+
+
 class OpenAiTranscriptionAdapter(TranscriptionPort):
     """Whisper transcription via the OpenAI SDK."""
 
@@ -127,15 +155,26 @@ class OpenAiTranscriptionAdapter(TranscriptionPort):
             max_retries=0,  # we manage retries ourselves
         )
 
-    async def transcribe(self, audio: bytes, filename: str) -> TranscriptResponse:
+    async def transcribe(
+        self, audio: bytes, filename: str, vocabulary: list[str] | None = None
+    ) -> TranscriptResponse:
         async def _op() -> TranscriptResponse:
             buffer = io.BytesIO(audio)
             buffer.name = filename or "audio.wav"
-            resp: Any = await self._client.audio.transcriptions.create(
-                model=self._settings.openai_transcribe_model,
-                file=buffer,
-                response_format="verbose_json",
-            )
+            request: dict[str, Any] = {
+                "model": self._settings.openai_transcribe_model,
+                "file": buffer,
+                "response_format": "verbose_json",
+            }
+            # Whisper has no boosting parameter. Its `prompt` is the documented
+            # stand-in: it biases decoding toward the style and spellings it
+            # contains. Comma-separated terms are the shape OpenAI's own
+            # guidance uses for exactly this — getting names and jargon spelled
+            # the way the user spells them.
+            hint = prompt_hint(vocabulary)
+            if hint:
+                request["prompt"] = hint
+            resp: Any = await self._client.audio.transcriptions.create(**request)
             text = getattr(resp, "text", "") or ""
             language = getattr(resp, "language", "en") or "en"
             segments: list[Segment] = []

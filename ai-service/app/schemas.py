@@ -78,6 +78,12 @@ class Segment(CamelModel):
     # estimating from the segment span, which is what every transcript recorded
     # before this field existed still does.
     words: list[Word] = Field(default_factory=list)
+    # Set only when this utterance is in a *different* language from the
+    # meeting's, and only when detection was confident. None therefore means
+    # "same as the meeting, or not known" — never "detection failed", because
+    # labelling every line would make the marker meaningless in the monolingual
+    # meetings that are the overwhelming majority.
+    language: str | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -336,6 +342,12 @@ class MeetingUploadedEvent(CamelModel):
     # Which summary shape the user picked. None means General, so an event
     # published before this field existed still processes.
     summary_template: str | None = None
+    # The user's transcription boosting hints, resolved by Spring when the job
+    # was queued. Sent with the event rather than fetched here: the worker runs
+    # without a user context, and pinning the list at enqueue time keeps a term
+    # added mid-run from changing a transcript halfway through. Defaults empty
+    # so events published before this field existed still validate.
+    vocabulary: list[str] = []
 
 
 class ProcessingFailedEvent(CamelModel):

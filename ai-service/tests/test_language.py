@@ -99,7 +99,7 @@ async def test_pipeline_passes_the_detected_language_to_every_llm_call():
             return await super().extract_action_items(transcript, language)
 
     class SpanishTranscriber(MockTranscriptionAdapter):
-        async def transcribe(self, audio, filename):
+        async def transcribe(self, audio, filename, vocabulary=None):
             return TranscriptResponse(
                 transcript="Acordamos usar S3.", language="es", segments=[]
             )

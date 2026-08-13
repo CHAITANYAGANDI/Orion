@@ -7,6 +7,7 @@ import com.recallix.dto.MeetingResponse;
 import com.recallix.dto.PageResponse;
 import com.recallix.dto.ReprocessResponse;
 import com.recallix.dto.ResummarizeRequest;
+import com.recallix.dto.SpeakerRematchRequest;
 import com.recallix.dto.SpeakerRenameRequest;
 import com.recallix.dto.SummaryResponse;
 import com.recallix.dto.TranscriptEditRequest;
@@ -98,6 +99,19 @@ public class MeetingController {
     public TranscriptResponse renameSpeakers(@PathVariable String id,
                                              @Valid @RequestBody SpeakerRenameRequest req) {
         return meetings.renameSpeakers(SecurityUtils.currentUserId(), id, req.mapping());
+    }
+
+    /**
+     * Fix diarization: merge a label that was split across two speakers, or
+     * move individual turns to the person who actually said them.
+     *
+     * <p>Distinct from the rename above, which only changes what a label is
+     * called.
+     */
+    @PatchMapping("/{id}/speakers/rematch")
+    public TranscriptResponse rematchSpeaker(@PathVariable String id,
+                                             @Valid @RequestBody SpeakerRematchRequest req) {
+        return meetings.rematchSpeaker(SecurityUtils.currentUserId(), id, req);
     }
 
     /**

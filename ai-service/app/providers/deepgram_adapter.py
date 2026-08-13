@@ -65,7 +65,9 @@ class DeepgramTranscriptionAdapter(TranscriptionPort):
             # default.
             logger.error("Deepgram selected but DEEPGRAM_API_KEY is empty; transcription will fail.")
 
-    async def transcribe(self, audio: bytes, filename: str) -> TranscriptResponse:
+    async def transcribe(
+        self, audio: bytes, filename: str, vocabulary: list[str] | None = None
+    ) -> TranscriptResponse:
         async def _op() -> TranscriptResponse:
             params: dict[str, Any] = {
                 "model": self._settings.deepgram_model,
@@ -80,6 +82,12 @@ class DeepgramTranscriptionAdapter(TranscriptionPort):
                 params["language"] = self._settings.deepgram_language
             else:
                 params["detect_language"] = "true"
+
+            boost = boost_params(vocabulary, self._settings.deepgram_model)
+            if boost:
+                # httpx repeats a list-valued param, which is exactly the wire
+                # format Deepgram wants: ?keyterm=a&keyterm=b.
+                params.update(boost)
 
             headers = {
                 "Authorization": f"Token {self._settings.deepgram_api_key}",
@@ -106,6 +114,63 @@ class DeepgramTranscriptionAdapter(TranscriptionPort):
             fallback=TranscriptResponse(transcript="", language="en", segments=[]),
             label="transcribe",
         )
+
+
+# --------------------------------------------------------------------------- #
+# Request shaping — pure, so it can be tested without a network or a key.
+# --------------------------------------------------------------------------- #
+
+# Deepgram accepts more, but every extra term is another word the model is
+# biased toward: a list of everything boosts nothing. The backend caps a user's
+# vocabulary well below this; the cap is repeated here because this adapter is
+# also reachable from the HTTP endpoints, which do not go through that cap.
+MAX_BOOST_TERMS = 100
+
+
+def boost_params(vocabulary: list[str] | None, model: str) -> dict[str, Any]:
+    """Map the user's vocabulary onto whichever boosting parameter the model takes.
+
+    Deepgram renamed the feature between model generations, and the two are not
+    interchangeable — `keywords` is silently ignored by nova-3, and `keyterm`
+    is rejected by nova-2. Sending the wrong one is a boost that appears to
+    work and does nothing, so the model decides which name is used.
+    """
+    if not vocabulary:
+        return {}
+
+    terms: list[str] = []
+    seen: set[str] = set()
+    for raw in vocabulary:
+        # Deepgram splits on commas, so a term containing one would arrive as
+        # two partial terms; dropping the comma keeps it a single phrase.
+        # Whitespace is collapsed afterwards so "Smith, Jane" does not become a
+        # term with a double space that matches nothing said out loud.
+        term = " ".join(str(raw or "").replace(",", " ").split())
+        if not term:
+            continue
+        key = term.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        terms.append(term)
+        if len(terms) >= MAX_BOOST_TERMS:
+            break
+
+    if not terms:
+        return {}
+
+    # nova-3 and later take `keyterm`; earlier models take `keywords`.
+    parameter = "keyterm" if _is_keyterm_model(model) else "keywords"
+    logger.info("Sending %d vocabulary term(s) to Deepgram as %s.", len(terms), parameter)
+    return {parameter: terms}
+
+
+def _is_keyterm_model(model: str) -> bool:
+    name = (model or "").strip().lower()
+    # Unknown/custom model names default to keyterm: it is the current
+    # parameter, so a model added after this code was written is more likely to
+    # want it than the legacy one.
+    return not name.startswith(("nova-2", "nova-1", "base", "enhanced", "whisper"))
 
 
 # --------------------------------------------------------------------------- #

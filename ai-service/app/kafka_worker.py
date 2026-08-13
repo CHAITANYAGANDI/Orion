@@ -202,6 +202,9 @@ class KafkaWorker:
         """
         meeting_id = event.meeting_id
         template_slug = event.summary_template
+        # None rather than [] so adapters can distinguish "no hints" from an
+        # empty list without each of them re-checking for falsiness.
+        vocabulary = event.vocabulary or None
 
         if event.source_type == "YOUTUBE":
             await progress_hook(
@@ -214,7 +217,7 @@ class KafkaWorker:
             source = await fetch_youtube(event.source_url or "", self._settings)
             result = await self._pipeline.process(
                 meeting_id, source.audio or b"", source.filename, progress_hook,
-                transcript_hook, template_slug,
+                transcript_hook, template_slug, vocabulary,
             )
             # Spring created this meeting before anything was known about the
             # video; hand back the real title and length so it can replace them.
@@ -245,7 +248,8 @@ class KafkaWorker:
             self._settings, audio_url=event.audio_url, object_key=event.object_key
         )
         return await self._pipeline.process(
-            meeting_id, audio, filename, progress_hook, transcript_hook, template_slug
+            meeting_id, audio, filename, progress_hook, transcript_hook,
+            template_slug, vocabulary,
         )
 
     async def _handle(self, event: MeetingUploadedEvent) -> None:

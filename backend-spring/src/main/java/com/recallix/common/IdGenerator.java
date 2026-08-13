@@ -37,4 +37,6 @@ public final class IdGenerator {
     public static String connection()  { return generate("con_"); }
     public static String agentAction() { return generate("aar_"); }
     public static String syncLog()     { return generate("syn_"); }
+    public static String vocabulary()  { return generate("voc_"); }
+    public static String knownSpeaker(){ return generate("spk_"); }
 }

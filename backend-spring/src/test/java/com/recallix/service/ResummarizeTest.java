@@ -63,6 +63,8 @@ class ResummarizeTest {
     @Mock private AuditService audit;
     @Mock private AiClient ai;
     @Mock private SummaryTemplateService templates;
+    @Mock private KnownSpeakerService knownSpeakers;
+    @Mock private VocabularyService vocabulary;
 
     private MeetingService service;
     private Meeting meeting;
@@ -70,7 +72,7 @@ class ResummarizeTest {
     @BeforeEach
     void setUp() {
         service = new MeetingService(meetings, transcripts, segments, summaries,
-                actionItems, storage, usage, outbox, audit, ai, templates);
+                actionItems, storage, usage, outbox, audit, ai, templates, knownSpeakers, vocabulary);
 
         meeting = new Meeting();
         meeting.setId(MEETING);

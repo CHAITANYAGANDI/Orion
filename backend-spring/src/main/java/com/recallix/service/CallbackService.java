@@ -150,6 +150,7 @@ public class CallbackService {
             seg.setSpeaker(s.speaker());
             seg.setText(s.text());
             seg.setWords(s.wordsOrEmpty());
+            seg.setLanguage(s.language());
             segments.save(seg);
         }
     }

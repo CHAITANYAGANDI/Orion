@@ -60,6 +60,8 @@ class TranscriptEditTest {
     @Mock private AuditService audit;
     @Mock private AiClient ai;
     @Mock private SummaryTemplateService templates;
+    @Mock private KnownSpeakerService knownSpeakers;
+    @Mock private VocabularyService vocabulary;
 
     private MeetingService service;
     private MeetingTranscript transcript;
@@ -69,7 +71,7 @@ class TranscriptEditTest {
     @BeforeEach
     void setUp() {
         service = new MeetingService(meetings, transcripts, segments, summaries,
-                actionItems, storage, usage, outbox, audit, ai, templates);
+                actionItems, storage, usage, outbox, audit, ai, templates, knownSpeakers, vocabulary);
 
         Meeting meeting = new Meeting();
         meeting.setId(MEETING);

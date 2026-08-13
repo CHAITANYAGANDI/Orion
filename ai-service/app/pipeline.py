@@ -20,6 +20,7 @@ import logging
 import time
 from typing import Awaitable, Callable
 
+from app.language import annotate_segments
 from app.providers.ports import LlmPort, TranscriptionPort
 from app.schemas import (
     DraftEmailRequest,
@@ -70,8 +71,10 @@ class Pipeline:
         self._llm = llm
 
     # --- individual stages (used directly by HTTP endpoints) ---------------- #
-    async def transcribe(self, audio: bytes, filename: str) -> TranscriptResponse:
-        return await self._transcription.transcribe(audio, filename)
+    async def transcribe(
+        self, audio: bytes, filename: str, vocabulary: list[str] | None = None
+    ) -> TranscriptResponse:
+        return await self._transcription.transcribe(audio, filename, vocabulary)
 
     async def summarize(
         self,
@@ -106,6 +109,7 @@ class Pipeline:
         progress_hook: ProgressHook | None = None,
         transcript_hook: TranscriptHook | None = None,
         template_slug: str | None = None,
+        vocabulary: list[str] | None = None,
     ) -> MeetingBriefResult:
         """Run the full pipeline, emitting stage events through the hook."""
 
@@ -121,7 +125,11 @@ class Pipeline:
 
         # 1) Transcription
         await emit(TOPIC_TRANSCRIPTION_STARTED, "TRANSCRIBING", 10, "Generating transcript from audio...")
-        transcript = await self._transcription.transcribe(audio, filename)
+        transcript = await self._transcription.transcribe(audio, filename, vocabulary)
+        # Providers report one language for the whole recording, which is wrong
+        # for the meetings people actually notice: half in one language, half in
+        # another. This marks the utterances that differ, leaving the rest None.
+        annotate_segments(transcript.segments, transcript.language)
         transcribed_at = time.perf_counter()
         await emit(
             TOPIC_TRANSCRIPTION_COMPLETED, "TRANSCRIBING", 40, "Transcript ready; preparing summary..."

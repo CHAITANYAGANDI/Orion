@@ -126,6 +126,23 @@ export interface TranscriptSegment {
    * falls back to estimating from the segment span.
    */
   words?: SpokenWord[];
+  /**
+   * ISO-639-1 code, present only when this line is in a different language from
+   * the meeting's. Absent for monolingual meetings and for anything detection
+   * could not call — so it marks exceptions rather than labelling every line.
+   */
+  language?: string | null;
+}
+
+/** How much of the talking one speaker did. Derived server-side on every read. */
+export interface SpeakerStats {
+  speaker: string;
+  /** Seconds this speaker held the floor, summed across their turns. */
+  speakingSeconds: number;
+  /** Share of total *speaking* time, 0-100. Not share of wall-clock duration. */
+  percentage: number;
+  segmentCount: number;
+  wordCount: number;
 }
 
 export interface TranscriptResponse {
@@ -133,6 +150,51 @@ export interface TranscriptResponse {
   transcript: string;
   language: string;
   segments: TranscriptSegment[];
+  /** Ordered by who spoke most. Empty for a document, which has no speakers. */
+  speakers: SpeakerStats[];
+}
+
+/**
+ * Fix diarization rather than naming: merge a label that was split across two
+ * speakers, or move individual turns to whoever actually said them. Exactly one
+ * of `fromSpeaker` / `segmentIds` is sent.
+ */
+export interface SpeakerRematch {
+  fromSpeaker?: string;
+  toSpeaker: string;
+  segmentIds?: string[];
+}
+
+export type VocabularyCategory = "KEYWORD" | "NAME" | "JARGON" | "ACRONYM";
+
+/**
+ * A transcription boosting hint. Sent with the transcription job, so it applies
+ * to meetings processed after it is added — an existing transcript has to be
+ * reprocessed to benefit from it.
+ */
+export interface VocabularyTerm {
+  id: string;
+  term: string;
+  category: VocabularyCategory;
+  /** What an acronym stands for. Empty for every other category. */
+  expansion: string;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface VocabularyTermInput {
+  term: string;
+  category: VocabularyCategory;
+  expansion?: string;
+  active?: boolean;
+}
+
+/** A name this user has applied to a speaker before, offered when renaming. */
+export interface KnownSpeaker {
+  id: string;
+  displayName: string;
+  timesUsed: number;
+  lastUsedAt: string;
 }
 
 /** A heading with its bullets — the repeating unit of an `outline` section. */

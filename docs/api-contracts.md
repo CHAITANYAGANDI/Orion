@@ -84,8 +84,61 @@ again in the worker.
 | GET  | `/api/v1/meetings/{id}/decisions` | — | `DecisionResponse[]` |
 | GET  | `/api/v1/meetings/{id}/risks` | — | `RiskResponse[]` |
 | PATCH | `/api/v1/meetings/{id}/speakers` | `{ "mapping": { "Speaker 1": "Ana" } }` | `TranscriptResponse` |
+| PATCH | `/api/v1/meetings/{id}/speakers/rematch` | `{ "fromSpeaker"?, "toSpeaker", "segmentIds"? }` | `TranscriptResponse` |
 | POST | `/api/v1/meetings/{id}/reprocess` | — | `202 { "meetingId","status" }` |
 | DELETE | `/api/v1/meetings/{id}` | — | `204` |
+
+`TranscriptResponse` carries a `speakers[]` of talk-time stats
+(`speaker`, `speakingSeconds`, `percentage`, `segmentCount`, `wordCount`),
+derived from the segments on every read. The percentage is a share of total
+**speaking** time, not of the meeting's wall-clock duration — the two differ
+whenever there is silence, and percentages that do not sum to 100 read as a bug.
+
+### Speaker rematch vs. rename
+
+Renaming answers "who is Speaker 2?". Rematching fixes diarization itself, and
+takes exactly one of two shapes — sending both is a `400`, because the result
+would depend on which was applied first:
+
+- **Merge** — send `fromSpeaker`. Every turn with that label becomes
+  `toSpeaker`. For when one person was split across two labels; renaming both
+  to the same name leaves the turns separate, so the transcript reads as though
+  they interrupt themselves.
+- **Reassign** — send `segmentIds`. Only those turns move. For a handover where
+  two people overlap and the turn landed on the wrong one. An unknown segment id
+  fails the whole batch rather than half-applying it.
+
+Both re-index the meeting and rebuild the flat transcript, because each carries
+the speaker prefix and chat and the export read them.
+
+### Custom vocabulary & known speakers
+
+| Method | Path | Body | Response |
+| --- | --- | --- | --- |
+| GET | `/api/v1/vocabulary` | — | `VocabularyTerm[]` |
+| POST | `/api/v1/vocabulary` | `{ "term", "category", "expansion"?, "active"? }` | `201 VocabularyTerm` |
+| PUT | `/api/v1/vocabulary/{id}` | same as POST | `VocabularyTerm` |
+| DELETE | `/api/v1/vocabulary/{id}` | — | `204` |
+| GET | `/api/v1/speakers` | — | `KnownSpeaker[]` |
+| DELETE | `/api/v1/speakers/{id}` | — | `204` |
+
+`category` is `KEYWORD | NAME | JARGON | ACRONYM`. All four become the same
+boosting list on the transcription request — the category is what the user is
+telling us, not a different mechanism — and `expansion` is stored for `ACRONYM`
+only. Terms are hints, not rules: they raise the probability of a term being
+recognised without forcing it. Duplicates (case-insensitive) and exceeding the
+per-user cap are both `400` with a message worth showing verbatim.
+
+Vocabulary is resolved by Spring when a job is enqueued and travels on the
+`meeting_uploaded` event, so it applies to meetings processed **after** a term
+is added — an existing transcript must be reprocessed to benefit. Each provider
+expresses boosting differently: Deepgram nova-3+ takes `keyterm`, nova-2 and
+earlier take `keywords`, AssemblyAI takes `word_boost`, and Whisper has no
+boosting parameter so the terms go in its decoding `prompt`.
+
+`/api/v1/speakers` has no create endpoint on purpose: the list is written by
+renaming or rematching a speaker, so it reflects names actually in use rather
+than a separate address book that would drift from the transcripts.
 
 ### Chat, semantic search & translation
 

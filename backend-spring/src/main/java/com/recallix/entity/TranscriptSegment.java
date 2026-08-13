@@ -40,6 +40,13 @@ public class TranscriptSegment {
     @Column(name = "words_json", columnDefinition = "jsonb")
     private List<SpokenWord> words = new ArrayList<>();
 
+    /**
+     * ISO-639-1 code, set only when this utterance is in a different language
+     * from the meeting's. Null means same-as-meeting or undetermined — see V21.
+     */
+    @Column(name = "language")
+    private String language;
+
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
 
@@ -51,6 +58,9 @@ public class TranscriptSegment {
 
     public Double getEndTime() { return endTime; }
     public void setEndTime(Double endTime) { this.endTime = endTime; }
+
+    public String getLanguage() { return language; }
+    public void setLanguage(String language) { this.language = language; }
 
     public List<SpokenWord> getWords() { return words; }
     public void setWords(List<SpokenWord> words) { this.words = words; }

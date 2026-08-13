@@ -11,6 +11,8 @@ import com.recallix.dto.MeetingResponse;
 import com.recallix.dto.PageResponse;
 import com.recallix.dto.ReprocessResponse;
 import com.recallix.dto.SegmentDto;
+import com.recallix.dto.SpeakerRematchRequest;
+import com.recallix.dto.SpeakerStatsDto;
 import com.recallix.dto.SummaryResponse;
 import com.recallix.dto.TranscriptEditRequest;
 import com.recallix.dto.TranscriptResponse;
@@ -74,6 +76,8 @@ public class MeetingService {
     private final AuditService audit;
     private final AiClient ai;
     private final SummaryTemplateService templates;
+    private final KnownSpeakerService knownSpeakers;
+    private final VocabularyService vocabulary;
 
     public MeetingService(MeetingRepository meetings,
                           MeetingTranscriptRepository transcripts,
@@ -85,7 +89,9 @@ public class MeetingService {
                           OutboxService outbox,
                           AuditService audit,
                           AiClient ai,
-                          SummaryTemplateService templates) {
+                          SummaryTemplateService templates,
+                          KnownSpeakerService knownSpeakers,
+                          VocabularyService vocabulary) {
         this.meetings = meetings;
         this.transcripts = transcripts;
         this.segments = segments;
@@ -97,6 +103,8 @@ public class MeetingService {
         this.audit = audit;
         this.ai = ai;
         this.templates = templates;
+        this.knownSpeakers = knownSpeakers;
+        this.vocabulary = vocabulary;
     }
 
     // --- upload + create ---------------------------------------------------- //
@@ -213,7 +221,13 @@ public class MeetingService {
                 // user chose the first time, rather than producing General
                 // notes that then have to be rewritten.
                 "summaryTemplate", meeting.getSummaryTemplate() == null
-                        ? SummaryTemplateService.DEFAULT_SLUG : meeting.getSummaryTemplate()
+                        ? SummaryTemplateService.DEFAULT_SLUG : meeting.getSummaryTemplate(),
+                // Read at enqueue rather than fetched by the worker: the worker
+                // runs as a system context with no user, and sending the list
+                // with the job keeps that boundary intact. It also pins the
+                // vocabulary to what it was when the job was queued, so a term
+                // added mid-run cannot change a transcript halfway through.
+                "vocabulary", vocabulary.boostTermsFor(meeting.getUserId())
         ));
     }
 
@@ -248,10 +262,10 @@ public class MeetingService {
         require(userId, meetingId);
         var transcript = transcripts.findFirstByMeetingIdOrderByCreatedAtDesc(meetingId)
                 .orElseThrow(() -> ApiException.notFound("Transcript not ready"));
-        List<SegmentDto> segs = segments.findByMeetingIdOrderByStartTimeAsc(meetingId)
-                .stream().map(SegmentDto::from).toList();
+        var rows = segments.findByMeetingIdOrderByStartTimeAsc(meetingId);
+        List<SegmentDto> segs = rows.stream().map(SegmentDto::from).toList();
         return new TranscriptResponse(meetingId, transcript.getTranscriptText(),
-                transcript.getLanguage(), segs);
+                transcript.getLanguage(), segs, SpeakerStatsDto.from(rows));
     }
 
     @Transactional(readOnly = true)
@@ -342,8 +356,93 @@ public class MeetingService {
         // citing a name the transcript no longer shows anywhere.
         if (changed) {
             reindex(userId, meetingId, segs);
+            // Learned from the rename itself rather than a settings page, so
+            // the suggestion list fills from ordinary use instead of needing to
+            // be seeded by someone first.
+            knownSpeakers.remember(userId, mapping.values());
         }
         audit.record(userId, "SPEAKERS_RENAMED", "meeting", meetingId);
+        return getTranscript(userId, meetingId);
+    }
+
+    /**
+     * Fix diarization rather than naming.
+     *
+     * <p>Renaming answers "who is Speaker 2?" — one label, one name. Neither of
+     * the two ways diarization actually goes wrong is expressible that way:
+     *
+     * <ul>
+     *   <li>One person gets split across two labels, usually across a long
+     *       pause or a change in mic level. Renaming both to "Alice" produces a
+     *       transcript where Alice appears to interrupt herself, because the
+     *       turns stay separate. Merging folds the label away.
+     *   <li>Individual turns land on the wrong person, typically where two
+     *       people overlap. That is a per-segment correction, and a label-wide
+     *       rename would move every other turn with it.
+     * </ul>
+     *
+     * <p>Like an edit, this re-indexes: retrieval passages carry the speaker
+     * prefix, so a rematch that is not re-indexed leaves chat attributing
+     * quotes to whoever the transcript no longer says.
+     */
+    @Transactional
+    public TranscriptResponse rematchSpeaker(String userId, String meetingId,
+                                             SpeakerRematchRequest req) {
+        require(userId, meetingId);
+
+        String invalid = req.validate();
+        if (invalid != null) {
+            throw ApiException.badRequest(invalid);
+        }
+
+        String target = req.trimmedTo();
+        var segs = segments.findByMeetingIdOrderByStartTimeAsc(meetingId);
+        boolean changed;
+
+        if (req.isMerge()) {
+            String source = req.fromSpeaker().trim();
+            changed = false;
+            for (var seg : segs) {
+                if (source.equals(seg.getSpeaker())) {
+                    seg.setSpeaker(target);
+                    changed = true;
+                }
+            }
+            if (!changed) {
+                throw ApiException.badRequest(
+                        "No turns are labelled \"" + source + "\"; reload the transcript and try again");
+            }
+        } else {
+            Map<String, TranscriptSegment> byId = segs.stream()
+                    .collect(Collectors.toMap(TranscriptSegment::getId, s -> s, (a, b) -> a));
+            changed = false;
+            for (String segmentId : req.segmentIdsOrEmpty()) {
+                var seg = byId.get(segmentId);
+                // Refused rather than skipped, for the same reason an edit is:
+                // silently dropping half a batch leaves the user believing
+                // corrections landed that did not.
+                if (seg == null) {
+                    throw ApiException.badRequest(
+                            "That segment is not part of this meeting; reload the transcript and try again");
+                }
+                if (!target.equals(seg.getSpeaker())) {
+                    seg.setSpeaker(target);
+                    changed = true;
+                }
+            }
+        }
+
+        if (!changed) {
+            return getTranscript(userId, meetingId);
+        }
+
+        // The flat transcript carries the speaker prefixes, so it is as stale
+        // after a rematch as it is after an edit — and the export reads it.
+        transcripts.findFirstByMeetingIdOrderByCreatedAtDesc(meetingId)
+                .ifPresent(t -> t.setTranscriptText(joinSegments(segs)));
+        reindex(userId, meetingId, segs);
+        knownSpeakers.remember(userId, List.of(target));
+        audit.record(userId, "SPEAKER_REMATCHED", "meeting", meetingId);
         return getTranscript(userId, meetingId);
     }
 
