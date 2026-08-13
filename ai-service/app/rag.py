@@ -200,6 +200,81 @@ class RagService:
         ]
         return (answer, citations)
 
+    # --- the commitment ledger ---------------------------------------------- #
+    # How many action items to put in front of the model. Enough to cover a
+    # normal workspace, bounded because these compete with retrieved passages
+    # for the context window — a user with a thousand stale items must not
+    # crowd out the transcript evidence that answers everything else.
+    _MAX_COMMITMENTS = 60
+
+    async def _commitment_context(
+        self, user_id: str, meeting_ids: list[str] | None = None
+    ) -> list[str]:
+        """Every tracked action item, with the status the transcript cannot know.
+
+        Ordered outstanding-first and then by due date, so the truncation above
+        drops finished work rather than live work — the opposite order would
+        quietly hide exactly what "what hasn't been completed?" is asking for.
+
+        Completed items are included rather than filtered out, deliberately. A
+        list of only the open ones lets the model infer that anything it
+        remembers from the transcript and cannot see here is still outstanding,
+        which is the same wrong answer by a longer route. Seeing "DONE" is what
+        stops it.
+
+        Never raises: this is an enrichment. If the tracker cannot be read the
+        answer degrades to transcript-only, which is what it was before.
+        """
+        sql = """
+            SELECT a.title, a.status, a.owner_name, a.due_date, m.title
+              FROM meeting_action_items a
+              JOIN meetings m ON m.id = a.meeting_id
+             WHERE m.user_id = %s
+        """
+        params: list = [user_id]
+        if meeting_ids:
+            sql += " AND a.meeting_id = ANY(%s)"
+            params.append(list(meeting_ids))
+        # 'DONE' sorts after 'IN_PROGRESS' and 'OPEN' alphabetically, which is
+        # the order wanted here; spelled out rather than relied upon.
+        sql += """
+             ORDER BY CASE a.status WHEN 'DONE' THEN 1 ELSE 0 END,
+                      a.due_date NULLS LAST,
+                      a.created_at
+             LIMIT %s
+        """
+        params.append(self._MAX_COMMITMENTS)
+
+        try:
+            async with self.connection(user_id) as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(sql, tuple(params))
+                    rows = await cur.fetchall()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not read action items for user %s: %s", user_id, exc)
+            return []
+
+        if not rows:
+            return []
+
+        lines = []
+        for title, status, owner, due, meeting in rows:
+            parts = [f"[Action item · {status or 'OPEN'} · {meeting}] {title}"]
+            if owner:
+                parts.append(f"owner: {owner}")
+            if due:
+                parts.append(f"due: {due}")
+            lines.append(" — ".join(parts))
+
+        # A header, because without one these read as more transcript and the
+        # model quotes them back as things somebody said in a meeting.
+        return [
+            "The following are tracked action items and their CURRENT status, "
+            "which is more up to date than anything in the transcripts below. "
+            "Treat DONE as completed even if a transcript says otherwise.",
+            *lines,
+        ]
+
     # --- workspace-wide retrieval ------------------------------------------- #
     async def answer_workspace(
         self,
@@ -252,6 +327,15 @@ class RagService:
         # Label each passage with its meeting so the model can attribute answers
         # across calls ("in the Acme kickoff you said...").
         context = [f"[Meeting: {r[5]}] {r[1]}" for r in rows]
+
+        # Retrieval only ever sees transcript text, which records what people
+        # *promised* and can never record what happened afterwards. Asked "what
+        # hasn't been completed?", a purely retrieval-grounded answer therefore
+        # lists everything anyone ever committed to — including the items the
+        # user closed last week — and states it with total confidence. The
+        # tracker holds the missing half, so it is put in front of the model.
+        context = await self._commitment_context(user_id, meeting_ids) + context
+
         answer = await self._llm.answer(question, context)
         citations = [
             {

@@ -31,13 +31,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { timecode } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Citation } from "@/lib/types";
-
-const SUGGESTIONS = [
-  "What did we decide about pricing across all my calls?",
-  "What did I say I would do?",
-  "Summarise everything I discussed with the design team.",
-  "What has come up more than once?",
-];
+import { ChatSuggestions } from "@/components/chat-suggestions";
+import { WORKSPACE_PROMPTS } from "@/lib/chat-prompts";
 
 export default function AskPage() {
   const { data: messages, isLoading } = useGetWorkspaceChatQuery();
@@ -115,16 +110,13 @@ export default function AskPage() {
                 <p className="text-sm text-muted-foreground">
                   Ask a question that spans your meetings.
                 </p>
-                <div className="mx-auto mt-4 flex max-w-xl flex-wrap justify-center gap-2">
-                  {SUGGESTIONS.map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => void send(s)}
-                      className="rounded-full border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-                    >
-                      {s}
-                    </button>
-                  ))}
+                <div className="mx-auto mt-4 max-w-xl">
+                  <ChatSuggestions
+                    prompts={WORKSPACE_PROMPTS}
+                    disabled={asking}
+                    onSend={(prompt) => void send(prompt)}
+                    onCompose={setQ}
+                  />
                 </div>
               </div>
             ) : (

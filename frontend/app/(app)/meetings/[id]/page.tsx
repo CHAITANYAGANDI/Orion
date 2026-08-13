@@ -81,6 +81,8 @@ import {
   timecode,
 } from "@/lib/format";
 import { languageName } from "@/lib/language";
+import { ChatSuggestions } from "@/components/chat-suggestions";
+import { MEETING_PROMPTS } from "@/lib/chat-prompts";
 import { cn } from "@/lib/utils";
 import type { MeetingStatus, StatusEvent, TranscriptSegment } from "@/lib/types";
 
@@ -633,9 +635,8 @@ function ChatPanel({ meetingId, onCite }: { meetingId: string; onCite: (s: numbe
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, asking]);
 
-  async function send(e: React.FormEvent) {
-    e.preventDefault();
-    const question = q.trim();
+  async function submit(text: string) {
+    const question = text.trim();
     if (!question) return;
     setQ("");
     try {
@@ -643,6 +644,11 @@ function ChatPanel({ meetingId, onCite }: { meetingId: string; onCite: (s: numbe
     } catch {
       toast.error("Couldn't get an answer.");
     }
+  }
+
+  async function send(e: React.FormEvent) {
+    e.preventDefault();
+    await submit(q);
   }
 
   return (
@@ -686,8 +692,17 @@ function ChatPanel({ meetingId, onCite }: { meetingId: string; onCite: (s: numbe
               </div>
             ))
           ) : (
-            <div className="py-6 text-center text-sm text-muted-foreground">
-              Ask anything about this meeting — e.g. “What did we decide about storage?” or “What are my tasks?”
+            <div className="space-y-4 py-6">
+              <p className="text-center text-sm text-muted-foreground">
+                Ask anything about this meeting — answers are grounded in the
+                transcript, with citations you can play.
+              </p>
+              <ChatSuggestions
+                prompts={MEETING_PROMPTS}
+                disabled={asking}
+                onSend={(prompt) => void submit(prompt)}
+                onCompose={setQ}
+              />
             </div>
           )}
           {asking && (
