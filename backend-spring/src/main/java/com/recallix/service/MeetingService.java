@@ -113,6 +113,9 @@ public class MeetingService {
         meeting.setTitle(stripExtension(req.filename()));
         meeting.setStatus(MeetingStatus.CREATED);
         meeting.setObjectKey(objectKey);
+        // Validated just above, so what is stored is always one of the types we
+        // allow — the player reads this to decide between <video> and <audio>.
+        meeting.setContentType(req.contentType());
         // A PDF has no audio track, so the worker must skip transcription.
         meeting.setSourceType(PDF.equals(req.contentType()) ? SourceType.DOCUMENT : SourceType.AUDIO);
         meetings.save(meeting);
@@ -486,7 +489,7 @@ public class MeetingService {
                 m.getParticipants(), m.getTags(), audioUrl,
                 m.getDurationSeconds(), m.getCreatedAt(), m.getErrorMessage(),
                 m.getSourceType(), m.getSourceUrl(), m.getLanguage(),
-                m.getSummaryTemplate());
+                m.getSummaryTemplate(), m.getContentType());
     }
 
     private void validateContentType(String contentType) {

@@ -3,9 +3,15 @@
 /**
  * Record a live meeting from the browser.
  *
- * Captures the meeting tab's audio (the other participants) mixed with your
- * microphone, then hands the result to the same presigned-upload → create-meeting
- * path the upload page uses, so processing is identical from there on.
+ * Two kinds of meeting, two capture modes. An online meeting mixes the meeting
+ * tab's audio (the other participants) with your microphone; an in-person one
+ * is the microphone alone, since everybody is already in the room. Either way
+ * the result goes down the same presigned-upload → create-meeting path the
+ * upload page uses, so processing is identical from there on.
+ *
+ * The recorder itself lives in the app shell rather than here, so navigating
+ * away mid-meeting no longer destroys the recording. This page is a view onto
+ * it: mount, unmount, come back, and a running recording is still running.
  */
 
 import * as React from "react";
@@ -23,9 +29,12 @@ import {
   ShieldCheck,
   RotateCcw,
   Volume2,
+  MonitorSpeaker,
+  Users,
 } from "lucide-react";
 import { useCreateUploadUrlMutation, useCreateMeetingMutation } from "@/lib/api";
-import { useRecorder } from "@/lib/use-recorder";
+import { useRecording } from "@/lib/recording-context";
+import type { CaptureMode } from "@/lib/use-recorder";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -38,11 +47,12 @@ type Phase = "idle" | "uploading" | "creating";
 
 export default function RecordPage() {
   const router = useRouter();
-  const recorder = useRecorder();
+  const recorder = useRecording();
   const [createUploadUrl] = useCreateUploadUrlMutation();
   const [createMeeting] = useCreateMeetingMutation();
 
   const [consented, setConsented] = React.useState(false);
+  const [mode, setMode] = React.useState<CaptureMode>("online");
   const [title, setTitle] = React.useState("");
 
   // Arriving from the calendar page: /record?title=Sprint%20planning. Read from
@@ -62,6 +72,11 @@ export default function RecordPage() {
 
   const busy = phase !== "idle";
   const live = recorder.state === "recording" || recorder.state === "paused";
+  // Once a recording exists, the mode it was actually captured in is the truth.
+  // The local picker only governs the *next* one — which matters when you come
+  // back to this page mid-recording and local state has reset to its default.
+  const effectiveMode: CaptureMode =
+    live || recorder.state === "stopped" ? recorder.mode : mode;
 
   async function handleSave() {
     if (!recorder.result) return;
@@ -103,20 +118,30 @@ export default function RecordPage() {
           <Mic className="h-6 w-6 text-primary" /> Record a meeting
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Captures the meeting tab plus your microphone. Keep this tab open while
-          you record — you can switch windows, just don&apos;t close it.
+          Recording keeps running while you move around Recallix — the timer in
+          the header follows you. Keep this browser tab open, though: closing or
+          reloading it loses the audio.
         </p>
       </div>
 
       {!recorder.supported && (
         <Notice tone="error" icon={AlertTriangle}>
-          This browser can&apos;t record audio. Chrome or Edge support capturing tab
-          audio; Safari and Firefox don&apos;t.{" "}
+          This browser can&apos;t record audio.{" "}
           <Link href="/upload" className="underline underline-offset-2">
             Upload a file instead
           </Link>
           .
         </Notice>
+      )}
+
+      {/* Only the online path needs tab audio, which Safari and Firefox do not
+          provide. In-person recording is plain getUserMedia and works
+          everywhere, so this warning is scoped to the mode that suffers. */}
+      {recorder.supported && effectiveMode === "online" && !live && (
+        <p className="text-xs text-muted-foreground">
+          Capturing tab audio needs Chrome or Edge — Safari and Firefox can only
+          record your microphone. In-person recording works in any browser.
+        </p>
       )}
 
       {/* Consent is a legal requirement in two-party-consent jurisdictions and
@@ -149,6 +174,33 @@ export default function RecordPage() {
         </CardContent>
       </Card>
 
+      {/* Capture mode. Locked once recording starts: the audio graph is built
+          at start, so switching mid-recording would mean discarding what has
+          been captured — which is never what someone reaching for this wants. */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Where is everyone?</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3 sm:grid-cols-2">
+          <ModeOption
+            icon={MonitorSpeaker}
+            label="Online meeting"
+            hint="Zoom, Meet or Teams in another tab. Records their audio and your mic."
+            selected={effectiveMode === "online"}
+            disabled={live || recorder.state === "requesting"}
+            onSelect={() => setMode("online")}
+          />
+          <ModeOption
+            icon={Users}
+            label="In person"
+            hint="Everyone's in the room. Records the microphone only — no screen sharing."
+            selected={effectiveMode === "in-person"}
+            disabled={live || recorder.state === "requesting"}
+            onSelect={() => setMode("in-person")}
+          />
+        </CardContent>
+      </Card>
+
       <Card>
         <CardContent className="space-y-5 py-6">
           {/* Recorder */}
@@ -175,11 +227,12 @@ export default function RecordPage() {
             <div className="flex flex-wrap items-center justify-center gap-2">
               {recorder.state === "idle" && (
                 <Button
-                  onClick={() => void recorder.start()}
+                  onClick={() => void recorder.start(mode)}
                   disabled={!consented || !recorder.supported}
                   className="gap-2"
                 >
-                  <Mic className="h-4 w-4" /> Start recording
+                  <Mic className="h-4 w-4" />
+                  {mode === "in-person" ? "Start recording the room" : "Start recording"}
                 </Button>
               )}
               {recorder.state === "recording" && (
@@ -227,23 +280,29 @@ export default function RecordPage() {
             </Notice>
           )}
 
-          {/* The single most common failure: user shared a window, or declined
-              the share, so only their own voice was captured. */}
-          {live && !recorder.hasTabAudio && (
+          {/* The single most common failure of the online path: user shared a
+              window, or declined the share, so only their own voice was
+              captured. In person that is the whole point, so warning about it
+              would be telling someone their deliberate choice went wrong. */}
+          {live && effectiveMode === "online" && !recorder.hasTabAudio && (
             <Notice tone="warn" icon={Volume2}>
               <strong>Microphone only.</strong> No tab audio is being captured, so
               other participants won&apos;t be recorded. Stop, start again, choose
               the <em>tab</em> running your meeting, and tick “Also share tab
-              audio”.
+              audio”. If everyone is in the room with you, switch to{" "}
+              <strong>In person</strong> instead.
             </Notice>
           )}
 
-          {recorder.state === "stopped" && recorder.result && !recorder.result.hadTabAudio && (
-            <Notice tone="warn" icon={Volume2}>
-              This recording contains your microphone only — other participants
-              were not captured.
-            </Notice>
-          )}
+          {recorder.state === "stopped" &&
+            recorder.result &&
+            recorder.result.mode === "online" &&
+            !recorder.result.hadTabAudio && (
+              <Notice tone="warn" icon={Volume2}>
+                This recording contains your microphone only — other participants
+                were not captured.
+              </Notice>
+            )}
 
           {/* Details, shown once there's something to save */}
           {recorder.state === "stopped" && recorder.result && (
@@ -254,7 +313,11 @@ export default function RecordPage() {
                 </span>{" "}
                 <span className="text-muted-foreground">
                   · {formatDuration(recorder.result.durationSeconds)}
-                  {recorder.result.hadTabAudio ? " · tab audio + mic" : " · mic only"}
+                  {recorder.result.mode === "in-person"
+                    ? " · in-person (mic)"
+                    : recorder.result.hadTabAudio
+                      ? " · tab audio + mic"
+                      : " · mic only"}
                 </span>
               </div>
 
@@ -325,6 +388,42 @@ export default function RecordPage() {
 }
 
 /* --------------------------------- pieces -------------------------------- */
+
+function ModeOption({
+  icon: Icon,
+  label,
+  hint,
+  selected,
+  disabled,
+  onSelect,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  hint: string;
+  selected: boolean;
+  disabled: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      disabled={disabled}
+      aria-pressed={selected}
+      className={cn(
+        "flex items-start gap-3 rounded-lg border p-3 text-left transition-colors",
+        selected ? "border-primary bg-primary/5" : "hover:bg-accent",
+        disabled && "cursor-not-allowed opacity-60 hover:bg-transparent"
+      )}
+    >
+      <Icon className={cn("mt-0.5 h-4 w-4 shrink-0", selected && "text-primary")} />
+      <span>
+        <span className="block text-sm font-medium">{label}</span>
+        <span className="mt-0.5 block text-xs text-muted-foreground">{hint}</span>
+      </span>
+    </button>
+  );
+}
 
 function LevelRing({ level, active }: { level: number; active: boolean }) {
   const scale = 1 + (active ? level * 0.35 : 0);

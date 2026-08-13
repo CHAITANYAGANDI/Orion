@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
+import { RecordingProvider, useRecording } from "@/lib/recording-context";
+import { formatDuration } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
@@ -44,6 +46,17 @@ const NAV = [
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  // The provider wraps the shell, not the other way round, so the recorder
+  // outlives every route change inside the app group — and so the header can
+  // read it. See lib/recording-context.tsx.
+  return (
+    <RecordingProvider>
+      <AppShellInner>{children}</AppShellInner>
+    </RecordingProvider>
+  );
+}
+
+function AppShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = React.useState(false);
 
@@ -102,6 +115,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Button>
             <div className="flex-1" />
             <div className="flex items-center gap-2">
+              <RecordingIndicator />
               <ThemeToggle />
               <UserMenu />
             </div>
@@ -112,6 +126,64 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Live recording state, visible from every page.
+ *
+ * Recording now survives navigation, which is only an improvement if you can
+ * tell it is still happening — an invisible live microphone is worse than one
+ * that stops. Shows the running clock, and links back to the record page so
+ * there is always one click between you and the stop button.
+ *
+ * Also covers the state after stopping: audio captured but not yet saved is the
+ * easiest thing in the app to lose, so it keeps nagging until it is dealt with.
+ */
+function RecordingIndicator() {
+  const recorder = useRecording();
+  const live = recorder.state === "recording" || recorder.state === "paused";
+  const unsaved = recorder.state === "stopped" && recorder.result !== null;
+
+  if (!live && !unsaved) return null;
+
+  const paused = recorder.state === "paused";
+
+  return (
+    <Link
+      href="/record"
+      className={cn(
+        "flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+        unsaved
+          ? "border-amber-500/40 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 dark:text-amber-400"
+          : "border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/20"
+      )}
+      title={
+        unsaved
+          ? "You have a recording that hasn't been saved yet"
+          : paused
+            ? "Recording paused — click to return"
+            : "Recording in progress — click to return"
+      }
+    >
+      <span
+        className={cn(
+          "h-2 w-2 shrink-0 rounded-full",
+          unsaved ? "bg-amber-500" : "bg-destructive",
+          // Only a running recording pulses; a paused or finished one is still,
+          // so the dot never implies capture that is not happening.
+          recorder.state === "recording" && "animate-pulse"
+        )}
+      />
+      {unsaved ? (
+        <span>Unsaved recording</span>
+      ) : (
+        <>
+          <span className="hidden sm:inline">{paused ? "Paused" : "Recording"}</span>
+          <span className="font-mono tabular-nums">{formatDuration(recorder.elapsed)}</span>
+        </>
+      )}
+    </Link>
   );
 }
 

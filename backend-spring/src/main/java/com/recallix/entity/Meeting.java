@@ -39,6 +39,14 @@ public class Meeting {
     @Column(name = "object_key")
     private String objectKey;
 
+    /**
+     * Validated MIME type of the uploaded media, so the player can tell a video
+     * from an audio file. Null for meetings created before V16 and for YouTube
+     * imports, both of which the UI treats as audio.
+     */
+    @Column(name = "content_type")
+    private String contentType;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "source_type", nullable = false)
     private SourceType sourceType = SourceType.AUDIO;
@@ -106,6 +114,9 @@ public class Meeting {
 
     public String getObjectKey() { return objectKey; }
     public void setObjectKey(String objectKey) { this.objectKey = objectKey; }
+
+    public String getContentType() { return contentType; }
+    public void setContentType(String contentType) { this.contentType = contentType; }
 
     public SourceType getSourceType() { return sourceType; }
     public void setSourceType(SourceType sourceType) { this.sourceType = sourceType; }

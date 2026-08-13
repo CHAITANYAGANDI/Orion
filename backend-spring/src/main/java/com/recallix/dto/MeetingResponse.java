@@ -23,7 +23,13 @@ public record MeetingResponse(
         /** Detected transcription language (ISO-639-1); null until processed. */
         String language,
         /** Which summary template this meeting's notes are written in. */
-        String summaryTemplate
+        String summaryTemplate,
+        /**
+         * MIME type of the stored media, so the player renders a video as a
+         * video. Null for pre-V16 meetings and YouTube imports; both play as
+         * audio, which is what they did before this field existed.
+         */
+        String contentType
 ) {
     public static MeetingResponse from(Meeting m) {
         return new MeetingResponse(
@@ -39,7 +45,8 @@ public record MeetingResponse(
                 m.getSourceType(),
                 m.getSourceUrl(),
                 m.getLanguage(),
-                m.getSummaryTemplate()
+                m.getSummaryTemplate(),
+                m.getContentType()
         );
     }
 }

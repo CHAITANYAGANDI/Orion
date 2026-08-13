@@ -80,6 +80,12 @@ export interface MeetingResponse {
   sourceUrl?: string | null;
   /** Detected transcription language (ISO-639-1); absent until processed. */
   language?: string | null;
+  /**
+   * MIME type of the stored media. Drives the choice between a video and an
+   * audio player. Absent for meetings created before it was persisted, and for
+   * YouTube imports — both render as audio.
+   */
+  contentType?: string | null;
 }
 
 export interface CalendarSubscriptionResponse {

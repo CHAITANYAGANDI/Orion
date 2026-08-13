@@ -257,11 +257,11 @@ export default function MeetingDetailPage() {
         </div>
       </div>
 
-      {/* Audio player (synced with transcript). A DOCUMENT's presigned URL
+      {/* Media player (synced with transcript). A DOCUMENT's presigned URL
           points at the source PDF, not audio, so the player must stay away. */}
       {ready && m.audioUrl && !isDocument && (
         <div className="no-print">
-          <AudioPlayer src={m.audioUrl} controller={audio} />
+          <AudioPlayer src={m.audioUrl} controller={audio} contentType={m.contentType} />
         </div>
       )}
 
