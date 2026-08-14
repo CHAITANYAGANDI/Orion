@@ -89,7 +89,6 @@ export default function SharedMeetingPage() {
               <p className="mt-1 text-sm text-muted-foreground">
                 {formatDateTime(meeting.meetingDate)}
                 {meeting.durationSeconds ? ` · ${formatDuration(meeting.durationSeconds)}` : ""}
-                {meeting.participants?.length ? ` · ${meeting.participants.join(", ")}` : ""}
               </p>
             </div>
 

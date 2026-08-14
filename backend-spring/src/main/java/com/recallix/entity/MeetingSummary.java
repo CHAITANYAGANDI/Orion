@@ -54,6 +54,16 @@ public class MeetingSummary {
     @Column(name = "template_slug")
     private String templateSlug;
 
+    /**
+     * True when the transcript was edited after this summary was written.
+     *
+     * <p>The summary is not regenerated on an edit — that would spend a model
+     * call per typo fix — so this is what tells the reader that the notes above
+     * the transcript and the transcript itself no longer agree.
+     */
+    @Column(nullable = false)
+    private boolean stale = false;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -77,6 +87,9 @@ public class MeetingSummary {
 
     public String getTemplateSlug() { return templateSlug; }
     public void setTemplateSlug(String templateSlug) { this.templateSlug = templateSlug; }
+
+    public boolean isStale() { return stale; }
+    public void setStale(boolean stale) { this.stale = stale; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

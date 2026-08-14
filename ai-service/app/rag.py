@@ -11,10 +11,12 @@ from __future__ import annotations
 import logging
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 from app.config import Settings
 from app.providers.ports import EmbeddingPort, LlmPort
 from app.schemas import Segment
+from app.timeframe import detect_window
 
 logger = logging.getLogger("ai-service.rag")
 
@@ -22,6 +24,19 @@ logger = logging.getLogger("ai-service.rag")
 def _vec_literal(embedding: list[float]) -> str:
     """Encode a vector as a pgvector text literal: '[0.1,0.2,...]'."""
     return "[" + ",".join(f"{x:.6f}" for x in embedding) + "]"
+
+
+def _passage(row: tuple) -> str:
+    """One retrieved chunk, labelled with its meeting and date.
+
+    The date is what lets the model say which of two contradictory statements
+    came later. Without it, "we decided X" and "we decided not-X" are two
+    equally-present facts and the answer picks one arbitrarily.
+    """
+    created = row[6]
+    when = created.date().isoformat() if isinstance(created, datetime) else ""
+    stamp = f" · {when}" if when else ""
+    return f"[Meeting: {row[5]}{stamp}] {row[1]}"
 
 
 class RagService:
@@ -275,7 +290,118 @@ class RagService:
             *lines,
         ]
 
+    # --- the decision record -------------------------------------------------- #
+    # Bounded for the same reason as the commitments above: these compete with
+    # retrieved passages for the context window. Chronological rather than
+    # relevance-ordered, so what survives the limit is a continuous recent
+    # history — a sampled one would show a conflict's later half without its
+    # earlier half and make a settled question look freshly decided.
+    _MAX_DECISIONS = 80
+
+    async def _decision_context(
+        self, user_id: str, meeting_ids: list[str] | None = None
+    ) -> list[str]:
+        """Every decision on record, oldest first, each with its date.
+
+        Order is the whole point. "Do any decisions conflict with earlier ones?"
+        is a question about sequence, and a model given an unordered, undated
+        list will report a conflict without being able to say which side of it
+        is current — which is worse than not answering, because the reader
+        cannot tell either.
+
+        Risks are excluded: a risk that recurs is not a contradiction, so
+        including them would produce "conflicts" out of a team consistently
+        worrying about the same dependency.
+
+        Never raises, for the same reason as the commitment ledger — this is an
+        enrichment, and losing it should cost one question rather than all of
+        them.
+        """
+        sql = """
+            SELECT i.text, m.title, m.created_at
+              FROM meeting_insights i
+              JOIN meetings m ON m.id = i.meeting_id
+             WHERE m.user_id = %s AND i.kind = 'DECISION'
+        """
+        params: list = [user_id]
+        if meeting_ids:
+            sql += " AND i.meeting_id = ANY(%s)"
+            params.append(list(meeting_ids))
+        sql += " ORDER BY m.created_at, i.created_at LIMIT %s"
+        params.append(self._MAX_DECISIONS)
+
+        try:
+            async with self.connection(user_id) as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(sql, tuple(params))
+                    rows = await cur.fetchall()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not read decisions for user %s: %s", user_id, exc)
+            return []
+
+        if not rows:
+            return []
+
+        lines = []
+        for text, meeting, created in rows:
+            when = created.date().isoformat() if isinstance(created, datetime) else "unknown date"
+            lines.append(f"[Decision · {when} · {meeting}] {text}")
+
+        return [
+            "The following are the decisions on record across these meetings, "
+            "oldest first. A later decision that contradicts an earlier one "
+            "supersedes it — say which is current when you report a conflict.",
+            *lines,
+        ]
+
     # --- workspace-wide retrieval ------------------------------------------- #
+    async def _retrieve(
+        self,
+        user_id: str,
+        q_emb: list[float],
+        meeting_ids: list[str] | None,
+        limit: int,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> list[tuple]:
+        """Nearest chunks for one embedding, optionally inside a date range.
+
+        The range is half-open — `since <= created_at < until` — so calling this
+        twice with a shared boundary partitions the archive instead of returning
+        the meeting on the boundary in both halves, which would make a
+        comparison quote the same passage as both "recent" and "earlier".
+
+        Filtering happens in SQL rather than after retrieval: post-filtering
+        takes the top-k of everything and then throws most of it away, which on
+        a workspace with a year of meetings leaves a "last week" question
+        answering from two surviving chunks.
+        """
+        sql = """
+            SELECT c.chunk_index, c.text, c.start_time, c.end_time,
+                   c.meeting_id, m.title, m.created_at,
+                   c.embedding <=> %s::vector AS distance
+              FROM transcript_chunks c
+              JOIN meetings m ON m.id = c.meeting_id
+             WHERE c.user_id = %s
+        """
+        params: list = [_vec_literal(q_emb), user_id]
+        if meeting_ids:
+            sql += " AND c.meeting_id = ANY(%s)"
+            params.append(list(meeting_ids))
+        if since is not None:
+            sql += " AND m.created_at >= %s"
+            params.append(since)
+        if until is not None:
+            sql += " AND m.created_at < %s"
+            params.append(until)
+        sql += " ORDER BY distance LIMIT %s"
+        params.append(limit)
+
+        async with self.connection(user_id) as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(sql, tuple(params))
+                return await cur.fetchall()
+
     async def answer_workspace(
         self,
         user_id: str,
@@ -293,40 +419,71 @@ class RagService:
 
         q_emb = (await self._embedder.embed([question]))[0]
         top_k = self._settings.rag_workspace_top_k
-        sql = """
-            SELECT c.chunk_index, c.text, c.start_time, c.end_time,
-                   c.meeting_id, m.title, m.created_at,
-                   c.embedding <=> %s::vector AS distance
-              FROM transcript_chunks c
-              JOIN meetings m ON m.id = c.meeting_id
-             WHERE c.user_id = %s
-        """
-        params: list = [_vec_literal(q_emb), user_id]
-        if meeting_ids:
-            sql += " AND c.meeting_id = ANY(%s)"
-            params.append(list(meeting_ids))
-        sql += " ORDER BY distance LIMIT %s"
-        params.append(top_k)
+
+        # "What changed since last week?" is a question about a period, and
+        # nearest-neighbour search has no notion of one — it would answer from
+        # whichever passages sit closest in embedding space, quite possibly from
+        # March. When the question names a window, retrieval is run inside it.
+        window = detect_window(question)
 
         try:
-            async with self.connection(user_id) as conn:
-                async with conn.cursor() as cur:
-                    await cur.execute(sql, tuple(params))
-                    rows = await cur.fetchall()
+            if window is None:
+                rows = await self._retrieve(user_id, q_emb, meeting_ids, top_k)
+                recent, earlier = rows, []
+            else:
+                # A comparison needs both halves or there is nothing to have
+                # changed from, and the two are retrieved separately so the
+                # older half cannot crowd the recent half out of the top-k.
+                # Split evenly rather than doubling the budget: the context
+                # window is the same size either way.
+                half = max(1, top_k // 2) if window.comparative else top_k
+                recent = await self._retrieve(
+                    user_id, q_emb, meeting_ids, half, since=window.start, until=window.end
+                )
+                earlier = (
+                    await self._retrieve(
+                        user_id, q_emb, meeting_ids, top_k - half, until=window.start
+                    )
+                    if window.comparative
+                    else []
+                )
+                rows = recent + earlier
         except Exception as exc:  # noqa: BLE001
             logger.warning("Workspace retrieval failed for user %s: %s", user_id, exc)
             return ("I couldn't search your meetings right now.", [])
 
         if not rows:
+            if window is not None:
+                return (
+                    f"I couldn't find any meetings from {window.label}. Try asking "
+                    "without the time frame, or over a longer period.",
+                    [],
+                )
             return (
                 "I don't have any indexed meetings for you yet. Upload a meeting "
                 "and I'll be able to answer questions across all of them.",
                 [],
             )
 
-        # Label each passage with its meeting so the model can attribute answers
-        # across calls ("in the Acme kickoff you said...").
-        context = [f"[Meeting: {r[5]}] {r[1]}" for r in rows]
+        # Label each passage with its meeting and date so the model can attribute
+        # answers across calls ("in the Acme kickoff you said...") and can tell
+        # which of two conflicting statements came later.
+        if window is None:
+            context = [_passage(r) for r in rows]
+        else:
+            context = [
+                f"The passages below are grouped by when the meeting happened. "
+                f"The question is about {window.label}.",
+                f"--- From {window.label} ---",
+                *(_passage(r) for r in recent),
+            ]
+            if earlier:
+                context += [
+                    f"--- From before {window.label}, for comparison only ---",
+                    *(_passage(r) for r in earlier),
+                    "Answer about what is in the first group. Use the second only "
+                    "to say what is different, and never present it as recent.",
+                ]
 
         # Retrieval only ever sees transcript text, which records what people
         # *promised* and can never record what happened afterwards. Asked "what
@@ -335,6 +492,11 @@ class RagService:
         # user closed last week — and states it with total confidence. The
         # tracker holds the missing half, so it is put in front of the model.
         context = await self._commitment_context(user_id, meeting_ids) + context
+        # And "do any decisions conflict?" cannot be answered from passages at
+        # all: two contradictory decisions made six weeks apart are unlikely to
+        # both land in one top-k, and even together they arrive undated. The
+        # store holds every decision with the date it was made.
+        context = await self._decision_context(user_id, meeting_ids) + context
 
         answer = await self._llm.answer(question, context)
         citations = [

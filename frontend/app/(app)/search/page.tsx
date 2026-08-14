@@ -142,7 +142,6 @@ export default function SearchPage() {
                         <p className="truncate font-medium">{m.title}</p>
                         <p className="text-xs text-muted-foreground">
                           {formatDateTime(m.createdAt)} · {formatDuration(m.durationSeconds)}
-                          {m.participants?.length ? ` · ${m.participants.join(", ")}` : ""}
                         </p>
                       </div>
                       <div className="flex items-center gap-3">

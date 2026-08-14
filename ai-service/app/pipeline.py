@@ -20,6 +20,7 @@ import logging
 import time
 from typing import Awaitable, Callable
 
+from app.insights import derive_insights
 from app.language import annotate_segments
 from app.quotes import verify_quotes
 from app.providers.ports import LlmPort, TranscriptionPort
@@ -238,6 +239,11 @@ class Pipeline:
             kept_sections.append(section)
         quotes = [Quotation(**q) for q in verify_quotes(raw_quotes, transcript.segments)]
 
+        # Decisions and risks are read back out of the sections just written,
+        # not asked for again. A second extraction pass would produce a list
+        # that disagrees with the summary next to it on the page.
+        insights = derive_insights(kept_sections)
+
         return MeetingBriefResult(
             meeting_id=meeting_id,
             transcript=transcript.transcript,
@@ -250,4 +256,5 @@ class Pipeline:
             template_slug=summary.template_slug or template.slug,
             action_items=action_items,
             quotes=quotes,
+            insights=insights,
         )

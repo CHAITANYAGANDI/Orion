@@ -6,6 +6,7 @@ import com.recallix.entity.Meeting;
 import com.recallix.entity.MeetingTranscript;
 import com.recallix.entity.TranscriptSegment;
 import com.recallix.repository.MeetingActionItemRepository;
+import com.recallix.repository.MeetingInsightRepository;
 import com.recallix.repository.MeetingRepository;
 import com.recallix.repository.MeetingSummaryRepository;
 import com.recallix.repository.MeetingTranscriptRepository;
@@ -52,6 +53,7 @@ class SpeakerRematchTest {
     @Mock private TranscriptSegmentRepository segments;
     @Mock private MeetingSummaryRepository summaries;
     @Mock private MeetingActionItemRepository actionItems;
+    @Mock private MeetingInsightRepository insights;
     @Mock private StorageService storage;
     @Mock private UsageLimitService usage;
     @Mock private OutboxService outbox;
@@ -70,7 +72,7 @@ class SpeakerRematchTest {
     @BeforeEach
     void setUp() {
         service = new MeetingService(meetings, transcripts, segments, summaries,
-                actionItems, storage, usage, outbox, audit, ai, templates,
+                actionItems, insights, storage, usage, outbox, audit, ai, templates,
                 knownSpeakers, vocabulary);
 
         Meeting meeting = new Meeting();

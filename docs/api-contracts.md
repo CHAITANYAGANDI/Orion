@@ -78,15 +78,31 @@ again in the worker.
 | PATCH | `/api/v1/preferences` | `{ "autoEmailRecap"?, "recapEmail"? }` | `PreferencesResponse` |
 | GET  | `/api/v1/meetings` | `?page&size&search&tag&status` | `Page<MeetingResponse>` |
 | GET  | `/api/v1/meetings/{id}` | — | `MeetingResponse` |
+| PATCH | `/api/v1/meetings/{id}` | `{ "title"?, "tags"? }` | `MeetingResponse` |
 | GET  | `/api/v1/meetings/{id}/transcript` | — | `TranscriptResponse` |
 | GET  | `/api/v1/meetings/{id}/summary` | — | `SummaryResponse` |
 | GET  | `/api/v1/meetings/{id}/action-items` | — | `ActionItemResponse[]` |
-| GET  | `/api/v1/meetings/{id}/decisions` | — | `DecisionResponse[]` |
-| GET  | `/api/v1/meetings/{id}/risks` | — | `RiskResponse[]` |
 | PATCH | `/api/v1/meetings/{id}/speakers` | `{ "mapping": { "Speaker 1": "Ana" } }` | `TranscriptResponse` |
 | PATCH | `/api/v1/meetings/{id}/speakers/rematch` | `{ "fromSpeaker"?, "toSpeaker", "segmentIds"? }` | `TranscriptResponse` |
 | POST | `/api/v1/meetings/{id}/reprocess` | — | `202 { "meetingId","status" }` |
 | DELETE | `/api/v1/meetings/{id}` | — | `204` |
+
+**Creating a meeting takes almost nothing.** `MeetingCreateRequest` is
+`{ "objectKey", "title"?, "tags"?, "contentType"?, "durationSeconds"?,
+"summaryTemplate"? }`. The title is set from the uploaded filename at presign
+time, so `title` here is an override for clients whose filename is not a name —
+the in-browser recorder, whose files are `recording-1755084000000.webm`. Blank
+or absent keeps the filename.
+
+Renaming and tagging happen afterwards, through `PATCH /meetings/{id}`, because
+both are things you know after listening rather than before. On that endpoint a
+`null`/absent field means *leave alone* and an empty `tags` array means *clear*
+— without the distinction, removing the last tag would be inexpressible.
+
+There is no `participants` field anywhere. Recallix never joins a meeting, so it
+never learns who attended; the column only ever held what an uploader typed, and
+was dropped in V23. Speaker labels on the transcript are the answer to "who was
+here", and they come from the recording itself.
 
 `TranscriptResponse` carries a `speakers[]` of talk-time stats
 (`speaker`, `speakingSeconds`, `percentage`, `segmentCount`, `wordCount`),
@@ -160,27 +176,44 @@ deep-link to `/meetings/{id}?t={start}`.
 Persistence note: `chat_messages.meeting_id` is `NULL` for workspace turns —
 that is what distinguishes the two conversations.
 
-### Meeting Memory (commitment ledger + decision drift)
+### Decisions and risks (`meeting_insights`)
 
-Populated automatically: when a meeting reaches `READY`, its action items are
-promoted to commitments, and the meeting is evaluated as evidence against every
-commitment still open from *earlier* meetings. Its decisions are embedded and
-compared against the user's earlier decisions.
+Populated by the worker, from the summary it has just written — **not** by a
+second extraction pass. A separate pass produces a list that disagrees with the
+summary sitting beside it on the page, and the reader has no way to tell which
+to believe. Reading them out of the sections means the two are the same words.
+
+Which sections count (see `ai-service/app/insights.py`):
+
+| Kind | Sections | Templates that produce them |
+|---|---|---|
+| `DECISION` | `decisions`, `selected`, `improvements` | General, Weekly Sync, Brainstorm, Retrospective |
+| `RISK` | `risks`, `blockers`, `concerns` | Sprint Planning, Project Review, Daily Stand-up, Client Meeting |
+
+1:1 and Interview produce neither, deliberately: a 1:1 produces commitments
+(already action items) and an interview produces observations. Neither settles
+anything, and inventing decisions for them would be worse than an empty list.
 
 | Method | Endpoint | Body / Query | Response |
 |---|---|---|---|
-| GET | `/api/v1/commitments` | `?page&size&status` | `Page<CommitmentResponse>` |
-| GET | `/api/v1/commitments/{id}` | — | `CommitmentResponse` (with evidence trail) |
-| PATCH | `/api/v1/commitments/{id}` | `{ "status" }` | `CommitmentResponse` (manual override) |
-| GET | `/api/v1/decisions/drift` | `?includeAcknowledged` | `DecisionDriftResponse[]` |
-| POST | `/api/v1/decisions/drift/{id}/acknowledge` | — | `204` |
-| GET | `/api/v1/memory/stats` | — | `MemoryStatsResponse` |
+| GET | `/api/v1/meetings/{id}/insights` | — | `InsightResponse[]` (both kinds) |
+| POST | `/api/v1/meetings/{id}/insights` | `{ "kind", "text" }` | `201 InsightResponse` |
+| PATCH | `/api/v1/insights/{id}` | `{ "text" }` | `InsightResponse` |
+| DELETE | `/api/v1/insights/{id}` | — | `204` |
 
-Commitment status is `OPEN | FULFILLED | SLIPPED | CANCELLED | DROPPED`.
-`DROPPED` means the promise went unmentioned across several later meetings.
-A `RESTATED` verdict records evidence without changing status — the promise was
-raised again but not resolved. Drift relations are `CONTRADICTS | SUPERSEDES |
-REAFFIRMS`; pairs judged unrelated are discarded rather than stored.
+Both kinds come back from one `GET` so the meeting page makes one request; two
+could arrive out of step and render a meeting whose decisions and risks came
+from different moments.
+
+Rows are editable because they are not only shown on the page — workspace chat
+is handed the decision record as the authority on what was agreed and when, so a
+wrong row is a wrong answer rather than a cosmetic blemish. `edited` marks a row
+a human owns; **a reprocess replaces the derived rows and keeps those**, because
+a rewrite that discarded corrections would bring the same wrong decision back
+every time somebody fixed it.
+
+`kind` is set on create and ignored on update: turning a decision into a risk is
+not an edit, it is a different row.
 
 ### Action items
 | Method | Endpoint | Body | Response |
@@ -214,21 +247,55 @@ Base: `http://ai-service:8000`
 | Method | Endpoint | Input | Output |
 |---|---|---|---|
 | POST | `/ai/transcribe` | `{ "audioUrl" }` or `{ "audioPath" }` | `{ "transcript", "language", "segments":[{start,end,speaker,text}] }` |
-| POST | `/ai/summarize` | `{ "transcript" }` | `{ "shortSummary","detailedSummary","keyPoints":[] }` |
+| POST | `/ai/summarize` | `{ "transcript", "templateSlug"?, "durationSeconds"?, "speakerCount"? }` | `{ "shortSummary","detailedSummary","keyPoints":[],"sections":[],"templateSlug","insights":[Insight] }` |
 | POST | `/ai/extract-action-items` | `{ "transcript" }` | `{ "actionItems":[ActionItem] }` |
-| POST | `/ai/extract-decisions` | `{ "transcript" }` | `{ "decisions":[Decision] }` |
-| POST | `/ai/extract-risks` | `{ "transcript" }` | `{ "risks":[Risk] }` |
+| GET  | `/ai/templates` | — | `SummaryTemplate[]` (with section instructions) |
 | POST | `/ai/process-meeting` | `{ "meetingId","audioUrl" }` | `MeetingBriefResult` (also persisted via callback) |
 | POST | `/ai/chat` | `{ "meetingId","question" }` | `{ "answer","citations":[Citation] }` |
 | POST | `/ai/workspace-chat` | `{ "userId","question","meetingIds"? }` | `{ "answer","citations":[Citation] }` |
 | POST | `/ai/semantic-search` | `{ "userId","query","limit"? }` | `{ "hits":[SemanticSearchHit] }` |
-| POST | `/ai/memory/reconcile` | `{ "userId","meetingId","openCommitments":[],"decisions":[] }` | `{ "commitmentVerdicts":[],"decisionLinks":[] }` |
 | POST | `/ai/translate` | `{ "text","targetLanguage" }` | `{ "text","targetLanguage" }` |
 | GET  | `/health` | — | `{ "status":"ok","provider":"openai\|mock" }` |
+
+`/ai/summarize` returns `insights` as well as `sections`, derived from those
+sections here rather than by the caller. Spring's re-summarize path persists
+them, replacing the previously derived rows: a template switch changes the notes,
+so leaving the old decisions would put the store and the summary in
+disagreement. The key-to-kind mapping lives only in `app/insights.py` — a second
+copy in Java would drift from the templates it reads.
 
 Retrieval on the two workspace endpoints filters on `user_id`, which is
 denormalised onto `transcript_chunks` (migration `V3`). Cross-tenant grounding is
 therefore impossible even if a caller passes meeting ids they do not own.
+
+### Date-aware workspace retrieval
+
+`/ai/workspace-chat` reads a time window out of the question before retrieving
+(`app/timeframe.py`). "What changed since last week?" is a question about a
+period, and nearest-neighbour search has no notion of one — unfiltered it would
+answer from whichever passages sit closest in embedding space, quite possibly
+from March.
+
+* Windows **roll backwards from now**: "last week" is the last 7 days, not
+  Monday-to-Sunday. A calendar reading puts yesterday's meeting outside "last
+  week", which is never what the asker means. `today` and `yesterday` are the
+  exceptions, and named months (`in March`, `since March`) are calendar-anchored.
+* Filtering happens **in SQL**, not after retrieval. Post-filtering takes the
+  top-k of the whole archive and discards most of it, leaving a "last week"
+  question answering from whatever two chunks survived.
+* A question phrased as a comparison ("changed", "since", "versus", "progress")
+  additionally retrieves the meetings *before* the window, labelled as
+  comparison-only. Without both halves there is nothing to have changed from,
+  and the model fills the gap by asserting everything is new. The two halves
+  split one top-k budget and meet at exactly one boundary, so no passage is
+  quoted as both recent and earlier.
+* Every passage is labelled with its meeting **and date**, which is what lets an
+  answer say which of two contradictory statements came later.
+
+Workspace answers are also prefixed with two ledgers that retrieval cannot
+supply: current action-item status (a transcript records what was promised, never
+what happened next) and the decision record with dates (two contradictory
+decisions six weeks apart are unlikely to both land in one top-k).
 
 ---
 
@@ -240,14 +307,16 @@ therefore impossible even if a caller passes meeting ids they do not own.
   "dueDate": "Friday", "priority": "high|medium|low",
   "sourceSentence": "Chaitanya will finish JWT validation by Friday." }
 
-// Decision
-{ "decision": "Use AWS S3 for meeting audio storage.",
-  "confidence": "high|medium|low",
-  "sourceSentence": "Let's store the meeting audio in S3." }
+// Insight — a decision or a risk, READ OUT OF the sections below rather than
+// extracted separately. `sourceSection` names where it came from, which is what
+// keeps a blocker distinguishable from a risk once both are stored as RISK.
+{ "kind": "DECISION|RISK",
+  "text": "Ship on the 14th, not the 7th.",
+  "sourceSection": "decisions" }
 
-// Risk
-{ "risk": "Large audio files may slow down processing.",
-  "severity": "high|medium|low", "sourceSentence": "..." }
+// Quotation — verified against the transcript before it gets here; `speaker`
+// and `start` come from the matched segment, not from the model.
+{ "text": "we are not shipping on the 7th", "speaker": "Ana", "start": 412.5 }
 
 // MeetingBriefResult (FastAPI -> Spring callback + /ai/process-meeting response)
 { "meetingId": "mtg_123",
@@ -257,15 +326,32 @@ therefore impossible even if a caller passes meeting ids they do not own.
   "shortSummary": "...",
   "detailedSummary": "...",
   "keyPoints": [ "..." ],
-  "decisions": [ /* Decision */ ],
-  "actionItems": [ /* ActionItem */ ],
-  "risks": [ /* Risk */ ] }
+  "sections": [ /* SummarySection, in template order */ ],
+  "templateSlug": "general",
+  "quotes": [ /* Quotation */ ],
+  "insights": [ /* Insight */ ],
+  "actionItems": [ /* ActionItem */ ] }
 ```
+
+### SummaryResponse (Spring -> frontend)
+```jsonc
+{ "meetingId": "mtg_123",
+  "shortSummary": "...", "detailedSummary": "...", "keyPoints": [ "..." ],
+  "sections": [ /* SummarySection */ ], "quotes": [ /* Quotation */ ],
+  "templateSlug": "general",
+  "stale": false }
+```
+`stale` is true once the transcript has been edited — by a segment correction, a
+speaker rename or a rematch — after this summary was written. **The summary is
+not regenerated automatically.** One model call per typo fix, and per each of the
+next nineteen, is not a trade worth making, so the flag surfaces the choice
+instead of making it; the UI shows a banner with the rewrite action. Writing a
+summary (re-summarize, reprocess) clears it.
 
 ### MeetingResponse (Spring -> frontend)
 ```jsonc
 { "id": "mtg_123", "title": "Sprint Planning", "status": "READY",
-  "participants": ["Alice","Bob"], "tags": ["sprint"],
+  "tags": ["sprint"],
   "audioUrl": "https://...", "durationSeconds": 1830,
   "createdAt": "2026-07-21T10:00:00Z" }
 ```

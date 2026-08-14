@@ -4,9 +4,11 @@ import com.recallix.common.ApiException;
 import com.recallix.domain.SpokenWord;
 import com.recallix.dto.TranscriptEditRequest.SegmentEdit;
 import com.recallix.entity.Meeting;
+import com.recallix.entity.MeetingSummary;
 import com.recallix.entity.MeetingTranscript;
 import com.recallix.entity.TranscriptSegment;
 import com.recallix.repository.MeetingActionItemRepository;
+import com.recallix.repository.MeetingInsightRepository;
 import com.recallix.repository.MeetingRepository;
 import com.recallix.repository.MeetingSummaryRepository;
 import com.recallix.repository.MeetingTranscriptRepository;
@@ -54,6 +56,7 @@ class TranscriptEditTest {
     @Mock private TranscriptSegmentRepository segments;
     @Mock private MeetingSummaryRepository summaries;
     @Mock private MeetingActionItemRepository actionItems;
+    @Mock private MeetingInsightRepository insights;
     @Mock private StorageService storage;
     @Mock private UsageLimitService usage;
     @Mock private OutboxService outbox;
@@ -71,7 +74,7 @@ class TranscriptEditTest {
     @BeforeEach
     void setUp() {
         service = new MeetingService(meetings, transcripts, segments, summaries,
-                actionItems, storage, usage, outbox, audit, ai, templates, knownSpeakers, vocabulary);
+                actionItems, insights, storage, usage, outbox, audit, ai, templates, knownSpeakers, vocabulary);
 
         Meeting meeting = new Meeting();
         meeting.setId(MEETING);
@@ -228,5 +231,69 @@ class TranscriptEditTest {
     void renameWithNoMatchDoesNothing() {
         service.renameSpeakers(USER, MEETING, java.util.Map.of("Speaker 9", "Nobody"));
         verify(ai, never()).reindex(anyString(), anyString(), anyString(), any());
+    }
+
+    // --- the summary going out of date ------------------------------------- //
+    // An edit corrects the transcript and re-indexes it, so chat and search
+    // answer from the corrected words immediately. The summary does not change:
+    // rewriting it would put a model call behind every typo fix, and behind
+    // each of the next nineteen. What must not happen is the two disagreeing
+    // silently, with the notes still asserting the old version and nothing on
+    // screen saying so.
+
+    @Test
+    @DisplayName("editing the transcript marks the summary out of date")
+    void editMarksSummaryStale() {
+        MeetingSummary summary = new MeetingSummary();
+        summary.setMeetingId(MEETING);
+        when(summaries.findFirstByMeetingIdOrderByCreatedAtDesc(MEETING))
+                .thenReturn(Optional.of(summary));
+
+        service.editSegments(USER, MEETING, List.of(new SegmentEdit("seg_1", "Corrected line.")));
+
+        assertThat(summary.isStale()).isTrue();
+    }
+
+    @Test
+    @DisplayName("renaming a speaker marks the summary out of date")
+    void renameMarksSummaryStale() {
+        // The outline names speakers by design, so after a rename it refers to
+        // labels the transcript no longer contains.
+        MeetingSummary summary = new MeetingSummary();
+        summary.setMeetingId(MEETING);
+        when(summaries.findFirstByMeetingIdOrderByCreatedAtDesc(MEETING))
+                .thenReturn(Optional.of(summary));
+
+        service.renameSpeakers(USER, MEETING, java.util.Map.of("Speaker 1", "Cindy"));
+
+        assertThat(summary.isStale()).isTrue();
+    }
+
+    @Test
+    @DisplayName("an edit that changes nothing leaves the summary alone")
+    void noOpEditDoesNotMarkStale() {
+        MeetingSummary summary = new MeetingSummary();
+        summary.setMeetingId(MEETING);
+
+        // Same text the segment already has: saving an unchanged transcript
+        // must not put a "rewrite me" banner on notes that still match it.
+        service.editSegments(USER, MEETING,
+                List.of(new SegmentEdit("seg_1", first.getText())));
+
+        assertThat(summary.isStale()).isFalse();
+        verify(summaries, never()).findFirstByMeetingIdOrderByCreatedAtDesc(MEETING);
+    }
+
+    @Test
+    @DisplayName("an edit before the summary exists does not fail")
+    void editWithNoSummaryIsFine() {
+        when(summaries.findFirstByMeetingIdOrderByCreatedAtDesc(MEETING))
+                .thenReturn(Optional.empty());
+
+        // Correcting a transcript while the brief is still being written must
+        // not 500. There is nothing to have gone stale.
+        service.editSegments(USER, MEETING, List.of(new SegmentEdit("seg_1", "Corrected line.")));
+
+        assertThat(first.getText()).isEqualTo("Corrected line.");
     }
 }

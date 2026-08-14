@@ -4,16 +4,19 @@ import com.recallix.common.IdGenerator;
 import com.recallix.domain.MeetingStatus;
 import com.recallix.dto.StatusEvent;
 import com.recallix.dto.callback.AiActionItem;
+import com.recallix.dto.callback.AiInsight;
 import com.recallix.dto.callback.AiSegment;
 import com.recallix.dto.callback.MeetingBriefResult;
 import com.recallix.dto.callback.StatusCallbackRequest;
 import com.recallix.entity.Meeting;
 import com.recallix.entity.MeetingActionItem;
+import com.recallix.entity.MeetingInsight;
 import com.recallix.entity.MeetingSummary;
 import com.recallix.entity.MeetingTranscript;
 import com.recallix.entity.TranscriptSegment;
 import com.recallix.event.MeetingReadyEvent;
 import com.recallix.repository.MeetingActionItemRepository;
+import com.recallix.repository.MeetingInsightRepository;
 import com.recallix.repository.MeetingRepository;
 import com.recallix.repository.MeetingSummaryRepository;
 import com.recallix.repository.MeetingTranscriptRepository;
@@ -41,6 +44,7 @@ public class CallbackService {
     private final TranscriptSegmentRepository segments;
     private final MeetingSummaryRepository summaries;
     private final MeetingActionItemRepository actionItems;
+    private final MeetingInsightRepository insights;
     private final StatusPublisher statusPublisher;
     private final UsageLimitService usage;
     private final ApplicationEventPublisher events;
@@ -50,6 +54,7 @@ public class CallbackService {
                            TranscriptSegmentRepository segments,
                            MeetingSummaryRepository summaries,
                            MeetingActionItemRepository actionItems,
+                           MeetingInsightRepository insights,
                            StatusPublisher statusPublisher,
                            UsageLimitService usage,
                            ApplicationEventPublisher events) {
@@ -58,6 +63,7 @@ public class CallbackService {
         this.segments = segments;
         this.summaries = summaries;
         this.actionItems = actionItems;
+        this.insights = insights;
         this.statusPublisher = statusPublisher;
         this.usage = usage;
         this.events = events;
@@ -100,6 +106,7 @@ public class CallbackService {
         replaceSegments(meetingId, result.segmentsOrEmpty());
         replaceSummary(meetingId, result);
         replaceActionItems(meetingId, result.actionItemsOrEmpty());
+        replaceInsights(meeting, result.insightsOrEmpty());
 
         meeting.setStatus(MeetingStatus.READY);
         meeting.setErrorMessage(null);
@@ -182,6 +189,31 @@ public class CallbackService {
             e.setStatus("OPEN");
             e.setSourceSentence(a.sourceSentence());
             actionItems.save(e);
+        }
+    }
+
+    /**
+     * Replace the derived decisions and risks, keeping anything a person owns.
+     *
+     * <p>Unlike every other replace here, this one is not a clean sweep. The
+     * others hold only generated content, so deleting all of it and writing it
+     * again is exactly right. These rows can be corrected by hand, and a
+     * reprocess that wiped the corrections would bring the same wrong decision
+     * back every time somebody fixed it.
+     */
+    private void replaceInsights(Meeting meeting, List<AiInsight> list) {
+        insights.deleteDerivedByMeetingId(meeting.getId());
+        for (AiInsight i : list) {
+            MeetingInsight e = new MeetingInsight();
+            e.setId(IdGenerator.insight());
+            e.setMeetingId(meeting.getId());
+            // Denormalised from the meeting: the RLS policy tests ownership on
+            // this column, so a row without it is invisible to its own owner.
+            e.setUserId(meeting.getUserId());
+            e.setKind(i.kind());
+            e.setText(i.text().trim());
+            e.setSourceSection(i.sourceSection() == null ? "" : i.sourceSection());
+            insights.save(e);
         }
     }
 

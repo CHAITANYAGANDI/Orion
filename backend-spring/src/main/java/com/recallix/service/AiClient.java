@@ -3,6 +3,7 @@ package com.recallix.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.recallix.domain.SummarySection;
 import com.recallix.dto.SegmentDto;
+import com.recallix.dto.callback.AiInsight;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -150,12 +151,20 @@ public class AiClient {
         return out;
     }
 
-    /** A summary as written, in the shape the requested template asked for. */
+    /**
+     * A summary as written, in the shape the requested template asked for.
+     *
+     * <p>{@code insights} are the decisions and risks the ai-service read back
+     * out of those same sections. They ride along rather than being derived
+     * here so the section-key-to-kind mapping lives in one language: duplicating
+     * it in Java would let it drift from the templates it reads.
+     */
     public record SummaryResult(String shortSummary,
                                 String detailedSummary,
                                 List<String> keyPoints,
                                 List<SummarySection> sections,
-                                String templateSlug) {}
+                                String templateSlug,
+                                List<AiInsight> insights) {}
 
     /**
      * Re-summarize an existing transcript under a named template.
@@ -198,12 +207,26 @@ public class AiClient {
                 sections.add(toSection(s));
             }
         }
+        // Absent when an older ai-service answers, which is why the list is
+        // built defensively rather than assumed: a rewrite must still produce
+        // notes, it simply leaves the previous decisions in place.
+        List<AiInsight> insights = new java.util.ArrayList<>();
+        if (body != null && body.has("insights")) {
+            for (JsonNode i : body.get("insights")) {
+                AiInsight parsed = new AiInsight(
+                        text(i, "kind"), text(i, "text"), text(i, "sourceSection"));
+                if (parsed.isUsable()) {
+                    insights.add(parsed);
+                }
+            }
+        }
         return new SummaryResult(
                 text(body, "shortSummary"),
                 text(body, "detailedSummary"),
                 keyPoints,
                 sections,
-                body != null && body.hasNonNull("templateSlug") ? body.get("templateSlug").asText() : null);
+                body != null && body.hasNonNull("templateSlug") ? body.get("templateSlug").asText() : null,
+                insights);
     }
 
     private static SummarySection toSection(JsonNode s) {

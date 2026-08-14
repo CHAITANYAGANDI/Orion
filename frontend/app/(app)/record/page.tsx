@@ -37,8 +37,6 @@ import { useRecording } from "@/lib/recording-context";
 import type { CaptureMode } from "@/lib/use-recorder";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { formatDuration } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -53,9 +51,6 @@ export default function RecordPage() {
 
   const [consented, setConsented] = React.useState(false);
   const [mode, setMode] = React.useState<CaptureMode>("online");
-  const [title, setTitle] = React.useState("");
-  const [participants, setParticipants] = React.useState("");
-  const [tags, setTags] = React.useState("");
   const [phase, setPhase] = React.useState<Phase>("idle");
   const [progress, setProgress] = React.useState(0);
 
@@ -82,11 +77,11 @@ export default function RecordPage() {
       await putWithProgress(presign.uploadUrl, file, (pct) => setProgress(Math.max(5, pct)));
 
       setPhase("creating");
+      // A title is sent here — unlike upload — because the recorder's filename
+      // is `recording-1755084000000.webm`, which is not a name for anything.
       const meeting = await createMeeting({
         objectKey: presign.objectKey,
-        title: title.trim() || defaultTitle(),
-        participants: splitList(participants),
-        tags: splitList(tags),
+        title: defaultTitle(),
         contentType: file.type,
         durationSeconds: durationSeconds || undefined,
       }).unwrap();
@@ -310,36 +305,13 @@ export default function RecordPage() {
                 </span>
               </div>
 
-              <div className="grid gap-2">
-                <Label htmlFor="title">Meeting title</Label>
-                <Input
-                  id="title"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder={defaultTitle()}
-                  disabled={busy}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="participants">Participants (comma-separated)</Label>
-                <Input
-                  id="participants"
-                  value={participants}
-                  onChange={(e) => setParticipants(e.target.value)}
-                  placeholder="Alice, Bob"
-                  disabled={busy}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="tags">Tags (comma-separated)</Label>
-                <Input
-                  id="tags"
-                  value={tags}
-                  onChange={(e) => setTags(e.target.value)}
-                  placeholder="sprint, planning"
-                  disabled={busy}
-                />
-              </div>
+              {/* Saved as "Recording — <date>"; renamed on the meeting page,
+                  where you can see what it turned out to be. Asking for a title
+                  here means asking before the recording has been listened to. */}
+              <p className="text-sm text-muted-foreground">
+                Saves as <span className="text-foreground">{defaultTitle()}</span> — you
+                can rename it on the meeting page.
+              </p>
 
               {busy && (
                 <div className="space-y-2">
@@ -465,13 +437,6 @@ function Notice({
 
 function defaultTitle(): string {
   return `Recording — ${new Date().toLocaleString()}`;
-}
-
-function splitList(v: string): string[] {
-  return v
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
 }
 
 function putWithProgress(

@@ -19,7 +19,6 @@ public record SharedMeetingResponse(
         String title,
         Instant meetingDate,
         Integer durationSeconds,
-        List<String> participants,
         String shortSummary,
         String detailedSummary,
         List<String> keyPoints,

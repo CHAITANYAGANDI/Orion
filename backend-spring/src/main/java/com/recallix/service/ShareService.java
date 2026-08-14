@@ -154,7 +154,6 @@ public class ShareService {
                 meeting.getTitle(),
                 meeting.getCreatedAt(),
                 meeting.getDurationSeconds(),
-                meeting.getParticipants(),
                 summary == null ? null : summary.getShortSummary(),
                 summary == null ? null : summary.getDetailedSummary(),
                 summary == null ? List.of() : summary.getKeyPoints(),

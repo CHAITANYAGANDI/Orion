@@ -142,6 +142,23 @@ class Quotation(CamelModel):
     start: float = 0.0
 
 
+class Insight(CamelModel):
+    """One decision the meeting settled, or one risk it named.
+
+    Derived from the summary sections rather than extracted separately, so the
+    store and the notes can never disagree — see `app.insights` for why that
+    matters more than it sounds like it should.
+
+    `source_section` records which section it was read from, which is what keeps
+    "a risk" and "a blocker" distinguishable after they have been stored in the
+    same place.
+    """
+
+    kind: Literal["DECISION", "RISK"]
+    text: str
+    source_section: str = ""
+
+
 class MeetingBriefResult(CamelModel):
     """Full result — FastAPI -> Spring callback + /ai/process-meeting response."""
 
@@ -161,6 +178,9 @@ class MeetingBriefResult(CamelModel):
     # Verified against the transcript before they get here; anything the model
     # could not have copied from it has already been dropped.
     quotes: list[Quotation] = Field(default_factory=list)
+    # Read out of `sections` above, not extracted separately: the decision store
+    # and the Decisions section are the same words, so they cannot drift apart.
+    insights: list[Insight] = Field(default_factory=list)
     # Only populated for URL imports, where the worker discovers the real title
     # and length from the source. Spring uses them to replace its placeholder.
     title: str | None = None
@@ -207,6 +227,12 @@ class SummaryResponse(CamelModel):
     # all read those and must not care which template ran.
     sections: list[SummarySection] = Field(default_factory=list)
     template_slug: str | None = None
+    # Read out of `sections` above. Carried on this response, and not only on
+    # the pipeline's, because re-summarizing under a different template goes
+    # through here — and a template switch that changed the notes but left the
+    # old decisions behind would produce exactly the disagreement between the
+    # store and the summary that deriving them was meant to make impossible.
+    insights: list[Insight] = Field(default_factory=list)
 
 
 class TranscriptInput(CamelModel):

@@ -8,6 +8,7 @@ import com.recallix.dto.MeetingImportRequest;
 import com.recallix.dto.MeetingResponse;
 import com.recallix.entity.Meeting;
 import com.recallix.repository.MeetingActionItemRepository;
+import com.recallix.repository.MeetingInsightRepository;
 import com.recallix.repository.MeetingRepository;
 import com.recallix.repository.MeetingSummaryRepository;
 import com.recallix.repository.MeetingTranscriptRepository;
@@ -58,6 +59,7 @@ class MeetingImportTest {
     @Mock private TranscriptSegmentRepository segments;
     @Mock private MeetingSummaryRepository summaries;
     @Mock private MeetingActionItemRepository actionItems;
+    @Mock private MeetingInsightRepository insights;
     @Mock private StorageService storage;
     @Mock private UsageLimitService usage;
     @Mock private OutboxService outbox;
@@ -72,7 +74,7 @@ class MeetingImportTest {
     @BeforeEach
     void setUp() {
         service = new MeetingService(meetings, transcripts, segments, summaries,
-                actionItems, storage, usage, outbox, audit, ai, templates, knownSpeakers, vocabulary);
+                actionItems, insights, storage, usage, outbox, audit, ai, templates, knownSpeakers, vocabulary);
         // The picker's validation is exercised in SummaryTemplateServiceTest;
         // here it stands in for "whatever the user chose is fine".
         when(templates.requireKnown(any())).thenReturn("general");

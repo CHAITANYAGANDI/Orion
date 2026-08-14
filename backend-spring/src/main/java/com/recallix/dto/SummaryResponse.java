@@ -25,6 +25,16 @@ public record SummaryResponse(
          * play from it. Empty for summaries generated before V22.
          */
         List<Quotation> quotes,
-        String templateSlug
+        String templateSlug,
+        /**
+         * True when the transcript has been edited since this summary was
+         * written, so the notes and the transcript no longer agree.
+         *
+         * <p>The summary is not regenerated automatically — one model call per
+         * typo fix is not a trade worth making — so this is what turns "the
+         * summary is out of date" from something only the system knows into
+         * something the reader can see and act on.
+         */
+        boolean stale
 ) {
 }

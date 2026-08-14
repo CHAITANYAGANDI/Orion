@@ -13,7 +13,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { formatDuration } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -28,9 +27,6 @@ export default function UploadPage() {
   const [createMeeting] = useCreateMeetingMutation();
 
   const [file, setFile] = React.useState<File | null>(null);
-  const [title, setTitle] = React.useState("");
-  const [participants, setParticipants] = React.useState("");
-  const [tags, setTags] = React.useState("");
   const [duration, setDuration] = React.useState<number | null>(null);
   const [phase, setPhase] = React.useState<Phase>("idle");
   const [progress, setProgress] = React.useState(0);
@@ -46,7 +42,6 @@ export default function UploadPage() {
       return;
     }
     setFile(f);
-    if (!title) setTitle(f.name.replace(/\.[^.]+$/, ""));
     // A PDF has no timeline to probe.
     if (f.type === PDF) setDuration(null);
     else probeDuration(f).then(setDuration).catch(() => setDuration(null));
@@ -73,11 +68,10 @@ export default function UploadPage() {
 
       // 3) confirm meeting -> enqueues processing
       setPhase("creating");
+      // No title: the meeting is named after the file, and renamed on its own
+      // page once there is something to name it after.
       const meeting = await createMeeting({
         objectKey: presign.objectKey,
-        title: title.trim() || file.name,
-        participants: splitList(participants),
-        tags: splitList(tags),
         contentType: file.type,
         durationSeconds: duration ?? undefined,
       }).unwrap();
@@ -96,8 +90,10 @@ export default function UploadPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Add a meeting</h1>
         <p className="text-sm text-muted-foreground">
-          Upload audio, video or a PDF — or import straight from a YouTube link.
-          Files go directly to private storage, then processing starts automatically.
+          Drop in audio, video or a PDF — or import straight from a YouTube link.
+          Files go directly to private storage and processing starts
+          automatically. The meeting takes its name from the file; rename and tag
+          it afterwards.
         </p>
       </div>
 
@@ -187,19 +183,6 @@ export default function UploadPage() {
               </span>
             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="title">Meeting title</Label>
-              <Input id="title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Sprint planning" disabled={busy} />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="participants">Participants (comma-separated)</Label>
-              <Input id="participants" value={participants} onChange={(e) => setParticipants(e.target.value)} placeholder="Alice, Bob" disabled={busy} />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="tags">Tags (comma-separated)</Label>
-              <Input id="tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="sprint, planning" disabled={busy} />
-            </div>
-
             {busy && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
@@ -278,13 +261,6 @@ function YouTubeImport({ disabled }: { disabled: boolean }) {
       </CardContent>
     </Card>
   );
-}
-
-function splitList(v: string): string[] {
-  return v
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
 }
 
 function probeDuration(file: File): Promise<number | null> {

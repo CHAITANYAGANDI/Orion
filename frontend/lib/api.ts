@@ -14,7 +14,9 @@ import type {
   SpeakerRematch,
   VocabularyTerm,
   VocabularyTermInput,
+  Insight,
   MeetingCreateRequest,
+  MeetingUpdateRequest,
   MeetingImportRequest,
   PreferencesResponse,
   PreferencesUpdateRequest,
@@ -67,6 +69,7 @@ export const api = createApi({
     "Share",
     "Vocabulary",
     "KnownSpeakers",
+    "Insights",
   ],
   endpoints: (builder) => ({
     // ---- Meetings ----
@@ -96,6 +99,58 @@ export const api = createApi({
     getMeeting: builder.query<MeetingResponse, string>({
       query: (id) => `/meetings/${id}`,
       providesTags: (_r, _e, id) => [{ type: "Meeting", id }],
+    }),
+
+    /**
+     * Rename a meeting, or change its tags.
+     *
+     * Invalidates the list as well as the meeting: the title is what the list
+     * shows, so a rename that only refreshed the detail page would leave the
+     * old name behind the moment the user navigated back.
+     */
+    updateMeeting: builder.mutation<
+      MeetingResponse,
+      { id: string; body: MeetingUpdateRequest }
+    >({
+      query: ({ id, body }) => ({ url: `/meetings/${id}`, method: "PATCH", body }),
+      invalidatesTags: (_r, _e, arg) => [
+        { type: "Meeting", id: arg.id },
+        { type: "Meetings", id: "LIST" },
+      ],
+    }),
+
+    // ---- Decisions and risks ----
+    // One list for both kinds: they differ by a field, and two requests could
+    // arrive out of step and render a meeting whose decisions and risks came
+    // from different moments.
+    getInsights: builder.query<Insight[], string>({
+      query: (meetingId) => `/meetings/${meetingId}/insights`,
+      providesTags: (_r, _e, id) => [{ type: "Insights", id }],
+    }),
+
+    addInsight: builder.mutation<
+      Insight,
+      { meetingId: string; kind: Insight["kind"]; text: string }
+    >({
+      query: ({ meetingId, ...body }) => ({
+        url: `/meetings/${meetingId}/insights`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: (_r, _e, arg) => [{ type: "Insights", id: arg.meetingId }],
+    }),
+
+    updateInsight: builder.mutation<
+      Insight,
+      { id: string; meetingId: string; text: string }
+    >({
+      query: ({ id, text }) => ({ url: `/insights/${id}`, method: "PATCH", body: { text } }),
+      invalidatesTags: (_r, _e, arg) => [{ type: "Insights", id: arg.meetingId }],
+    }),
+
+    deleteInsight: builder.mutation<void, { id: string; meetingId: string }>({
+      query: ({ id }) => ({ url: `/insights/${id}`, method: "DELETE" }),
+      invalidatesTags: (_r, _e, arg) => [{ type: "Insights", id: arg.meetingId }],
     }),
 
     createUploadUrl: builder.mutation<UploadUrlResponse, UploadUrlRequest>({
@@ -426,6 +481,11 @@ export const {
   useGetMeetingQuery,
   useCreateUploadUrlMutation,
   useCreateMeetingMutation,
+  useUpdateMeetingMutation,
+  useGetInsightsQuery,
+  useAddInsightMutation,
+  useUpdateInsightMutation,
+  useDeleteInsightMutation,
   useImportMeetingMutation,
   useGetPreferencesQuery,
   useUpdatePreferencesMutation,

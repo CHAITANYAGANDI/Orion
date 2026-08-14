@@ -51,13 +51,24 @@ export interface UploadUrlResponse {
   expiresInSeconds: number;
 }
 
+/**
+ * Confirming an upload. Deliberately almost empty: the meeting is named after
+ * the uploaded file and everything else is edited afterwards, on the meeting
+ * itself. `title` is only for callers whose filename is not a name — the
+ * recorder, whose files are `recording-1755084000000.webm`.
+ */
 export interface MeetingCreateRequest {
   objectKey: string;
-  title: string;
-  participants: string[];
-  tags: string[];
+  title?: string;
+  tags?: string[];
   contentType?: string;
   durationSeconds?: number;
+}
+
+/** Renaming or re-tagging afterwards. Omitted fields are left alone. */
+export interface MeetingUpdateRequest {
+  title?: string;
+  tags?: string[];
 }
 
 /**
@@ -70,7 +81,6 @@ export interface MeetingResponse {
   id: string;
   title: string;
   status: MeetingStatus;
-  participants: string[];
   tags: string[];
   audioUrl?: string | null;
   durationSeconds?: number | null;
@@ -246,6 +256,12 @@ export interface SummaryResponse {
   /** Verified quotations. Empty for summaries generated before they existed. */
   quotes?: Quotation[];
   templateSlug?: string | null;
+  /**
+   * The transcript has been edited since this summary was written, so the two
+   * no longer agree. Not regenerated automatically — one model call per typo
+   * fix is not a trade worth making — so the UI says so and offers the rewrite.
+   */
+  stale?: boolean;
 }
 
 /** One entry in the template picker. */
@@ -364,12 +380,30 @@ export interface ShareResponse {
   createdAt: string;
 }
 
+/**
+ * A decision the meeting settled, or a risk it named.
+ *
+ * Read out of the summary sections rather than extracted separately, so these
+ * and the Decisions section on the same page are the same words. `sourceSection`
+ * is what keeps a blocker distinguishable from a risk once both are stored as
+ * `RISK` — one is already happening, the other might.
+ */
+export interface Insight {
+  id: string;
+  meetingId: string;
+  kind: "DECISION" | "RISK";
+  text: string;
+  sourceSection: string;
+  /** True once a person has edited or added it, rather than the model. */
+  edited: boolean;
+  createdAt: string;
+}
+
 /** The anonymous view of a shared meeting — no ids, no audio, no owner. */
 export interface SharedMeeting {
   title: string;
   meetingDate: string;
   durationSeconds?: number | null;
-  participants: string[];
   shortSummary?: string | null;
   detailedSummary?: string | null;
   keyPoints: string[];

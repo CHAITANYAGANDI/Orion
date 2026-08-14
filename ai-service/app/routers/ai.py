@@ -12,6 +12,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.config import Settings, get_settings
+from app.insights import derive_insights
 from app.pipeline import Pipeline
 from app.rag import RagService
 from app.schemas import (
@@ -87,12 +88,17 @@ async def summarize(
     # Spring sends, and resolving it here is what keeps the section wording
     # from having to be stored anywhere else.
     template = resolve(body.template_slug) if body.template_slug else body.template
-    return await pipeline.summarize(
+    summary = await pipeline.summarize(
         body.transcript,
         duration_seconds=body.duration_seconds,
         speaker_count=body.speaker_count,
         template=template,
     )
+    # Derived here rather than left to the caller: Spring persists these, and
+    # the key-to-kind mapping must not be duplicated in a second language where
+    # it would drift from the templates it reads.
+    summary.insights = derive_insights(summary.sections)
+    return summary
 
 
 @router.post("/extract-action-items", response_model=ActionItemsResponse)

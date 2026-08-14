@@ -4,11 +4,14 @@ import com.recallix.common.ApiException;
 import com.recallix.config.KafkaTopicsConfig;
 import com.recallix.domain.SummarySection;
 import com.recallix.dto.SummaryResponse;
+import com.recallix.dto.callback.AiInsight;
 import com.recallix.entity.Meeting;
+import com.recallix.entity.MeetingInsight;
 import com.recallix.entity.MeetingSummary;
 import com.recallix.entity.MeetingTranscript;
 import com.recallix.entity.TranscriptSegment;
 import com.recallix.repository.MeetingActionItemRepository;
+import com.recallix.repository.MeetingInsightRepository;
 import com.recallix.repository.MeetingRepository;
 import com.recallix.repository.MeetingSummaryRepository;
 import com.recallix.repository.MeetingTranscriptRepository;
@@ -57,6 +60,7 @@ class ResummarizeTest {
     @Mock private TranscriptSegmentRepository segments;
     @Mock private MeetingSummaryRepository summaries;
     @Mock private MeetingActionItemRepository actionItems;
+    @Mock private MeetingInsightRepository insights;
     @Mock private StorageService storage;
     @Mock private UsageLimitService usage;
     @Mock private OutboxService outbox;
@@ -72,7 +76,7 @@ class ResummarizeTest {
     @BeforeEach
     void setUp() {
         service = new MeetingService(meetings, transcripts, segments, summaries,
-                actionItems, storage, usage, outbox, audit, ai, templates, knownSpeakers, vocabulary);
+                actionItems, insights, storage, usage, outbox, audit, ai, templates, knownSpeakers, vocabulary);
 
         meeting = new Meeting();
         meeting.setId(MEETING);
@@ -119,7 +123,33 @@ class ResummarizeTest {
                 List.of("Budget signed off"),
                 List.of(new SummarySection("budget", "Budget", "bullets", "",
                         List.of("Signed off at 40k"), List.of())),
-                "sprint-planning");
+                "sprint-planning",
+                List.of(new AiInsight("DECISION", "Signed off at 40k", "decisions")));
+    }
+
+    @Test
+    @DisplayName("rewriting replaces the decisions the old sections produced")
+    void derivedInsightsAreReplaced() {
+        // The rows were read out of the sections that have just been thrown
+        // away. Leaving them puts the decision store and the notes on screen in
+        // disagreement — which is the one thing deriving them was meant to make
+        // impossible.
+        service.resummarize(USER, MEETING, "sprint-planning");
+
+        verify(insights).deleteDerivedByMeetingId(MEETING);
+
+        ArgumentCaptor<MeetingInsight> saved = ArgumentCaptor.forClass(MeetingInsight.class);
+        verify(insights).save(saved.capture());
+        MeetingInsight row = saved.getValue();
+        assertThat(row.getKind()).isEqualTo("DECISION");
+        assertThat(row.getText()).isEqualTo("Signed off at 40k");
+        assertThat(row.getSourceSection()).isEqualTo("decisions");
+        // Denormalised from the meeting: without it the row is invisible to its
+        // own owner, because the RLS policy tests this column.
+        assertThat(row.getUserId()).isEqualTo(USER);
+        assertThat(row.getMeetingId()).isEqualTo(MEETING);
+        // Derived, not human-owned, so the next rewrite may replace it.
+        assertThat(row.isEdited()).isFalse();
     }
 
     @Test

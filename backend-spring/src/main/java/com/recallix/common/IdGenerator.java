@@ -39,4 +39,5 @@ public final class IdGenerator {
     public static String syncLog()     { return generate("syn_"); }
     public static String vocabulary()  { return generate("voc_"); }
     public static String knownSpeaker(){ return generate("spk_"); }
+    public static String insight()     { return generate("ins_"); }
 }

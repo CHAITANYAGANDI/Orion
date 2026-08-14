@@ -32,6 +32,13 @@ public record MeetingBriefResult(
         String templateSlug,
         List<AiActionItem> actionItems,
         /**
+         * Decisions and risks read out of {@code sections} above. Absent from an
+         * older worker's payload, and legitimately empty for a template with no
+         * decision-shaped section — a 1:1 settles nothing, it produces
+         * commitments, which are action items.
+         */
+        List<AiInsight> insights,
+        /**
          * Only sent for URL imports, where the worker learns the real title and
          * length from the video's metadata. Null for uploads, which already
          * have both from the browser.
@@ -45,4 +52,11 @@ public record MeetingBriefResult(
 
     public List<Quotation> quotesOrEmpty() { return quotes == null ? List.of() : quotes; }
     public List<AiActionItem> actionItemsOrEmpty() { return actionItems == null ? List.of() : actionItems; }
+
+    /** Only the entries an older or misbehaving worker could not have malformed. */
+    public List<AiInsight> insightsOrEmpty() {
+        return insights == null
+                ? List.of()
+                : insights.stream().filter(i -> i != null && i.isUsable()).toList();
+    }
 }

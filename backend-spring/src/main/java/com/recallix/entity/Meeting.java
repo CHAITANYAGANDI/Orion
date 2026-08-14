@@ -60,10 +60,6 @@ public class Meeting {
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
-    private List<String> participants = new ArrayList<>();
-
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(columnDefinition = "jsonb")
     private List<String> tags = new ArrayList<>();
 
     @Column(name = "error_message")
@@ -127,8 +123,6 @@ public class Meeting {
     public Integer getDurationSeconds() { return durationSeconds; }
     public void setDurationSeconds(Integer durationSeconds) { this.durationSeconds = durationSeconds; }
 
-    public List<String> getParticipants() { return participants; }
-    public void setParticipants(List<String> participants) { this.participants = participants; }
 
     public List<String> getTags() { return tags; }
     public void setTags(List<String> tags) { this.tags = tags; }

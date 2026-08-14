@@ -69,6 +69,8 @@ import {
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
 import { AudioPlayer, useAudioController } from "@/components/audio-player";
 import { ShareDialog } from "@/components/share-dialog";
+import { MeetingTitle, MeetingTags } from "@/components/meeting-title";
+import { InsightsPanel } from "@/components/insights-panel";
 import { FollowUpEmail } from "@/components/follow-up-email";
 import { downloadMarkdown } from "@/lib/export-markdown";
 import { subscribeMeetingStatus } from "@/lib/ws";
@@ -200,7 +202,7 @@ export default function MeetingDetailPage() {
           <Link href="/search" className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-4 w-4" /> All meetings
           </Link>
-          <h1 className="text-2xl font-bold tracking-tight">{m.title}</h1>
+          <MeetingTitle id={id} title={m.title} />
           <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
             <StatusBadge status={status} />
             {/* A document has no runtime, so a duration would be meaningless. */}
@@ -226,9 +228,7 @@ export default function MeetingDetailPage() {
                 <Youtube className="h-3.5 w-3.5" /> Watch on YouTube
               </a>
             )}
-            {m.tags?.map((t) => (
-              <Badge key={t} variant="secondary">{t}</Badge>
-            ))}
+            <MeetingTags id={id} tags={m.tags ?? []} />
           </div>
         </div>
         <div className="flex items-center gap-2 no-print">
@@ -300,13 +300,17 @@ export default function MeetingDetailPage() {
           </TabsList>
 
           {/* Summary + translation */}
-          <TabsContent value="summary">
+          <TabsContent value="summary" className="space-y-4">
             <SummaryPanel
               meetingId={id}
               loading={summary.isLoading}
               summary={summary.data}
               onSeek={audio.seekTo}
             />
+            {/* Below the summary, not above it: these are read out of it, and
+                putting the derived rows first would suggest they were the
+                source rather than the reading. */}
+            <InsightsPanel meetingId={id} />
           </TabsContent>
 
           {/* Ask-the-meeting RAG chat */}
@@ -461,7 +465,13 @@ function SummaryPanel({
   const view = translated ?? summary;
   // Translation returns the flat fields only, so while one is showing we fall
   // back to the classic layout rather than render half-translated sections.
-  const sections = translated ? [] : summary?.sections ?? [];
+  // Memoised because the topics below are derived from it: a fresh array
+  // identity on every render would recompute them on every render, which is
+  // cheap here and exactly the habit that stops being cheap later.
+  const sections = React.useMemo(
+    () => (translated ? [] : summary?.sections ?? []),
+    [translated, summary?.sections],
+  );
   // Hidden alongside the sections while a translation is showing: a quotation is
   // a claim about the exact words spoken, so displaying it beside translated
   // prose would invite reading it as a translated quote.
@@ -496,6 +506,30 @@ function SummaryPanel({
           <Skeleton className="h-24 w-full" />
         ) : view ? (
           <>
+            {/* The transcript has been corrected since this was written, so the
+                notes and the transcript below them disagree. Not rewritten
+                automatically — that would spend a model call on every typo fix,
+                and on each of the next nineteen — so the choice is offered
+                instead of made. Hidden while a translation is showing: it
+                describes the original, which isn't what's on screen. */}
+            {summary?.stale && !translated && (
+              <div className="no-print flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+                <span className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" />
+                  The transcript changed after this summary was written.
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onTemplateChange(current)}
+                  disabled={rewriting}
+                >
+                  {rewriting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  Rewrite it
+                </Button>
+              </div>
+            )}
+
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-2">
                 {templates && templates.length > 0 && (

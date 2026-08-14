@@ -4,6 +4,7 @@ import com.recallix.domain.MeetingStatus;
 import com.recallix.dto.MeetingCreateRequest;
 import com.recallix.dto.MeetingImportRequest;
 import com.recallix.dto.MeetingResponse;
+import com.recallix.dto.MeetingUpdateRequest;
 import com.recallix.dto.PageResponse;
 import com.recallix.dto.ReprocessResponse;
 import com.recallix.dto.ResummarizeRequest;
@@ -70,6 +71,18 @@ public class MeetingController {
     @GetMapping("/{id}")
     public MeetingResponse get(@PathVariable String id) {
         return meetings.get(SecurityUtils.currentUserId(), id);
+    }
+
+    /**
+     * Rename a meeting, or change its tags.
+     *
+     * <p>Uploading collects neither, so this is the only way either is set —
+     * which is the point: both are things you know after listening, not before.
+     */
+    @PatchMapping("/{id}")
+    public MeetingResponse update(@PathVariable String id,
+                                  @Valid @RequestBody MeetingUpdateRequest req) {
+        return meetings.updateMeeting(SecurityUtils.currentUserId(), id, req);
     }
 
     @GetMapping("/{id}/transcript")

@@ -64,7 +64,7 @@ export function toMarkdown(data: MeetingExport): string {
 
   const meta: string[] = [new Date(meeting.createdAt).toLocaleString()];
   if (meeting.durationSeconds) meta.push(formatLength(meeting.durationSeconds));
-  if (meeting.participants?.length) meta.push(meeting.participants.join(", "));
+  if (meeting.tags?.length) meta.push(meeting.tags.join(", "));
   out.push(`*${meta.join(" · ")}*`, "");
 
   // A template-shaped summary exports as its own sections, which is both

@@ -8,7 +8,9 @@ import com.recallix.domain.SourceType;
 import com.recallix.dto.MeetingCreateRequest;
 import com.recallix.dto.MeetingImportRequest;
 import com.recallix.dto.MeetingResponse;
+import com.recallix.dto.MeetingUpdateRequest;
 import com.recallix.dto.PageResponse;
+import com.recallix.dto.callback.AiInsight;
 import com.recallix.dto.ReprocessResponse;
 import com.recallix.dto.SegmentDto;
 import com.recallix.dto.SpeakerRematchRequest;
@@ -19,8 +21,10 @@ import com.recallix.dto.TranscriptResponse;
 import com.recallix.dto.UploadUrlRequest;
 import com.recallix.dto.UploadUrlResponse;
 import com.recallix.entity.Meeting;
+import com.recallix.entity.MeetingInsight;
 import com.recallix.entity.TranscriptSegment;
 import com.recallix.repository.MeetingActionItemRepository;
+import com.recallix.repository.MeetingInsightRepository;
 import com.recallix.repository.MeetingRepository;
 import com.recallix.repository.MeetingSummaryRepository;
 import com.recallix.repository.MeetingTranscriptRepository;
@@ -70,6 +74,7 @@ public class MeetingService {
     private final TranscriptSegmentRepository segments;
     private final MeetingSummaryRepository summaries;
     private final MeetingActionItemRepository actionItems;
+    private final MeetingInsightRepository insights;
     private final StorageService storage;
     private final UsageLimitService usage;
     private final OutboxService outbox;
@@ -84,6 +89,7 @@ public class MeetingService {
                           TranscriptSegmentRepository segments,
                           MeetingSummaryRepository summaries,
                           MeetingActionItemRepository actionItems,
+                          MeetingInsightRepository insights,
                           StorageService storage,
                           UsageLimitService usage,
                           OutboxService outbox,
@@ -97,6 +103,7 @@ public class MeetingService {
         this.segments = segments;
         this.summaries = summaries;
         this.actionItems = actionItems;
+        this.insights = insights;
         this.storage = storage;
         this.usage = usage;
         this.outbox = outbox;
@@ -140,8 +147,12 @@ public class MeetingService {
         // Quota is charged at confirmation (not at presign) so abandoned uploads are free.
         usage.incrementMeetingsOrThrow(userId);
 
-        meeting.setTitle(req.title());
-        meeting.setParticipants(req.participantsOrEmpty());
+        // The title was set from the filename at presign. Only a client with a
+        // better name overrides it — the recorder, whose files are timestamps.
+        String override = req.titleOverrideOrNull();
+        if (override != null) {
+            meeting.setTitle(override);
+        }
         meeting.setTags(req.tagsOrEmpty());
         if (req.durationSeconds() != null) {
             meeting.setDurationSeconds(req.durationSeconds());
@@ -151,6 +162,32 @@ public class MeetingService {
 
         enqueueProcessing(meeting);
         audit.record(userId, "MEETING_CREATED", "meeting", meeting.getId());
+        return toResponse(meeting);
+    }
+
+    /**
+     * Rename a meeting or re-tag it.
+     *
+     * <p>Each field is applied only when the caller sent it, so renaming from
+     * the title row cannot wipe tags set from the tag row. For tags the
+     * distinction is null (leave) versus empty (clear) — without it there would
+     * be no way to remove the last tag.
+     */
+    @Transactional
+    public MeetingResponse updateMeeting(String userId, String meetingId, MeetingUpdateRequest req) {
+        Meeting meeting = meetings.findByIdAndUserId(meetingId, userId)
+                .orElseThrow(() -> ApiException.notFound("Meeting not found"));
+
+        String title = req.titleOrNull();
+        if (title != null) {
+            meeting.setTitle(title);
+        }
+        List<String> tags = req.tagsOrNull();
+        if (tags != null) {
+            meeting.setTags(tags);
+        }
+
+        audit.record(userId, "MEETING_UPDATED", "meeting", meetingId);
         return toResponse(meeting);
     }
 
@@ -273,9 +310,7 @@ public class MeetingService {
         require(userId, meetingId);
         var summary = summaries.findFirstByMeetingIdOrderByCreatedAtDesc(meetingId)
                 .orElseThrow(() -> ApiException.notFound("Summary not ready"));
-        return new SummaryResponse(meetingId, summary.getShortSummary(),
-                summary.getDetailedSummary(), summary.getKeyPoints(),
-                summary.getSections(), summary.getQuotes(), summary.getTemplateSlug());
+        return toResponse(meetingId, summary);
     }
 
     /**
@@ -327,15 +362,31 @@ public class MeetingService {
         summary.setKeyPoints(written.keyPoints());
         summary.setSections(written.sections());
         summary.setTemplateSlug(written.templateSlug() == null ? slug : written.templateSlug());
+        // Freshly written from the current transcript, whatever it said before.
+        summary.setStale(false);
         summaries.save(summary);
+
+        // The decisions and risks were read out of the sections that have just
+        // been replaced, so leaving them would put the store and the notes in
+        // disagreement — the one thing deriving them was meant to make
+        // impossible. Corrections survive: only the derived rows are replaced.
+        insights.deleteDerivedByMeetingId(meetingId);
+        for (AiInsight i : written.insights()) {
+            MeetingInsight e = new MeetingInsight();
+            e.setId(IdGenerator.insight());
+            e.setMeetingId(meetingId);
+            e.setUserId(userId);
+            e.setKind(i.kind());
+            e.setText(i.text().trim());
+            e.setSourceSection(i.sourceSection() == null ? "" : i.sourceSection());
+            insights.save(e);
+        }
 
         // Remembered on the meeting so a later reprocess keeps this shape.
         meeting.setSummaryTemplate(slug);
         audit.record(userId, "SUMMARY_RESUMMARIZED", "meeting", meetingId);
 
-        return new SummaryResponse(meetingId, summary.getShortSummary(),
-                summary.getDetailedSummary(), summary.getKeyPoints(),
-                summary.getSections(), summary.getQuotes(), summary.getTemplateSlug());
+        return toResponse(meetingId, summary);
     }
 
     /** Rename transcript speaker labels (e.g. {"S1":"Alice"}); returns updated segments. */
@@ -360,6 +411,9 @@ public class MeetingService {
             // the suggestion list fills from ordinary use instead of needing to
             // be seeded by someone first.
             knownSpeakers.remember(userId, mapping.values());
+            // The outline names speakers by design, so it now refers to labels
+            // the transcript no longer contains.
+            markSummaryStale(meetingId);
         }
         audit.record(userId, "SPEAKERS_RENAMED", "meeting", meetingId);
         return getTranscript(userId, meetingId);
@@ -442,6 +496,7 @@ public class MeetingService {
                 .ifPresent(t -> t.setTranscriptText(joinSegments(segs)));
         reindex(userId, meetingId, segs);
         knownSpeakers.remember(userId, List.of(target));
+        markSummaryStale(meetingId);
         audit.record(userId, "SPEAKER_REMATCHED", "meeting", meetingId);
         return getTranscript(userId, meetingId);
     }
@@ -511,6 +566,10 @@ public class MeetingService {
         transcripts.findFirstByMeetingIdOrderByCreatedAtDesc(meetingId)
                 .ifPresent(t -> t.setTranscriptText(joinSegments(segs)));
         reindex(userId, meetingId, segs);
+        // Chat and search now answer from the corrected words; the summary still
+        // asserts the old ones. Say so rather than letting the two disagree
+        // silently.
+        markSummaryStale(meetingId);
         audit.record(userId, "TRANSCRIPT_EDITED", "meeting", meetingId);
         return getTranscript(userId, meetingId);
     }
@@ -581,11 +640,33 @@ public class MeetingService {
 
     // --- helpers ------------------------------------------------------------ //
 
+    private static SummaryResponse toResponse(String meetingId, com.recallix.entity.MeetingSummary s) {
+        return new SummaryResponse(meetingId, s.getShortSummary(),
+                s.getDetailedSummary(), s.getKeyPoints(),
+                s.getSections(), s.getQuotes(), s.getTemplateSlug(), s.isStale());
+    }
+
+    /**
+     * Mark the summary as no longer matching its transcript.
+     *
+     * <p>Called from every path that changes what the transcript says. The
+     * summary is not rewritten here: doing so would put a model call behind a
+     * one-word correction, and behind each of the next nineteen. Flagging it
+     * leaves the choice with the person who can see both.
+     *
+     * <p>A meeting with no summary yet is simply skipped — there is nothing to
+     * have gone stale, and the pipeline will write one from the current text.
+     */
+    private void markSummaryStale(String meetingId) {
+        summaries.findFirstByMeetingIdOrderByCreatedAtDesc(meetingId)
+                .ifPresent(s -> s.setStale(true));
+    }
+
     private MeetingResponse toResponse(Meeting m) {
         String audioUrl = m.getObjectKey() != null ? storage.presignDownload(m.getObjectKey()) : m.getAudioUrl();
         return new MeetingResponse(
                 m.getId(), m.getTitle(), m.getStatus(),
-                m.getParticipants(), m.getTags(), audioUrl,
+                m.getTags(), audioUrl,
                 m.getDurationSeconds(), m.getCreatedAt(), m.getErrorMessage(),
                 m.getSourceType(), m.getSourceUrl(), m.getLanguage(),
                 m.getSummaryTemplate(), m.getContentType());

@@ -6,6 +6,7 @@ import com.recallix.dto.MeetingResponse;
 import com.recallix.dto.UploadUrlRequest;
 import com.recallix.entity.Meeting;
 import com.recallix.repository.MeetingActionItemRepository;
+import com.recallix.repository.MeetingInsightRepository;
 import com.recallix.repository.MeetingRepository;
 import com.recallix.repository.MeetingSummaryRepository;
 import com.recallix.repository.MeetingTranscriptRepository;
@@ -52,6 +53,7 @@ class MediaContentTypeTest {
     @Mock private TranscriptSegmentRepository segments;
     @Mock private MeetingSummaryRepository summaries;
     @Mock private MeetingActionItemRepository actionItems;
+    @Mock private MeetingInsightRepository insights;
     @Mock private StorageService storage;
     @Mock private UsageLimitService usage;
     @Mock private OutboxService outbox;
@@ -66,7 +68,7 @@ class MediaContentTypeTest {
     @BeforeEach
     void setUp() {
         service = new MeetingService(meetings, transcripts, segments, summaries,
-                actionItems, storage, usage, outbox, audit, ai, templates, knownSpeakers, vocabulary);
+                actionItems, insights, storage, usage, outbox, audit, ai, templates, knownSpeakers, vocabulary);
         when(storage.presignUpload(anyString(), anyString())).thenReturn("https://example/put");
         when(storage.presignDownload(anyString())).thenReturn("https://example/get");
         when(storage.presignExpirySeconds()).thenReturn(900L);
