@@ -119,6 +119,18 @@ export const api = createApi({
       ],
     }),
 
+    /**
+     * Starter questions for the workspace chat.
+     *
+     * Cached server-side per user and regenerated when a meeting arrives or a
+     * few hours pass, so this is a cheap read even though a miss costs a model
+     * call. Untagged deliberately: nothing in the app should invalidate it, and
+     * a refetch on every mutation would defeat the cache it is fronting.
+     */
+    getWorkspaceSuggestions: builder.query<{ suggestions: string[] }, void>({
+      query: () => "/suggestions/workspace",
+    }),
+
     // ---- Decisions and risks ----
     // One list for both kinds: they differ by a field, and two requests could
     // arrive out of step and render a meeting whose decisions and risks came
@@ -482,6 +494,7 @@ export const {
   useCreateUploadUrlMutation,
   useCreateMeetingMutation,
   useUpdateMeetingMutation,
+  useGetWorkspaceSuggestionsQuery,
   useGetInsightsQuery,
   useAddInsightMutation,
   useUpdateInsightMutation,

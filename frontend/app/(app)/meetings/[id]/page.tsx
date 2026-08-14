@@ -84,7 +84,7 @@ import {
 } from "@/lib/format";
 import { languageName } from "@/lib/language";
 import { ChatSuggestions } from "@/components/chat-suggestions";
-import { MEETING_PROMPTS } from "@/lib/chat-prompts";
+import { MEETING_PROMPTS, toPrompts } from "@/lib/chat-prompts";
 import { cn } from "@/lib/utils";
 import type { MeetingStatus, StatusEvent, TranscriptSegment } from "@/lib/types";
 
@@ -315,7 +315,11 @@ export default function MeetingDetailPage() {
 
           {/* Ask-the-meeting RAG chat */}
           <TabsContent value="ask">
-            <ChatPanel meetingId={id} onCite={(s) => audio.seekTo(s)} />
+            <ChatPanel
+              meetingId={id}
+              onCite={(s) => audio.seekTo(s)}
+              suggestions={summary.data?.suggestions}
+            />
             <FollowUpEmail meetingId={id} />
           </TabsContent>
 
@@ -659,7 +663,20 @@ function SummaryPanel({
 }
 
 /* ------------------------------- Chat panel ------------------------------ */
-function ChatPanel({ meetingId, onCite }: { meetingId: string; onCite: (s: number) => void }) {
+function ChatPanel({
+  meetingId,
+  onCite,
+  suggestions,
+}: {
+  meetingId: string;
+  onCite: (s: number) => void;
+  /**
+   * Questions generated from this meeting's summary. Passed down rather than
+   * fetched here: the page already has the summary, and a second request would
+   * make the chips appear after the chat they sit above.
+   */
+  suggestions?: string[];
+}) {
   const { data: messages, isLoading } = useGetChatQuery(meetingId);
   const [ask, { isLoading: asking }] = useAskChatMutation();
   const [q, setQ] = React.useState("");
@@ -732,7 +749,7 @@ function ChatPanel({ meetingId, onCite }: { meetingId: string; onCite: (s: numbe
                 transcript, with citations you can play.
               </p>
               <ChatSuggestions
-                prompts={MEETING_PROMPTS}
+                prompts={toPrompts(suggestions, MEETING_PROMPTS)}
                 disabled={asking}
                 onSend={(prompt) => void submit(prompt)}
                 onCompose={setQ}

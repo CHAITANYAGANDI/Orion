@@ -124,7 +124,39 @@ class ResummarizeTest {
                 List.of(new SummarySection("budget", "Budget", "bullets", "",
                         List.of("Signed off at 40k"), List.of())),
                 "executive",
-                List.of(new AiInsight("DECISION", "Signed off at 40k", "decisions")));
+                List.of(new AiInsight("DECISION", "Signed off at 40k", "decisions")),
+                List.of("How was the 40k budget arrived at?"));
+    }
+
+    @Test
+    @DisplayName("rewriting regenerates the starter questions")
+    void suggestionsAreReplaced() {
+        // They were drawn from the sections that have just been replaced, so
+        // the old chips ask about headings the page no longer has.
+        service.resummarize(USER, MEETING, "executive");
+
+        ArgumentCaptor<MeetingSummary> saved = ArgumentCaptor.forClass(MeetingSummary.class);
+        verify(summaries).save(saved.capture());
+        assertThat(saved.getValue().getSuggestions())
+                .containsExactly("How was the 40k budget arrived at?");
+    }
+
+    @Test
+    @DisplayName("a worker that sends no questions leaves the existing ones alone")
+    void emptySuggestionsDoNotClearExistingOnes() {
+        MeetingSummary existing = existingSummary();
+        existing.setSuggestions(List.of("An older but working question?"));
+        when(summaries.findFirstByMeetingIdOrderByCreatedAtDesc(MEETING))
+                .thenReturn(Optional.of(existing));
+        when(ai.summarize(anyString(), anyString(), any(), any())).thenReturn(
+                new AiClient.SummaryResult("s", "d", List.of(), List.of(), "executive",
+                        List.of(), List.of()));
+
+        service.resummarize(USER, MEETING, "executive");
+
+        // Clearing good chips because the answer was silent is worse than
+        // leaving slightly stale ones.
+        assertThat(existing.getSuggestions()).containsExactly("An older but working question?");
     }
 
     @Test

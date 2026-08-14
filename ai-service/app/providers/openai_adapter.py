@@ -658,6 +658,79 @@ class OpenAiLlmAdapter(LlmPort):
             label="answer",
         )
 
+    # How many chips a chat shows. Three because they sit above the input and
+    # compete with it: a fourth pushes the box down and starts reading as a
+    # menu the user must choose from rather than a set of examples.
+    _SUGGESTION_COUNT = 3
+
+    # Longest a chip can be before it wraps and stops being scannable. Enforced
+    # in the prompt and again on the way out, because the model treats a length
+    # limit as advice.
+    _SUGGESTION_MAX_CHARS = 80
+
+    _SUGGEST_RULES = (
+        "Rules:\n"
+        "- Each question must be answerable FROM THIS MATERIAL. A question the "
+        "material cannot answer produces a confident wrong reply, which is "
+        "worse than offering nothing.\n"
+        "- Be specific. Name the actual thing — the product, the customer, the "
+        "number, the document. 'What was discussed?' is useless on every "
+        "meeting ever recorded, and a chip that could sit on any meeting will "
+        "stop being read after the second one.\n"
+        f"- Under {_SUGGESTION_MAX_CHARS} characters each. They render as "
+        "chips.\n"
+        "- No two questions about the same thing.\n"
+        "- Return fewer, or none, if the material is too thin to ask anything "
+        "specific about. An empty list is a valid answer.\n"
+        'Respond with JSON: {"questions": ["...", "..."]}'
+    )
+
+    async def suggest_questions(self, material: str, *, workspace: bool = False) -> list[str]:
+        async def _op() -> list[str]:
+            if workspace:
+                system = (
+                    "You suggest starter questions for someone browsing their "
+                    "own meeting archive. You are given recent meetings: their "
+                    "titles, dates and summaries.\n"
+                    f"Propose {self._SUGGESTION_COUNT} questions that span "
+                    "meetings or pick out something notable across them — "
+                    "themes that recur, commitments that are outstanding, a "
+                    "meeting worth revisiting. Refer to real meetings and real "
+                    "topics by name.\n" + self._SUGGEST_RULES
+                )
+            else:
+                system = (
+                    "You suggest starter questions for someone who has just "
+                    "opened the notes for one meeting. You are given its "
+                    "summary.\n"
+                    f"Propose {self._SUGGESTION_COUNT} questions this reader "
+                    "would plausibly want answered — the specifics behind a "
+                    "decision, what someone committed to, the detail the "
+                    "summary compressed.\n" + self._SUGGEST_RULES
+                )
+            data = await self._chat_json(system, material)
+            raw = data.get("questions") or []
+            out: list[str] = []
+            for q in raw:
+                if not isinstance(q, str):
+                    continue
+                q = q.strip()
+                # Over-long ones are dropped rather than truncated: a chip cut
+                # mid-sentence would be sent as a truncated question.
+                if q and len(q) <= self._SUGGESTION_MAX_CHARS:
+                    out.append(q)
+            return out[: self._SUGGESTION_COUNT]
+
+        return await _with_retries(
+            _op,
+            attempts=self._settings.openai_max_retries + 1,
+            # Empty rather than a generic set: the caller falls back to its own
+            # static prompts, which are better written than anything invented
+            # here to fill a gap.
+            fallback=[],
+            label="suggest_questions",
+        )
+
     async def translate(self, text: str, target_language: str) -> str:
         async def _op() -> str:
             return await self._chat_text(

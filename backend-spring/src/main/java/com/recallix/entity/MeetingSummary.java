@@ -50,6 +50,19 @@ public class MeetingSummary {
     @Column(name = "quotes_json", columnDefinition = "jsonb")
     private List<Quotation> quotes = new ArrayList<>();
 
+    /**
+     * Starter questions for this meeting's chat, generated from the sections
+     * above when the summary was written.
+     *
+     * <p>Stored rather than generated per page view because a summary does not
+     * change on its own — regenerating on every visit would buy an identical
+     * answer for a model call each time. Empty is a normal outcome, not a
+     * failure: the UI falls back to its own written prompts.
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "suggestions_json", columnDefinition = "jsonb")
+    private List<String> suggestions = new ArrayList<>();
+
     /** Which template produced this summary; null for pre-template summaries. */
     @Column(name = "template_slug")
     private String templateSlug;
@@ -87,6 +100,9 @@ public class MeetingSummary {
 
     public String getTemplateSlug() { return templateSlug; }
     public void setTemplateSlug(String templateSlug) { this.templateSlug = templateSlug; }
+
+    public List<String> getSuggestions() { return suggestions; }
+    public void setSuggestions(List<String> suggestions) { this.suggestions = suggestions; }
 
     public boolean isStale() { return stale; }
     public void setStale(boolean stale) { this.stale = stale; }

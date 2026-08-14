@@ -17,6 +17,7 @@ from app.config import Settings
 from app.providers.ports import EmbeddingPort, LlmPort
 from app.questions import wants_full_list
 from app.schemas import Segment
+from app.suggestions import MAX_MEETINGS, MAX_OPEN_ITEMS, workspace_material
 from app.timeframe import detect_window
 
 logger = logging.getLogger("ai-service.rag")
@@ -358,6 +359,60 @@ class RagService:
             "supersedes it — say which is current when you report a conflict.",
             *lines,
         ]
+
+    async def workspace_material(self, user_id: str) -> str:
+        """Recent meetings and outstanding work, rendered for the suggester.
+
+        Read here rather than assembled in Spring and posted over, matching
+        workspace chat: the caller sends a user id and this service does the
+        reading. Two services querying the same tables for the same purpose is
+        how the two drift.
+
+        Returns an empty string for a user with no processed meetings, which
+        tells the caller to skip the model call rather than ask for questions
+        about an empty archive.
+        """
+        if not self.enabled:
+            return ""
+
+        meetings_sql = """
+            SELECT m.title, m.created_at, s.short_summary
+              FROM meetings m
+              LEFT JOIN LATERAL (
+                    SELECT short_summary
+                      FROM meeting_summaries
+                     WHERE meeting_id = m.id
+                     ORDER BY created_at DESC
+                     LIMIT 1
+                   ) s ON TRUE
+             WHERE m.user_id = %s AND m.status = 'READY'
+             ORDER BY m.created_at DESC
+             LIMIT %s
+        """
+        items_sql = """
+            SELECT a.title, m.title
+              FROM meeting_action_items a
+              JOIN meetings m ON m.id = a.meeting_id
+             WHERE m.user_id = %s AND a.status <> 'DONE'
+             ORDER BY a.due_date NULLS LAST, a.created_at
+             LIMIT %s
+        """
+
+        try:
+            async with self.connection(user_id) as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(meetings_sql, (user_id, MAX_MEETINGS))
+                    meetings = await cur.fetchall()
+                    await cur.execute(items_sql, (user_id, MAX_OPEN_ITEMS))
+                    items = await cur.fetchall()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not read workspace material for %s: %s", user_id, exc)
+            return ""
+
+        return workspace_material(
+            [(m[0], m[1], m[2]) for m in meetings],
+            [(i[0], i[1]) for i in items],
+        )
 
     # --- workspace-wide retrieval ------------------------------------------- #
     async def _retrieve(

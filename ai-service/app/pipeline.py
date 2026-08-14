@@ -23,6 +23,7 @@ from typing import Awaitable, Callable
 from app.insights import derive_insights
 from app.language import annotate_segments
 from app.quotes import verify_quotes
+from app.suggestions import meeting_material
 from app.providers.ports import LlmPort, TranscriptionPort
 from app.schemas import (
     DraftEmailRequest,
@@ -96,6 +97,9 @@ class Pipeline:
 
     async def extract_action_items(self, transcript: str):
         return await self._llm.extract_action_items(transcript)
+
+    async def suggest_questions(self, material: str, *, workspace: bool = False) -> list[str]:
+        return await self._llm.suggest_questions(material, workspace=workspace)
 
     async def translate(self, text: str, target_language: str) -> str:
         return await self._llm.translate(text, target_language)
@@ -244,6 +248,12 @@ class Pipeline:
         # that disagrees with the summary next to it on the page.
         insights = derive_insights(kept_sections)
 
+        # Starter questions for this meeting's chat, generated here so opening
+        # the chat costs nothing: they are derived from a summary that will not
+        # change, so generating per page view would buy an identical answer
+        # every time. Never fatal — a brief without chips is a working brief.
+        suggestions = await self._suggest(meeting_id, summary.short_summary, kept_sections)
+
         return MeetingBriefResult(
             meeting_id=meeting_id,
             transcript=transcript.transcript,
@@ -257,4 +267,25 @@ class Pipeline:
             action_items=action_items,
             quotes=quotes,
             insights=insights,
+            suggestions=suggestions,
         )
+
+    async def _suggest(
+        self, meeting_id: str, short_summary: str, sections: list
+    ) -> list[str]:
+        """Starter questions for this meeting, or none.
+
+        Swallows failures on purpose. This is the last thing the pipeline does
+        and the least important thing it produces — losing the chips costs a
+        convenience, whereas letting the exception through would fail a meeting
+        that has already been transcribed, summarized and had its action items
+        extracted, and would re-run all of it on retry.
+        """
+        try:
+            material = meeting_material(short_summary, sections)
+            if not material.strip():
+                return []
+            return await self._llm.suggest_questions(material)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not suggest questions for %s: %s", meeting_id, exc)
+            return []

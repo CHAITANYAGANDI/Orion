@@ -1,5 +1,17 @@
 /**
- * Starter prompts for the two grounded chats.
+ * Fallback starter prompts for the two grounded chats.
+ *
+ * **These are the floor, not the feature.** Both chats now show questions
+ * generated from the actual material — this meeting's summary, or the user's
+ * recent meetings — because a fixed list fails in the way that does not look
+ * like a failure: "What did we decide?" sits on a meeting that decided nothing,
+ * and the same three chips on every page stop being read after the second one.
+ *
+ * This set is what shows when there is nothing to generate from: a meeting
+ * still processing, a brand-new workspace, a summary too thin to ask anything
+ * specific about, or an ai-service outage. Kept hand-written rather than
+ * replaced with something generic, because in exactly those moments the user
+ * has the least context and the prompts have to carry the most.
  *
  * Split by what each chat can actually retrieve, which is the whole point of
  * having two lists. Meeting chat is grounded in one transcript, so "compare
@@ -17,6 +29,26 @@ export interface ChatPrompt {
   label: string;
   /** What is actually sent — fuller than the label, to steer retrieval. */
   prompt: string;
+}
+
+/**
+ * Turn generated questions into chips.
+ *
+ * A generated question is one string used for both the label and the prompt:
+ * it is already specific and already short (the generator caps it), so the
+ * label/prompt split that the static set needs — short chip, fuller prompt to
+ * steer retrieval — has nothing to do here.
+ *
+ * Returns the fallback when there is nothing generated, which is what makes
+ * every caller's empty case identical and keeps the decision in one place.
+ */
+export function toPrompts(
+  generated: string[] | undefined | null,
+  fallback: ChatPrompt[],
+): ChatPrompt[] {
+  const clean = (generated ?? []).map((q) => q.trim()).filter(Boolean);
+  if (clean.length === 0) return fallback;
+  return clean.map((q) => ({ label: q, prompt: q }));
 }
 
 /** Grounded in one transcript. */

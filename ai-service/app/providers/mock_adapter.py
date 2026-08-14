@@ -331,6 +331,13 @@ class MockLlmAdapter(LlmPort):
         joined = " ".join(context[:2]).strip()
         return f"Based on the meeting, {joined}"
 
+    async def suggest_questions(self, material: str, *, workspace: bool = False) -> list[str]:
+        # Nothing to generate from without a model. Empty rather than invented:
+        # the caller falls back to its written-by-hand static prompts, which is
+        # a better demo than three fabricated questions about a meeting the
+        # mock has not read.
+        return []
+
     async def translate(self, text: str, target_language: str) -> str:
         return f"[{target_language}] {text}"
 

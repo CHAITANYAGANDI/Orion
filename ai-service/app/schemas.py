@@ -181,6 +181,11 @@ class MeetingBriefResult(CamelModel):
     # Read out of `sections` above, not extracted separately: the decision store
     # and the Decisions section are the same words, so they cannot drift apart.
     insights: list[Insight] = Field(default_factory=list)
+    # Starter questions for this meeting's chat. Generated once here rather than
+    # on every page load: they are derived from a summary that does not change,
+    # so regenerating per view would be a model call per visit for an identical
+    # answer.
+    suggestions: list[str] = Field(default_factory=list)
     # Only populated for URL imports, where the worker discovers the real title
     # and length from the source. Spring uses them to replace its placeholder.
     title: str | None = None
@@ -227,6 +232,11 @@ class SummaryResponse(CamelModel):
     # all read those and must not care which template ran.
     sections: list[SummarySection] = Field(default_factory=list)
     template_slug: str | None = None
+    # Starter questions for this meeting's chat, generated from the sections
+    # above. Empty when the model could not produce specific ones, which is a
+    # valid answer — the UI falls back to its written-by-hand prompts, and three
+    # generic chips are worse than three good static ones.
+    suggestions: list[str] = Field(default_factory=list)
     # Read out of `sections` above. Carried on this response, and not only on
     # the pipeline's, because re-summarizing under a different template goes
     # through here — and a template switch that changed the notes but left the
@@ -304,6 +314,23 @@ class Citation(CamelModel):
 class ChatResponse(CamelModel):
     answer: str
     citations: list[Citation] = Field(default_factory=list)
+
+
+class SuggestionsResponse(CamelModel):
+    """Starter questions for a chat.
+
+    Always a valid response, including when empty: the caller has static
+    prompts to fall back on, and offering nothing is better than offering three
+    questions this material cannot answer.
+    """
+
+    suggestions: list[str] = Field(default_factory=list)
+
+
+class WorkspaceSuggestionsRequest(CamelModel):
+    """Starter questions across everything one user owns."""
+
+    user_id: str
 
 
 class WorkspaceChatRequest(CamelModel):

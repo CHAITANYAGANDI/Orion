@@ -208,6 +208,52 @@ section instructions.
 An unknown slug resolves to General rather than erroring, so a meeting
 summarized under a since-removed template can still be re-summarized.
 
+### Chat starter questions
+
+The chips above a chat are generated from real material, not hard-coded. A fixed
+list fails in the way that does not look like a bug: "What did we decide?" sits
+on a meeting that decided nothing, and the same three chips on every page stop
+being read after the second one.
+
+The two have different lifetimes, which is why they are stored differently.
+
+| | Meeting chat | Workspace chat |
+|---|---|---|
+| Generated from | that meeting's summary sections | recent meetings + open action items |
+| Generated when | the summary is written | on request |
+| Stored in | `meeting_summaries.suggestions_json` | `workspace_suggestions` (one row per user) |
+| Delivered by | `SummaryResponse.suggestions` | `GET /api/v1/suggestions/workspace` |
+| Refreshed by | re-summarize / reprocess | a new meeting, or 6 hours |
+
+**A meeting's questions ride on its summary** rather than getting their own
+endpoint: the page already loads the summary, and a second request would make
+the chips appear after the chat they sit above. They are generated once because
+a summary does not change on its own — regenerating per page view would buy an
+identical answer for a model call each time.
+
+**A workspace has no such moment.** There is no "workspace processed" event, and
+the right questions change as meetings land, so they are generated on request
+and cached. The cache is invalidated by a meeting arriving (suggestions naming
+last week's meetings read as a system that has lost track) or by six hours
+passing (otherwise a stable archive shows the same three questions for ever,
+which is the hard-coded list with extra steps).
+
+Material selection is in `ai-service/app/suggestions.py` and matters more than
+the prompt does. Two rules: send the **summary, not the transcript** — a
+transcript is mostly connective tissue and a model reading one picks a vivid
+aside over the decision that took forty minutes — and **bound it hard**, since
+these run per meeting and per workspace. The outline and quotations sections are
+excluded: the outline is a chronological walkthrough, so questions drawn from it
+come out as "what did Speaker 2 say at the start?".
+
+**Empty is a valid response everywhere**, and never an error. A meeting still
+processing, a new workspace, a summary too thin, or an ai-service outage all
+return `[]`, and the UI falls back to its hand-written prompts in
+`frontend/lib/chat-prompts.ts` — which are kept precisely because those are the
+moments when the user has least context. Generation failure never fails the
+thing it is attached to: a brief without chips is a working brief, and the
+workspace cache serves whatever it last had.
+
 ### Decisions and risks (`meeting_insights`)
 
 Populated by the worker, from the summary it has just written — **not** by a
@@ -283,6 +329,7 @@ Base: `http://ai-service:8000`
 | POST | `/ai/transcribe` | `{ "audioUrl" }` or `{ "audioPath" }` | `{ "transcript", "language", "segments":[{start,end,speaker,text}] }` |
 | POST | `/ai/summarize` | `{ "transcript", "templateSlug"?, "durationSeconds"?, "speakerCount"? }` | `{ "shortSummary","detailedSummary","keyPoints":[],"sections":[],"templateSlug","insights":[Insight] }` |
 | POST | `/ai/extract-action-items` | `{ "transcript" }` | `{ "actionItems":[ActionItem] }` |
+| POST | `/ai/suggestions/workspace` | `{ "userId" }` | `{ "suggestions":["..."] }` |
 | GET  | `/ai/templates` | — | `SummaryTemplate[]` (with section instructions) |
 | POST | `/ai/process-meeting` | `{ "meetingId","audioUrl" }` | `MeetingBriefResult` (also persisted via callback) |
 | POST | `/ai/chat` | `{ "meetingId","question" }` | `{ "answer","citations":[Citation] }` |

@@ -152,6 +152,34 @@ public class AiClient {
     }
 
     /**
+     * Starter questions across everything one user owns.
+     *
+     * <p>Only the user id is sent: the ai-service reads the meetings itself,
+     * exactly as workspace chat does. Assembling the material here instead
+     * would put two services querying the same tables for the same purpose,
+     * which is how the two come to disagree about what "recent" means.
+     */
+    public List<String> workspaceSuggestions(String userId) {
+        JsonNode body = client.post()
+                .uri("/ai/suggestions/workspace")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("userId", userId))
+                .retrieve()
+                .body(JsonNode.class);
+
+        List<String> out = new java.util.ArrayList<>();
+        if (body != null && body.has("suggestions")) {
+            for (JsonNode s : body.get("suggestions")) {
+                String q = s.asText("").trim();
+                if (!q.isEmpty()) {
+                    out.add(q);
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
      * A summary as written, in the shape the requested template asked for.
      *
      * <p>{@code insights} are the decisions and risks the ai-service read back
@@ -164,7 +192,9 @@ public class AiClient {
                                 List<String> keyPoints,
                                 List<SummarySection> sections,
                                 String templateSlug,
-                                List<AiInsight> insights) {}
+                                List<AiInsight> insights,
+                                /** Starter chat questions drawn from these sections. */
+                                List<String> suggestions) {}
 
     /**
      * Re-summarize an existing transcript under a named template.
@@ -220,13 +250,23 @@ public class AiClient {
                 }
             }
         }
+        List<String> suggestions = new java.util.ArrayList<>();
+        if (body != null && body.has("suggestions")) {
+            for (JsonNode s : body.get("suggestions")) {
+                String q = s.asText("").trim();
+                if (!q.isEmpty()) {
+                    suggestions.add(q);
+                }
+            }
+        }
         return new SummaryResult(
                 text(body, "shortSummary"),
                 text(body, "detailedSummary"),
                 keyPoints,
                 sections,
                 body != null && body.hasNonNull("templateSlug") ? body.get("templateSlug").asText() : null,
-                insights);
+                insights,
+                suggestions);
     }
 
     private static SummarySection toSection(JsonNode s) {

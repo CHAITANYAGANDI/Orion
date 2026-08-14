@@ -257,6 +257,12 @@ export interface SummaryResponse {
   quotes?: Quotation[];
   templateSlug?: string | null;
   /**
+   * Starter questions for this meeting's chat, generated from this summary.
+   * Empty when nothing specific could be generated — the UI falls back to its
+   * hand-written prompts rather than showing generic ones.
+   */
+  suggestions?: string[];
+  /**
    * The transcript has been edited since this summary was written, so the two
    * no longer agree. Not regenerated automatically — one model call per typo
    * fix is not a trade worth making — so the UI says so and offers the rewrite.

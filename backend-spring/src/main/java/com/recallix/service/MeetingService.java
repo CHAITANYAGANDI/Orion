@@ -362,6 +362,13 @@ public class MeetingService {
         summary.setKeyPoints(written.keyPoints());
         summary.setSections(written.sections());
         summary.setTemplateSlug(written.templateSlug() == null ? slug : written.templateSlug());
+        // Regenerated with the sections they were drawn from. Only replaced
+        // when the worker returned some: an older worker sends none, and
+        // clearing good chips because the answer was silent would be worse than
+        // leaving slightly stale ones.
+        if (!written.suggestions().isEmpty()) {
+            summary.setSuggestions(written.suggestions());
+        }
         // Freshly written from the current transcript, whatever it said before.
         summary.setStale(false);
         summaries.save(summary);
@@ -643,7 +650,8 @@ public class MeetingService {
     private static SummaryResponse toResponse(String meetingId, com.recallix.entity.MeetingSummary s) {
         return new SummaryResponse(meetingId, s.getShortSummary(),
                 s.getDetailedSummary(), s.getKeyPoints(),
-                s.getSections(), s.getQuotes(), s.getTemplateSlug(), s.isStale());
+                s.getSections(), s.getQuotes(), s.getTemplateSlug(),
+                s.getSuggestions(), s.isStale());
     }
 
     /**

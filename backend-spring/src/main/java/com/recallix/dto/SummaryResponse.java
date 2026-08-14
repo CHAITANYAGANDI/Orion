@@ -27,6 +27,15 @@ public record SummaryResponse(
         List<Quotation> quotes,
         String templateSlug,
         /**
+         * Starter questions for this meeting's chat, drawn from this summary.
+         *
+         * <p>Carried on the summary rather than fetched separately because the
+         * meeting page already loads it — a second request would make the chips
+         * arrive after the chat they sit above. Empty is normal; the UI falls
+         * back to its static prompts.
+         */
+        List<String> suggestions,
+        /**
          * True when the transcript has been edited since this summary was
          * written, so the notes and the transcript no longer agree.
          *

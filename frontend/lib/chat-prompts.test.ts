@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { MEETING_PROMPTS, WORKSPACE_PROMPTS } from "@/lib/chat-prompts";
+import { MEETING_PROMPTS, WORKSPACE_PROMPTS, toPrompts } from "@/lib/chat-prompts";
 
 /**
  * The starter prompts.
@@ -57,6 +57,44 @@ describe("the split between the two chats", () => {
     for (const p of WORKSPACE_PROMPTS) {
       expect(/\bthis meeting\b/i.test(p.prompt), p.label).toBe(false);
     }
+  });
+});
+
+describe("toPrompts", () => {
+  it("turns generated questions into chips", () => {
+    expect(toPrompts(["What did the vendor commit to?"], MEETING_PROMPTS)).toEqual([
+      { label: "What did the vendor commit to?", prompt: "What did the vendor commit to?" },
+    ]);
+  });
+
+  it("falls back when nothing was generated", () => {
+    // Every empty case has to land here, or a meeting still processing shows a
+    // blank row where the chips should be.
+    expect(toPrompts(undefined, MEETING_PROMPTS)).toBe(MEETING_PROMPTS);
+    expect(toPrompts(null, MEETING_PROMPTS)).toBe(MEETING_PROMPTS);
+    expect(toPrompts([], MEETING_PROMPTS)).toBe(MEETING_PROMPTS);
+  });
+
+  it("falls back when the generated questions are all blank", () => {
+    // A model that returns ["", "  "] must not produce two empty chips.
+    expect(toPrompts(["", "   "], WORKSPACE_PROMPTS)).toBe(WORKSPACE_PROMPTS);
+  });
+
+  it("drops the blanks but keeps the rest", () => {
+    expect(toPrompts(["  ", "A real question?"], MEETING_PROMPTS)).toEqual([
+      { label: "A real question?", prompt: "A real question?" },
+    ]);
+  });
+
+  it("trims, so a stray newline does not become a chip that wraps", () => {
+    expect(toPrompts(["  Padded?\n"], MEETING_PROMPTS)[0].label).toBe("Padded?");
+  });
+
+  it("never composes a generated question", () => {
+    // A trailing space is the compose signal for the static set. A generated
+    // one is complete, so it must not be left half-sent in the input box.
+    const prompts = toPrompts(["Did we settle the price? "], MEETING_PROMPTS);
+    expect(prompts[0].prompt.endsWith(" ")).toBe(false);
   });
 });
 

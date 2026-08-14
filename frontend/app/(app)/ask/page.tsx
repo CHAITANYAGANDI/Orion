@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import {
   useGetWorkspaceChatQuery,
+  useGetWorkspaceSuggestionsQuery,
   useAskWorkspaceChatMutation,
   useClearWorkspaceChatMutation,
 } from "@/lib/api";
@@ -32,10 +33,14 @@ import { timecode } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Citation } from "@/lib/types";
 import { ChatSuggestions } from "@/components/chat-suggestions";
-import { WORKSPACE_PROMPTS } from "@/lib/chat-prompts";
+import { WORKSPACE_PROMPTS, toPrompts } from "@/lib/chat-prompts";
 
 export default function AskPage() {
   const { data: messages, isLoading } = useGetWorkspaceChatQuery();
+  // Generated from the user's recent meetings and cached server-side, so this
+  // is a cheap read. Failure is silent by design: the chips fall back to the
+  // static set rather than the page reporting that a convenience is missing.
+  const { data: suggestions } = useGetWorkspaceSuggestionsQuery();
   const [ask, { isLoading: asking }] = useAskWorkspaceChatMutation();
   const [clear, { isLoading: clearing }] = useClearWorkspaceChatMutation();
   const [q, setQ] = React.useState("");
@@ -112,7 +117,7 @@ export default function AskPage() {
                 </p>
                 <div className="mx-auto mt-4 max-w-xl">
                   <ChatSuggestions
-                    prompts={WORKSPACE_PROMPTS}
+                    prompts={toPrompts(suggestions?.suggestions, WORKSPACE_PROMPTS)}
                     disabled={asking}
                     onSend={(prompt) => void send(prompt)}
                     onCompose={setQ}

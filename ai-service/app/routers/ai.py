@@ -29,6 +29,7 @@ from app.schemas import (
     SemanticSearchHit,
     SemanticSearchRequest,
     SemanticSearchResponse,
+    SuggestionsResponse,
     SummarizeRequest,
     SummaryResponse,
     SummaryTemplate,
@@ -38,8 +39,10 @@ from app.schemas import (
     TranslateRequest,
     TranslateResponse,
     WorkspaceChatRequest,
+    WorkspaceSuggestionsRequest,
 )
 from app.storage import fetch_audio
+from app.suggestions import meeting_material
 from app.templates import BUILT_IN, resolve
 
 logger = logging.getLogger("ai-service.router.ai")
@@ -98,7 +101,40 @@ async def summarize(
     # the key-to-kind mapping must not be duplicated in a second language where
     # it would drift from the templates it reads.
     summary.insights = derive_insights(summary.sections)
+    # Regenerated alongside the notes, because a template switch changes what
+    # the meeting page shows and the old chips would be asking about sections
+    # that are no longer there. Failure is swallowed for the same reason as in
+    # the pipeline: chips are not worth failing a rewrite over.
+    try:
+        material = meeting_material(summary.short_summary, summary.sections)
+        if material.strip():
+            summary.suggestions = await pipeline.suggest_questions(material)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not suggest questions while summarizing: %s", exc)
     return summary
+
+
+@router.post("/suggestions/workspace", response_model=SuggestionsResponse)
+async def workspace_suggestions(
+    body: WorkspaceSuggestionsRequest,
+    pipeline: Pipeline = Depends(get_pipeline),
+    rag: RagService = Depends(get_rag),
+) -> SuggestionsResponse:
+    """Starter questions across one user's archive.
+
+    Unlike a meeting's chips, these have no natural moment to be generated at —
+    a workspace has no "processed" event — so they are generated on request and
+    cached by the caller. Spring owns that cache: it knows when a meeting last
+    landed, which is what should expire them.
+
+    An empty archive returns an empty list rather than an error, and the UI
+    falls back to its static prompts.
+    """
+    material = await rag.workspace_material(body.user_id)
+    if not material.strip():
+        return SuggestionsResponse(suggestions=[])
+    questions = await pipeline.suggest_questions(material, workspace=True)
+    return SuggestionsResponse(suggestions=questions)
 
 
 @router.post("/extract-action-items", response_model=ActionItemsResponse)

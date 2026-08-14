@@ -13,6 +13,15 @@ public interface MeetingRepository extends JpaRepository<Meeting, String> {
 
     Optional<Meeting> findByIdAndUserId(String id, String userId);
 
+    /**
+     * The most recent meeting a user owns, whatever its state.
+     *
+     * <p>Read only to date-stamp the workspace suggestion cache: if a meeting
+     * arrived after the suggestions were written, they describe an archive that
+     * no longer exists and are regenerated.
+     */
+    Optional<Meeting> findFirstByUserIdOrderByCreatedAtDesc(String userId);
+
     Optional<Meeting> findByObjectKeyAndUserId(String objectKey, String userId);
 
     /** Backs the "you already imported that video" check (unique index in V6). */

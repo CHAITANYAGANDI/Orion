@@ -93,6 +93,27 @@ class LlmPort(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    @abstractmethod
+    async def suggest_questions(self, material: str, *, workspace: bool = False) -> list[str]:
+        """Questions worth asking about this material.
+
+        The starter chips on a chat. Generated from the material rather than
+        hard-coded, because a fixed list is wrong in the way that matters: it
+        offers "what did we decide?" to a meeting that decided nothing, and
+        offers the same three questions on every page, so it stops being read
+        after the second meeting.
+
+        `workspace` switches from "questions about this meeting" to "questions
+        across these meetings" — a different job, not a different subject.
+
+        Returns between zero and three. Zero is a valid answer for material too
+        thin to ask anything specific about, and is better than three generic
+        questions, because the caller has a static fallback and a generic
+        suggestion is indistinguishable from a broken one.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     async def translate(self, text: str, target_language: str) -> str:
         """Translate text into the target language, preserving meaning."""
         raise NotImplementedError

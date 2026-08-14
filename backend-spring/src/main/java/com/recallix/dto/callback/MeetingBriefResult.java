@@ -39,6 +39,12 @@ public record MeetingBriefResult(
          */
         List<AiInsight> insights,
         /**
+         * Starter questions for this meeting's chat. Absent from an older
+         * worker's payload, and legitimately empty when the model could not
+         * produce specific ones.
+         */
+        List<String> suggestions,
+        /**
          * Only sent for URL imports, where the worker learns the real title and
          * length from the video's metadata. Null for uploads, which already
          * have both from the browser.
@@ -52,6 +58,10 @@ public record MeetingBriefResult(
 
     public List<Quotation> quotesOrEmpty() { return quotes == null ? List.of() : quotes; }
     public List<AiActionItem> actionItemsOrEmpty() { return actionItems == null ? List.of() : actionItems; }
+
+    public List<String> suggestionsOrEmpty() {
+        return suggestions == null ? List.of() : suggestions;
+    }
 
     /** Only the entries an older or misbehaving worker could not have malformed. */
     public List<AiInsight> insightsOrEmpty() {

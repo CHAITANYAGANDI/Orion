@@ -172,6 +172,7 @@ public class CallbackService {
         s.setKeyPoints(result.keyPointsOrEmpty());
         s.setSections(result.sectionsOrEmpty());
         s.setQuotes(result.quotesOrEmpty());
+        s.setSuggestions(result.suggestionsOrEmpty());
         s.setTemplateSlug(result.templateSlug());
         summaries.save(s);
     }
