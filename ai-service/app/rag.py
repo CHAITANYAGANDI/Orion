@@ -15,6 +15,7 @@ from datetime import datetime
 
 from app.config import Settings
 from app.providers.ports import EmbeddingPort, LlmPort
+from app.questions import wants_full_list
 from app.schemas import Segment
 from app.timeframe import detect_window
 
@@ -209,7 +210,11 @@ class RagService:
             return ("I don't have an indexed transcript for this meeting yet.", [])
 
         context = [r[1] for r in rows]
-        answer = await self._llm.answer(question, context)
+        # "List every question that went unanswered" is an inventory here too,
+        # even though this chat sees one meeting rather than the workspace.
+        answer = await self._llm.answer(
+            question, context, exhaustive=wants_full_list(question)
+        )
         citations = [
             {"chunkIndex": r[0], "start": r[2], "end": r[3], "text": r[1]} for r in rows
         ]
@@ -498,7 +503,14 @@ class RagService:
         # store holds every decision with the date it was made.
         context = await self._decision_context(user_id, meeting_ids) + context
 
-        answer = await self._llm.answer(question, context)
+        # The ledger above is complete — every action item, not a retrieved
+        # sample — so an inventory question fails on *writing*, not on evidence.
+        # Told to be concise, the model merges near-identical items into one
+        # line: fifteen tracked items come back as thirteen bullets, complete
+        # and uncountable. This asks it to enumerate instead.
+        answer = await self._llm.answer(
+            question, context, exhaustive=wants_full_list(question)
+        )
         citations = [
             {
                 "chunkIndex": r[0],

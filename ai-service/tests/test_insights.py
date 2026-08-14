@@ -34,22 +34,32 @@ def test_a_decisions_section_becomes_decisions():
     ]
 
 
-@pytest.mark.parametrize("key", ["risks", "blockers", "concerns"])
+@pytest.mark.parametrize("key", ["risks", "blockers"])
 def test_risk_shaped_sections_become_risks(key):
     out = derive_insights([_bullets(key, "The vendor contract is not signed yet.")])
     assert [i.kind for i in out] == ["RISK"]
 
 
-@pytest.mark.parametrize("key", ["selected", "improvements"])
-def test_sections_that_settle_something_count_as_decisions(key):
-    """Brainstorm's "selected" and Retrospective's "improvements" are decisions.
+@pytest.mark.parametrize("key", ["selected", "improvements", "concerns"])
+def test_sections_from_deleted_templates_no_longer_count(key):
+    """Keys left over from the templates this release removed.
 
-    Both are written as things the group agreed to — "the ideas the group chose
-    to take forward", "changes the team agreed to try". Reading them as anything
-    else means those two templates produce no decision record at all.
+    They belonged to Brainstorm, Retrospective and Client Meeting. Kept as a
+    test rather than deleted with them because the failure mode is silent: a
+    future template that reuses one of these names would start feeding the
+    decision record without anyone choosing that.
     """
-    out = derive_insights([_bullets(key, "Move the deploy window to Tuesdays.")])
-    assert [i.kind for i in out] == ["DECISION"]
+    assert derive_insights([_bullets(key, "Move the deploy window to Tuesdays.")]) == []
+
+
+def test_a_recommendation_is_not_a_decision():
+    """A memo proposes; it does not settle.
+
+    Recording a recommendation as a decision puts a suggestion into the record
+    as though the group had agreed to it — and workspace chat then reports it
+    as what was decided.
+    """
+    assert derive_insights([_bullets("recommendation", "We should move to Postgres.")]) == []
 
 
 def test_commitments_are_not_decisions():
@@ -119,19 +129,32 @@ def test_blank_and_trivial_bullets_are_dropped():
     assert [i.text for i in out] == ["Adopt the new schema."]
 
 
-def test_the_same_item_in_two_sections_is_stored_once():
-    """Project Review has both Risks and Blockers.
+def test_the_same_item_twice_is_stored_once():
+    """Models repeat themselves, and a repeat here is two identical rows.
 
-    A team that names the same dependency in both should get one row, not two
-    that a reader has to notice are the same sentence.
+    Case-insensitive, because "The vendor contract is not signed" and "the
+    vendor contract is not signed" are the same risk and a reader should not
+    have to notice they are the same sentence.
     """
     sections = [
-        _bullets("risks", "The vendor contract is not signed."),
-        _bullets("blockers", "the vendor contract is not signed."),
+        _bullets(
+            "risks",
+            "The vendor contract is not signed.",
+            "the vendor contract is not signed.",
+        ),
     ]
     out = derive_insights(sections)
     assert len(out) == 1
-    assert out[0].source_section == "risks"
+
+
+def test_a_decision_and_a_risk_with_the_same_words_are_both_kept():
+    """Dedup is per kind. The same sentence can be settled and still be a worry,
+    and collapsing the two would silently drop one of them."""
+    sections = [
+        _bullets("decisions", "Ship without the vendor integration."),
+        _bullets("risks", "Ship without the vendor integration."),
+    ]
+    assert len(derive_insights(sections)) == 2
 
 
 def test_a_prose_section_is_not_split_into_rows():
@@ -218,14 +241,34 @@ def test_every_built_in_template_is_accounted_for():
     """
     from app.insights import DECISION_KEYS, RISK_KEYS
 
-    settles_nothing = {"one-on-one", "interview"}
+    # A 1:1 produces commitments (already action items), an interview produces
+    # observations, and a memo produces a recommendation. None of the three
+    # settles anything, and inventing decisions for them would be worse than
+    # the empty card.
+    settles_nothing = {"one-on-one", "interview", "memo"}
     for tpl in BUILT_IN:
         keys = {s.key for s in tpl.sections}
         derives = bool(keys & (DECISION_KEYS | RISK_KEYS))
         if tpl.slug in settles_nothing:
-            # A 1:1 produces commitments and an interview produces
-            # observations. Neither settles anything, and inventing decisions
-            # for them would be worse than the empty card.
             assert not derives, f"{tpl.slug} now derives insights; update this list"
         else:
             assert derives, f"{tpl.slug} produces neither decisions nor risks"
+
+
+def test_the_set_of_templates_is_the_one_that_was_asked_for():
+    """The picker is the feature; this is what it offers.
+
+    Pinned because templates are easy to add and nearly impossible to notice
+    the absence of — a slug quietly dropped in a refactor shows up as a picker
+    with one fewer option, and nothing else.
+    """
+    assert [t.slug for t in BUILT_IN] == [
+        "general",
+        "detailed",
+        "executive",
+        "memo",
+        "standup",
+        "interview",
+        "one-on-one",
+        "team-meeting",
+    ]

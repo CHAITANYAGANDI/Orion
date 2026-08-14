@@ -12,19 +12,18 @@ Decisions section says is what the decision store holds, which means the two
 surfaces can never contradict each other and correcting one corrects both.
 
 The consequence, stated plainly: a template with no decision-shaped section
-yields no decisions. 1:1 and Interview are the two, and that is right rather
-than a gap — a 1:1 produces commitments (already action items) and an interview
-produces observations. Neither settles anything.
+yields no decisions. Three of the eight are like that, and each is right rather
+than a gap:
 
-Which sections count is a judgement about the instruction each was written with,
-not about its title:
+* **1:1** produces commitments, which are already action items
+* **Interview** produces observations about a candidate, which settle nothing
+* **Memo** produces a recommendation, which is a proposal rather than a decision
+  — recording it as one would put a suggestion into the record as though the
+  group had agreed to it
 
-* `selected` (Brainstorm) is "the ideas the group **chose** to take forward"
-* `improvements` (Retrospective) is "changes the team **agreed** to try"
-
-Both are decisions in everything but name. `commitments` (1:1) is deliberately
-excluded: those are tasks with an owner, which is what action items already are,
-and duplicating them here would double-count every promise in the workspace.
+`commitments` is excluded for a second reason as well: counting it here would
+double every promise in the workspace, once in the tracker that knows whether it
+was done and once in a record that does not.
 """
 
 from __future__ import annotations
@@ -33,14 +32,16 @@ import re
 
 from app.schemas import Insight, SummarySection
 
-# Sections whose bullets are things the meeting settled.
-DECISION_KEYS = frozenset({"decisions", "selected", "improvements"})
+# Sections whose bullets are things the meeting settled. One key, because every
+# template that tracks decisions shares the same `_DECISIONS` section — which is
+# what stops four templates having four different standards for what counts.
+DECISION_KEYS = frozenset({"decisions"})
 
 # Sections whose bullets are things that might go wrong. `blockers` is already
 # happening and `risks` might; they are stored together because a reader
 # scanning for trouble wants both, and the section they came from is kept so the
 # distinction is not lost.
-RISK_KEYS = frozenset({"risks", "blockers", "concerns"})
+RISK_KEYS = frozenset({"risks", "blockers"})
 
 # A bullet has to carry some content to be worth storing as a standalone row.
 _MIN_CHARS = 8

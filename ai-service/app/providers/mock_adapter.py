@@ -321,7 +321,9 @@ class MockLlmAdapter(LlmPort):
 
 
 
-    async def answer(self, question: str, context: list[str]) -> str:
+    async def answer(
+        self, question: str, context: list[str], *, exhaustive: bool = False
+    ) -> str:
         # No real generation in mock mode — compose a grounded-looking answer
         # from the retrieved passages so the RAG UX is demoable without a key.
         if not context:

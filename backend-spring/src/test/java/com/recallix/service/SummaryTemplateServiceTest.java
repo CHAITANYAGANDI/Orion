@@ -31,7 +31,7 @@ class SummaryTemplateServiceTest {
 
     private static final List<AiClient.SummaryTemplateSummary> TEMPLATES = List.of(
             new AiClient.SummaryTemplateSummary("general", "General", List.of("Overview", "Outline")),
-            new AiClient.SummaryTemplateSummary("sprint-planning", "Sprint Planning", List.of("Overview", "Stories")));
+            new AiClient.SummaryTemplateSummary("executive", "Executive", List.of("Overview", "Asks")));
 
     @Test
     @DisplayName("the list is fetched once and then served from cache")
@@ -87,7 +87,7 @@ class SummaryTemplateServiceTest {
     void knownSlugIsAccepted() {
         when(ai.listTemplates()).thenReturn(TEMPLATES);
         SummaryTemplateService service = new SummaryTemplateService(ai);
-        assertThat(service.requireKnown(" sprint-planning ")).isEqualTo("sprint-planning");
+        assertThat(service.requireKnown(" executive ")).isEqualTo("executive");
     }
 
     @Test
@@ -113,6 +113,6 @@ class SummaryTemplateServiceTest {
         when(ai.listTemplates()).thenThrow(new RuntimeException("connection refused"));
         SummaryTemplateService service = new SummaryTemplateService(ai);
 
-        assertThat(service.requireKnown("sprint-planning")).isEqualTo("sprint-planning");
+        assertThat(service.requireKnown("executive")).isEqualTo("executive");
     }
 }

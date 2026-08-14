@@ -79,8 +79,17 @@ class LlmPort(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def answer(self, question: str, context: list[str]) -> str:
-        """Answer a question grounded ONLY in the provided context passages."""
+    async def answer(
+        self, question: str, context: list[str], *, exhaustive: bool = False
+    ) -> str:
+        """Answer a question grounded ONLY in the provided context passages.
+
+        `exhaustive` asks for an enumeration rather than prose: every matching
+        item on its own line, with a count. It changes only the instruction —
+        the context is the same either way — and exists because a concise answer
+        to "what is outstanding?" silently merges near-identical items, so the
+        reply is complete but cannot be counted. See `app.questions`.
+        """
         raise NotImplementedError
 
     @abstractmethod

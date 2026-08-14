@@ -56,9 +56,11 @@ class _Embedder:
 class _Llm:
     def __init__(self):
         self.context = None
+        self.exhaustive = None
 
-    async def answer(self, question, context):
+    async def answer(self, question, context, *, exhaustive=False):
         self.context = context
+        self.exhaustive = exhaustive
         return "an answer"
 
 

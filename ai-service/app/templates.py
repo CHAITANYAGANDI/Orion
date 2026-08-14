@@ -13,8 +13,26 @@ Writing one section in the other's voice is what makes notes feel thin: an
 overview that narrates who spoke states nothing, and an outline that only
 states conclusions cannot be scanned for a moment you half-remember.
 
-Defined here rather than only in SQL so the wording lives with the prompts it
-shapes; the migration seeds the same set for the picker to list.
+THE SET
+    Eight templates, drawn from two places. General, Detailed, Executive, Memo,
+    Standup and Interview follow Summary.ai's shapes; 1:1 and Team Meeting
+    follow Otter's.
+
+    Summary.ai also offers a "Meeting" template, which is deliberately absent.
+    In a product where every input *is* a meeting, "Meeting" and "General" are
+    the same template with two names, and a picker that offers both makes the
+    user choose between synonyms. General is the one kept, because it is also
+    the fallback for an unknown slug and so has to exist regardless.
+
+    The three that vary by *depth* rather than by kind — General, Detailed,
+    Executive — are worth keeping apart even though their sections overlap:
+    the same meeting genuinely needs a different summary for the person
+    catching up, the person reconstructing it, and the person approving it.
+    That difference lives in the section wording below, not in the headings.
+
+Defined here rather than duplicated in the backend so the wording lives with
+the prompts it shapes. There is no templates table: Spring serves this list
+through, and a second copy would drift from the one the prompt is built from.
 """
 
 from __future__ import annotations
@@ -48,18 +66,6 @@ _OUTLINE = TemplateSection(
     ),
 )
 
-_KEY_POINTS = TemplateSection(
-    key="keyPoints",
-    title="Key points",
-    kind="bullets",
-    instruction=(
-        "6-10 bullets, each a decision, commitment or concrete fact that "
-        "stands on its own, with the owner and deadline where the transcript "
-        "gives them."
-    ),
-)
-
-
 _NEXT_STEPS = TemplateSection(
     key="nextSteps",
     title="Next steps",
@@ -86,6 +92,23 @@ _QUOTES = TemplateSection(
     ),
 )
 
+# The decision section, shared by every template that tracks decisions. Shared
+# rather than repeated because `app.insights` reads these bullets into the
+# decision record, and four near-identical instructions would give four
+# different standards for what counts as a decision.
+_DECISIONS = TemplateSection(
+    key="decisions",
+    title="Decisions",
+    kind="bullets",
+    instruction=(
+        "Each decision the meeting actually settled, stated as the outcome "
+        "rather than the debate, and attributed where the transcript says who "
+        "decided. A question left open is not a decision — leave it out and "
+        "let Next steps carry it. Empty list when nothing was settled, which "
+        "is common and fine."
+    ),
+)
+
 
 def _template(slug: str, name: str, *extra: TemplateSection) -> SummaryTemplate:
     """Every template opens with an Overview and closes the same way.
@@ -107,31 +130,147 @@ def _template(slug: str, name: str, *extra: TemplateSection) -> SummaryTemplate:
 
 
 BUILT_IN: list[SummaryTemplate] = [
+    # --- the three that vary by depth -------------------------------------- #
     _template(
         "general",
-        "General Meeting",
+        "General",
+        _DECISIONS,
+    ),
+    _template(
+        "detailed",
+        "Detailed",
         TemplateSection(
-            key="decisions",
-            title="Decisions",
+            key="keyPoints",
+            title="Key points",
             kind="bullets",
             instruction=(
-                "Each decision the meeting actually settled, stated as the "
-                "outcome rather than the debate, and attributed where the "
-                "transcript says who decided. A question left open is not a "
-                "decision — leave it out and let Next steps carry it."
+                "8-12 bullets, each a decision, commitment or concrete fact "
+                "that stands on its own, with the owner and deadline where the "
+                "transcript gives them. This is the long form: prefer keeping a "
+                "detail that might matter over a tidy list. A reader chose this "
+                "template because they intend to reconstruct the meeting."
+            ),
+        ),
+        _DECISIONS,
+        TemplateSection(
+            key="risks",
+            title="Risks",
+            kind="bullets",
+            instruction=(
+                "What was named as likely to go wrong or still unknown, "
+                "including dependencies outside the group. Empty list if none "
+                "was raised — an invented risk sends people chasing a problem "
+                "that does not exist."
+            ),
+        ),
+        TemplateSection(
+            key="openQuestions",
+            title="Open questions",
+            kind="bullets",
+            instruction=(
+                "Questions raised and left unresolved, with who needs to "
+                "resolve each. A question someone answered in the meeting does "
+                "not belong here."
             ),
         ),
     ),
     _template(
-        "daily-standup",
-        "Daily Stand-up",
+        "executive",
+        "Executive",
+        TemplateSection(
+            key="impact",
+            title="Impact",
+            kind="bullets",
+            instruction=(
+                "3-5 bullets on what this changes for the business: cost, "
+                "timeline, scope, customers, headcount. Stated as consequences, "
+                "not as activity — 'launch moves to March, two weeks of "
+                "engineering re-planned', never 'the team discussed the "
+                "timeline'. Say plainly when the meeting had no material "
+                "impact rather than inflating one."
+            ),
+        ),
+        _DECISIONS,
+        TemplateSection(
+            key="risks",
+            title="Risks",
+            kind="bullets",
+            instruction=(
+                "What could still go wrong, worst first, each with its "
+                "consequence where the meeting gave one. Written for a reader "
+                "who was not there and will not listen to the recording."
+            ),
+        ),
+        TemplateSection(
+            key="asks",
+            title="Asks",
+            kind="bullets",
+            instruction=(
+                "What the meeting needs from someone senior: a decision, a "
+                "budget, an escalation, a name. This is the section an "
+                "executive reads first, so it must contain only things "
+                "genuinely asked for in the meeting. Empty list when nothing "
+                "was."
+            ),
+        ),
+    ),
+    # --- specific shapes ---------------------------------------------------- #
+    _template(
+        "memo",
+        "Memo",
+        TemplateSection(
+            key="purpose",
+            title="Purpose",
+            kind="prose",
+            instruction=(
+                "Two or three sentences stating what this memo is about and "
+                "who needs to read it, in the register of a written memo rather "
+                "than of meeting notes. Do not mention the meeting, the "
+                "recording, or the speakers."
+            ),
+        ),
+        TemplateSection(
+            key="background",
+            title="Background",
+            kind="bullets",
+            instruction=(
+                "What a reader needs to know before the discussion makes "
+                "sense: prior decisions, constraints, and how the situation "
+                "arose. Only background the meeting actually supplied."
+            ),
+        ),
+        TemplateSection(
+            key="discussion",
+            title="Discussion",
+            kind="bullets",
+            instruction=(
+                "The options weighed and the argument for and against each. "
+                "Unlike every other template, the reasoning is the point here "
+                "rather than the conclusion — a memo exists to let a reader "
+                "disagree with how the group got there."
+            ),
+        ),
+        TemplateSection(
+            key="recommendation",
+            title="Recommendation",
+            kind="bullets",
+            instruction=(
+                "What the memo proposes, with the reason for each proposal. "
+                "A recommendation is not a decision: if the group settled it, "
+                "say so plainly rather than restating it as a proposal."
+            ),
+        ),
+    ),
+    _template(
+        "standup",
+        "Standup",
         TemplateSection(
             key="yesterday",
             title="Yesterday",
             kind="bullets",
             instruction=(
                 "What each person reported finishing or moving forward since "
-                "the last stand-up. One bullet per person, named."
+                "the last standup. One bullet per person, named."
             ),
         ),
         TemplateSection(
@@ -156,35 +295,37 @@ BUILT_IN: list[SummaryTemplate] = [
         ),
     ),
     _template(
-        "sprint-planning",
-        "Sprint Planning",
+        "interview",
+        "Interview",
         TemplateSection(
-            key="stories",
-            title="Stories",
-            kind="bullets",
+            key="questionsAndResponses",
+            title="Questions and responses",
+            kind="outline",
             instruction=(
-                "One bullet per story or ticket taken into the sprint, each "
-                "carrying its owner and estimate in the same bullet as the "
-                "story they belong to. Separate lists of stories, owners and "
-                "estimates cannot be lined back up by a reader. Say plainly "
-                "when an owner or estimate was not stated rather than guessing "
-                "one."
+                "One heading per question the interviewer asked, in the words "
+                "they asked it, with the candidate's answer summarised beneath "
+                "in 2-4 bullets. Keep the candidate's own framing and specific "
+                "claims — numbers, technologies, timelines — rather than "
+                "smoothing them into a verdict."
             ),
         ),
         TemplateSection(
-            key="risks",
-            title="Risks and unknowns",
+            key="observations",
+            title="Observations",
             kind="bullets",
             instruction=(
-                "What the team named as likely to go wrong or still unknown, "
-                "including dependencies outside the team. Empty list if none "
-                "was raised."
+                "What the transcript supports about how the candidate "
+                "answered: what they demonstrated, where they hesitated, what "
+                "they asked about. Report only what was said. Do not score, "
+                "rank, or recommend — an assessment invented from a transcript "
+                "is a hiring decision made by something that was not in the "
+                "room."
             ),
         ),
     ),
     _template(
         "one-on-one",
-        "1:1 Meeting",
+        "1:1",
         TemplateSection(
             key="topics",
             title="Topics",
@@ -215,174 +356,19 @@ BUILT_IN: list[SummaryTemplate] = [
         ),
     ),
     _template(
-        "project-review",
-        "Project Review",
+        "team-meeting",
+        "Team Meeting",
         TemplateSection(
             key="progress",
             title="Progress",
             kind="bullets",
             instruction=(
-                "What has moved since the last review, stated as completed "
-                "work rather than as activity."
+                "What moved since the last time the team met, organised per "
+                "person or per workstream as the meeting itself was organised. "
+                "Stated as completed work rather than as activity."
             ),
         ),
-        TemplateSection(
-            key="risks",
-            title="Risks",
-            kind="bullets",
-            instruction=(
-                "Threats to the plan that were named, with their likely impact "
-                "where it was discussed. Empty list if none was raised."
-            ),
-        ),
-        TemplateSection(
-            key="blockers",
-            title="Blockers",
-            kind="bullets",
-            instruction=(
-                "What is stopping work right now, and who or what it waits on. "
-                "Distinct from a risk: a blocker is already happening."
-            ),
-        ),
-    ),
-    _template(
-        "interview",
-        "Interview",
-        TemplateSection(
-            key="questionsAndResponses",
-            title="Questions and responses",
-            kind="outline",
-            instruction=(
-                "One heading per question the interviewer asked, worded as it "
-                "was asked, with the candidate's answer as the bullets beneath "
-                "it. Paired this way deliberately: a list of questions and a "
-                "separate list of answers cannot be matched back up by anyone "
-                "reading them later."
-            ),
-        ),
-        TemplateSection(
-            key="observations",
-            title="Observations",
-            kind="bullets",
-            instruction=(
-                "What the answers showed, each tied to something the candidate "
-                "actually said. Never infer a judgement nobody voiced, and "
-                "never score the candidate — report the evidence and leave the "
-                "conclusion to the reader."
-            ),
-        ),
-    ),
-    _template(
-        "brainstorm",
-        "Brainstorm",
-        TemplateSection(
-            key="ideas",
-            title="Ideas raised",
-            kind="bullets",
-            instruction=(
-                "Every distinct idea put forward, including the ones dismissed. "
-                "A record that keeps only the winners destroys the reason the "
-                "others were set aside, which is the thing people come back for."
-            ),
-        ),
-        TemplateSection(
-            key="themes",
-            title="Themes",
-            kind="bullets",
-            instruction=(
-                "The groupings the ideas fall into, named. Empty list when the "
-                "ideas did not cluster into anything."
-            ),
-        ),
-        TemplateSection(
-            key="selected",
-            title="Selected ideas",
-            kind="bullets",
-            instruction=(
-                "The ideas the group chose to take forward, with the reason "
-                "given for each. Empty list when nothing was selected — say "
-                "that rather than promoting whichever idea got the most airtime."
-            ),
-        ),
-    ),
-    _template(
-        "client-meeting",
-        "Client Meeting",
-        TemplateSection(
-            key="requirements",
-            title="Requirements",
-            kind="bullets",
-            instruction=(
-                "What the client said they need, in their own words where the "
-                "phrasing matters, separating firm requirements from "
-                "preferences wherever they said which was which."
-            ),
-        ),
-        TemplateSection(
-            key="concerns",
-            title="Concerns",
-            kind="bullets",
-            instruction=(
-                "Objections, hesitations and risks the client raised, however "
-                "lightly. A concern mentioned once and moved past is still the "
-                "thing that stalls a deal, so record it."
-            ),
-        ),
-    ),
-    _template(
-        "retrospective",
-        "Retrospective",
-        TemplateSection(
-            key="wentWell",
-            title="What went well",
-            kind="bullets",
-            instruction=(
-                "What the team said worked, attributed where someone credited "
-                "a person or a change."
-            ),
-        ),
-        TemplateSection(
-            key="didntGoWell",
-            title="What didn't go well",
-            kind="bullets",
-            instruction=(
-                "What the team said did not work. Report the problem as it was "
-                "described, without softening it and without assigning blame "
-                "the team did not assign."
-            ),
-        ),
-        TemplateSection(
-            key="improvements",
-            title="Improvements to try",
-            kind="bullets",
-            instruction=(
-                "Changes the team agreed to try, with an owner where one was "
-                "named. Only agreed changes — a suggestion nobody took up "
-                "belongs under what didn't go well, not here."
-            ),
-        ),
-    ),
-    _template(
-        "weekly-sync",
-        "Weekly Sync",
-        TemplateSection(
-            key="progress",
-            title="Progress",
-            kind="bullets",
-            instruction=(
-                "What moved this week, organised per person or per workstream "
-                "as the meeting itself was organised."
-            ),
-        ),
-        TemplateSection(
-            key="decisions",
-            title="Decisions",
-            kind="bullets",
-            instruction=(
-                "What was settled, stated as the outcome. Empty list when the "
-                "sync decided nothing, which is common and fine."
-            ),
-        ),
+        _DECISIONS,
         TemplateSection(
             key="openItems",
             title="Open items",
@@ -404,6 +390,7 @@ def resolve(slug: str | None) -> SummaryTemplate:
     """The named template, falling back to General for an unknown slug.
 
     Unknown rather than invalid: a template deleted after a meeting was
-    summarized should still produce notes, not an error.
+    summarized should still produce notes, not an error. This release removes
+    five templates, so that path is live rather than theoretical.
     """
     return BY_SLUG.get(slug or DEFAULT_SLUG, BY_SLUG[DEFAULT_SLUG])

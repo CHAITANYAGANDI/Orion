@@ -605,14 +605,48 @@ class OpenAiLlmAdapter(LlmPort):
             label="extract_action_items",
         )
 
-    async def answer(self, question: str, context: list[str]) -> str:
+    # Asked for a lookup. Concise is right here: "what did we decide about
+    # pricing?" wants a sentence, not the pricing section reproduced.
+    _ANSWER_SYSTEM = (
+        "You answer questions about the user's meetings using ONLY the provided "
+        "passages. Some passages are transcript extracts; others are tracked "
+        "records (action items with their current status, decisions with dates) "
+        "and are more up to date than any transcript. If the answer is not in "
+        "the passages, say you don't have that information. Be concise and "
+        "specific."
+    )
+
+    # Asked for an inventory. The context is identical — what changes is that
+    # merging is now a defect rather than good writing. Three tracked items
+    # rendered as "like the video, subscribe, and comment" is a complete answer
+    # that cannot be counted, and a reader auditing their commitments is
+    # counting.
+    _ANSWER_SYSTEM_EXHAUSTIVE = (
+        "You answer questions about the user's meetings using ONLY the provided "
+        "passages. Some passages are transcript extracts; others are tracked "
+        "records (action items with their current status, decisions with dates) "
+        "and are more up to date than any transcript.\n\n"
+        "This question asks for a complete list. Therefore:\n"
+        "- Include EVERY item that matches. Not a representative sample, not "
+        "the most important ones.\n"
+        "- One bullet per item. Never combine two items into one bullet, even "
+        "when they are near-identical, share an owner, or came from the same "
+        "meeting. The reader is counting.\n"
+        "- Keep each item recognisable as the item it came from; do not "
+        "generalise several into a category.\n"
+        "- Respect the status given: an item marked DONE is not outstanding, "
+        "whatever a transcript says.\n"
+        "- Finish with a line of the form 'Total: N.'\n"
+        "- If you cannot tell whether the list is complete, say so on that "
+        "line rather than implying it is."
+    )
+
+    async def answer(
+        self, question: str, context: list[str], *, exhaustive: bool = False
+    ) -> str:
         async def _op() -> str:
             passages = "\n\n".join(f"[{i + 1}] {c}" for i, c in enumerate(context))
-            system = (
-                "You answer questions about a meeting using ONLY the provided transcript "
-                "passages. If the answer is not in the passages, say you don't have that "
-                "information. Be concise and specific."
-            )
+            system = self._ANSWER_SYSTEM_EXHAUSTIVE if exhaustive else self._ANSWER_SYSTEM
             return await self._chat_text(
                 system, f"Passages:\n{passages}\n\nQuestion: {question}"
             )

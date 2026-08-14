@@ -176,6 +176,38 @@ deep-link to `/meetings/{id}?t={start}`.
 Persistence note: `chat_messages.meeting_id` is `NULL` for workspace turns —
 that is what distinguishes the two conversations.
 
+### Summary templates
+
+A template decides what a summary contains and the order it reads in. Eight of
+them, defined once in `ai-service/app/templates.py` and served through
+`GET /api/v1/summary-templates` — there is no templates table, because the copy
+that matters is the one the prompt is built from.
+
+| Slug | Name | Sections between the spine |
+|---|---|---|
+| `general` | General | Decisions |
+| `detailed` | Detailed | Key points, Decisions, Risks, Open questions |
+| `executive` | Executive | Impact, Decisions, Risks, Asks |
+| `memo` | Memo | Purpose, Background, Discussion, Recommendation |
+| `standup` | Standup | Yesterday, Today, Blockers |
+| `interview` | Interview | Questions and responses, Observations |
+| `one-on-one` | 1:1 | Topics, Feedback, Commitments |
+| `team-meeting` | Team Meeting | Progress, Decisions, Open items |
+
+Every template opens with **Overview** and closes with **Next steps → Key
+quotations → Outline**. That spine is fixed so switching template never takes
+away the summary someone was reading, and because quotations are only
+trustworthy after `app/quotes.py` verifies them against the transcript — which
+happens once, keyed on the `quotes` section, rather than per template.
+
+General, Detailed and Executive overlap in sections and differ in *voice*: the
+same meeting needs a different summary for the person catching up, the person
+reconstructing it, and the person approving it. That difference lives in the
+section instructions.
+
+An unknown slug resolves to General rather than erroring, so a meeting
+summarized under a since-removed template can still be re-summarized.
+
 ### Decisions and risks (`meeting_insights`)
 
 Populated by the worker, from the summary it has just written — **not** by a
@@ -187,12 +219,14 @@ Which sections count (see `ai-service/app/insights.py`):
 
 | Kind | Sections | Templates that produce them |
 |---|---|---|
-| `DECISION` | `decisions`, `selected`, `improvements` | General, Weekly Sync, Brainstorm, Retrospective |
-| `RISK` | `risks`, `blockers`, `concerns` | Sprint Planning, Project Review, Daily Stand-up, Client Meeting |
+| `DECISION` | `decisions` | General, Detailed, Executive, Team Meeting |
+| `RISK` | `risks`, `blockers` | Detailed, Executive, Standup |
 
-1:1 and Interview produce neither, deliberately: a 1:1 produces commitments
-(already action items) and an interview produces observations. Neither settles
-anything, and inventing decisions for them would be worse than an empty list.
+Three templates produce neither, deliberately. A **1:1** produces commitments,
+which are already action items; an **Interview** produces observations about a
+candidate; a **Memo** produces a recommendation, which is a proposal rather than
+something the group settled. Recording any of the three as a decision would put
+words into the record that nobody agreed to.
 
 | Method | Endpoint | Body / Query | Response |
 |---|---|---|---|
@@ -296,6 +330,33 @@ Workspace answers are also prefixed with two ledgers that retrieval cannot
 supply: current action-item status (a transcript records what was promised, never
 what happened next) and the decision record with dates (two contradictory
 decisions six weeks apart are unlikely to both land in one top-k).
+
+### Lookups vs inventories
+
+Both chat endpoints classify the question before generating (`app/questions.py`)
+and answer under one of two briefs. The **context is identical either way** —
+this is not a retrieval switch.
+
+| Kind | Example | Brief |
+|---|---|---|
+| Lookup | "What did we decide about pricing?" | Concise and specific |
+| Inventory | "What hasn't been completed?" | Every item, one bullet each, never merged, ending `Total: N.` |
+
+The ledger already contains every action item, so an inventory question never
+failed for want of evidence — it failed at the writing. Told to be concise, the
+model does what a person would and merges near-identical items: fifteen tracked
+items came back as thirteen bullets. Complete, and impossible to count against
+the Action items page.
+
+**Composition beats enumeration.** "Draft an agenda from what was left open"
+contains list words and is not a list request; any question asking for something
+to be *written* stays prose. The asymmetry is deliberate — a missed inventory
+gives the old merged answer, while a false positive staples `Total: 6.` to the
+bottom of an email somebody is about to forward.
+
+Above `_MAX_COMMITMENTS` (60) the ledger truncates, dropping DONE before OPEN.
+The exhaustive brief tells the model to say the list may be incomplete rather
+than imply otherwise, but that path is untested against real data.
 
 ---
 
