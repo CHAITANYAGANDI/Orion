@@ -1,7 +1,57 @@
 "use client";
 
+/**
+ * The recording, with controls built around the transcript.
+ *
+ * The native `controls` attribute is gone and that is the whole point. People
+ * use this to check the notes against what was actually said, which means the
+ * moves they need are "back ten seconds", "who spoke next", "skip the dead
+ * air", "half speed on that bit" — and a browser's default control strip offers
+ * none of them, hides playback rate behind a context menu, and looks different
+ * in every browser.
+ *
+ * Everything non-obvious is driven by the transcript rather than by the audio
+ * signal; see `lib/playback.ts` for why that is both cheaper and more accurate.
+ */
+
 import * as React from "react";
+import {
+  Play,
+  Pause,
+  RotateCcw,
+  RotateCw,
+  SkipBack,
+  SkipForward,
+  Volume2,
+  VolumeX,
+  Gauge,
+  AudioLines,
+  Highlighter,
+} from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+import type { TranscriptMoment, TranscriptSegment } from "@/lib/types";
+import {
+  MIN_SILENCE,
+  SPEEDS,
+  highlightSpans,
+  insideSpan,
+  nextSpanStart,
+  nextSpeakerStart,
+  previousSpeakerStart,
+  progressFraction,
+  seekTarget,
+  silenceSkip,
+  speakerTurns,
+} from "@/lib/playback";
+import { speakerHex } from "@/lib/speakers";
+import { timecode } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 export interface AudioController {
   // Typed as the shared media interface, not HTMLAudioElement: the same
@@ -51,55 +101,464 @@ export function useAudioController(): AudioController {
   return { ref, currentTime, setCurrentTime, seekTo };
 }
 
-/**
- * Native media element wired to a shared controller. Clicking a transcript line
- * or a chat citation calls `controller.seekTo()`; `onTimeUpdate` feeds the
- * active-segment highlight.
- *
- * <p>Renders a `<video>` when the meeting is one — a video played through an
- * `<audio>` element gives sound and no picture, which for a screen-share
- * recording throws away the half that mattered. Everything else about playback
- * is identical, which is why one controller serves both.
- */
+const NUDGE = 10;
+
 export function AudioPlayer({
   src,
   controller,
   contentType,
+  segments = [],
+  moments = [],
 }: {
   src: string;
   controller: AudioController;
   /** MIME type of the stored media. Absent (older meetings) means audio. */
   contentType?: string | null;
+  /** Drives skip-silence, speaker jumps and the coloured timeline. */
+  segments?: TranscriptSegment[];
+  /** Drives "highlights only". */
+  moments?: TranscriptMoment[];
 }) {
   const isVideo = !!contentType && contentType.startsWith("video/");
+  // Stable, so it can be a real dependency of the callbacks and effects below
+  // rather than something they have to be told to ignore. `controller.ref` is a
+  // useRef object and never changes identity.
+  const el = React.useCallback(() => controller.ref.current, [controller.ref]);
 
-  const shared = {
-    src,
-    controls: true,
-    preload: "metadata" as const,
-    onTimeUpdate: (e: React.SyntheticEvent<HTMLMediaElement>) =>
-      controller.setCurrentTime(e.currentTarget.currentTime),
-  };
+  const [playing, setPlaying] = React.useState(false);
+  const [duration, setDuration] = React.useState(0);
+  const [rate, setRate] = React.useState(1);
+  const [volume, setVolume] = React.useState(1);
+  const [muted, setMuted] = React.useState(false);
+  const [skipSilence, setSkipSilence] = React.useState(false);
+  const [highlightsOnly, setHighlightsOnly] = React.useState(false);
+
+  const turns = React.useMemo(() => speakerTurns(segments), [segments]);
+  const spans = React.useMemo(() => highlightSpans(moments), [moments]);
+  const hasHighlights = spans.length > 0;
+
+  // Reflect whatever the element is actually doing. Playback can start or stop
+  // without this component asking — a transcript click calls play(), and the
+  // media session keys work whether or not we know about them.
+  React.useEffect(() => {
+    const media = el();
+    if (!media) return;
+    const sync = () => {
+      setPlaying(!media.paused && !media.ended);
+      setRate(media.playbackRate);
+      setVolume(media.volume);
+      setMuted(media.muted);
+    };
+    const onMeta = () => setDuration(Number.isFinite(media.duration) ? media.duration : 0);
+
+    sync();
+    onMeta();
+    media.addEventListener("play", sync);
+    media.addEventListener("pause", sync);
+    media.addEventListener("ended", sync);
+    media.addEventListener("ratechange", sync);
+    media.addEventListener("volumechange", sync);
+    media.addEventListener("loadedmetadata", onMeta);
+    media.addEventListener("durationchange", onMeta);
+    return () => {
+      media.removeEventListener("play", sync);
+      media.removeEventListener("pause", sync);
+      media.removeEventListener("ended", sync);
+      media.removeEventListener("ratechange", sync);
+      media.removeEventListener("volumechange", sync);
+      media.removeEventListener("loadedmetadata", onMeta);
+      media.removeEventListener("durationchange", onMeta);
+    };
+  }, [src, el]);
+
+  const toggle = React.useCallback(() => {
+    const media = el();
+    if (!media) return;
+    if (media.paused) void media.play().catch(() => {});
+    else media.pause();
+  }, [el]);
+
+  const jumpTo = React.useCallback(
+    (seconds: number) => {
+      const media = el();
+      if (!media) return;
+      media.currentTime = Math.max(0, seconds);
+      controller.setCurrentTime(media.currentTime);
+    },
+    [controller, el],
+  );
+
+  const nudge = React.useCallback(
+    (by: number) => jumpTo((el()?.currentTime ?? 0) + by),
+    [jumpTo, el],
+  );
+
+  /**
+   * Enforce skip-silence and highlights-only while playing.
+   *
+   * Runs off the clock the controller is already reading rather than its own
+   * loop, and only while playing — otherwise dragging the scrubber into a gap
+   * would yank the playhead away from where it was deliberately put.
+   *
+   * Highlights-only takes precedence: it is the stricter filter, and the two
+   * fighting over the playhead would be visible as a stutter.
+   */
+  React.useEffect(() => {
+    if (!playing) return;
+    const at = controller.currentTime;
+
+    if (highlightsOnly && hasHighlights) {
+      if (insideSpan(spans, at)) return;
+      const next = nextSpanStart(spans, at);
+      if (next === null) {
+        el()?.pause();
+        return;
+      }
+      jumpTo(next);
+      return;
+    }
+
+    if (skipSilence) {
+      const target = silenceSkip(segments, at, MIN_SILENCE);
+      if (target !== null) jumpTo(target);
+    }
+  }, [
+    controller.currentTime,
+    playing,
+    skipSilence,
+    highlightsOnly,
+    hasHighlights,
+    spans,
+    segments,
+    jumpTo,
+    el,
+  ]);
+
+  /**
+   * Keyboard control.
+   *
+   * Deliberately inert while typing: the transcript has a find box and the page
+   * has two chat inputs, and a space bar that pauses the recording mid-sentence
+   * instead of typing a space is worse than no shortcut at all.
+   */
+  React.useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      switch (e.key) {
+        case " ":
+        case "k":
+          e.preventDefault();
+          toggle();
+          break;
+        case "ArrowLeft":
+          e.preventDefault();
+          nudge(-5);
+          break;
+        case "ArrowRight":
+          e.preventDefault();
+          nudge(5);
+          break;
+        case "j":
+          e.preventDefault();
+          nudge(-NUDGE);
+          break;
+        case "l":
+          e.preventDefault();
+          nudge(NUDGE);
+          break;
+        case "m": {
+          e.preventDefault();
+          const media = el();
+          if (media) media.muted = !media.muted;
+          break;
+        }
+        default:
+          break;
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [toggle, nudge, el]);
+
+  function scrub(e: React.MouseEvent<HTMLDivElement>) {
+    const box = e.currentTarget.getBoundingClientRect();
+    if (box.width === 0) return;
+    jumpTo(seekTarget((e.clientX - box.left) / box.width, duration));
+  }
+
+  const fraction = progressFraction(controller.currentTime, duration);
 
   return (
     <Card>
-      <CardContent className="py-3">
+      <CardContent className="space-y-2 py-3">
         {isVideo ? (
           <video
             ref={controller.ref as React.MutableRefObject<HTMLVideoElement | null>}
+            src={src}
             playsInline
-            {...shared}
+            preload="metadata"
+            onTimeUpdate={(e) => controller.setCurrentTime(e.currentTarget.currentTime)}
+            onClick={toggle}
             // Tall portrait clips would otherwise push the transcript off screen.
             className="max-h-[60vh] w-full rounded-md bg-black"
           />
         ) : (
           <audio
             ref={controller.ref as React.MutableRefObject<HTMLAudioElement | null>}
-            {...shared}
-            className="w-full"
+            src={src}
+            preload="metadata"
+            onTimeUpdate={(e) => controller.setCurrentTime(e.currentTarget.currentTime)}
+            className="hidden"
           />
         )}
+
+        {/* Scrubber, banded by who is speaking.
+            The bands are why this is not a plain progress bar: on an hour-long
+            recording they turn "find where the other person answers" from
+            scrubbing blindly into looking. Silence shows as the gaps between
+            them, which is the same information an amplitude waveform is usually
+            being read for. */}
+        <div
+          role="slider"
+          tabIndex={0}
+          aria-label="Seek"
+          aria-valuemin={0}
+          aria-valuemax={Math.round(duration)}
+          aria-valuenow={Math.round(controller.currentTime)}
+          aria-valuetext={`${timecode(controller.currentTime)} of ${timecode(duration)}`}
+          onClick={scrub}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowLeft") {
+              e.preventDefault();
+              nudge(-5);
+            } else if (e.key === "ArrowRight") {
+              e.preventDefault();
+              nudge(5);
+            }
+          }}
+          className="group relative h-6 cursor-pointer"
+        >
+          <div className="absolute inset-x-0 top-1/2 h-2 -translate-y-1/2 overflow-hidden rounded-full bg-secondary">
+            {duration > 0 &&
+              turns.map((turn, i) => (
+                <span
+                  key={i}
+                  aria-hidden
+                  title={turn.speaker}
+                  className="absolute inset-y-0 opacity-45"
+                  style={{
+                    left: `${(turn.start / duration) * 100}%`,
+                    width: `${Math.max(0.15, ((turn.end - turn.start) / duration) * 100)}%`,
+                    backgroundColor: speakerHex(turn.speaker),
+                  }}
+                />
+              ))}
+            {/* Played-so-far, over the bands rather than replacing them, so the
+                speaker layout stays readable ahead of and behind the playhead. */}
+            <span
+              aria-hidden
+              className="absolute inset-y-0 left-0 bg-foreground/25"
+              style={{ width: `${fraction * 100}%` }}
+            />
+          </div>
+          <span
+            aria-hidden
+            className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary shadow ring-2 ring-background transition-transform group-hover:scale-125"
+            style={{ left: `${fraction * 100}%` }}
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
+          <IconButton
+            label="Previous speaker"
+            onClick={() => {
+              const to = previousSpeakerStart(turns, controller.currentTime);
+              if (to !== null) jumpTo(to);
+            }}
+            disabled={turns.length === 0}
+          >
+            <SkipBack className="h-4 w-4" />
+          </IconButton>
+          <IconButton label={`Back ${NUDGE} seconds`} onClick={() => nudge(-NUDGE)}>
+            <RotateCcw className="h-4 w-4" />
+          </IconButton>
+
+          <button
+            onClick={toggle}
+            aria-label={playing ? "Pause" : "Play"}
+            className="mx-1 flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform hover:scale-105"
+          >
+            {playing ? <Pause className="h-4 w-4" /> : <Play className="ml-0.5 h-4 w-4" />}
+          </button>
+
+          <IconButton label={`Forward ${NUDGE} seconds`} onClick={() => nudge(NUDGE)}>
+            <RotateCw className="h-4 w-4" />
+          </IconButton>
+          <IconButton
+            label="Next speaker"
+            onClick={() => {
+              const to = nextSpeakerStart(turns, controller.currentTime);
+              if (to !== null) jumpTo(to);
+            }}
+            disabled={turns.length === 0}
+          >
+            <SkipForward className="h-4 w-4" />
+          </IconButton>
+
+          <span className="ml-2 font-mono text-xs tabular-nums text-muted-foreground">
+            {timecode(controller.currentTime)} / {timecode(duration)}
+          </span>
+
+          <div className="ml-auto flex flex-wrap items-center gap-1">
+            {/* Skip silence, from the transcript's gaps rather than the signal's
+                amplitude — exact, and free. */}
+            <Toggle
+              label="Skip silence"
+              active={skipSilence}
+              disabled={segments.length === 0 || highlightsOnly}
+              onClick={() => setSkipSilence((v) => !v)}
+            >
+              <AudioLines className="h-4 w-4" />
+            </Toggle>
+
+            {/* Only offered when there is something marked; a toggle that can
+                only ever produce silence is worse than an absent one. */}
+            {hasHighlights && (
+              <Toggle
+                label="Play highlights only"
+                active={highlightsOnly}
+                onClick={() => setHighlightsOnly((v) => !v)}
+              >
+                <Highlighter className="h-4 w-4" />
+              </Toggle>
+            )}
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  aria-label="Playback speed"
+                  className="flex h-8 items-center gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <Gauge className="h-4 w-4" />
+                  {rate}×
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {SPEEDS.map((s) => (
+                  <DropdownMenuItem
+                    key={s}
+                    onSelect={() => {
+                      const media = el();
+                      if (media) media.playbackRate = s;
+                    }}
+                    className={cn(s === rate && "font-semibold")}
+                  >
+                    {s}×
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <IconButton
+              label={muted ? "Unmute" : "Mute"}
+              onClick={() => {
+                const media = el();
+                if (media) media.muted = !media.muted;
+              }}
+            >
+              {muted || volume === 0 ? (
+                <VolumeX className="h-4 w-4" />
+              ) : (
+                <Volume2 className="h-4 w-4" />
+              )}
+            </IconButton>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={muted ? 0 : volume}
+              aria-label="Volume"
+              onChange={(e) => {
+                const media = el();
+                if (!media) return;
+                media.volume = Number(e.target.value);
+                // Moving the slider off zero is an unmute request; leaving the
+                // element muted would make the control appear to do nothing.
+                media.muted = Number(e.target.value) === 0;
+              }}
+              className="h-1 w-20 cursor-pointer accent-[hsl(var(--primary))]"
+            />
+          </div>
+        </div>
       </CardContent>
     </Card>
+  );
+}
+
+function IconButton({
+  label,
+  onClick,
+  disabled,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+    >
+      {children}
+    </button>
+  );
+}
+
+function Toggle({
+  label,
+  active,
+  disabled,
+  onClick,
+  children,
+}: {
+  label: string;
+  active: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      aria-pressed={active}
+      title={label}
+      className={cn(
+        "flex h-8 w-8 items-center justify-center rounded-md transition-colors disabled:pointer-events-none disabled:opacity-40",
+        active
+          ? "bg-primary/15 text-primary"
+          : "text-muted-foreground hover:bg-accent hover:text-foreground",
+      )}
+    >
+      {children}
+    </button>
   );
 }

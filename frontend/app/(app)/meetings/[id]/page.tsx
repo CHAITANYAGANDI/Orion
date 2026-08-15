@@ -94,6 +94,10 @@ import {
   timecode,
 } from "@/lib/format";
 import { languageName } from "@/lib/language";
+// Shared with the player's timeline: the band under the scrubber and the avatar
+// beside the words are the same claim about the same person, and two copies of
+// the palette would eventually disagree.
+import { speakerColor } from "@/lib/speakers";
 import { ChatSuggestions } from "@/components/chat-suggestions";
 import { ChatHistory } from "@/components/chat-history";
 import { ChatMessageBubble } from "@/components/chat-message";
@@ -200,6 +204,9 @@ export default function MeetingDetailPage() {
   const summary = useGetSummaryQuery(id, { skip: !ready });
   const transcript = useGetTranscriptQuery(id, { skip: !ready });
   const actions = useGetMeetingActionItemsQuery(id, { skip: !ready });
+  // Also read inside the transcript panel; RTK Query dedupes to one request.
+  // Fetched here because the player needs it for "play highlights only".
+  const moments = useGetMomentsQuery(id, { skip: !ready });
 
   const [reprocess, reprocessState] = useReprocessMeetingMutation();
   const [remove, removeState] = useDeleteMeetingMutation();
@@ -330,7 +337,17 @@ export default function MeetingDetailPage() {
           points at the source PDF, not audio, so the player must stay away. */}
       {ready && m.audioUrl && !isDocument && (
         <div className="no-print">
-          <AudioPlayer src={m.audioUrl} controller={audio} contentType={m.contentType} />
+          <AudioPlayer
+            src={m.audioUrl}
+            controller={audio}
+            contentType={m.contentType}
+            // Skip-silence, the speaker jumps and the coloured timeline are all
+            // read out of the transcript rather than the audio signal — see
+            // lib/playback.ts. Both queries are already in flight for the tabs
+            // below, so RTK Query serves these from the same request.
+            segments={transcript.data?.segments ?? []}
+            moments={moments.data ?? []}
+          />
         </div>
       )}
 
@@ -1894,20 +1911,6 @@ function groupIntoTurns(segments: TranscriptSegment[]): Turn[] {
     }
   }
   return turns;
-}
-
-// Fixed palette, picked by a hash of the name rather than by position, so a
-// speaker keeps their colour when renamed reorders the list — and so the same
-// person looks the same on every visit.
-const SPEAKER_COLORS = [
-  "bg-blue-500", "bg-amber-500", "bg-emerald-500", "bg-violet-500",
-  "bg-rose-500", "bg-cyan-500", "bg-orange-500", "bg-indigo-500",
-];
-
-function speakerColor(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
-  return SPEAKER_COLORS[Math.abs(hash) % SPEAKER_COLORS.length];
 }
 
 /** Initial of the speaker's name — "Speaker 3" gives S, "Marcus" gives M. */

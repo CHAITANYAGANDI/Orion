@@ -177,6 +177,31 @@ deep-link to `/meetings/{id}?t={start}`.
 Persistence note: `chat_messages.meeting_id` is `NULL` for workspace turns —
 that is what distinguishes the two scopes.
 
+### Playback
+
+No endpoints — it is worth a note anyway, because the player's least obvious
+features are read out of the transcript rather than out of the audio.
+
+| Control | Source |
+|---|---|
+| skip silence | gaps between `transcript_segments`, ≥ 1s |
+| next / previous speaker | the next segment whose `speaker` differs |
+| play highlights only | `transcript_moments` spans, merged |
+| coloured seek bar | speaker turns over the meeting's duration |
+
+Recallix already knows to the word who spoke and when, so a gap between
+utterances **is** the silence and a change of speaker **is** the boundary.
+Deriving them is exact and free; an amplitude implementation would need the
+samples decoded in the browser and would still guess at the quiet parts of
+speech. The logic is pure and time-based in `frontend/lib/playback.ts`, which is
+the only way it is testable — jsdom has no playback.
+
+**A true amplitude waveform is not implemented.** It needs a peaks array
+computed in the worker and stored on the meeting; decoding a 100 MB MP3 in the
+browser to draw it would jank badly. The speaker-banded seek bar covers most of
+what a waveform is read for on a meeting recording — where each person talks,
+and where nobody does.
+
 ### Chat history (`chat_conversations`)
 
 Both scopes are organised into named threads (V28). Before it, each scope was

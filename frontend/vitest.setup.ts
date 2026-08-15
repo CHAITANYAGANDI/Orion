@@ -26,3 +26,34 @@ if (!Element.prototype.scrollIntoView) {
     /* no layout to scroll */
   };
 }
+
+/**
+ * jsdom has no media pipeline: `play()` throws "not implemented" and `pause()`
+ * does nothing observable.
+ *
+ * Stubbed to the smallest thing that behaves like a player — a settable
+ * `paused` that the real events would drive — so the controls can be tested for
+ * what they ask the element to do. What the element then does with it is the
+ * browser's business, and is not something jsdom could tell us anyway.
+ */
+Object.defineProperty(HTMLMediaElement.prototype, "paused", {
+  configurable: true,
+  get(this: HTMLMediaElement & { _paused?: boolean }) {
+    return this._paused ?? true;
+  },
+});
+
+HTMLMediaElement.prototype.play = function play(
+  this: HTMLMediaElement & { _paused?: boolean },
+) {
+  this._paused = false;
+  this.dispatchEvent(new Event("play"));
+  return Promise.resolve();
+};
+
+HTMLMediaElement.prototype.pause = function pause(
+  this: HTMLMediaElement & { _paused?: boolean },
+) {
+  this._paused = true;
+  this.dispatchEvent(new Event("pause"));
+};
