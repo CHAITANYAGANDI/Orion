@@ -6,6 +6,7 @@ import com.recallix.common.ConversationTitle;
 import com.recallix.common.IdGenerator;
 import com.recallix.dto.ChatMessageResponse;
 import com.recallix.dto.ConversationResponse;
+import com.recallix.dto.ExchangeDeleteResponse;
 import com.recallix.entity.ChatConversation;
 import com.recallix.entity.ChatMessage;
 import com.recallix.repository.ChatConversationRepository;
@@ -184,10 +185,11 @@ public class ChatService {
      * memory is ever added this becomes a decision about rewriting history and
      * should be revisited.
      *
-     * @return how many rows were removed — one for a turn with no partner.
+     * @return what was removed, including whether the thread went with it —
+     *         see {@link ExchangeDeleteResponse} for why that matters.
      */
     @Transactional
-    public int deleteExchange(String userId, String messageId) {
+    public ExchangeDeleteResponse deleteExchange(String userId, String messageId) {
         ChatMessage target = messages.findByIdAndUserId(messageId, userId)
                 .orElseThrow(() -> ApiException.notFound("Message not found"));
 
@@ -234,12 +236,17 @@ public class ChatService {
         messages.deleteAll(doomed);
 
         // An emptied conversation is a row nobody can reach and an entry in the
-        // history list that opens onto nothing.
+        // history list that opens onto nothing. Reported back rather than done
+        // silently: the caller is almost certainly holding this conversation's
+        // id, and every request it makes afterwards would 404.
+        boolean conversationDeleted = false;
         if (doomed.size() >= thread.size()) {
-            conversations.findByIdAndUserId(target.getConversationId(), userId)
-                    .ifPresent(conversations::delete);
+            Optional<ChatConversation> emptied =
+                    conversations.findByIdAndUserId(target.getConversationId(), userId);
+            emptied.ifPresent(conversations::delete);
+            conversationDeleted = emptied.isPresent();
         }
-        return doomed.size();
+        return new ExchangeDeleteResponse(doomed.size(), conversationDeleted);
     }
 
     // --- helpers ------------------------------------------------------------ //

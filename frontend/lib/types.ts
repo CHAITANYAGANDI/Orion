@@ -506,11 +506,6 @@ export interface SharedMeeting {
   transcript?: string | null;
 }
 
-export interface EmailDraft {
-  subject: string;
-  body: string;
-}
-
 // ---- Billing & usage ----
 export interface CheckoutRequest {
   plan: "PRO" | "PREMIUM";

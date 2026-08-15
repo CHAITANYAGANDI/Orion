@@ -5,6 +5,7 @@ import com.recallix.dto.ChatMessageResponse;
 import com.recallix.dto.ConversationRenameRequest;
 import com.recallix.dto.ConversationResponse;
 import com.recallix.dto.EmailDraftResponse;
+import com.recallix.dto.ExchangeDeleteResponse;
 import com.recallix.dto.TranslateRequest;
 import com.recallix.dto.TranslateResponse;
 import com.recallix.dto.WorkspaceAskRequest;
@@ -131,11 +132,17 @@ public class ChatController {
         return ResponseEntity.noContent().build();
     }
 
-    /** Remove one exchange — the message named and the turn that goes with it. */
+    /**
+     * Remove one exchange — the message named and the turn that goes with it.
+     *
+     * <p>Returns a body rather than a 204 because deleting the last exchange
+     * also deletes the thread, and the caller is holding that thread's id. A
+     * 204 left it with no way to know, so its next read asked for a
+     * conversation that no longer existed and the chat locked up on 404s.
+     */
     @DeleteMapping("/api/v1/chat/messages/{messageId}")
-    public ResponseEntity<Void> deleteExchange(@PathVariable String messageId) {
-        chat.deleteExchange(SecurityUtils.currentUserId(), messageId);
-        return ResponseEntity.noContent().build();
+    public ExchangeDeleteResponse deleteExchange(@PathVariable String messageId) {
+        return chat.deleteExchange(SecurityUtils.currentUserId(), messageId);
     }
 
     // --- other per-meeting AI actions --------------------------------------- //

@@ -83,7 +83,6 @@ import { AudioPlayer, useAudioController } from "@/components/audio-player";
 import { ShareDialog } from "@/components/share-dialog";
 import { MeetingTitle, MeetingTags } from "@/components/meeting-title";
 import { InsightsPanel } from "@/components/insights-panel";
-import { FollowUpEmail } from "@/components/follow-up-email";
 import { downloadMarkdown } from "@/lib/export-markdown";
 import { subscribeMeetingStatus } from "@/lib/ws";
 import {
@@ -380,7 +379,6 @@ export default function MeetingDetailPage() {
               suggestions={summary.data?.suggestions}
               composed={composed}
             />
-            <FollowUpEmail meetingId={id} />
           </TabsContent>
 
           <TabsContent value="actions">
@@ -746,10 +744,11 @@ function ChatPanel({
   // no conversation to exist.
   const [conversationId, setConversationId] = React.useState<string | null>(null);
 
-  const { data: messages, isLoading } = useGetChatQuery({
-    id: meetingId,
-    conversationId: conversationId ?? undefined,
-  });
+  const {
+    data: messages,
+    isLoading,
+    isError: chatError,
+  } = useGetChatQuery({ id: meetingId, conversationId: conversationId ?? undefined });
   const { data: conversations } = useGetMeetingConversationsQuery(meetingId);
   const [ask, { isLoading: asking }] = useAskChatMutation();
   const [newConversation, { isLoading: starting }] = useCreateMeetingConversationMutation();
@@ -771,6 +770,15 @@ function ChatPanel({
       setConversationId(messages[0].conversationId);
     }
   }, [messages, conversationId]);
+
+  /**
+   * Recover from a conversation that is no longer there — see the same guard on
+   * the workspace chat. Without it a thread deleted underneath this page leaves
+   * the chat stuck on 404 with no way out but a reload.
+   */
+  React.useEffect(() => {
+    if (chatError && conversationId) setConversationId(null);
+  }, [chatError, conversationId]);
 
   const submitRef = React.useRef<(text: string) => Promise<void>>();
 
@@ -862,7 +870,10 @@ function ChatPanel({
                 message={msg}
                 deleting={deleting}
                 onDelete={async (messageId) => {
-                  await deleteExchange({ messageId, scope: meetingId }).unwrap();
+                  const result = await deleteExchange({ messageId, scope: meetingId }).unwrap();
+                  // That was the thread's only exchange, so the thread went
+                  // with it. Holding its id would 404 every read from here.
+                  if (result.conversationDeleted) setConversationId(null);
                 }}
               >
                 {msg.citations && msg.citations.length > 0 && (

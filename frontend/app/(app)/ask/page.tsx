@@ -50,9 +50,11 @@ export default function AskPage() {
    */
   const [conversationId, setConversationId] = React.useState<string | null>(null);
 
-  const { data: messages, isLoading } = useGetWorkspaceChatQuery(
-    conversationId ? { conversationId } : undefined,
-  );
+  const {
+    data: messages,
+    isLoading,
+    isError: chatError,
+  } = useGetWorkspaceChatQuery(conversationId ? { conversationId } : undefined);
   const { data: conversations } = useGetWorkspaceConversationsQuery();
   // Generated from the user's recent meetings and cached server-side, so this
   // is a cheap read. Failure is silent by design: the chips fall back to the
@@ -83,6 +85,18 @@ export default function AskPage() {
       setConversationId(messages[0].conversationId);
     }
   }, [messages, conversationId]);
+
+  /**
+   * Recover from a conversation that is no longer there.
+   *
+   * The explicit resets below cover the cases this page causes itself. This
+   * covers the rest — another tab, a stale id, a thread emptied elsewhere —
+   * because the alternative is a chat stuck on 404 with no way out but a
+   * reload. Dropping the id re-reads the most recent thread, or an empty chat.
+   */
+  React.useEffect(() => {
+    if (chatError && conversationId) setConversationId(null);
+  }, [chatError, conversationId]);
 
   async function send(question: string) {
     const trimmed = question.trim();
@@ -199,7 +213,10 @@ export default function AskPage() {
                   message={msg}
                   deleting={deleting}
                   onDelete={async (messageId) => {
-                    await deleteExchange({ messageId, scope: "ME" }).unwrap();
+                    const result = await deleteExchange({ messageId, scope: "ME" }).unwrap();
+                    // That was the thread's only exchange, so the thread went
+                    // with it. Holding its id would 404 every read from here.
+                    if (result.conversationDeleted) setConversationId(null);
                   }}
                 >
                   <SourceList citations={msg.citations} />

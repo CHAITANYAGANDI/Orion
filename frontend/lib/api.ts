@@ -11,7 +11,6 @@ import type {
   ChatMessage,
   CheckoutRequest,
   CheckoutResponse,
-  EmailDraft,
   KnownSpeaker,
   ShareCreateRequest,
   ShareResponse,
@@ -385,12 +384,19 @@ export const api = createApi({
     /**
      * Remove one exchange — the message named and the turn that answers it.
      *
+     * Returns `conversationDeleted`, which the caller must act on: deleting the
+     * last exchange deletes the thread, and a page still holding that thread's
+     * id will 404 on every request it makes afterwards.
+     *
      * `scope` is the meeting id, or "ME" for the workspace. Both chats' tags are
      * invalidated rather than the one the caller claims: a message id does not
      * say which chat it came from without a round-trip, and refetching a chat
      * the user is not looking at costs one cached request.
      */
-    deleteChatExchange: builder.mutation<void, { messageId: string; scope: string }>({
+    deleteChatExchange: builder.mutation<
+      { deletedMessages: number; conversationDeleted: boolean },
+      { messageId: string; scope: string }
+    >({
       query: ({ messageId }) => ({ url: `/chat/messages/${messageId}`, method: "DELETE" }),
       invalidatesTags: (_r, _e, arg) => [
         { type: "Chat", id: arg.scope },
@@ -624,11 +630,6 @@ export const api = createApi({
       invalidatesTags: (_r, _e, id) => [{ type: "Share", id }],
     }),
 
-    // ---- Follow-up email ----
-    draftFollowUpEmail: builder.mutation<EmailDraft, string>({
-      query: (id) => ({ url: `/meetings/${id}/follow-up-email`, method: "POST" }),
-    }),
-
     // ---- Billing & usage ----
     checkout: builder.mutation<CheckoutResponse, CheckoutRequest>({
       query: (body) => ({ url: "/billing/checkout", method: "POST", body }),
@@ -697,7 +698,6 @@ export const {
   useGetShareQuery,
   useCreateShareMutation,
   useRevokeShareMutation,
-  useDraftFollowUpEmailMutation,
   useCheckoutMutation,
   useGetUsageQuery,
 } = api;

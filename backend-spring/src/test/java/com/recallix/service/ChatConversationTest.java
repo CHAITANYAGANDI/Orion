@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.recallix.common.ApiException;
 import com.recallix.common.ConversationTitle;
 import com.recallix.dto.ChatMessageResponse;
+import com.recallix.dto.ExchangeDeleteResponse;
 import com.recallix.entity.ChatConversation;
 import com.recallix.entity.ChatMessage;
 import com.recallix.entity.Meeting;
@@ -378,7 +379,7 @@ class ChatConversationTest {
             service.ask(USER, MEETING, "A question?", null);
             String questionId = turns.get(0).getId();
 
-            assertThat(service.deleteExchange(USER, questionId)).isEqualTo(2);
+            assertThat(service.deleteExchange(USER, questionId).deletedMessages()).isEqualTo(2);
         }
 
         @Test
@@ -387,7 +388,7 @@ class ChatConversationTest {
             service.ask(USER, MEETING, "A question?", null);
             String answerId = turns.get(1).getId();
 
-            assertThat(service.deleteExchange(USER, answerId)).isEqualTo(2);
+            assertThat(service.deleteExchange(USER, answerId).deletedMessages()).isEqualTo(2);
         }
 
         @Test
@@ -426,22 +427,31 @@ class ChatConversationTest {
         }
 
         @Test
-        @DisplayName("emptying a thread removes the thread")
+        @DisplayName("emptying a thread removes the thread, and says so")
         void emptyingRemovesTheThread() {
             service.ask(USER, MEETING, "The only question?", null);
 
-            service.deleteExchange(USER, turns.get(0).getId());
+            ExchangeDeleteResponse result = service.deleteExchange(USER, turns.get(0).getId());
 
             // Otherwise the history list keeps a row that opens onto nothing.
             verify(conversations).delete(any());
+            // And the caller — which is holding this conversation's id in state
+            // — has to be told, or every request it makes next will 404 and the
+            // chat will look like it broke rather than like it emptied.
+            assertThat(result.conversationDeleted()).isTrue();
         }
 
         @Test
         @DisplayName("emptying one exchange of two leaves the thread alone")
         void partialDeleteKeepsTheThread() {
             twoExchanges();
-            service.deleteExchange(USER, turns.get(0).getId());
+
+            ExchangeDeleteResponse result = service.deleteExchange(USER, turns.get(0).getId());
+
             verify(conversations, never()).delete(any());
+            // The caller must keep its id here — resetting would jump the user
+            // out of the thread they are reading.
+            assertThat(result.conversationDeleted()).isFalse();
         }
 
         @Test

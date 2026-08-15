@@ -13,3 +13,16 @@ import { cleanup } from "@testing-library/react";
 afterEach(() => {
   cleanup();
 });
+
+/**
+ * jsdom implements no layout, so it has no `scrollIntoView`.
+ *
+ * Both chats call it to keep the newest message in view. Unstubbed, any test
+ * that renders one dies inside a `useEffect` with a TypeError that names the
+ * scroll rather than whatever the test was actually about.
+ */
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = function scrollIntoView() {
+    /* no layout to scroll */
+  };
+}
