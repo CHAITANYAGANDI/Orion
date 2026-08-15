@@ -1,6 +1,8 @@
 package com.recallix.service;
 
 import com.recallix.common.ApiException;
+import com.recallix.common.IdGenerator;
+import com.recallix.dto.ActionItemCreateRequest;
 import com.recallix.dto.ActionItemPatchRequest;
 import com.recallix.dto.ActionItemResponse;
 import com.recallix.dto.PageResponse;
@@ -52,6 +54,38 @@ public class ActionItemService {
                 .map(a -> ActionItemResponse.from(a, titles.get(a.getMeetingId())))
                 .toList();
         return PageResponse.from(result, content);
+    }
+
+    /**
+     * Record a commitment somebody spotted while reading.
+     *
+     * <p>Stored in the same table as the extracted ones rather than a parallel
+     * "manual" list, because the question the action-items page answers is "what
+     * did we promise" — and an answer split across two lists by how each row was
+     * noticed is two answers.
+     */
+    @Transactional
+    public ActionItemResponse create(String userId, String meetingId, ActionItemCreateRequest req) {
+        Meeting meeting = meetings.findByIdAndUserId(meetingId, userId)
+                .orElseThrow(() -> ApiException.notFound("Meeting not found"));
+
+        String priority = req.priority() == null ? "medium" : req.priority().toLowerCase();
+        if (!VALID_PRIORITIES.contains(priority)) {
+            throw ApiException.badRequest("priority must be one of " + VALID_PRIORITIES);
+        }
+
+        MeetingActionItem item = new MeetingActionItem();
+        item.setId(IdGenerator.actionItem());
+        item.setMeetingId(meetingId);
+        item.setTitle(req.title().trim());
+        item.setOwnerName(blankToNull(req.ownerName()));
+        item.setDueDate(blankToNull(req.dueDate()));
+        item.setPriority(priority);
+        item.setStatus("OPEN");
+        item.setSourceSentence(blankToNull(req.sourceSentence()));
+        actionItems.save(item);
+
+        return ActionItemResponse.from(item, meeting.getTitle());
     }
 
     @Transactional

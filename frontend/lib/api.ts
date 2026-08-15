@@ -1,9 +1,12 @@
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
 import { buildAuthHeaders } from "@/lib/auth-store";
 import type {
+  ActionItemCreateRequest,
   ActionItemListQuery,
   ActionItemPatchRequest,
   ActionItemResponse,
+  MomentCreateRequest,
+  TranscriptMoment,
   ChatMessage,
   CheckoutRequest,
   CheckoutResponse,
@@ -70,6 +73,7 @@ export const api = createApi({
     "Vocabulary",
     "KnownSpeakers",
     "Insights",
+    "Moments",
   ],
   endpoints: (builder) => ({
     // ---- Meetings ----
@@ -235,6 +239,60 @@ export const api = createApi({
     getMeetingActionItems: builder.query<ActionItemResponse[], string>({
       query: (id) => `/meetings/${id}/action-items`,
       providesTags: [{ type: "ActionItems", id: "LIST" }],
+    }),
+
+    /**
+     * Record a commitment the extraction pass missed.
+     *
+     * Invalidates the whole list, not just this meeting's: the action-items page
+     * is the one that answers "what did we promise", and an item added from a
+     * transcript that never showed up there would be worse than not adding it.
+     */
+    createActionItem: builder.mutation<
+      ActionItemResponse,
+      { meetingId: string; body: ActionItemCreateRequest }
+    >({
+      query: ({ meetingId, body }) => ({
+        url: `/meetings/${meetingId}/action-items`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: [{ type: "ActionItems", id: "LIST" }],
+    }),
+
+    // ---- Transcript moments ----
+    // Highlights, bookmarks and notes in one list: they are drawn over the same
+    // transcript in one pass, and three requests could paint a page whose
+    // highlights and notes came from different moments.
+    getMoments: builder.query<TranscriptMoment[], string>({
+      query: (meetingId) => `/meetings/${meetingId}/moments`,
+      providesTags: (_r, _e, id) => [{ type: "Moments", id }],
+    }),
+
+    createMoment: builder.mutation<
+      TranscriptMoment,
+      { meetingId: string; body: MomentCreateRequest }
+    >({
+      query: ({ meetingId, body }) => ({
+        url: `/meetings/${meetingId}/moments`,
+        method: "POST",
+        body,
+      }),
+      invalidatesTags: (_r, _e, arg) => [{ type: "Moments", id: arg.meetingId }],
+    }),
+
+    /** Edits the body only — a note's text, or a bookmark's label. */
+    updateMoment: builder.mutation<
+      TranscriptMoment,
+      { id: string; meetingId: string; body: string }
+    >({
+      query: ({ id, body }) => ({ url: `/moments/${id}`, method: "PATCH", body: { body } }),
+      invalidatesTags: (_r, _e, arg) => [{ type: "Moments", id: arg.meetingId }],
+    }),
+
+    deleteMoment: builder.mutation<void, { id: string; meetingId: string }>({
+      query: ({ id }) => ({ url: `/moments/${id}`, method: "DELETE" }),
+      invalidatesTags: (_r, _e, arg) => [{ type: "Moments", id: arg.meetingId }],
     }),
 
     reprocessMeeting: builder.mutation<ReprocessResponse, string>({
@@ -507,6 +565,11 @@ export const {
   useGetSummaryTemplatesQuery,
   useResummarizeMutation,
   useGetMeetingActionItemsQuery,
+  useCreateActionItemMutation,
+  useGetMomentsQuery,
+  useCreateMomentMutation,
+  useUpdateMomentMutation,
+  useDeleteMomentMutation,
   useReprocessMeetingMutation,
   useDeleteMeetingMutation,
   useGetChatQuery,

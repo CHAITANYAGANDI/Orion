@@ -14,11 +14,16 @@ Target length: 2–3 minutes.
    verified quotations that play from the moment they were said), then the
    decisions and risks read out of it, then the transcript and action items.
    Rename the meeting inline to show where metadata actually lives.
-7. **Action items** (1:45) — edit owner/due/priority, mark one done; show it on
-   the cross-meeting Action Items page.
-8. **Search & export** (2:05) — search a past decision; export the brief as PDF/Markdown.
-9. **Billing** (2:20) — show plan cards + usage limits; (test-mode) Stripe checkout.
-10. **Phase 2 teaser** (2:35) — open the Agent panel, generate a draft action plan,
+7. **Marking the transcript** (1:40) — select a sentence and use the menu that
+   appears: highlight it, then select another and turn it into an action item.
+   The strongest beat is "Ask Recallix" — it carries the passage into the chat,
+   which is the one thing a highlight in a document cannot do.
+8. **Action items** (1:55) — the item created from the transcript is in the list
+   with the spoken line as its evidence; edit owner/due/priority, mark one done,
+   then show it on the cross-meeting Action Items page.
+9. **Search & export** (2:05) — search a past decision; export the brief as PDF/Markdown.
+10. **Billing** (2:20) — show plan cards + usage limits; (test-mode) Stripe checkout.
+11. **Phase 2 teaser** (2:35) — open the Agent panel, generate a draft action plan,
     show the approval screen (execution stubbed).
 
 Sample audio: use any short meeting recording, or run with `AI_PROVIDER=mock`

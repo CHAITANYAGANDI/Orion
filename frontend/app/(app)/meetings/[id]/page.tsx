@@ -22,6 +22,10 @@ import {
   Pencil,
   Search,
   X,
+  Bookmark,
+  Highlighter,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import {
   useGetMeetingQuery,
@@ -39,6 +43,9 @@ import {
   useEditSegmentsMutation,
   useGetSummaryTemplatesQuery,
   useResummarizeMutation,
+  useGetMomentsQuery,
+  useCreateMomentMutation,
+  useDeleteMomentMutation,
 } from "@/lib/api";
 import type {
   SpeakerStats,
@@ -85,8 +92,27 @@ import {
 import { languageName } from "@/lib/language";
 import { ChatSuggestions } from "@/components/chat-suggestions";
 import { MEETING_PROMPTS, toPrompts } from "@/lib/chat-prompts";
+import { SelectionMenu, type SelectionAction } from "@/components/selection-menu";
+import { MomentsPanel } from "@/components/moments-panel";
+import { ActionItemDialog, NoteDialog, type Passage } from "@/components/moment-composer";
+import {
+  askPrefix,
+  attributedQuote,
+  isMarked,
+  readSelection,
+  segmentMarks,
+  summarizePrompt,
+  tokenize,
+  type SegmentMark,
+  type SelectionCapture,
+} from "@/lib/moments";
 import { cn } from "@/lib/utils";
-import type { MeetingStatus, StatusEvent, TranscriptSegment } from "@/lib/types";
+import type {
+  MeetingStatus,
+  StatusEvent,
+  TranscriptMoment,
+  TranscriptSegment,
+} from "@/lib/types";
 
 export default function MeetingDetailPage() {
   const params = useParams<{ id: string }>();
@@ -95,6 +121,32 @@ export default function MeetingDetailPage() {
 
   const [live, setLive] = React.useState<StatusEvent | null>(null);
   const meeting = useGetMeetingQuery(id);
+
+  /**
+   * Controlled so the transcript can hand a selection to the chat.
+   * "Ask Recallix" about a highlighted sentence has to leave the tab it was
+   * invoked from, which an uncontrolled Tabs cannot do.
+   */
+  const [tab, setTab] = React.useState("summary");
+
+  /**
+   * Text pushed into the chat from elsewhere on the page.
+   *
+   * Carries a nonce because the same passage can be asked about twice, and a
+   * bare string would compare equal the second time and never re-fire. `send`
+   * distinguishes a complete prompt ("summarize this") from an opening the user
+   * still has to finish ("about this passage: …").
+   */
+  const [composed, setComposed] = React.useState<{
+    text: string;
+    send: boolean;
+    nonce: number;
+  } | null>(null);
+
+  const askAbout = React.useCallback((text: string, send: boolean) => {
+    setTab("ask");
+    setComposed({ text, send, nonce: Date.now() });
+  }, []);
 
   const status: MeetingStatus = (live?.status ?? meeting.data?.status ?? "CREATED") as MeetingStatus;
   const ready = status === "READY";
@@ -291,7 +343,7 @@ export default function MeetingDetailPage() {
       )}
 
       {ready && (
-        <Tabs defaultValue="summary">
+        <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="flex-wrap">
             <TabsTrigger value="summary">Summary</TabsTrigger>
             <TabsTrigger value="ask"><Sparkles className="mr-1 h-3.5 w-3.5" /> Ask</TabsTrigger>
@@ -319,6 +371,7 @@ export default function MeetingDetailPage() {
               meetingId={id}
               onCite={(s) => audio.seekTo(s)}
               suggestions={summary.data?.suggestions}
+              composed={composed}
             />
             <FollowUpEmail meetingId={id} />
           </TabsContent>
@@ -364,6 +417,7 @@ export default function MeetingDetailPage() {
               // change identity 60 times a second, defeating the memo that
               // keeps inactive utterances from re-rendering every frame.
               onSeek={audio.seekTo}
+              onAskAbout={askAbout}
             />
           </TabsContent>
         </Tabs>
@@ -667,6 +721,7 @@ function ChatPanel({
   meetingId,
   onCite,
   suggestions,
+  composed,
 }: {
   meetingId: string;
   onCite: (s: number) => void;
@@ -676,15 +731,43 @@ function ChatPanel({
    * make the chips appear after the chat they sit above.
    */
   suggestions?: string[];
+  /** A question pushed in from the transcript's selection menu. */
+  composed?: { text: string; send: boolean; nonce: number } | null;
 }) {
   const { data: messages, isLoading } = useGetChatQuery(meetingId);
   const [ask, { isLoading: asking }] = useAskChatMutation();
   const [q, setQ] = React.useState("");
   const endRef = React.useRef<HTMLDivElement | null>(null);
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
 
   React.useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, asking]);
+
+  const submitRef = React.useRef<(text: string) => Promise<void>>();
+
+  /**
+   * Take whatever the transcript handed over.
+   *
+   * Keyed on the nonce alone: the same passage can be asked about twice, and
+   * depending on the text would silently swallow the second attempt. A complete
+   * prompt is sent; an opening is placed in the box with the caret at the end,
+   * because it is missing the only thing the app cannot supply — the question.
+   */
+  React.useEffect(() => {
+    if (!composed) return;
+    if (composed.send) {
+      void submitRef.current?.(composed.text);
+      return;
+    }
+    setQ(composed.text);
+    const el = inputRef.current;
+    if (el) {
+      el.focus();
+      el.setSelectionRange(composed.text.length, composed.text.length);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composed?.nonce]);
 
   async function submit(text: string) {
     const question = text.trim();
@@ -696,6 +779,7 @@ function ChatPanel({
       toast.error("Couldn't get an answer.");
     }
   }
+  submitRef.current = submit;
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
@@ -767,7 +851,7 @@ function ChatPanel({
         </div>
 
         <form onSubmit={send} className="flex gap-2">
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ask about this meeting…" disabled={asking} />
+          <Input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ask about this meeting…" disabled={asking} />
           <Button type="submit" size="icon" disabled={asking || !q.trim()}>
             <Send className="h-4 w-4" />
           </Button>
@@ -786,6 +870,7 @@ function TranscriptPanel({
   fallbackText,
   currentTime,
   onSeek,
+  onAskAbout,
 }: {
   meetingId: string;
   loading: boolean;
@@ -799,6 +884,8 @@ function TranscriptPanel({
   fallbackText?: string;
   currentTime: number;
   onSeek: (s: number) => void;
+  /** Hands a selected passage to the chat on the Ask tab. */
+  onAskAbout: (text: string, send: boolean) => void;
 }) {
   const [renameSpeakers, { isLoading: renaming }] = useRenameSpeakersMutation();
   const [rematchSpeaker, { isLoading: merging }] = useRematchSpeakerMutation();
@@ -879,6 +966,167 @@ function TranscriptPanel({
 
   const allTurns = React.useMemo(() => groupIntoTurns(segments), [segments]);
 
+  /* ---- Marking: highlights, bookmarks and notes ---- */
+  const { data: moments } = useGetMomentsQuery(meetingId);
+  const marks = React.useMemo(() => moments ?? [], [moments]);
+  const [createMoment, { isLoading: marking }] = useCreateMomentMutation();
+  const [deleteMoment] = useDeleteMomentMutation();
+
+  // The live selection, plus where to put the menu. Held together because a
+  // menu without a selection is a menu whose actions do nothing.
+  const [picked, setPicked] = React.useState<{
+    capture: SelectionCapture;
+    anchor: { top: number; left: number; bottom: number };
+  } | null>(null);
+  const [noteFor, setNoteFor] = React.useState<Passage | null>(null);
+  const [actionFor, setActionFor] = React.useState<Passage | null>(null);
+  const bodyRef = React.useRef<HTMLDivElement | null>(null);
+
+  const clearSelection = React.useCallback(() => {
+    setPicked(null);
+    window.getSelection?.()?.removeAllRanges();
+  }, []);
+
+  /**
+   * Watch for a finished selection.
+   *
+   * On mouseup and keyup rather than on `selectionchange`: the latter fires
+   * continuously while dragging, so the menu would appear over the words being
+   * selected and move under the cursor. Mousedown clears, so a click anywhere
+   * dismisses — the menu stops its own mousedown from reaching here.
+   */
+  React.useEffect(() => {
+    function capture() {
+      const found = readSelection(bodyRef.current);
+      if (!found) {
+        setPicked(null);
+        return;
+      }
+      const range = window.getSelection()?.getRangeAt(0);
+      const rect = range?.getBoundingClientRect();
+      if (!rect) {
+        setPicked(null);
+        return;
+      }
+      setPicked({
+        capture: found,
+        anchor: { top: rect.top, left: rect.left, bottom: rect.bottom },
+      });
+    }
+    function dismiss() {
+      setPicked(null);
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") dismiss();
+    }
+
+    document.addEventListener("mouseup", capture);
+    document.addEventListener("keyup", capture);
+    document.addEventListener("mousedown", dismiss);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mouseup", capture);
+      document.removeEventListener("keyup", capture);
+      document.removeEventListener("mousedown", dismiss);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
+
+  async function saveMoment(kind: "HIGHLIGHT" | "BOOKMARK", p: Passage) {
+    try {
+      await createMoment({
+        meetingId,
+        body: {
+          kind,
+          ranges: p.ranges,
+          quote: p.quote,
+          body: "",
+          speaker: p.speaker,
+          startSeconds: p.startSeconds,
+          endSeconds: p.endSeconds,
+        },
+      }).unwrap();
+    } catch {
+      toast.error("Could not save that mark.");
+    }
+  }
+
+  async function copyToClipboard(text: string, ok: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(ok);
+    } catch {
+      toast.error("Couldn't copy — your browser blocked clipboard access.");
+    }
+  }
+
+  async function onSelectionAction(action: SelectionAction) {
+    if (!picked) return;
+    const p = picked.capture;
+
+    switch (action) {
+      case "highlight":
+        await saveMoment("HIGHLIGHT", p);
+        break;
+      case "copy":
+        // With the speaker and the timecode, because a transcript line pasted
+        // bare into a ticket loses the two things that make it evidence.
+        await copyToClipboard(attributedQuote(p), "Copied with attribution.");
+        break;
+      case "note":
+        setNoteFor(p);
+        break;
+      case "ask":
+        // Left unfinished: only the user knows what they wanted to ask.
+        onAskAbout(askPrefix(p.quote), false);
+        break;
+      case "summarize":
+        onAskAbout(summarizePrompt(p.quote), true);
+        break;
+      case "action-item":
+        setActionFor(p);
+        break;
+      case "share": {
+        // The in-app deep link, which the page already knows how to open at a
+        // timestamp. Not the public share link: that is a separate capability
+        // URL the owner may not have created, and minting one silently from a
+        // menu would publish a meeting nobody asked to publish.
+        const url = `${window.location.origin}/meetings/${meetingId}?t=${Math.floor(p.startSeconds)}`;
+        await copyToClipboard(url, "Link copied — it opens at this moment.");
+        break;
+      }
+    }
+    clearSelection();
+  }
+
+  /** The bookmark on a turn, if there is one. */
+  function bookmarkAt(seconds: number): TranscriptMoment | undefined {
+    return marks.find(
+      (m) => m.kind === "BOOKMARK" && Math.abs(m.startSeconds - seconds) < 0.01,
+    );
+  }
+
+  async function toggleBookmark(turn: Turn) {
+    const existing = bookmarkAt(turn.start);
+    try {
+      if (existing) {
+        await deleteMoment({ id: existing.id, meetingId }).unwrap();
+        return;
+      }
+      await saveMoment("BOOKMARK", {
+        ranges: [],
+        // A bookmark marks a time, so its text is context for the list rather
+        // than an anchor — the first line of the turn is what identifies it.
+        quote: (turn.segments[0]?.text ?? "").slice(0, 200),
+        speaker: turn.speaker,
+        startSeconds: turn.start,
+        endSeconds: turn.start,
+      });
+    } catch {
+      toast.error("Could not update that bookmark.");
+    }
+  }
+
   /**
    * Find-in-transcript.
    *
@@ -894,14 +1142,59 @@ function TranscriptPanel({
   const [query, setQuery] = React.useState("");
   const needle = query.trim().toLowerCase();
 
+  /**
+   * Only the marked turns.
+   *
+   * The counterpart to the highlight list below: that one reads as an index,
+   * this one keeps the marks in the transcript where the surrounding speech is
+   * still there to be played.
+   */
+  const [onlyMarked, setOnlyMarked] = React.useState(false);
+
+  /**
+   * The marks each segment carries, resolved against its current text.
+   *
+   * Computed once for the whole transcript rather than per utterance while
+   * rendering: resolution can fall back to searching a segment for the quoted
+   * words, and doing that inside the render path would repeat the search on
+   * every clock tick.
+   */
+  const marksBySegment = React.useMemo(() => {
+    const map = new Map<string, SegmentMark[]>();
+    if (marks.length === 0) return map;
+    for (const s of segments) {
+      if (!s.id) continue;
+      const found = segmentMarks(s.id, s.text, marks);
+      if (found.length > 0) map.set(s.id, found);
+    }
+    return map;
+  }, [segments, marks]);
+
+  const bookmarkTimes = React.useMemo(
+    () => marks.filter((m) => m.kind === "BOOKMARK").map((m) => m.startSeconds),
+    [marks],
+  );
+
   const turns = React.useMemo(() => {
-    if (!needle) return allTurns;
-    return allTurns.filter(
-      (t) =>
-        t.speaker.toLowerCase().includes(needle) ||
-        t.segments.some((s) => s.text.toLowerCase().includes(needle)),
-    );
-  }, [allTurns, needle]);
+    let visible = allTurns;
+    if (needle) {
+      visible = visible.filter(
+        (t) =>
+          t.speaker.toLowerCase().includes(needle) ||
+          t.segments.some((s) => s.text.toLowerCase().includes(needle)),
+      );
+    }
+    if (onlyMarked) {
+      visible = visible.filter(
+        (t) =>
+          t.segments.some((s) => s.id && marksBySegment.has(s.id)) ||
+          // A bookmark has no text anchor, so it is matched on the turn it
+          // points into rather than on a segment.
+          bookmarkTimes.some((at) => Math.abs(at - t.start) < 0.01),
+      );
+    }
+    return visible;
+  }, [allTurns, needle, onlyMarked, marksBySegment, bookmarkTimes]);
 
   // Counted over utterances rather than turns: a turn is a display grouping, so
   // counting those would report a number that changes with how text happens to
@@ -1004,7 +1297,24 @@ function TranscriptPanel({
                     }. Click any word to play from there.`}
               </p>
             )}
+            <p className="text-xs text-muted-foreground">
+              Select any part of the transcript to highlight, quote, note or act
+              on it.
+            </p>
           </div>
+        )}
+
+        {/* What has been marked. Collapsed by default: it is an index, and an
+            index that opens over the thing it indexes is in the way. */}
+        {marks.length > 0 && (
+          <MarksSection
+            meetingId={meetingId}
+            moments={marks}
+            segments={segments}
+            onSeek={onSeek}
+            onlyMarked={onlyMarked}
+            onToggleFilter={() => setOnlyMarked((v) => !v)}
+          />
         )}
 
         {/* Talk-time */}
@@ -1131,8 +1441,10 @@ function TranscriptPanel({
             page; merged into a turn it reads as someone talking. Each utterance
             stays individually seekable inside the turn, so nothing is lost. */}
         {segments.length > 0 ? (
-          <div className="space-y-5">
-            {turns.map((turn, i) => (
+          <div className="space-y-5" ref={bodyRef}>
+            {turns.map((turn, i) => {
+              const bookmarked = bookmarkAt(turn.start);
+              return (
               <div key={i} className="group flex gap-3">
                 <SpeakerAvatar name={turn.speaker} />
                 <div className="min-w-0 flex-1 space-y-1">
@@ -1144,6 +1456,27 @@ function TranscriptPanel({
                       aria-label={`Play from ${timecode(turn.start)}`}
                     >
                       {timecode(turn.start)}
+                    </button>
+                    {/* Marking a moment rather than a passage — "come back to
+                        this bit" — which is a different gesture from selecting
+                        words, and the one you want while listening. Stays
+                        visible once set, so a bookmarked turn is findable by
+                        scrolling and not only by hovering. */}
+                    <button
+                      onClick={() => void toggleBookmark(turn)}
+                      aria-label={bookmarked ? "Remove bookmark" : "Bookmark this moment"}
+                      aria-pressed={Boolean(bookmarked)}
+                      title={bookmarked ? "Remove bookmark" : "Bookmark this moment"}
+                      className={cn(
+                        "rounded p-0.5 transition-opacity hover:text-foreground focus:opacity-100",
+                        bookmarked
+                          ? "text-primary opacity-100"
+                          : "text-muted-foreground opacity-0 group-hover:opacity-100",
+                      )}
+                    >
+                      <Bookmark
+                        className={cn("h-3.5 w-3.5", bookmarked && "fill-current")}
+                      />
                     </button>
                     {/* Per-turn reassignment, for the handovers where two people
                         overlap and the whole turn landed on the wrong one. A
@@ -1219,6 +1552,12 @@ function TranscriptPanel({
                       return (
                         <span
                           key={j}
+                          // The segment and speaker live here rather than on
+                          // every word: `readSelection` recovers them with
+                          // `closest`, and repeating a name across tens of
+                          // thousands of spans is document weight for nothing.
+                          data-seg={s.id}
+                          data-speaker={turn.speaker}
                           className={cn(
                             "group/line rounded px-0.5 transition-colors",
                             active && "bg-primary/10"
@@ -1237,6 +1576,7 @@ function TranscriptPanel({
                             at={active ? currentTime : -1}
                             onSeek={onSeek}
                             match={needle}
+                            marks={s.id ? marksBySegment.get(s.id) : undefined}
                           />
                           {/* Only lines that differ from the meeting's language
                               carry this, so it stays a signal. In a monolingual
@@ -1267,7 +1607,8 @@ function TranscriptPanel({
                   </p>
                 </div>
               </div>
-            ))}
+              );
+            })}
             {/* Searched, matched nothing. Without this the panel just empties,
                 which reads as a transcript that failed to load. */}
             {needle && turns.length === 0 && (
@@ -1275,12 +1616,92 @@ function TranscriptPanel({
                 Nothing in this transcript matches “{query.trim()}”.
               </p>
             )}
+            {!needle && onlyMarked && turns.length === 0 && (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                Nothing is marked in this transcript yet.
+              </p>
+            )}
           </div>
         ) : (
           <p className="whitespace-pre-wrap text-sm">{fallbackText || "Transcript unavailable."}</p>
         )}
       </CardContent>
+
+      <SelectionMenu anchor={picked?.anchor ?? null} onAction={onSelectionAction} busy={marking} />
+      <NoteDialog meetingId={meetingId} passage={noteFor} onClose={() => setNoteFor(null)} />
+      <ActionItemDialog
+        meetingId={meetingId}
+        passage={actionFor}
+        onClose={() => setActionFor(null)}
+      />
     </Card>
+  );
+}
+
+/**
+ * The marks on this transcript, as a collapsible index.
+ *
+ * Split out of {@link TranscriptPanel} only because that component is already
+ * long; it has no state worth sharing beyond what is passed in.
+ */
+function MarksSection({
+  meetingId,
+  moments,
+  segments,
+  onSeek,
+  onlyMarked,
+  onToggleFilter,
+}: {
+  meetingId: string;
+  moments: TranscriptMoment[];
+  segments: TranscriptSegment[];
+  onSeek: (s: number) => void;
+  onlyMarked: boolean;
+  onToggleFilter: () => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+
+  // Looked up by id rather than scanned per mark: a two-hour transcript has
+  // thousands of segments and the list resolves every mark against them.
+  const textById = React.useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of segments) if (s.id) map.set(s.id, s.text);
+    return map;
+  }, [segments]);
+
+  return (
+    <div className="rounded-md border">
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2">
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="flex items-center gap-1.5 text-sm font-medium"
+          aria-expanded={open}
+        >
+          {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          <Highlighter className="h-4 w-4 text-amber-500" />
+          {moments.length} {moments.length === 1 ? "mark" : "marks"}
+        </button>
+        <Button
+          variant={onlyMarked ? "secondary" : "ghost"}
+          size="sm"
+          className="ml-auto"
+          onClick={onToggleFilter}
+          aria-pressed={onlyMarked}
+        >
+          {onlyMarked ? "Show everything" : "Show only marked"}
+        </Button>
+      </div>
+      {open && (
+        <div className="border-t px-3">
+          <MomentsPanel
+            meetingId={meetingId}
+            moments={moments}
+            segmentText={(id) => textById.get(id)}
+            onSeek={onSeek}
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1311,6 +1732,7 @@ const SpokenWords = React.memo(function SpokenWords({
   at,
   onSeek,
   match,
+  marks,
 }: {
   text: string;
   start: number;
@@ -1324,62 +1746,68 @@ const SpokenWords = React.memo(function SpokenWords({
    * what tells you *why* a turn matched.
    */
   match?: string;
+  /**
+   * Saved highlights and notes covering this utterance, already resolved to
+   * character offsets by the panel above.
+   */
+  marks?: SegmentMark[];
 }) {
-  const tokens = React.useMemo(() => {
-    if (words && words.length > 0) {
-      // A trailing space per word so the line reads normally; the provider
-      // strips whitespace from each token.
-      return words.map((w) => ({ token: w.text + " ", from: w.start, to: w.end }));
-    }
-
-    // Fallback. Each token keeps its trailing whitespace, so joining them
-    // reproduces the original text exactly and the weighting counts the gap
-    // between words.
-    const raw = text.match(/\S+\s*/g) ?? [];
-    const chars = raw.reduce((n, t) => n + t.length, 0) || 1;
-    const span = Math.max(end - start, 0.001);
-
-    let acc = 0;
-    return raw.map((token) => {
-      const from = start + (acc / chars) * span;
-      acc += token.length;
-      return { token, from, to: start + (acc / chars) * span };
-    });
-  }, [text, start, end, words]);
+  // Tokenizing lives in lib/moments so the offsets a word reports and the ones
+  // a stored highlight was saved with come from one implementation. Two would
+  // drift, and a highlight that fails to resolve looks exactly like one that
+  // was never saved.
+  const tokens = React.useMemo(
+    () => tokenize(text, start, end, words),
+    [text, start, end, words],
+  );
 
   return (
     <>
-      {tokens.map((w, i) => (
-        <span
-          key={i}
-          role="button"
-          tabIndex={0}
-          // Stops the enclosing utterance handler from also firing and seeking
-          // to the start of the sentence instead of to this word.
-          onClick={(e) => {
-            e.stopPropagation();
-            onSeek(w.from);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
+      {tokens.map((w, i) => {
+        const marked = marks && marks.length > 0 ? isMarked(marks, w.from, w.to) : undefined;
+        return (
+          <span
+            key={i}
+            role="button"
+            tabIndex={0}
+            data-word=""
+            data-from={w.from}
+            data-to={w.to}
+            data-start={w.start}
+            data-end={w.end}
+            // Stops the enclosing utterance handler from also firing and seeking
+            // to the start of the sentence instead of to this word.
+            onClick={(e) => {
               e.stopPropagation();
-              onSeek(w.from);
-            }
-          }}
-          className={cn(
-            "cursor-pointer rounded transition-colors duration-75 hover:bg-primary/20",
-            // Search hits use amber, never the primary tint: the playback
-            // highlight already owns that colour, and two meanings sharing one
-            // colour would make the moving cursor unreadable while searching.
-            match && w.token.toLowerCase().includes(match) &&
-              "bg-amber-400/40 text-foreground dark:bg-amber-400/30",
-            at >= w.from && at < w.to && "bg-primary/40 text-foreground"
-          )}
-        >
-          {w.token}
-        </span>
-      ))}
+              onSeek(w.start);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                e.stopPropagation();
+                onSeek(w.start);
+              }
+            }}
+            title={marked?.moment.body || undefined}
+            className={cn(
+              "cursor-pointer rounded transition-colors duration-75 hover:bg-primary/20",
+              // A saved mark and a search hit share a hue — a highlighter is
+              // yellow, and pretending otherwise to avoid the collision would
+              // make saved highlights unrecognisable. They are told apart by
+              // the underline, which only a saved mark carries, and the overlap
+              // is momentary anyway: a search tint lasts as long as the find
+              // box has text in it.
+              marked &&
+                "rounded-none border-b-2 border-amber-500 bg-amber-300/40 dark:bg-amber-400/25",
+              match && w.text.toLowerCase().includes(match) &&
+                "bg-amber-400/40 text-foreground dark:bg-amber-400/30",
+              at >= w.start && at < w.end && "bg-primary/40 text-foreground"
+            )}
+          >
+            {w.text}
+          </span>
+        );
+      })}
     </>
   );
 });

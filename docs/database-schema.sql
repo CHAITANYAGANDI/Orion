@@ -2,7 +2,7 @@
 --
 -- NOT the current one, and not a source of truth. Flyway owns the schema; the
 -- migrations under backend-spring/src/main/resources/db/migration are what runs,
--- and this file is kept only as a readable starting point. Twenty-four
+-- and this file is kept only as a readable starting point. Twenty-six
 -- migrations have landed since, several of them destructive. Read the
 -- migrations, or `\d` a live database, before trusting anything below.
 --
@@ -15,9 +15,13 @@
 --   * agent_connections, agent_action_requests, external_sync_logs — the agent
 --     and Meeting Memory features were removed (V15), and the calendar and
 --     integrations that used them in V18/V19.
---   * meeting_summaries — has gained sections_json, quotes_json, template_slug
---     and stale since (V12, V22, V25).
+--   * meeting_summaries — has gained sections_json, quotes_json, template_slug,
+--     stale and suggestions_json since (V12, V22, V25, V26).
 --   * transcript_segments — has gained words_json (V13) and language (V21).
+--   * workspace_suggestions (V26) and transcript_moments (V27) are missing
+--     entirely. The latter holds highlights, bookmarks and notes, and anchors
+--     each one three ways because transcripts here are editable — see the
+--     migration, not this file.
 --   * Row-level security (V9/V11) is not shown here at all, and it is not
 --     optional: every user-owned table carries a FORCE'd tenant_isolation
 --     policy, and the app connects as a NOBYPASSRLS role.

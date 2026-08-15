@@ -295,11 +295,79 @@ every time somebody fixed it.
 `kind` is set on create and ignored on update: turning a decision into a risk is
 not an edit, it is a different row.
 
+### Transcript moments (`transcript_moments`)
+
+Highlights, bookmarks and private notes a user marked while reading. All three
+kinds are one table and one endpoint: they differ by which fields are filled in,
+not by shape, lifecycle or permissions, and they are drawn over one transcript in
+one pass — three requests could paint a page whose highlights and notes came from
+different moments.
+
+| Method | Endpoint | Body | Response |
+|---|---|---|---|
+| GET | `/api/v1/meetings/{id}/moments` | — | `MomentResponse[]`, in transcript order |
+| POST | `/api/v1/meetings/{id}/moments` | `{ kind, ranges[], quote, body, speaker, startSeconds, endSeconds }` | `201 MomentResponse` |
+| PATCH | `/api/v1/moments/{id}` | `{ body }` | `MomentResponse` |
+| DELETE | `/api/v1/moments/{id}` | — | `204` |
+
+`kind` is `HIGHLIGHT` \| `BOOKMARK` \| `NOTE`. A highlight needs a non-empty
+`quote`; a note needs a non-empty `body`; a bookmark needs neither, because it
+marks a time rather than a passage. `PATCH` edits the body only — re-pointing a
+note at a different passage is a new note, and doing it in place would leave a
+comment attached to words nobody wrote it about.
+
+**The anchor is stored three ways, and this is the point of the design.**
+Recallix lets people correct transcript lines. Fixing a typo near the start of a
+line shifts every character offset after it, so an annotation pinned to offsets
+alone does not break loudly — it slides silently onto different words.
+
+```jsonc
+"ranges": [
+  { "segmentId": "seg_…", "startOffset": 10, "endOffset": 14, "quote": "ship" }
+]
+```
+
+| Anchor | Survives | Used when |
+|---|---|---|
+| `segmentId` + offsets | nothing changed | first — and only if the text there is still the quoted text |
+| `quote` | an edit elsewhere in the same line | second — nearest occurrence to the old offset wins |
+| `startSeconds` on the row | a reprocess that rebuilt every segment | the list, always |
+
+A mark that resolves by none of them is **orphaned**: it stops rendering inline
+and is shown in the list labelled *line edited*, with its quote and timestamp.
+Hiding it would be indistinguishable from the app losing the annotation.
+
+`ranges` is a JSONB array rather than a child table, for the same reason as
+`transcript_segments.words_json` — a selection crossing an utterance boundary
+covers two or three segments, and those ranges are only ever read as a whole
+moment's worth. There is deliberately **no foreign key on `segmentId`**: a
+cascading delete would destroy every highlight the moment someone asked for a
+better transcription.
+
+Resolution happens **client-side at render** (`frontend/lib/moments.ts`), not on
+read. The browser already has both the transcript and the moments, persisting
+repaired offsets would make a `GET` a write, and reverting an edit brings the
+original offsets back into agreement on its own.
+
+**What is not here.** No threads, no `@mentions`, no reactions. Those are one
+person addressing another, and Recallix has one account per workspace — there is
+no second user to reply to, mention or react at. A note here is a private
+annotation.
+
 ### Action items
 | Method | Endpoint | Body | Response |
 |---|---|---|---|
 | GET | `/api/v1/action-items` | `?page&size&status&priority` | `Page<ActionItemResponse>` |
+| GET | `/api/v1/meetings/{id}/action-items` | — | `ActionItemResponse[]` |
+| POST | `/api/v1/meetings/{id}/action-items` | `{ title, ownerName?, dueDate?, priority?, sourceSentence? }` | `201 ActionItemResponse` |
 | PATCH | `/api/v1/action-items/{id}` | `{ ownerName?, dueDate?, priority?, status? }` | `ActionItemResponse` |
+
+`POST` exists for the transcript's selection menu: until it did, the one thing a
+reader is most likely to notice — a commitment the extraction pass missed — was
+the one thing they could not record. Hand-added items go in the same table as
+extracted ones, with `sourceSentence` carrying the transcript line as evidence,
+because "what did we promise" split across two lists by how each row was noticed
+is two answers.
 
 ### Billing & usage
 | Method | Endpoint | Body | Response |

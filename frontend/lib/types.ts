@@ -405,6 +405,68 @@ export interface Insight {
   createdAt: string;
 }
 
+// ---- Transcript moments ----
+
+export type MomentKind = "HIGHLIGHT" | "BOOKMARK" | "NOTE";
+
+/**
+ * One transcript segment's share of a marked passage.
+ *
+ * A selection that crosses an utterance boundary produces several of these,
+ * which is common: diarization splits on pauses rather than on sentences, so
+ * one spoken sentence often arrives as two segments.
+ *
+ * Two anchors, deliberately. The offsets are exact while the line is untouched;
+ * `quote` is what finds the passage again after somebody fixes a typo earlier
+ * in the same line and shifts every offset after it. See `resolveRange` in
+ * `lib/moments.ts` for the order they are tried in.
+ */
+export interface MomentRange {
+  segmentId: string;
+  startOffset: number;
+  endOffset: number;
+  quote: string;
+}
+
+/** Something a person marked on a transcript: a highlight, a bookmark or a note. */
+export interface TranscriptMoment {
+  id: string;
+  meetingId: string;
+  kind: MomentKind;
+  /** Empty for a bookmark, which marks a time rather than a passage. */
+  ranges: MomentRange[];
+  /** The selected words, joined. */
+  quote: string;
+  /** The user's own words: a note's text, or a bookmark's label. */
+  body: string;
+  /** Denormalised — the segment it came from may not survive a reprocess. */
+  speaker: string;
+  startSeconds: number;
+  endSeconds: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MomentCreateRequest {
+  kind: MomentKind;
+  ranges: MomentRange[];
+  quote: string;
+  body: string;
+  speaker: string;
+  startSeconds: number;
+  endSeconds: number;
+}
+
+/** Recording a commitment the extraction pass missed. */
+export interface ActionItemCreateRequest {
+  title: string;
+  ownerName?: string;
+  dueDate?: string;
+  priority?: Priority;
+  /** The transcript line it came from — the same field the extractor fills. */
+  sourceSentence?: string;
+}
+
 /** The anonymous view of a shared meeting — no ids, no audio, no owner. */
 export interface SharedMeeting {
   title: string;
