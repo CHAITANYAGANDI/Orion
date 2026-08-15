@@ -26,6 +26,16 @@ public class ChatMessage {
     @Column(name = "meeting_id")
     private String meetingId;
 
+    /**
+     * The thread this turn belongs to (V28).
+     *
+     * <p>{@code meetingId} above is retained alongside it and is still the scope
+     * discriminator, but it no longer identifies a conversation on its own —
+     * one meeting can have several.
+     */
+    @Column(name = "conversation_id", nullable = false)
+    private String conversationId;
+
     @Column(name = "user_id", nullable = false)
     private String userId;
 
@@ -47,6 +57,9 @@ public class ChatMessage {
 
     public String getMeetingId() { return meetingId; }
     public void setMeetingId(String meetingId) { this.meetingId = meetingId; }
+
+    public String getConversationId() { return conversationId; }
+    public void setConversationId(String conversationId) { this.conversationId = conversationId; }
 
     public String getUserId() { return userId; }
     public void setUserId(String userId) { this.userId = userId; }

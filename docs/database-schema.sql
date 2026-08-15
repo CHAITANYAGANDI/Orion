@@ -2,7 +2,7 @@
 --
 -- NOT the current one, and not a source of truth. Flyway owns the schema; the
 -- migrations under backend-spring/src/main/resources/db/migration are what runs,
--- and this file is kept only as a readable starting point. Twenty-six
+-- and this file is kept only as a readable starting point. Twenty-seven
 -- migrations have landed since, several of them destructive. Read the
 -- migrations, or `\d` a live database, before trusting anything below.
 --
@@ -18,10 +18,13 @@
 --   * meeting_summaries — has gained sections_json, quotes_json, template_slug,
 --     stale and suggestions_json since (V12, V22, V25, V26).
 --   * transcript_segments — has gained words_json (V13) and language (V21).
---   * workspace_suggestions (V26) and transcript_moments (V27) are missing
---     entirely. The latter holds highlights, bookmarks and notes, and anchors
---     each one three ways because transcripts here are editable — see the
---     migration, not this file.
+--   * workspace_suggestions (V26), transcript_moments (V27) and
+--     chat_conversations (V28) are missing entirely. transcript_moments holds
+--     highlights, bookmarks and notes, and anchors each one three ways because
+--     transcripts here are editable — see the migration, not this file.
+--   * chat_messages — has gained conversation_id (V28, NOT NULL). Each scope is
+--     several named threads now, so meeting_id no longer identifies a
+--     conversation on its own.
 --   * Row-level security (V9/V11) is not shown here at all, and it is not
 --     optional: every user-owned table carries a FORCE'd tenant_isolation
 --     policy, and the app connects as a NOBYPASSRLS role.

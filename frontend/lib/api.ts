@@ -3,6 +3,7 @@ import { buildAuthHeaders } from "@/lib/auth-store";
 import type {
   ActionItemCreateRequest,
   ActionItemListQuery,
+  ChatConversation,
   ActionItemPatchRequest,
   ActionItemResponse,
   MomentCreateRequest,
@@ -74,6 +75,7 @@ export const api = createApi({
     "KnownSpeakers",
     "Insights",
     "Moments",
+    "Conversations",
   ],
   endpoints: (builder) => ({
     // ---- Meetings ----
@@ -304,34 +306,128 @@ export const api = createApi({
     }),
 
     // ---- RAG chat ----
-    getChat: builder.query<ChatMessage[], string>({
-      query: (id) => `/meetings/${id}/chat`,
-      providesTags: (_r, _e, id) => [{ type: "Chat", id }],
+    // `conversationId` is part of the query *argument*, so RTK Query caches each
+    // thread separately on its own — without it, switching threads would serve
+    // the previous one's messages from cache before replacing them, which reads
+    // as the app losing the history.
+    //
+    // The invalidation tag is deliberately coarser than the cache key: one tag
+    // per scope, so a mutation refreshes every thread cached for that chat. A
+    // per-thread tag would be exact right up until deleting the last exchange
+    // deletes the thread, at which point the open view has no tag left to
+    // invalidate and stays on screen showing messages that no longer exist.
+    getChat: builder.query<ChatMessage[], { id: string; conversationId?: string }>({
+      query: ({ id, conversationId }) =>
+        `/meetings/${id}/chat${conversationId ? `?conversationId=${conversationId}` : ""}`,
+      providesTags: (_r, _e, arg) => [{ type: "Chat", id: arg.id }],
     }),
 
-    askChat: builder.mutation<ChatMessage, { id: string; question: string }>({
-      query: ({ id, question }) => ({
+    askChat: builder.mutation<
+      ChatMessage,
+      { id: string; question: string; conversationId?: string }
+    >({
+      query: ({ id, question, conversationId }) => ({
         url: `/meetings/${id}/chat`,
         method: "POST",
-        body: { question },
+        body: { question, conversationId },
       }),
-      invalidatesTags: (_r, _e, arg) => [{ type: "Chat", id: arg.id }],
+      // The thread list too: a first question names its thread, and an unnamed
+      // row left in the picker is the one the user is looking at.
+      invalidatesTags: (_r, _e, arg) => [
+        { type: "Chat", id: arg.id },
+        { type: "Conversations", id: arg.id },
+      ],
+    }),
+
+    // ---- Chat conversations (history) ----
+    getMeetingConversations: builder.query<ChatConversation[], string>({
+      query: (id) => `/meetings/${id}/chat/conversations`,
+      providesTags: (_r, _e, id) => [{ type: "Conversations", id }],
+    }),
+
+    createMeetingConversation: builder.mutation<ChatConversation, string>({
+      query: (id) => ({ url: `/meetings/${id}/chat/conversations`, method: "POST" }),
+      invalidatesTags: (_r, _e, id) => [{ type: "Conversations", id }],
+    }),
+
+    getWorkspaceConversations: builder.query<ChatConversation[], void>({
+      query: () => "/chat/conversations",
+      providesTags: [{ type: "Conversations", id: "ME" }],
+    }),
+
+    createWorkspaceConversation: builder.mutation<ChatConversation, void>({
+      query: () => ({ url: "/chat/conversations", method: "POST" }),
+      invalidatesTags: [{ type: "Conversations", id: "ME" }],
+    }),
+
+    // Renaming and deleting need no scope: a conversation id already says which
+    // chat it belongs to. `scope` is carried only to invalidate the right list.
+    renameConversation: builder.mutation<
+      ChatConversation,
+      { conversationId: string; title: string; scope: string }
+    >({
+      query: ({ conversationId, title }) => ({
+        url: `/chat/conversations/${conversationId}`,
+        method: "PATCH",
+        body: { title },
+      }),
+      invalidatesTags: (_r, _e, arg) => [{ type: "Conversations", id: arg.scope }],
+    }),
+
+    deleteConversation: builder.mutation<void, { conversationId: string; scope: string }>({
+      query: ({ conversationId }) => ({
+        url: `/chat/conversations/${conversationId}`,
+        method: "DELETE",
+      }),
+      invalidatesTags: (_r, _e, arg) => [{ type: "Conversations", id: arg.scope }],
+    }),
+
+    /**
+     * Remove one exchange — the message named and the turn that answers it.
+     *
+     * `scope` is the meeting id, or "ME" for the workspace. Both chats' tags are
+     * invalidated rather than the one the caller claims: a message id does not
+     * say which chat it came from without a round-trip, and refetching a chat
+     * the user is not looking at costs one cached request.
+     */
+    deleteChatExchange: builder.mutation<void, { messageId: string; scope: string }>({
+      query: ({ messageId }) => ({ url: `/chat/messages/${messageId}`, method: "DELETE" }),
+      invalidatesTags: (_r, _e, arg) => [
+        { type: "Chat", id: arg.scope },
+        { type: "Conversations", id: arg.scope },
+        { type: "WorkspaceChat", id: "ME" },
+      ],
     }),
 
     // ---- Workspace-wide chat (grounded across every meeting) ----
-    getWorkspaceChat: builder.query<ChatMessage[], void>({
-      query: () => "/chat",
+    getWorkspaceChat: builder.query<ChatMessage[], { conversationId?: string } | void>({
+      query: (arg) =>
+        arg && arg.conversationId ? `/chat?conversationId=${arg.conversationId}` : "/chat",
       providesTags: [{ type: "WorkspaceChat", id: "ME" }],
     }),
 
     askWorkspaceChat: builder.mutation<ChatMessage, WorkspaceAskRequest>({
       query: (body) => ({ url: "/chat", method: "POST", body }),
-      invalidatesTags: [{ type: "WorkspaceChat", id: "ME" }],
+      invalidatesTags: [
+        { type: "WorkspaceChat", id: "ME" },
+        { type: "Conversations", id: "ME" },
+      ],
     }),
 
     clearWorkspaceChat: builder.mutation<void, void>({
       query: () => ({ url: "/chat", method: "DELETE" }),
-      invalidatesTags: [{ type: "WorkspaceChat", id: "ME" }],
+      invalidatesTags: [
+        { type: "WorkspaceChat", id: "ME" },
+        { type: "Conversations", id: "ME" },
+      ],
+    }),
+
+    clearMeetingChat: builder.mutation<void, string>({
+      query: (id) => ({ url: `/meetings/${id}/chat`, method: "DELETE" }),
+      invalidatesTags: (_r, _e, id) => [
+        { type: "Chat", id },
+        { type: "Conversations", id },
+      ],
     }),
 
     // ---- Semantic search (find meetings by what was said) ----
@@ -574,9 +670,17 @@ export const {
   useDeleteMeetingMutation,
   useGetChatQuery,
   useAskChatMutation,
+  useClearMeetingChatMutation,
   useGetWorkspaceChatQuery,
   useAskWorkspaceChatMutation,
   useClearWorkspaceChatMutation,
+  useGetMeetingConversationsQuery,
+  useCreateMeetingConversationMutation,
+  useGetWorkspaceConversationsQuery,
+  useCreateWorkspaceConversationMutation,
+  useRenameConversationMutation,
+  useDeleteConversationMutation,
+  useDeleteChatExchangeMutation,
   useSemanticSearchMutation,
   useTranslateSummaryMutation,
   useRenameSpeakersMutation,

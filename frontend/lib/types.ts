@@ -318,6 +318,8 @@ export interface Citation {
 
 export interface ChatMessage {
   id: string;
+  /** The thread this turn belongs to. */
+  conversationId: string;
   role: "user" | "assistant";
   content: string;
   citations: Citation[];
@@ -326,12 +328,32 @@ export interface ChatMessage {
 
 export interface ChatAskRequest {
   question: string;
+  /** Omit to continue the thread last used, or start one. */
+  conversationId?: string;
+}
+
+/**
+ * One named chat thread.
+ *
+ * `meetingId` is null for the workspace-wide chat. `updatedAt` — not
+ * `createdAt` — is what the history picker sorts and groups by: a thread
+ * returned to this morning belongs under "Today" however old it is.
+ */
+export interface ChatConversation {
+  id: string;
+  meetingId: string | null;
+  title: string;
+  messageCount: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 // ---- Workspace-wide chat & semantic search ----
 export interface WorkspaceAskRequest {
   question: string;
   meetingIds?: string[];
+  /** Omit to continue the thread last used, or start one. */
+  conversationId?: string;
 }
 
 export interface SemanticSearchRequest {

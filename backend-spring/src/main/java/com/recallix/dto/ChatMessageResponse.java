@@ -9,6 +9,8 @@ import java.util.List;
 
 public record ChatMessageResponse(
         String id,
+        /** Which thread this turn belongs to — see V28. */
+        String conversationId,
         String role,
         String content,
         List<CitationDto> citations,
@@ -28,6 +30,7 @@ public record ChatMessageResponse(
                         c.hasNonNull("meetingTitle") ? c.get("meetingTitle").asText() : null));
             }
         }
-        return new ChatMessageResponse(m.getId(), m.getRole(), m.getContent(), citations, m.getCreatedAt());
+        return new ChatMessageResponse(m.getId(), m.getConversationId(), m.getRole(),
+                m.getContent(), citations, m.getCreatedAt());
     }
 }

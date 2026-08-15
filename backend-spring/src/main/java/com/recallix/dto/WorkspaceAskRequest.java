@@ -10,9 +10,13 @@ import java.util.List;
  *
  * <p>{@code meetingIds} is optional — when present the search is narrowed to
  * those meetings, otherwise it spans every meeting the user owns.
+ *
+ * <p>{@code conversationId} is optional and means "add this to that thread".
+ * Omitting it continues whichever thread was last used, or starts one.
  */
 public record WorkspaceAskRequest(
         @NotBlank @Size(max = 2000) String question,
-        @Size(max = 50) List<String> meetingIds
+        @Size(max = 50) List<String> meetingIds,
+        String conversationId
 ) {
 }

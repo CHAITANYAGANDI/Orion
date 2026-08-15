@@ -46,6 +46,11 @@ import {
   useGetMomentsQuery,
   useCreateMomentMutation,
   useDeleteMomentMutation,
+  useGetMeetingConversationsQuery,
+  useCreateMeetingConversationMutation,
+  useRenameConversationMutation,
+  useDeleteConversationMutation,
+  useDeleteChatExchangeMutation,
 } from "@/lib/api";
 import type {
   SpeakerStats,
@@ -91,6 +96,8 @@ import {
 } from "@/lib/format";
 import { languageName } from "@/lib/language";
 import { ChatSuggestions } from "@/components/chat-suggestions";
+import { ChatHistory } from "@/components/chat-history";
+import { ChatMessageBubble } from "@/components/chat-message";
 import { MEETING_PROMPTS, toPrompts } from "@/lib/chat-prompts";
 import { SelectionMenu, type SelectionAction } from "@/components/selection-menu";
 import { MomentsPanel } from "@/components/moments-panel";
@@ -734,8 +741,21 @@ function ChatPanel({
   /** A question pushed in from the transcript's selection menu. */
   composed?: { text: string; send: boolean; nonce: number } | null;
 }) {
-  const { data: messages, isLoading } = useGetChatQuery(meetingId);
+  // Null means "whatever I was last saying about this meeting", which is what
+  // the server returns for an unspecified conversation — so a first visit needs
+  // no conversation to exist.
+  const [conversationId, setConversationId] = React.useState<string | null>(null);
+
+  const { data: messages, isLoading } = useGetChatQuery({
+    id: meetingId,
+    conversationId: conversationId ?? undefined,
+  });
+  const { data: conversations } = useGetMeetingConversationsQuery(meetingId);
   const [ask, { isLoading: asking }] = useAskChatMutation();
+  const [newConversation, { isLoading: starting }] = useCreateMeetingConversationMutation();
+  const [rename] = useRenameConversationMutation();
+  const [removeConversation] = useDeleteConversationMutation();
+  const [deleteExchange, { isLoading: deleting }] = useDeleteChatExchangeMutation();
   const [q, setQ] = React.useState("");
   const endRef = React.useRef<HTMLDivElement | null>(null);
   const inputRef = React.useRef<HTMLInputElement | null>(null);
@@ -743,6 +763,14 @@ function ChatPanel({
   React.useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, asking]);
+
+  // Follow the thread the server actually filed the turn under — only the
+  // response knows which one an unnamed question continued.
+  React.useEffect(() => {
+    if (!conversationId && messages && messages.length > 0) {
+      setConversationId(messages[0].conversationId);
+    }
+  }, [messages, conversationId]);
 
   const submitRef = React.useRef<(text: string) => Promise<void>>();
 
@@ -774,12 +802,27 @@ function ChatPanel({
     if (!question) return;
     setQ("");
     try {
-      await ask({ id: meetingId, question }).unwrap();
+      const answer = await ask({
+        id: meetingId,
+        question,
+        conversationId: conversationId ?? undefined,
+      }).unwrap();
+      setConversationId(answer.conversationId);
     } catch {
       toast.error("Couldn't get an answer.");
     }
   }
   submitRef.current = submit;
+
+  async function onNew() {
+    try {
+      const created = await newConversation(meetingId).unwrap();
+      setConversationId(created.id);
+      setQ("");
+    } catch {
+      toast.error("Couldn't start a new chat.");
+    }
+  }
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
@@ -788,10 +831,25 @@ function ChatPanel({
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="space-y-3">
         <CardTitle className="flex items-center gap-2 text-base">
           <Sparkles className="h-4 w-4 text-primary" /> Ask this meeting
         </CardTitle>
+        <ChatHistory
+          conversations={conversations ?? []}
+          activeId={conversationId}
+          onSelect={setConversationId}
+          onNew={onNew}
+          busy={starting}
+          onRename={async (id, title) => {
+            await rename({ conversationId: id, title, scope: meetingId }).unwrap();
+          }}
+          onDelete={async (id) => {
+            await removeConversation({ conversationId: id, scope: meetingId }).unwrap();
+            // The open thread just went; fall back to the most recent one.
+            if (id === conversationId) setConversationId(null);
+          }}
+        />
       </CardHeader>
       <CardContent>
         <div className="mb-4 max-h-[420px] space-y-4 overflow-y-auto">
@@ -799,32 +857,31 @@ function ChatPanel({
             <Skeleton className="h-16 w-full" />
           ) : messages && messages.length > 0 ? (
             messages.map((msg) => (
-              <div key={msg.id} className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}>
-                <div
-                  className={cn(
-                    "max-w-[85%] rounded-lg px-3 py-2 text-sm",
-                    msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"
-                  )}
-                >
-                  <p className="whitespace-pre-wrap">{msg.content}</p>
-                  {msg.citations && msg.citations.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {msg.citations.map((c, i) =>
-                        c.start != null ? (
-                          <button
-                            key={i}
-                            onClick={() => onCite(c.start as number)}
-                            title={c.text}
-                            className="inline-flex items-center gap-1 rounded-full bg-background/60 px-2 py-0.5 text-[11px] text-foreground hover:bg-background"
-                          >
-                            <Quote className="h-3 w-3" /> {timecode(c.start as number)}
-                          </button>
-                        ) : null
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
+              <ChatMessageBubble
+                key={msg.id}
+                message={msg}
+                deleting={deleting}
+                onDelete={async (messageId) => {
+                  await deleteExchange({ messageId, scope: meetingId }).unwrap();
+                }}
+              >
+                {msg.citations && msg.citations.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {msg.citations.map((c, i) =>
+                      c.start != null ? (
+                        <button
+                          key={i}
+                          onClick={() => onCite(c.start as number)}
+                          title={c.text}
+                          className="inline-flex items-center gap-1 rounded-full bg-background/60 px-2 py-0.5 text-[11px] text-foreground hover:bg-background"
+                        >
+                          <Quote className="h-3 w-3" /> {timecode(c.start as number)}
+                        </button>
+                      ) : null
+                    )}
+                  </div>
+                )}
+              </ChatMessageBubble>
             ))
           ) : (
             <div className="space-y-4 py-6">

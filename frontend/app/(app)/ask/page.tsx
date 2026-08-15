@@ -24,6 +24,11 @@ import {
   useGetWorkspaceSuggestionsQuery,
   useAskWorkspaceChatMutation,
   useClearWorkspaceChatMutation,
+  useGetWorkspaceConversationsQuery,
+  useCreateWorkspaceConversationMutation,
+  useRenameConversationMutation,
+  useDeleteConversationMutation,
+  useDeleteChatExchangeMutation,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,16 +38,32 @@ import { timecode } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Citation } from "@/lib/types";
 import { ChatSuggestions } from "@/components/chat-suggestions";
+import { ChatHistory } from "@/components/chat-history";
+import { ChatMessageBubble } from "@/components/chat-message";
 import { WORKSPACE_PROMPTS, toPrompts } from "@/lib/chat-prompts";
 
 export default function AskPage() {
-  const { data: messages, isLoading } = useGetWorkspaceChatQuery();
+  /**
+   * Which thread is on screen. Null means "whatever I was last saying", which
+   * is what the server returns for an unspecified conversation — so a first
+   * visit needs no conversation to exist.
+   */
+  const [conversationId, setConversationId] = React.useState<string | null>(null);
+
+  const { data: messages, isLoading } = useGetWorkspaceChatQuery(
+    conversationId ? { conversationId } : undefined,
+  );
+  const { data: conversations } = useGetWorkspaceConversationsQuery();
   // Generated from the user's recent meetings and cached server-side, so this
   // is a cheap read. Failure is silent by design: the chips fall back to the
   // static set rather than the page reporting that a convenience is missing.
   const { data: suggestions } = useGetWorkspaceSuggestionsQuery();
   const [ask, { isLoading: asking }] = useAskWorkspaceChatMutation();
   const [clear, { isLoading: clearing }] = useClearWorkspaceChatMutation();
+  const [newConversation, { isLoading: starting }] = useCreateWorkspaceConversationMutation();
+  const [rename] = useRenameConversationMutation();
+  const [removeConversation] = useDeleteConversationMutation();
+  const [deleteExchange, { isLoading: deleting }] = useDeleteChatExchangeMutation();
   const [q, setQ] = React.useState("");
   const endRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -50,23 +71,54 @@ export default function AskPage() {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, asking]);
 
+  /**
+   * Follow the thread the server actually filed the turn under.
+   *
+   * Asking without naming one continues the most recent thread or starts a new
+   * one, and only the response knows which. Without this the picker would keep
+   * saying "Previous chat history" while a named thread sat underneath it.
+   */
+  React.useEffect(() => {
+    if (!conversationId && messages && messages.length > 0) {
+      setConversationId(messages[0].conversationId);
+    }
+  }, [messages, conversationId]);
+
   async function send(question: string) {
     const trimmed = question.trim();
     if (!trimmed || asking) return;
     setQ("");
     try {
-      await ask({ question: trimmed }).unwrap();
+      const answer = await ask({
+        question: trimmed,
+        conversationId: conversationId ?? undefined,
+      }).unwrap();
+      setConversationId(answer.conversationId);
     } catch {
       toast.error("Couldn't get an answer.");
     }
   }
 
   async function onClear() {
+    if (!window.confirm("Delete every conversation in this chat? This cannot be undone.")) {
+      return;
+    }
     try {
       await clear().unwrap();
-      toast.success("Conversation cleared.");
+      setConversationId(null);
+      toast.success("Chat history cleared.");
     } catch {
       toast.error("Couldn't clear the conversation.");
+    }
+  }
+
+  async function onNew() {
+    try {
+      const created = await newConversation().unwrap();
+      setConversationId(created.id);
+      setQ("");
+    } catch {
+      toast.error("Couldn't start a new chat.");
     }
   }
 
@@ -84,7 +136,7 @@ export default function AskPage() {
             they came from.
           </p>
         </div>
-        {!empty && (
+        {(conversations?.length ?? 0) > 0 && (
           <Button
             variant="outline"
             size="sm"
@@ -92,10 +144,26 @@ export default function AskPage() {
             disabled={clearing}
             className="gap-2 shrink-0"
           >
-            <Trash2 className="h-4 w-4" /> Clear
+            <Trash2 className="h-4 w-4" /> Clear all
           </Button>
         )}
       </div>
+
+      <ChatHistory
+        conversations={conversations ?? []}
+        activeId={conversationId}
+        onSelect={setConversationId}
+        onNew={onNew}
+        busy={starting}
+        onRename={async (id, title) => {
+          await rename({ conversationId: id, title, scope: "ME" }).unwrap();
+        }}
+        onDelete={async (id) => {
+          await removeConversation({ conversationId: id, scope: "ME" }).unwrap();
+          // The open thread just went; fall back to the most recent one.
+          if (id === conversationId) setConversationId(null);
+        }}
+      />
 
       <Card>
         <CardHeader className="pb-3">
@@ -126,25 +194,16 @@ export default function AskPage() {
               </div>
             ) : (
               messages!.map((msg) => (
-                <div
+                <ChatMessageBubble
                   key={msg.id}
-                  className={cn(
-                    "flex",
-                    msg.role === "user" ? "justify-end" : "justify-start"
-                  )}
+                  message={msg}
+                  deleting={deleting}
+                  onDelete={async (messageId) => {
+                    await deleteExchange({ messageId, scope: "ME" }).unwrap();
+                  }}
                 >
-                  <div
-                    className={cn(
-                      "max-w-[85%] rounded-lg px-3 py-2 text-sm",
-                      msg.role === "user"
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted"
-                    )}
-                  >
-                    <p className="whitespace-pre-wrap">{msg.content}</p>
-                    <SourceList citations={msg.citations} />
-                  </div>
-                </div>
+                  <SourceList citations={msg.citations} />
+                </ChatMessageBubble>
               ))
             )}
             {asking && (

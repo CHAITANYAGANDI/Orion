@@ -163,18 +163,74 @@ transcript. **Workspace-scoped** chat is grounded across every meeting the calle
 owns — its citations additionally carry `meetingId`/`meetingTitle`, so the UI can
 deep-link to `/meetings/{id}?t={start}`.
 
-| Method | Endpoint | Body | Response |
+| Method | Endpoint | Body / Query | Response |
 |---|---|---|---|
-| GET | `/api/v1/meetings/{id}/chat` | — | `ChatMessageResponse[]` |
-| POST | `/api/v1/meetings/{id}/chat` | `{ "question" }` | `ChatMessageResponse` |
+| GET | `/api/v1/meetings/{id}/chat` | `?conversationId` | `ChatMessageResponse[]` |
+| POST | `/api/v1/meetings/{id}/chat` | `{ "question", "conversationId"? }` | `ChatMessageResponse` |
+| DELETE | `/api/v1/meetings/{id}/chat` | — | `204` (every thread on this meeting) |
 | POST | `/api/v1/meetings/{id}/translate` | `{ "targetLanguage" }` | `TranslateResponse` |
-| GET | `/api/v1/chat` | — | `ChatMessageResponse[]` (workspace conversation) |
-| POST | `/api/v1/chat` | `{ "question", "meetingIds"? }` | `ChatMessageResponse` |
-| DELETE | `/api/v1/chat` | — | `204` (clears workspace conversation) |
+| GET | `/api/v1/chat` | `?conversationId` | `ChatMessageResponse[]` |
+| POST | `/api/v1/chat` | `{ "question", "meetingIds"?, "conversationId"? }` | `ChatMessageResponse` |
+| DELETE | `/api/v1/chat` | — | `204` (every workspace thread) |
 | POST | `/api/v1/search/semantic` | `{ "query", "limit"? }` | `SemanticSearchHit[]` |
 
 Persistence note: `chat_messages.meeting_id` is `NULL` for workspace turns —
-that is what distinguishes the two conversations.
+that is what distinguishes the two scopes.
+
+### Chat history (`chat_conversations`)
+
+Both scopes are organised into named threads (V28). Before it, each scope was
+one unbounded conversation, which made "clear it all" the only tidying control
+available — so clearing became the thing people did, throwing away the record
+that made storing it worthwhile.
+
+| Method | Endpoint | Body | Response |
+|---|---|---|---|
+| GET | `/api/v1/meetings/{id}/chat/conversations` | — | `ConversationResponse[]` |
+| POST | `/api/v1/meetings/{id}/chat/conversations` | — | `201 ConversationResponse` |
+| GET | `/api/v1/chat/conversations` | — | `ConversationResponse[]` |
+| POST | `/api/v1/chat/conversations` | — | `201 ConversationResponse` |
+| PATCH | `/api/v1/chat/conversations/{id}` | `{ "title" }` | `ConversationResponse` |
+| DELETE | `/api/v1/chat/conversations/{id}` | — | `204` |
+| DELETE | `/api/v1/chat/messages/{id}` | — | `204` (the exchange) |
+
+Renaming and deleting take no scope: a conversation id already says which chat
+it belongs to. Listing and creating do, because a scope is what they enumerate.
+
+**Omitting `conversationId` when asking is the normal case.** It continues
+whichever thread was last used at that scope, or starts one — the chat box is
+the primary control on the page, and a first-time user has no thread yet. The
+response carries the `conversationId` the turn was actually filed under, which
+is the only way the client learns which thread it just continued.
+
+**Scope is enforced on every read and write.** Handing a meeting chat a
+workspace `conversationId` is a `404`, not a silent reparent: it would answer
+from one meeting and file the turn in the workspace log, where it reads back
+afterwards as a cross-meeting answer.
+
+**Titles are derived locally, not generated** — `common/ConversationTitle`
+strips a leading interrogative off the first question ("What are the action
+items from last week?" → "Action items from last week"). A model call would
+read slightly better and would land on the first message of every new
+conversation, which is the worst place in the product to add latency and a
+failure mode: the user is waiting on an answer, not on a label for a list they
+are not looking at. The strip is deliberately timid — bare "who" is never
+removed, and an opener whose removal would expose a preposition is kept, since
+"Of these is blocking" is not a shorter title but a broken one. Renaming covers
+whatever it gets wrong; a title is set once and never rewritten by a later
+question.
+
+**Deleting a message deletes the exchange.** Half of one is worse than none: a
+question whose answer is gone reads as a request the app ignored, and an answer
+with no question is a claim about nothing. Safe because turns are independent —
+neither ask path sends prior messages to the model, so removing a pair cannot
+change how a later question is answered. *If conversational memory is ever
+added, this becomes a decision about rewriting history and must be revisited.*
+Emptying a thread deletes the thread, so the picker never lists a row that
+opens onto nothing.
+
+The V28 backfill gives every pre-existing thread one conversation named after
+its first question, so nothing already stored becomes unreachable.
 
 ### Summary templates
 
