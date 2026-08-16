@@ -1,5 +1,5 @@
 /**
- * Downloading a meeting.
+ * Downloading a meeting, or the whole account.
  *
  * <p>The file is built by the server — see the export renderers — so this module
  * only has to ask for it and get it onto the disk. That is less trivial than it
@@ -8,8 +8,9 @@
  * blob and handed to a synthetic link, which is also what lets the filename come
  * from `Content-Disposition` rather than from a guess made here.
  *
- * <p>Everything except {@link downloadExport} is pure, so the awkward parts —
- * the query string and the header parsing — are testable without a browser.
+ * <p>Everything except the two `download…` functions is pure, so the awkward
+ * parts — the query string and the header parsing — are testable without a
+ * browser.
  */
 
 import { API_BASE } from "@/lib/api";
@@ -84,12 +85,15 @@ export function save(blob: Blob, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
-export async function downloadExport(
-  meetingId: string,
-  format: ExportFormat,
-  options: ExportOptions = {},
-): Promise<void> {
-  const response = await fetch(`${API_BASE}/api/v1${exportPath(meetingId, format, options)}`, {
+/**
+ * Fetch an authenticated file and put it on the disk.
+ *
+ * <p>Shared by the two downloads that go through the API rather than through a
+ * signed storage URL, so they cannot come to disagree about how a failure reads
+ * or where the filename comes from.
+ */
+async function fetchAndSave(path: string, fallbackName: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/v1${path}`, {
     headers: await buildAuthHeaders(),
   });
   if (!response.ok) {
@@ -101,12 +105,37 @@ export async function downloadExport(
     } catch {
       message = "";
     }
-    throw new Error(message || `Export failed (${response.status})`);
+    throw new Error(message || `Download failed (${response.status})`);
   }
   save(
     await response.blob(),
-    filenameFrom(response.headers.get("Content-Disposition"), `meeting.${format}`),
+    filenameFrom(response.headers.get("Content-Disposition"), fallbackName),
   );
+}
+
+export async function downloadExport(
+  meetingId: string,
+  format: ExportFormat,
+  options: ExportOptions = {},
+): Promise<void> {
+  return fetchAndSave(exportPath(meetingId, format, options), `meeting.${format}`);
+}
+
+/**
+ * The whole account, as a zip.
+ *
+ * <p>The same mechanism as a single meeting and a different promise: this is the
+ * thing somebody downloads before pressing the button underneath it, so it goes
+ * through the same authenticated fetch rather than a link that could be shared
+ * by accident.
+ */
+export async function downloadAccountArchive(
+  zone: string | null = timeZone(),
+): Promise<void> {
+  const params = new URLSearchParams();
+  if (zone) params.set("tz", zone);
+  const query = params.toString();
+  return fetchAndSave(`/privacy/export${query ? `?${query}` : ""}`, "recallix-export.zip");
 }
 
 /**

@@ -16,6 +16,7 @@ import com.recallix.dto.TranscriptResponse;
 import com.recallix.dto.UploadUrlRequest;
 import com.recallix.dto.UploadUrlResponse;
 import com.recallix.security.SecurityUtils;
+import com.recallix.service.ErasureService;
 import com.recallix.service.MeetingService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -31,14 +32,19 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Instant;
+import java.util.Map;
+
 @RestController
 @RequestMapping("/api/v1/meetings")
 public class MeetingController {
 
     private final MeetingService meetings;
+    private final ErasureService erasure;
 
-    public MeetingController(MeetingService meetings) {
+    public MeetingController(MeetingService meetings, ErasureService erasure) {
         this.meetings = meetings;
+        this.erasure = erasure;
     }
 
     @PostMapping("/upload-url")
@@ -144,6 +150,32 @@ public class MeetingController {
     @ResponseStatus(HttpStatus.ACCEPTED)
     public ReprocessResponse reprocess(@PathVariable String id) {
         return meetings.reprocess(SecurityUtils.currentUserId(), id);
+    }
+
+    /**
+     * Erase the recording and keep everything drawn from it (V35).
+     *
+     * <p>The grain most people actually want. The audio is somebody's voice and
+     * the largest thing we hold; the notes are what the meeting was for. 200 with
+     * the timestamp rather than 204, because the page immediately has to say when
+     * it happened.
+     */
+    @DeleteMapping("/{id}/audio")
+    public Map<String, Instant> eraseAudio(@PathVariable String id) {
+        return Map.of("audioDeletedAt",
+                erasure.eraseAudio(SecurityUtils.currentUserId(), id));
+    }
+
+    /**
+     * Erase the transcript, its marks, its translations and its embeddings.
+     *
+     * <p>The summary and action items survive — see {@code ErasureService} for
+     * why that is the right line, and why the embeddings are on this side of it.
+     */
+    @DeleteMapping("/{id}/transcript")
+    public Map<String, Instant> eraseTranscript(@PathVariable String id) {
+        return Map.of("transcriptDeletedAt",
+                erasure.eraseTranscript(SecurityUtils.currentUserId(), id));
     }
 
     @DeleteMapping("/{id}")

@@ -55,6 +55,10 @@ public interface MeetingActionItemRepository extends JpaRepository<MeetingAction
     @Query("SELECT a FROM MeetingActionItem a WHERE a.meetingId = :meetingId AND a.edited = true")
     List<MeetingActionItem> findEditedByMeetingId(@Param("meetingId") String meetingId);
 
+    /** Everything one account has committed to, counted — the privacy inventory. */
+    @Query("SELECT COUNT(a) FROM MeetingActionItem a WHERE " + OWNED_BY)
+    long countForUser(@Param("userId") String userId);
+
     /** Fetch a single item scoped to its owning user (via the parent meeting). */
     @Query("SELECT a FROM MeetingActionItem a WHERE a.id = :id AND " + OWNED_BY)
     Optional<MeetingActionItem> findByIdForUser(@Param("id") String id, @Param("userId") String userId);

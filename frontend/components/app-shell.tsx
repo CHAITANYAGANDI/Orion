@@ -15,6 +15,7 @@ import {
   LogOut,
   Sparkles,
   FolderOpen,
+  ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
@@ -45,6 +46,10 @@ const NAV = [
   { href: "/action-items", label: "Action items", icon: ListChecks },
   { href: "/billing", label: "Billing", icon: CreditCard },
   { href: "/settings", label: "Settings", icon: SettingsIcon },
+  // Its own entry rather than a section of Settings. Somebody who wants to know
+  // what a meeting recorder has of theirs, or to take it back, should not have
+  // to guess that it lives three cards below the recap email preference.
+  { href: "/privacy", label: "Privacy & data", icon: ShieldCheck },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {

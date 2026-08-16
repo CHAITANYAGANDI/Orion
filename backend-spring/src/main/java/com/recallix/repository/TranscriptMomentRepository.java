@@ -19,4 +19,16 @@ public interface TranscriptMomentRepository extends JpaRepository<TranscriptMome
     List<TranscriptMoment> findByMeetingIdOrderByStartSecondsAscCreatedAtAsc(String meetingId);
 
     long countByMeetingId(String meetingId);
+
+    long countByUserId(String userId);
+
+    /**
+     * Erasing the transcript takes the marks with it.
+     *
+     * <p>A highlight is a quotation: it stores the words it was made on, so a
+     * transcript deleted while its marks survive has not been deleted. The note
+     * somebody typed against it goes too, for the same reason — it is only ever
+     * read beside the sentence it is about.
+     */
+    void deleteByMeetingId(String meetingId);
 }

@@ -23,6 +23,9 @@ public interface ChatConversationRepository extends JpaRepository<ChatConversati
      */
     List<ChatConversation> findByUserIdAndMeetingIdOrderByUpdatedAtDesc(String userId, String meetingId);
 
+    /** How many threads exist across every scope — the privacy page's inventory. */
+    long countByUserId(String userId);
+
     List<ChatConversation> findByUserIdAndProjectIdOrderByUpdatedAtDesc(String userId, String projectId);
 
     List<ChatConversation> findByUserIdAndMeetingIdIsNullAndProjectIdIsNullOrderByUpdatedAtDesc(String userId);

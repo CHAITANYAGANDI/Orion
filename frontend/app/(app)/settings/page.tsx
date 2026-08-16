@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { toast } from "sonner";
-import { Bell, ListChecks, Mail } from "lucide-react";
+import { Bell, ListChecks, Mail, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useAppDispatch, useAppSelector } from "@/lib/hooks";
 import { setNotifyProcessingDone } from "@/lib/uiSlice";
@@ -77,22 +78,23 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      <Card className="border-destructive/30">
+      {/* Not a second copy of the controls — a signpost to the page that owns
+          them. Deleting an account is not a settings toggle, and it belongs
+          beside the export that is the only thing standing between somebody and
+          losing everything. */}
+      <Card>
         <CardHeader>
-          <CardTitle className="text-base text-destructive">Danger zone</CardTitle>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <ShieldCheck className="h-4 w-4 text-primary" /> Privacy &amp; data
+          </CardTitle>
         </CardHeader>
-        <CardContent className="flex items-center justify-between">
-          <div>
-            <p className="font-medium">Delete account data</p>
-            <p className="text-sm text-muted-foreground">Removes meetings, transcripts and action items.</p>
-          </div>
-          <Button
-            variant="destructive"
-            onClick={() =>
-              toast.info("Per-meeting deletion is available from each meeting's page in this build.")
-            }
-          >
-            Request deletion
+        <CardContent className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">
+            What Recallix holds, what is shared, how long it is kept, downloading
+            all of it, and closing the account.
+          </p>
+          <Button variant="outline" asChild>
+            <Link href="/privacy">Open privacy &amp; data</Link>
           </Button>
         </CardContent>
       </Card>

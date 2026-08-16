@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -30,6 +31,26 @@ public interface MeetingRepository extends JpaRepository<Meeting, String> {
     Optional<Meeting> findByUserIdAndSourceUrl(String userId, String sourceUrl);
 
     long countByUserId(String userId);
+
+    /**
+     * Everything one account owns, newest first.
+     *
+     * <p>Unpaged on purpose, and only ever called by the three operations that
+     * genuinely mean all of it: exporting an account, closing one, and taking an
+     * inventory of what is held. Paging those would mean a partial export or a
+     * partial deletion, which are both worse than a slow one.
+     */
+    List<Meeting> findByUserIdOrderByCreatedAtDesc(String userId);
+
+    /**
+     * One account's meetings old enough for a retention rule to act on.
+     *
+     * <p>Per account rather than across the whole table, because the cut-off is
+     * per account: two people with different policies have different definitions
+     * of old. It also keeps the nightly pass inside the same tenant boundary as
+     * every other read. V35 adds the composite index it needs.
+     */
+    List<Meeting> findByUserIdAndCreatedAtLessThanOrderByCreatedAtAsc(String userId, Instant before);
 
     /** One project's meetings, newest first — the project page's list. */
     List<Meeting> findByUserIdAndProjectIdOrderByCreatedAtDesc(String userId, String projectId);

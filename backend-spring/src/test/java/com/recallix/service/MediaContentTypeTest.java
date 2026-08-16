@@ -68,13 +68,14 @@ class MediaContentTypeTest {
     @Mock private ProjectRepository projects;
     @Mock private MeetingTranslationRepository translations;
     @Mock private NotificationService notifications;
+    @Mock private ErasureService erasure;
 
     private MeetingService service;
 
     @BeforeEach
     void setUp() {
         service = new MeetingService(meetings, transcripts, segments, summaries,
-                actionItems, insights, storage, usage, outbox, audit, ai, templates, knownSpeakers, vocabulary, projects, translations, notifications);
+                insights, storage, usage, outbox, audit, ai, templates, knownSpeakers, vocabulary, projects, translations, notifications, erasure);
         when(storage.presignUpload(anyString(), anyString())).thenReturn("https://example/put");
         when(storage.presignDownload(anyString())).thenReturn("https://example/get");
         when(storage.presignExpirySeconds()).thenReturn(900L);

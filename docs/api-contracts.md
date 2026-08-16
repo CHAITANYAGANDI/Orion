@@ -383,10 +383,11 @@ A `DOCUMENT` source has no recording and says so with a 400.
 | DELETE | `/api/v1/notifications` | — | `204` |
 | POST | `/api/v1/recordings/started` | — | `202` |
 
-**Ten kinds, emitted from events that already existed.** `RECORDING_STARTED`,
+**Eleven kinds, emitted from events that already existed.** `RECORDING_STARTED`,
 `PROCESSING_STARTED`, `TRANSCRIPT_READY`, `SUMMARY_READY`, `PROCESSING_FAILED`,
 `RECAP_SENT`, `ACTION_ITEM_DUE`, `ACTION_ITEM_OVERDUE`, `MENTIONED_IN_MEETING`,
-`SHARE_VIEWED`. Before this, all of it happened in the log: the only feedback
+`SHARE_VIEWED`, and — added by V35 — `RETENTION_APPLIED`. Before this, all of it
+happened in the log: the only feedback
 surface was the live status socket on one meeting page, so closing the tab meant
 the product had nothing to say about the twenty minutes it spent working.
 
@@ -402,9 +403,10 @@ person has no counterpart: action item notes are a private working log.
 
 **`PROCESSING_FAILED` is on nobody's list and is the one people need.** An upload
 that failed while the tab was closed is otherwise indistinguishable from one
-still running. It is the single kind that cannot be muted — `mutable: false` —
+still running. It is one of two kinds that cannot be muted — `mutable: false` —
 because switching it off makes "nothing happened" and "something broke" the same
-silence.
+silence. V35 adds the other, `RETENTION_APPLIED`, for the same reason with the
+stakes reversed: "nothing happened" and "something is gone for good".
 
 **Transcript and summary are one arrival.** The worker returns transcript, notes
 and action items in a single result callback, so both would fire at the same
@@ -439,6 +441,112 @@ dedupe-key collision, which is what forty simultaneous readers produce.
 **Nothing here may break what it reports on.** `NotificationService.emit`
 swallows everything and logs — a meeting that processed correctly must not be
 reported as failed because the sentence about it could not be written down.
+
+### Privacy & data (V35)
+
+| Method | Endpoint | Body / Query | Response |
+|---|---|---|---|
+| GET | `/api/v1/privacy` | — | `PrivacyOverviewResponse` |
+| GET | `/api/v1/privacy/links` | — | `LiveLinkResponse[]` |
+| POST | `/api/v1/privacy/links/revoke-all` | — | `{ revoked }` |
+| PATCH | `/api/v1/privacy/retention` | `{ audioDays?, meetingDays? }` | `Retention` |
+| GET | `/api/v1/privacy/export` | `tz?` | `application/zip` |
+| DELETE | `/api/v1/privacy/account` | `{ confirm }` | `{ meetings, storedObjects }` |
+| DELETE | `/api/v1/meetings/{id}/audio` | — | `{ audioDeletedAt }` |
+| DELETE | `/api/v1/meetings/{id}/transcript` | — | `{ transcriptDeletedAt }` |
+
+**Recallix had the architecture and none of the controls.** Row-level security
+means one account cannot read another's rows; the audio is in a private bucket
+reachable only through a URL we sign for fifteen minutes; a share link is opt-in,
+per meeting, and revocable. All true, all invisible, and the settings page's
+"Danger zone" popped a toast saying deletion was not implemented. A privacy claim
+nobody can check from inside the product is marketing.
+
+**Erasure has grains, because "delete the meeting" is the wrong unit.** The
+recording is the sensitive artefact — somebody's voice, the largest object, the
+one thing that can be replayed out of context — and the notes drawn from it are
+usually what the meeting was for. So `DELETE .../audio` removes the object and
+keeps everything derived; `DELETE .../transcript` removes the segments, the marks
+made on them, every translation **and the pgvector embeddings**, keeping the
+summary and action items; `DELETE .../{id}` is unchanged. `meetings.audio_deleted_at`
+and `transcript_deleted_at` are timestamps rather than flags, because the question
+asked afterwards is always "when", and because a null `object_key` is also true of
+a YouTube import and of an upload in flight.
+
+**The embeddings are on the transcript's side of the line.** `transcript_chunks`
+is written and read entirely by the ai-service, and a transcript deleted while its
+vectors survive is worse than one never deleted: chat would keep answering out of
+text the account holder was told had gone, citing a source no page can show them.
+Whole-meeting deletion gets this by foreign key; transcript-only deletion goes
+through `TranscriptChunkRepository`.
+
+**Erasure narrows live links rather than revoking them.** A link promising audio
+that has been deleted would hand its reader a signed URL for an absent object. It
+is narrowed, not withdrawn — whoever holds it was given the notes too, and taking
+those back is a different decision from erasing a recording.
+
+**Retention is two dials, both null by default.** `users.audio_retention_days`
+and `meeting_retention_days`. "How long do you keep the recording of my voice" is
+asked by the people in the meeting; "how long do you keep the notes" is asked by
+the account holder, and thirty days and forever is a coherent answer to that pair
+that one dial cannot express. A meeting window shorter than the audio window is
+**refused**: nothing breaks, but the narrower promise never runs, and a policy
+that silently does not do its job is worse than one that will not save. Age is
+measured from `created_at`, not last access — last-touched retention means the
+recording of a sensitive conversation survives precisely because people keep going
+back to it. `RetentionJob` runs at 03:00 UTC (`recallix.retention.cron`,
+`recallix.retention.enabled`) and shares `ErasureService` with the buttons, so the
+nightly pass and the menu item cannot come to disagree about what deleted means.
+
+**`RETENTION_APPLIED` joins `PROCESSING_FAILED` as unmutable.** They are the two
+whose silence is indistinguishable from nothing having happened — one is "something
+broke", the other is "something is gone for good" — and the retention one is the
+more dangerous, because the rule behind it was set once and then fires unattended
+for years. One notification for the whole night's work, deduped by day; a policy
+switched on over an old archive erases hundreds of things on its first run.
+
+**Encryption at rest is reported, never claimed.** `StorageFacts.encryptionAtRest`
+comes from `GetBucketEncryption` on the live bucket and is **null** when it applies
+none, which is what a default docker-compose MinIO will say. The setting belongs to
+the bucket and the bucket belongs to whoever runs the deployment, so an application
+printing its own intent has told the reader nothing. `s3.default-encryption`
+(`AES256` / `aws:kms`, plus `s3.kms-key-id`) applies it at startup when set —
+applied to the bucket rather than per upload, because uploads are presigned PUTs
+performed by a browser and an encryption header signed into one must be echoed
+byte-identically or the signature fails.
+
+**The account export is a zip, and deliberately excludes the audio.**
+`account.json` (profile, preferences, retention, projects, vocabulary, speakers,
+live links), `meetings.json` (every meeting complete: summary, tasks, insights,
+marks, every segment), `action-items.csv`, and `meetings/<slug>-<id>/notes.md`
+rendered by the **same** Markdown renderer as the per-meeting export so the two
+cannot drift. Recordings would be gigabytes through a request thread — the README
+inside says so and points at the per-meeting audio download. Zip entry times are
+fixed at epoch, so two exports of an unchanged account are byte-identical. The one
+field mapped by hand rather than serialised is `meeting_shares.password_hash`: a
+credential is worth nothing to the person downloading their own data and something
+to whoever later finds the zip.
+
+**Closing an account is immediate and irreversible.** No soft delete, no thirty-day
+bin. The alternative means answering "yes, that is deleted" while the data is still
+on disk and restorable by whoever runs the servers, which is the answer this page
+exists to make true. Guarded by typing `delete everything` — checked in the service,
+not the controller, and again in the browser only so the button can be disabled.
+Implementation is two steps: delete every stored object, then delete the one `users`
+row. Every user-owned table declares `user_id ... REFERENCES users(id) ON DELETE
+CASCADE`, so Postgres does the rest — a hand-written list of thirty tables is a list
+that stops being complete the first time somebody adds a table.
+
+**Consent is recorded, not verified.** `meetings.consent_confirmed_at` is set when
+the browser recorder sends `consentConfirmed`. Until now the tick on the record page
+enabled a button and was then forgotten, which makes it theatre; stamped on the
+meeting it becomes a record that the person asked. Only the recorder sends it — an
+uploaded file was captured somewhere Recallix was not present to ask — and the page
+also hands over the sentence to say out loud, because **Recallix has no bot**. It
+never joins a call and never appears in a participant list, so "the bot is visibly
+identified as Recallix" has no counterpart here; the announcement has to come from
+the person recording, and giving them the words is the difference between a policy
+and a thing that gets said.
 
 ### Projects (V30)
 

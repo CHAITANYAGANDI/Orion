@@ -26,6 +26,7 @@ import {
   Highlighter,
   ChevronDown,
   ChevronRight,
+  ShieldCheck,
 } from "lucide-react";
 import {
   useGetMeetingQuery,
@@ -34,6 +35,8 @@ import {
   useGetMeetingActionItemsQuery,
   useReprocessMeetingMutation,
   useDeleteMeetingMutation,
+  useEraseAudioMutation,
+  useEraseTranscriptMutation,
   useGetChatQuery,
   useAskChatMutation,
   useTranslateMeetingMutation,
@@ -98,6 +101,7 @@ import { ExportDialog } from "@/components/export-dialog";
 import { copyMinutes, copySummary } from "@/lib/minutes";
 import { subscribeMeetingStatus } from "@/lib/ws";
 import {
+  formatDate,
   formatDateTime,
   formatDuration,
   statusLabel,
@@ -264,6 +268,8 @@ export default function MeetingDetailPage() {
   const [reprocess, reprocessState] = useReprocessMeetingMutation();
   const [remove, removeState] = useDeleteMeetingMutation();
   const [assignProject, { isLoading: filing }] = useAssignProjectMutation();
+  const [eraseAudio] = useEraseAudioMutation();
+  const [eraseTranscript] = useEraseTranscriptMutation();
 
   /**
    * The download dialog, opened from the export menu.
@@ -330,6 +336,50 @@ export default function MeetingDetailPage() {
     }
   }
 
+  /**
+   * Erasing part of a meeting rather than all of it.
+   *
+   * The recording is the sensitive artefact — somebody's voice, the largest
+   * object, the thing a participant might ask about afterwards — and the notes
+   * drawn from it are usually what the meeting was for. So each can go on its
+   * own. Both prompts name what survives, because "delete the audio" reads to
+   * most people like "delete the meeting".
+   */
+  async function onEraseAudio() {
+    if (
+      !window.confirm(
+        "Delete the recording?\n\nThe transcript, summary and action items stay. " +
+          "The audio itself is removed from storage and cannot be recovered.",
+      )
+    ) {
+      return;
+    }
+    try {
+      await eraseAudio(id).unwrap();
+      toast.success("Recording deleted. The notes are still here.");
+    } catch {
+      toast.error("Could not delete the recording.");
+    }
+  }
+
+  async function onEraseTranscript() {
+    if (
+      !window.confirm(
+        "Delete the transcript?\n\nThe summary and action items stay. Every " +
+          "line of the transcript, its highlights and notes, its translations " +
+          "and everything Ask Recallix reads go with it, and cannot be recovered.",
+      )
+    ) {
+      return;
+    }
+    try {
+      await eraseTranscript(id).unwrap();
+      toast.success("Transcript deleted. The summary and tasks are still here.");
+    } catch {
+      toast.error("Could not delete the transcript.");
+    }
+  }
+
   if (meeting.isLoading) return <Skeleton className="h-64 w-full" />;
   if (meeting.isError || !meeting.data) {
     return (
@@ -345,6 +395,10 @@ export default function MeetingDetailPage() {
   const m = meeting.data;
   // A PDF was never spoken: no audio, no timeline, nothing to seek to.
   const isDocument = m.sourceType === "DOCUMENT";
+  // Only offered when there is something to erase. A YouTube import holds no
+  // recording of ours, and offering to delete one would imply we had it.
+  const canEraseAudio = !isDocument && !!m.audioUrl && !m.audioDeletedAt;
+  const canEraseTranscript = !m.transcriptDeletedAt && (transcript.data?.segments?.length ?? 0) > 0;
 
   return (
     <div className="space-y-6">
@@ -445,6 +499,27 @@ export default function MeetingDetailPage() {
                   <DropdownMenuItem onSelect={() => setExporting(true)}>
                     Download as PDF, Word, Markdown or text…
                   </DropdownMenuItem>
+                  {/* Erasure sits under Export on purpose: taking a copy is the
+                      step before deleting the original, and putting them in the
+                      same menu means nobody has to go looking for the first one
+                      after committing to the second. */}
+                  {(canEraseAudio || canEraseTranscript) && <DropdownMenuSeparator />}
+                  {canEraseAudio && (
+                    <DropdownMenuItem
+                      className="text-destructive focus:text-destructive"
+                      onSelect={() => void onEraseAudio()}
+                    >
+                      Delete the recording, keep the notes
+                    </DropdownMenuItem>
+                  )}
+                  {canEraseTranscript && (
+                    <DropdownMenuItem
+                      className="text-destructive focus:text-destructive"
+                      onSelect={() => void onEraseTranscript()}
+                    >
+                      Delete the transcript, keep the summary
+                    </DropdownMenuItem>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
               <ExportDialog
@@ -490,6 +565,25 @@ export default function MeetingDetailPage() {
             moments={moments.data ?? []}
           />
         </div>
+      )}
+
+      {/* Said out loud rather than left as an absence. "No audio" is also true
+          of a YouTube import and of an upload still in flight, and a page that
+          cannot tell those apart has to give all three the least useful of the
+          three answers. */}
+      {(m.audioDeletedAt || m.transcriptDeletedAt) && (
+        <p className="no-print flex items-start gap-2 rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
+          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            {m.audioDeletedAt && (
+              <>You deleted the recording on {formatDate(m.audioDeletedAt)}. </>
+            )}
+            {m.transcriptDeletedAt && (
+              <>You deleted the transcript on {formatDate(m.transcriptDeletedAt)}. </>
+            )}
+            What is below is what was kept.
+          </span>
+        </p>
       )}
 
       {/* Processing / failed */}

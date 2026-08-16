@@ -31,6 +31,8 @@ import {
   Volume2,
   MonitorSpeaker,
   Users,
+  Copy,
+  Check,
 } from "lucide-react";
 import {
   useCreateUploadUrlMutation,
@@ -38,6 +40,7 @@ import {
   useRecordingStartedMutation,
 } from "@/lib/api";
 import { useRecording } from "@/lib/recording-context";
+import { RECORDING_ANNOUNCEMENT } from "@/lib/privacy";
 import type { CaptureMode } from "@/lib/use-recorder";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -74,6 +77,17 @@ export default function RecordPage() {
 
   const busy = phase !== "idle";
   const live = recorder.state === "recording" || recorder.state === "paused";
+
+  /**
+   * Whether the room was told.
+   *
+   * Recording cannot start without the tick, so a recording that exists is
+   * proof one was given — which matters because this page unmounts when you
+   * navigate away and comes back with `consented` reset to false. Without this
+   * the meeting would be filed as "not asserted" purely because somebody looked
+   * something up mid-call.
+   */
+  const consentGiven = consented || live || recorder.state === "stopped";
   // Once a recording exists, the mode it was actually captured in is the truth.
   // The local picker only governs the *next* one — which matters when you come
   // back to this page mid-recording and local state has reset to its default.
@@ -102,6 +116,10 @@ export default function RecordPage() {
         title: defaultTitle(),
         contentType: file.type,
         durationSeconds: durationSeconds || undefined,
+        // Kept with the meeting rather than forgotten the moment it enabled the
+        // button. It is the only record that anybody was asked, and the only
+        // thing the privacy page can honestly say about how this was captured.
+        consentConfirmed: consentGiven,
       }).unwrap();
 
       toast.success("Recording saved — processing started.");
@@ -160,10 +178,17 @@ export default function RecordPage() {
             and some require their explicit agreement. Tell your participants
             before you start.
           </p>
+
+          {/* Recallix has no bot to announce itself in a participant list, so
+              the announcement has to come from the person recording. Handing
+              them the sentence is the difference between a policy and a thing
+              that actually gets said. */}
+          <Announcement />
+
           <label className="flex cursor-pointer items-start gap-2 text-sm">
             <input
               type="checkbox"
-              checked={consented}
+              checked={consentGiven}
               disabled={live}
               onChange={(e) => setConsented(e.target.checked)}
               className="mt-0.5 h-4 w-4 shrink-0 accent-[hsl(var(--primary))]"
@@ -173,6 +198,11 @@ export default function RecordPage() {
               and have their consent where required.
             </span>
           </label>
+          <p className="text-xs text-muted-foreground">
+            Ticking this is kept with the meeting, so months later there is a
+            record that you asked. It is your statement — Recallix cannot check
+            it.
+          </p>
         </CardContent>
       </Card>
 
@@ -230,7 +260,7 @@ export default function RecordPage() {
               {recorder.state === "idle" && (
                 <Button
                   onClick={() => void onStart()}
-                  disabled={!consented || !recorder.supported}
+                  disabled={!consentGiven || !recorder.supported}
                   className="gap-2"
                 >
                   <Mic className="h-4 w-4" />
@@ -269,7 +299,7 @@ export default function RecordPage() {
               )}
             </div>
 
-            {!consented && recorder.state === "idle" && (
+            {!consentGiven && recorder.state === "idle" && (
               <p className="text-xs text-muted-foreground">
                 Confirm the notice above to enable recording.
               </p>
@@ -367,6 +397,31 @@ export default function RecordPage() {
 }
 
 /* --------------------------------- pieces -------------------------------- */
+
+/** The sentence to say out loud, and a button that puts it on the clipboard. */
+function Announcement() {
+  const [copied, setCopied] = React.useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(RECORDING_ANNOUNCEMENT);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error("Couldn't copy — select the text instead.");
+    }
+  }
+
+  return (
+    <div className="rounded-md border bg-muted/40 p-3">
+      <p className="text-sm italic">&ldquo;{RECORDING_ANNOUNCEMENT}&rdquo;</p>
+      <Button variant="ghost" size="sm" className="mt-2 gap-2" onClick={() => void copy()}>
+        {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+        {copied ? "Copied" : "Copy to paste in the chat"}
+      </Button>
+    </div>
+  );
+}
 
 function ModeOption({
   icon: Icon,

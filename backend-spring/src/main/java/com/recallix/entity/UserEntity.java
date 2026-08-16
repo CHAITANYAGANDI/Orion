@@ -63,6 +63,20 @@ public class UserEntity {
     @Column(name = "muted_notifications", columnDefinition = "jsonb")
     private List<String> mutedNotifications = new ArrayList<>();
 
+    /**
+     * Erase the recording this many days after a meeting is created.
+     *
+     * <p>Null keeps it, which is what every account did before this existed and
+     * therefore the only default that cannot delete something nobody agreed to
+     * lose. Everything drawn from the audio survives.
+     */
+    @Column(name = "audio_retention_days")
+    private Integer audioRetentionDays;
+
+    /** Erase the whole meeting this many days after it is created. Null keeps it. */
+    @Column(name = "meeting_retention_days")
+    private Integer meetingRetentionDays;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -99,6 +113,17 @@ public class UserEntity {
 
     public void setMutedNotifications(List<String> mutedNotifications) {
         this.mutedNotifications = mutedNotifications == null ? new ArrayList<>() : mutedNotifications;
+    }
+
+    public Integer getAudioRetentionDays() { return audioRetentionDays; }
+    public void setAudioRetentionDays(Integer audioRetentionDays) { this.audioRetentionDays = audioRetentionDays; }
+
+    public Integer getMeetingRetentionDays() { return meetingRetentionDays; }
+    public void setMeetingRetentionDays(Integer meetingRetentionDays) { this.meetingRetentionDays = meetingRetentionDays; }
+
+    /** Whether either dial is set — the one question the settings page asks. */
+    public boolean hasRetentionPolicy() {
+        return audioRetentionDays != null || meetingRetentionDays != null;
     }
 
     /** Where recaps go: the override when set, otherwise the account address. */

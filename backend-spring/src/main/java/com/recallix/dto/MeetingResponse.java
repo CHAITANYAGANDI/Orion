@@ -30,7 +30,23 @@ public record MeetingResponse(
          */
         String contentType,
         /** The project this meeting is filed under, or null for unfiled (V30). */
-        String projectId
+        String projectId,
+
+        /**
+         * When the recording was erased, or null (V35).
+         *
+         * <p>Sent so the page can say "you deleted this on the 3rd" instead of
+         * "no audio" — which is also what it would have to say about a YouTube
+         * import and about an upload still in flight. Three different situations
+         * with one wrong sentence between them.
+         */
+        Instant audioDeletedAt,
+
+        /** When the transcript was erased, or null. The notes outlive it. */
+        Instant transcriptDeletedAt,
+
+        /** When the person recording confirmed they had told the room, or null. */
+        Instant consentConfirmedAt
 ) {
     public static MeetingResponse from(Meeting m) {
         return new MeetingResponse(
@@ -47,7 +63,10 @@ public record MeetingResponse(
                 m.getLanguage(),
                 m.getSummaryTemplate(),
                 m.getContentType(),
-                m.getProjectId()
+                m.getProjectId(),
+                m.getAudioDeletedAt(),
+                m.getTranscriptDeletedAt(),
+                m.getConsentConfirmedAt()
         );
     }
 }

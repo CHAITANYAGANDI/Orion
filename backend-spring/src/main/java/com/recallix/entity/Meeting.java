@@ -94,6 +94,30 @@ public class Meeting {
     @Column(name = "summary_template", nullable = false)
     private String summaryTemplate = "general";
 
+    /**
+     * When the recording was erased, or null if it never was.
+     *
+     * <p>Distinct from {@link #objectKey} being null, which is also true of a
+     * YouTube import and of a meeting still being uploaded. A page that cannot
+     * tell those apart has to say "no audio" to all three, which is the least
+     * useful of the three things it could say.
+     */
+    @Column(name = "audio_deleted_at")
+    private Instant audioDeletedAt;
+
+    /** When the transcript was erased. The summary and tasks outlive it. */
+    @Column(name = "transcript_deleted_at")
+    private Instant transcriptDeletedAt;
+
+    /**
+     * When the person recording confirmed they had told everyone.
+     *
+     * <p>Their assertion, kept — not something Recallix can check. Set only for
+     * meetings captured in the browser, which is the only path that asks.
+     */
+    @Column(name = "consent_confirmed_at")
+    private Instant consentConfirmedAt;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -153,6 +177,15 @@ public class Meeting {
 
     public String getSummaryTemplate() { return summaryTemplate; }
     public void setSummaryTemplate(String summaryTemplate) { this.summaryTemplate = summaryTemplate; }
+
+    public Instant getAudioDeletedAt() { return audioDeletedAt; }
+    public void setAudioDeletedAt(Instant audioDeletedAt) { this.audioDeletedAt = audioDeletedAt; }
+
+    public Instant getTranscriptDeletedAt() { return transcriptDeletedAt; }
+    public void setTranscriptDeletedAt(Instant transcriptDeletedAt) { this.transcriptDeletedAt = transcriptDeletedAt; }
+
+    public Instant getConsentConfirmedAt() { return consentConfirmedAt; }
+    public void setConsentConfirmedAt(Instant consentConfirmedAt) { this.consentConfirmedAt = consentConfirmedAt; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

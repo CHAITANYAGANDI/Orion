@@ -70,6 +70,13 @@ export interface MeetingCreateRequest {
    * heard a word of it.
    */
   projectId?: string;
+  /**
+   * The recorder confirming they told the room (V35).
+   *
+   * Only the browser recorder sends this — it is the only client that was
+   * present when the recording started. Recorded, not verified.
+   */
+  consentConfirmed?: boolean;
 }
 
 /** Renaming or re-tagging afterwards. Omitted fields are left alone. */
@@ -105,6 +112,18 @@ export interface MeetingResponse {
   contentType?: string | null;
   /** The project it is filed under, or null for unfiled (V30). */
   projectId?: string | null;
+  /**
+   * When the recording was erased, or null (V35).
+   *
+   * Distinct from having no `audioUrl`, which is also true of a YouTube import
+   * and of an upload still in flight. Three different situations that would
+   * otherwise share one unhelpful sentence.
+   */
+  audioDeletedAt?: string | null;
+  /** When the transcript was erased. The summary and tasks outlive it. */
+  transcriptDeletedAt?: string | null;
+  /** When the person recording confirmed they had told the room. */
+  consentConfirmedAt?: string | null;
 }
 
 export interface PreferencesResponse {
@@ -910,6 +929,87 @@ export interface SharedMeeting {
   startSeconds?: number | null;
   endSeconds?: number | null;
   quote?: string | null;
+}
+
+// ---- Privacy & data (V35) ----
+
+/**
+ * What Recallix holds, counted.
+ *
+ * No byte totals: getting them means a HEAD request per stored object, and the
+ * number people actually want here is how many recordings of them exist, not
+ * how many megabytes that came to.
+ */
+export interface HeldData {
+  meetings: number;
+  recordings: number;
+  audioErased: number;
+  transcripts: number;
+  transcriptsErased: number;
+  actionItems: number;
+  marks: number;
+  projects: number;
+  chats: number;
+  /** Meetings whose recorder confirmed the room had been told. */
+  consentConfirmed: number;
+  oldestMeetingAt: string | null;
+}
+
+/** The two dials, and what they would delete tonight. Null means keep. */
+export interface RetentionPolicy {
+  audioDays: number | null;
+  meetingDays: number | null;
+  recordingsDueNow: number;
+  meetingsDueNow: number;
+}
+
+/**
+ * How recordings are stored, reported rather than claimed.
+ *
+ * `encryptionAtRest` is read back from the object store and is null when it
+ * applies none — the page says so instead of printing a reassuring sentence its
+ * own infrastructure would contradict.
+ */
+export interface StorageFacts {
+  encryptionAtRest: string | null;
+  signedUrlSeconds: number;
+  rowLevelSecurity: boolean;
+}
+
+/** One live share link, seen from the privacy page rather than from its meeting. */
+export interface LiveLink {
+  id: string;
+  meetingId: string;
+  meetingTitle: string;
+  url: string;
+  label: string;
+  /** What it reveals, already collapsed into words a person can read. */
+  reveals: string[];
+  moment: boolean;
+  passwordProtected: boolean;
+  expiresAt: string | null;
+  viewCount: number;
+  lastViewedAt: string | null;
+  createdAt: string;
+}
+
+export interface PrivacyOverview {
+  held: HeldData;
+  retention: RetentionPolicy;
+  storage: StorageFacts;
+  liveLinks: LiveLink[];
+}
+
+/** Both dials every time: null means keep forever, not "leave this one alone". */
+export interface RetentionUpdateRequest {
+  audioDays: number | null;
+  meetingDays: number | null;
+}
+
+/** The receipt for closing an account — the last thing Recallix can tell you. */
+export interface AccountClosed {
+  meetings: number;
+  storedObjects: number;
 }
 
 // ---- Billing & usage ----

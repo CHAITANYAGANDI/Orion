@@ -29,4 +29,13 @@ public interface MeetingShareRepository extends JpaRepository<MeetingShare, Stri
     List<MeetingShare> findByMeetingIdAndRevokedFalseOrderByCreatedAtDesc(String meetingId);
 
     Optional<MeetingShare> findByIdAndUserId(String id, String userId);
+
+    /**
+     * Every live link in the workspace, newest first.
+     *
+     * <p>The one question the per-meeting dialog cannot answer: what is public
+     * right now. Somebody who has shared thirty meetings over a year is not
+     * going to open thirty pages to find out.
+     */
+    List<MeetingShare> findByUserIdAndRevokedFalseOrderByCreatedAtDesc(String userId);
 }

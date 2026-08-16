@@ -40,7 +40,22 @@ public record MeetingCreateRequest(
          * filing later means going back through a list of things you have
          * already dealt with.
          */
-        String projectId
+        String projectId,
+
+        /**
+         * The recorder confirming they told the room (V35).
+         *
+         * <p>Only the browser recorder sends this, and only because it is the
+         * only client that was present when the recording started — an uploaded
+         * file was captured somewhere Recallix was not there to ask. Absent and
+         * false are the same thing and both mean "not asserted", which is the
+         * honest state for every meeting that arrived any other way.
+         *
+         * <p>Recorded, not verified. It is the account holder's statement about
+         * what they did, which is the only form this can take and is also the
+         * only form anybody would ever want it in.
+         */
+        Boolean consentConfirmed
 ) {
     public List<String> tagsOrEmpty() {
         return tags == null ? List.of() : tags;

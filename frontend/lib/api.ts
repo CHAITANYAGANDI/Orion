@@ -49,6 +49,10 @@ import type {
   MeetingTranslation,
   NotificationCount,
   NotificationKindOption,
+  AccountClosed,
+  PrivacyOverview,
+  RetentionPolicy,
+  RetentionUpdateRequest,
   UploadUrlRequest,
   UploadUrlResponse,
   UsageResponse,
@@ -120,6 +124,7 @@ export const api = createApi({
     "Projects",
     "Translations",
     "Notifications",
+    "Privacy",
   ],
   endpoints: (builder) => ({
     // ---- Meetings ----
@@ -862,7 +867,69 @@ export const api = createApi({
         // in a cached result list means clicking through to a 404.
         { type: "Search", id: "RESULTS" },
         { type: "Search", id: "FACETS" },
+        { type: "Privacy", id: "ME" },
       ],
+    }),
+
+    // ---- Privacy & data (V35) ----
+
+    /**
+     * Erase the recording, keep everything drawn from it.
+     *
+     * Invalidates the transcript and summary too, even though neither changed:
+     * a link that offered the audio was narrowed by the same call, and the
+     * meeting page reads all three.
+     */
+    eraseAudio: builder.mutation<{ audioDeletedAt: string }, string>({
+      query: (id) => ({ url: `/meetings/${id}/audio`, method: "DELETE" }),
+      invalidatesTags: (_r, _e, id) => [
+        { type: "Meeting", id },
+        { type: "Meetings", id: "LIST" },
+        { type: "Share", id },
+        { type: "Privacy", id: "ME" },
+      ],
+    }),
+
+    /** Erase the transcript, its marks, its translations and its embeddings. */
+    eraseTranscript: builder.mutation<{ transcriptDeletedAt: string }, string>({
+      query: (id) => ({ url: `/meetings/${id}/transcript`, method: "DELETE" }),
+      invalidatesTags: (_r, _e, id) => [
+        { type: "Meeting", id },
+        { type: "Transcript", id },
+        { type: "Moments", id },
+        { type: "Translations", id },
+        // Chat answered out of those embeddings a moment ago and cannot any
+        // more; a cached answer citing text that is gone is the worst of both.
+        { type: "Chat", id },
+        { type: "Share", id },
+        { type: "Search", id: "RESULTS" },
+        { type: "Privacy", id: "ME" },
+      ],
+    }),
+
+    getPrivacyOverview: builder.query<PrivacyOverview, void>({
+      query: () => "/privacy",
+      providesTags: [{ type: "Privacy", id: "ME" }],
+    }),
+
+    updateRetention: builder.mutation<RetentionPolicy, RetentionUpdateRequest>({
+      query: (body) => ({ url: "/privacy/retention", method: "PATCH", body }),
+      invalidatesTags: [{ type: "Privacy", id: "ME" }],
+    }),
+
+    revokeAllLinks: builder.mutation<{ revoked: number }, void>({
+      query: () => ({ url: "/privacy/links/revoke-all", method: "POST" }),
+      invalidatesTags: [{ type: "Privacy", id: "ME" }, { type: "Share", id: "LIST" }],
+    }),
+
+    /**
+     * Close the account. Immediate and irreversible.
+     *
+     * Invalidates nothing, on purpose: there is no cache left to correct, and
+     * the caller is about to leave the app entirely.
+     */
+    closeAccount: builder.mutation<AccountClosed, { confirm: string }>({
+      query: (body) => ({ url: "/privacy/account", method: "DELETE", body }),
     }),
 
     // ---- Action items ----
@@ -1104,6 +1171,12 @@ export const {
   useDeleteNotificationMutation,
   useClearNotificationsMutation,
   useRecordingStartedMutation,
+  useEraseAudioMutation,
+  useEraseTranscriptMutation,
+  useGetPrivacyOverviewQuery,
+  useUpdateRetentionMutation,
+  useRevokeAllLinksMutation,
+  useCloseAccountMutation,
   useRenameSpeakersMutation,
   useRematchSpeakerMutation,
   useGetKnownSpeakersQuery,

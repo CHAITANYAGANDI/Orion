@@ -28,6 +28,11 @@ import java.util.Optional;
  * <p>{@link #PROCESSING_FAILED} is not on anyone's wish list and is the one
  * people need most: an upload that quietly failed while the tab was closed is
  * the exact case this whole table exists for.
+ *
+ * <p><strong>Two of these have no switch</strong>, and they are the two whose
+ * silence is indistinguishable from nothing having happened: a failure, and an
+ * erasure. {@link #RETENTION_APPLIED} is the more dangerous of the pair, because
+ * the rule behind it was set once and then fires unattended for years.
  */
 public enum NotificationKind {
 
@@ -59,7 +64,17 @@ public enum NotificationKind {
     MENTIONED_IN_MEETING("Mentioned in a meeting", "when a meeting assigns work to you by name"),
 
     /** A link you published was opened by somebody outside the workspace. */
-    SHARE_VIEWED("Shared link opened", "when someone opens a link you shared");
+    SHARE_VIEWED("Shared link opened", "when someone opens a link you shared"),
+
+    /**
+     * Your retention policy erased something. Cannot be switched off.
+     *
+     * <p>The rule was set deliberately and runs unattended months later, which
+     * is exactly when its owner has stopped thinking about it. Deleting somebody
+     * else's data silently is the behaviour a privacy control exists to prevent,
+     * even when the somebody else asked for it.
+     */
+    RETENTION_APPLIED("Retention applied", "when your retention policy deletes something");
 
     private final String label;
     private final String setting;
@@ -81,12 +96,14 @@ public enum NotificationKind {
     /**
      * Whether this one can be switched off.
      *
-     * <p>A failure is the one thing a notification list exists to carry. Muting
-     * it turns silence into two indistinguishable states — nothing happened, and
-     * something went wrong — which is the state this feature was built to end.
+     * <p>Two are not. A failure is the one thing a notification list exists to
+     * carry: muting it turns silence into two indistinguishable states — nothing
+     * happened, and something went wrong — which is the state this feature was
+     * built to end. An erasure is the same shape with the stakes reversed:
+     * nothing happened, and something is gone for good.
      */
     public boolean mutable() {
-        return this != PROCESSING_FAILED;
+        return this != PROCESSING_FAILED && this != RETENTION_APPLIED;
     }
 
     public static Optional<NotificationKind> find(String raw) {

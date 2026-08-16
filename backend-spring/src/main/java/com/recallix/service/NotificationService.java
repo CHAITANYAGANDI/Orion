@@ -263,6 +263,44 @@ public class NotificationService {
                 "share:" + shareId + ":" + today);
     }
 
+    /**
+     * A retention rule deleted something.
+     *
+     * <p>One notification for the whole night's work rather than one per
+     * meeting: a policy switched on over an old archive erases hundreds of
+     * things on its first run, and a bell with three hundred rows in it is a
+     * bell nobody reads the important row in.
+     *
+     * <p>Deduped by day for the same reason the digest is — the pass runs daily
+     * and a retry after a failure must not say it twice — and deliberately not
+     * mutable. See {@link NotificationKind#RETENTION_APPLIED}.
+     *
+     * @param recordings meetings whose audio was erased, notes intact
+     * @param meetings   meetings erased entirely
+     */
+    @Transactional
+    public void retentionApplied(String userId, int recordings, int meetings, LocalDate today) {
+        if (recordings <= 0 && meetings <= 0) {
+            return;
+        }
+        StringBuilder body = new StringBuilder("Your retention policy deleted ");
+        if (recordings > 0) {
+            body.append(count(recordings, "recording", "recordings"))
+                    .append(recordings == 1 ? " (its notes are kept)" : " (their notes are kept)");
+        }
+        if (recordings > 0 && meetings > 0) {
+            body.append(", and ");
+        }
+        if (meetings > 0) {
+            body.append(count(meetings, "meeting", "meetings")).append(" in full");
+        }
+        emit(userId, NotificationKind.RETENTION_APPLIED,
+                "Retention deleted " + count(recordings + meetings, "item", "items"),
+                body.append(". This cannot be undone.").toString(),
+                null, null, "/privacy",
+                "day:" + today);
+    }
+
     /* ------------------------------- the rule ----------------------------- */
 
     /**
@@ -338,6 +376,10 @@ public class NotificationService {
 
     private static String link(Meeting meeting) {
         return "/meetings/" + meeting.getId();
+    }
+
+    private static String count(int n, String one, String many) {
+        return n + " " + (n == 1 ? one : many);
     }
 
     private static String trim(String title) {

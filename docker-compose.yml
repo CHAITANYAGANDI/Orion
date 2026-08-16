@@ -150,6 +150,13 @@ services:
       # environment that should never mail anybody moves it out of reach or
       # turns mail off entirely with RECALLIX_MAIL_ENABLED.
       RECALLIX_TASKS_REMINDER_CRON: "${RECALLIX_TASKS_REMINDER_CRON:-0 0 8 * * *}"
+      # The nightly retention pass (V35). Exposed for the same reason and one
+      # more: it is the only scheduled job that deletes data, so an environment
+      # restored from a backup needs to be able to switch it off before it wakes
+      # up and re-runs last month's deletions against data somebody is trying to
+      # recover.
+      RECALLIX_RETENTION_CRON: "${RECALLIX_RETENTION_CRON:-0 0 3 * * *}"
+      RECALLIX_RETENTION_ENABLED: "${RECALLIX_RETENTION_ENABLED:-true}"
       CLERK_ISSUER: ${CLERK_ISSUER:-}
       CLERK_JWKS_URL: ${CLERK_JWKS_URL:-}
       AI_SERVICE_URL: http://ai-service:8000

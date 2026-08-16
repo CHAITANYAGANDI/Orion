@@ -98,6 +98,13 @@ recallix:
   mail:
     from: ${RECALLIX_MAIL_FROM:recallix@localhost}
     enabled: ${RECALLIX_MAIL_ENABLED:true}
+  # The nightly pass that applies each account's retention policy. Written out
+  # here rather than left to an inline default because it is the one scheduled
+  # job that deletes data: an environment restored from a backup should be able
+  # to find the switch before it wakes up and re-runs last month's deletions.
+  retention:
+    enabled: ${RECALLIX_RETENTION_ENABLED:true}
+    cron: ${RECALLIX_RETENTION_CRON:0 0 3 * * *}
 
 app:
   frontend-url: ${APP_FRONTEND_URL:http://localhost:3000}
@@ -111,6 +118,12 @@ s3:
   bucket: ${S3_BUCKET:recallix}
   region: ${S3_REGION:us-east-1}
   presign-expiry-seconds: 900
+  # Applied to the bucket at startup when set (AES256 or aws:kms), and left
+  # alone when blank — which is what a deployment managing its own bucket
+  # policy wants. Whatever the bucket actually reports afterwards is what the
+  # privacy page shows; see StorageService.encryptionAtRest.
+  default-encryption: ${S3_DEFAULT_ENCRYPTION:}
+  kms-key-id: ${S3_KMS_KEY_ID:}
 
 stripe:
   secret-key: ${STRIPE_SECRET_KEY:}

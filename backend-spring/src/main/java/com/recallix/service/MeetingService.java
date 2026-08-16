@@ -23,7 +23,6 @@ import com.recallix.dto.UploadUrlResponse;
 import com.recallix.entity.Meeting;
 import com.recallix.entity.MeetingInsight;
 import com.recallix.entity.TranscriptSegment;
-import com.recallix.repository.MeetingActionItemRepository;
 import com.recallix.repository.MeetingInsightRepository;
 import com.recallix.repository.MeetingRepository;
 import com.recallix.repository.MeetingSummaryRepository;
@@ -75,7 +74,6 @@ public class MeetingService {
     private final MeetingTranscriptRepository transcripts;
     private final TranscriptSegmentRepository segments;
     private final MeetingSummaryRepository summaries;
-    private final MeetingActionItemRepository actionItems;
     private final MeetingInsightRepository insights;
     private final StorageService storage;
     private final UsageLimitService usage;
@@ -90,12 +88,13 @@ public class MeetingService {
     private final ProjectRepository projects;
     /** Only to flag translations when the words underneath them change (V33). */
     private final MeetingTranslationRepository translations;
+    /** Owns every grain of deletion, so the button and the retention pass agree (V35). */
+    private final ErasureService erasure;
 
     public MeetingService(MeetingRepository meetings,
                           MeetingTranscriptRepository transcripts,
                           TranscriptSegmentRepository segments,
                           MeetingSummaryRepository summaries,
-                          MeetingActionItemRepository actionItems,
                           MeetingInsightRepository insights,
                           StorageService storage,
                           UsageLimitService usage,
@@ -107,7 +106,9 @@ public class MeetingService {
                           VocabularyService vocabulary,
                           ProjectRepository projects,
                           MeetingTranslationRepository translations,
-                          NotificationService notifications) {
+                          NotificationService notifications,
+                          ErasureService erasure) {
+        this.erasure = erasure;
         this.notifications = notifications;
         this.projects = projects;
         this.translations = translations;
@@ -115,7 +116,6 @@ public class MeetingService {
         this.transcripts = transcripts;
         this.segments = segments;
         this.summaries = summaries;
-        this.actionItems = actionItems;
         this.insights = insights;
         this.storage = storage;
         this.usage = usage;
@@ -178,6 +178,12 @@ public class MeetingService {
             projects.findByIdAndUserId(req.projectId(), userId)
                     .orElseThrow(() -> ApiException.notFound("Project not found"));
             meeting.setProjectId(req.projectId());
+        }
+        if (Boolean.TRUE.equals(req.consentConfirmed())) {
+            // Stamped now rather than when the recorder started, because now is
+            // when the meeting exists. The few minutes between the two are not
+            // worth a second timestamp travelling up from the browser.
+            meeting.setConsentConfirmedAt(java.time.Instant.now());
         }
         meeting.setStatus(MeetingStatus.QUEUED);
 
@@ -668,17 +674,17 @@ public class MeetingService {
         return new ReprocessResponse(meetingId, MeetingStatus.QUEUED);
     }
 
+    /**
+     * Delete the meeting and everything about it.
+     *
+     * <p>Delegated to {@link ErasureService}, which owns all four grains of
+     * deletion — audio, transcript, meeting, account. Keeping a second copy here
+     * would mean the button and the nightly retention pass could quietly come to
+     * disagree about what "deleted" includes.
+     */
     @Transactional
     public void delete(String userId, String meetingId) {
-        Meeting meeting = require(userId, meetingId);
-        transcripts.deleteByMeetingId(meetingId);
-        segments.deleteByMeetingId(meetingId);
-        summaries.deleteByMeetingId(meetingId);
-        actionItems.deleteByMeetingId(meetingId);
-        translations.deleteByMeetingId(meetingId);
-        storage.delete(meeting.getObjectKey());
-        meetings.delete(meeting);
-        audit.record(userId, "MEETING_DELETED", "meeting", meetingId);
+        erasure.eraseMeeting(userId, meetingId);
     }
 
     // --- helpers ------------------------------------------------------------ //
@@ -718,7 +724,8 @@ public class MeetingService {
                 m.getTags(), audioUrl,
                 m.getDurationSeconds(), m.getCreatedAt(), m.getErrorMessage(),
                 m.getSourceType(), m.getSourceUrl(), m.getLanguage(),
-                m.getSummaryTemplate(), m.getContentType(), m.getProjectId());
+                m.getSummaryTemplate(), m.getContentType(), m.getProjectId(),
+                m.getAudioDeletedAt(), m.getTranscriptDeletedAt(), m.getConsentConfirmedAt());
     }
 
     private void validateContentType(String contentType) {
