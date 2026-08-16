@@ -17,6 +17,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -81,7 +82,7 @@ class ProjectServiceTest {
                             && p.getName().trim().equalsIgnoreCase(name))
                     .findFirst();
         });
-        when(projects.findByUserIdOrderByNameAsc(USER)).thenAnswer(inv -> List.copyOf(stored));
+        when(projects.findByUserIdOrderByFavoriteDescNameAsc(USER)).thenAnswer(inv -> List.copyOf(stored));
         when(projects.countByUserId(anyString())).thenAnswer(inv -> (long) stored.size());
         when(meetings.countByProject(anyString())).thenReturn(List.of());
 
@@ -95,7 +96,7 @@ class ProjectServiceTest {
     }
 
     private static ProjectRequest named(String name) {
-        return new ProjectRequest(name, null, null);
+        return new ProjectRequest(name, null, null, null);
     }
 
     @Nested
@@ -148,7 +149,7 @@ class ProjectServiceTest {
         void canKeepItsOwnName() {
             // Otherwise saving a description would fail on the name it already has.
             ProjectResponse updated = service.update(USER, PROJECT,
-                    new ProjectRequest("Client ABC", "The ABC engagement", null));
+                    new ProjectRequest("Client ABC", "The ABC engagement", null, null));
 
             assertThat(updated.description()).isEqualTo("The ABC engagement");
         }
@@ -166,10 +167,32 @@ class ProjectServiceTest {
         @Test
         @DisplayName("an omitted field is left alone")
         void omittedFieldsSurvive() {
-            service.update(USER, PROJECT, new ProjectRequest(null, "A description", null));
+            service.update(USER, PROJECT, new ProjectRequest(null, "A description", null, null));
 
             assertThat(stored.get(0).getName()).isEqualTo("Client ABC");
             assertThat(stored.get(0).getDescription()).isEqualTo("A description");
+        }
+
+        @Test
+        @DisplayName("starring a project does not rename it")
+        void canStar() {
+            ProjectResponse starred = service.update(USER, PROJECT,
+                    new ProjectRequest(null, null, null, true));
+
+            assertThat(starred.favorite()).isTrue();
+            assertThat(starred.name()).isEqualTo("Client ABC");
+        }
+
+        @Test
+        @DisplayName("a rename leaves the star where it was")
+        void renameDoesNotUnstar() {
+            // The field is boxed for exactly this: an omitted `favorite` has to
+            // be distinguishable from `false`, or every rename silently unstars.
+            service.update(USER, PROJECT, new ProjectRequest(null, null, null, true));
+
+            ProjectResponse renamed = service.update(USER, PROJECT, named("ABC Ltd"));
+
+            assertThat(renamed.favorite()).isTrue();
         }
 
         @Test
@@ -241,6 +264,43 @@ class ProjectServiceTest {
         void checksTheMeeting() {
             assertThatThrownBy(() -> service.assign(OTHER, MEETING, PROJECT))
                     .isInstanceOf(ApiException.class);
+        }
+
+        @Test
+        @DisplayName("filing marks the project as updated")
+        void filingTouchesTheProject() throws Exception {
+            Instant before = stored.get(0).getUpdatedAt();
+            Thread.sleep(5);
+
+            service.assign(USER, MEETING, PROJECT);
+
+            // The folder list has a "Last Updated" column. Without this it reads
+            // as the day the project was named however much is filed into it.
+            assertThat(stored.get(0).getUpdatedAt()).isAfter(before);
+        }
+
+        @Test
+        @DisplayName("unfiling marks the project it left")
+        void unfilingTouchesTheOldProject() throws Exception {
+            service.assign(USER, MEETING, PROJECT);
+            Instant afterFiling = stored.get(0).getUpdatedAt();
+            Thread.sleep(5);
+
+            service.assign(USER, MEETING, null);
+
+            assertThat(stored.get(0).getUpdatedAt()).isAfter(afterFiling);
+        }
+
+        @Test
+        @DisplayName("a meeting whose old project is gone can still be filed")
+        void survivesAMissingOldProject() {
+            Meeting orphan = new Meeting();
+            orphan.setId(MEETING);
+            orphan.setUserId(USER);
+            orphan.setProjectId("prj_deleted");
+            when(meetings.findByIdAndUserId(MEETING, USER)).thenReturn(Optional.of(orphan));
+
+            assertThat(service.assign(USER, MEETING, PROJECT).projectId()).isEqualTo(PROJECT);
         }
     }
 

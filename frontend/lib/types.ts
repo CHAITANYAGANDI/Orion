@@ -465,6 +465,8 @@ export interface Project {
   name: string;
   description: string;
   color: string;
+  /** Starred: listed first in the rail and on the folder page (V37). */
+  favorite: boolean;
   /** What makes the row worth showing, and whether asking it anything can work. */
   meetingCount: number;
   createdAt: string;
@@ -475,6 +477,8 @@ export interface ProjectInput {
   name?: string;
   description?: string;
   color?: string;
+  /** Omitted leaves the star alone — sending `false` is how it is removed. */
+  favorite?: boolean;
 }
 
 // ---- Workspace-wide chat & semantic search ----

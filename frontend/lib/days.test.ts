@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { dayKey, dayLabel, groupByDay } from "@/lib/home";
+import { dayKey, dayLabel, groupByDay } from "@/lib/days";
 import type { MeetingResponse } from "@/lib/types";
 
 /**
- * Grouping the home list into days.
+ * Grouping a list into days.
  *
  * Every failure this guards against renders perfectly and is wrong: a meeting
  * recorded at 23:40 filed under tomorrow because the key was built from UTC; two
@@ -26,7 +26,7 @@ function local(y: number, m: number, d: number, h = 12): string {
   return new Date(y, m - 1, d, h).toISOString();
 }
 
-describe("the day a meeting belongs to", () => {
+describe("the day a row belongs to", () => {
   it("is the local calendar day, not the UTC one", () => {
     // 23:40 local is tomorrow in UTC for anyone east of Greenwich. Filed under
     // tomorrow, the evening's meeting appears above the ones that followed it.
@@ -79,7 +79,7 @@ describe("grouping", () => {
     );
 
     expect(groups.map((g) => g.key)).toEqual(["2026-08-16", "2026-08-14"]);
-    expect(groups[0].meetings.map((m) => m.id)).toEqual(["b", "c"]);
+    expect(groups[0].items.map((m) => m.id)).toEqual(["b", "c"]);
   });
 
   it("keeps each day's own order rather than re-sorting it", () => {
@@ -89,7 +89,7 @@ describe("grouping", () => {
       [meeting("later", local(2026, 8, 16, 16)), meeting("earlier", local(2026, 8, 16, 9))],
       now,
     );
-    expect(groups[0].meetings.map((m) => m.id)).toEqual(["later", "earlier"]);
+    expect(groups[0].items.map((m) => m.id)).toEqual(["later", "earlier"]);
   });
 
   it("reads the clock once, so a list rendered at midnight is consistent", () => {
@@ -104,5 +104,22 @@ describe("grouping", () => {
 
   it("returns nothing for nothing", () => {
     expect(groupByDay([], now)).toEqual([]);
+  });
+
+  it("groups anything with a timestamp, not only meetings", () => {
+    // The notification panel groups the same way. One implementation, because
+    // the hard part is the calendar arithmetic rather than the row type.
+    const groups = groupByDay(
+      [
+        { id: "n1", createdAt: local(2026, 8, 16) },
+        { id: "n2", createdAt: local(2026, 8, 15) },
+      ],
+      now,
+    );
+
+    expect(groups.map((g) => g.label)).toEqual([
+      expect.stringMatching(/^Today, /),
+      expect.stringMatching(/^Yesterday, /),
+    ]);
   });
 });

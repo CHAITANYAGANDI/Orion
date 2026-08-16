@@ -17,6 +17,7 @@ public record ProjectResponse(
         String name,
         String description,
         String color,
+        boolean favorite,
         long meetingCount,
         Instant createdAt,
         Instant updatedAt
@@ -27,6 +28,7 @@ public record ProjectResponse(
                 p.getName(),
                 p.getDescription(),
                 p.getColor(),
+                p.isFavorite(),
                 meetingCount,
                 p.getCreatedAt(),
                 p.getUpdatedAt());

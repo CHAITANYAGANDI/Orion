@@ -31,6 +31,7 @@ const PROJECTS: Project[] = [
     name: "Client ABC",
     description: "",
     color: "",
+    favorite: false,
     meetingCount: 3,
     createdAt: "2026-07-01T09:00:00Z",
     updatedAt: "2026-08-01T09:00:00Z",

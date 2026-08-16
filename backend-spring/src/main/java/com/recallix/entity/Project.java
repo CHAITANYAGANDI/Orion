@@ -39,6 +39,15 @@ public class Project {
     @Column(nullable = false)
     private String color = "";
 
+    /**
+     * Starred, and therefore listed first.
+     *
+     * <p>Not a second grouping — a starred project is the same project with a
+     * sort key. See V37.
+     */
+    @Column(nullable = false)
+    private boolean favorite = false;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -64,6 +73,9 @@ public class Project {
 
     public String getColor() { return color; }
     public void setColor(String color) { this.color = color; }
+
+    public boolean isFavorite() { return favorite; }
+    public void setFavorite(boolean favorite) { this.favorite = favorite; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

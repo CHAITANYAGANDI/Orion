@@ -391,6 +391,18 @@ happened in the log: the only feedback
 surface was the live status socket on one meeting page, so closing the tab meant
 the product had nothing to say about the twenty minutes it spent working.
 
+**Inbox and Unread are two queries against `?unread=`, not one list filtered
+twice.** The panel holds twenty rows; somebody with sixty notifications and four
+unread would otherwise open Unread and see whichever of the four fell inside the
+most recent twenty. Filtering happens in the database, so the tab means what it
+says however long the archive is.
+
+**Nothing trims this table.** There is no retention job over `notifications` —
+rows live until the owner clears them or the account is deleted (`ON DELETE
+CASCADE`). The panel therefore reports what it is showing ("Showing the 20 most
+recent of 64") rather than claiming a rolling window the product does not
+enforce.
+
 **What a one-account product cannot notify about.** Recallix has no teams,
 members or invitations, so there is no "someone" to comment, to mention you or to
 share a meeting with you. Two of those three have real counterparts and are here
@@ -647,7 +659,7 @@ and a thing that gets said.
 | GET | `/api/v1/projects/{id}` | — | `ProjectResponse` |
 | GET | `/api/v1/projects/{id}/meetings` | — | `MeetingResponse[]` |
 | POST | `/api/v1/projects` | `{ "name", "description"?, "color"? }` | `201 ProjectResponse` |
-| PATCH | `/api/v1/projects/{id}` | same, all optional | `ProjectResponse` |
+| PATCH | `/api/v1/projects/{id}` | same + `"favorite"?`, all optional | `ProjectResponse` |
 | DELETE | `/api/v1/projects/{id}` | — | `{ "unfiledMeetings": n }` |
 | PUT | `/api/v1/projects/meetings/{meetingId}` | `{ "projectId": id \| null }` | `MeetingResponse` |
 
@@ -669,6 +681,20 @@ somebody tidying a sidebar is not asking to destroy six hours of audio. The
 opposite call for conversations (`ON DELETE CASCADE`) — a thread about a project
 that no longer exists is answers about meetings that are no longer grouped,
 reachable from nowhere.
+
+**Starred folders, and a `updated_at` that means it (V37).** `projects.favorite`
+is one boolean and one sort key — `list` returns starred first, then
+alphabetical, and the sidebar and the folder page read the same order so nobody
+has to check they are looking at the same list. It is deliberately not a second
+grouping: a starred folder is the same folder, listed first. On the request it is
+boxed (`Boolean`), because an omitted field has to be distinguishable from
+`false` or every rename silently unstars.
+
+The same migration fixed what `updated_at` meant. It was the row's own last
+write, which made the folder list's "Last Updated" column quietly wrong — filing
+three meetings into a folder left it reading as untouched since the day it was
+named. `assign` now stamps both the folder a meeting leaves and the one it
+joins, and V37 backfills existing rows from the newest meeting each holds.
 
 Assignment is its own endpoint rather than a field on `PATCH /meetings/{id}`,
 which leaves omitted fields alone: Jackson cannot tell an omitted `projectId`

@@ -9,8 +9,12 @@ import {
   ArrowLeft,
   Trash2,
   Pencil,
-  Check,
-  X,
+  Star,
+  MoreHorizontal,
+  FileText,
+  Calendar,
+  Clock,
+  FolderMinus,
   Search as SearchIcon,
 } from "lucide-react";
 import {
@@ -23,38 +27,43 @@ import {
   useClearProjectChatMutation,
   useUpdateProjectMutation,
   useDeleteProjectMutation,
+  useAssignProjectMutation,
   useRenameConversationMutation,
   useDeleteConversationMutation,
   useDeleteChatExchangeMutation,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/status-badge";
 import { ScopedChat } from "@/components/scoped-chat";
+import { FolderDialog } from "@/components/folder-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { PROJECT_PROMPTS } from "@/lib/chat-prompts";
 import { formatDateTime, formatDuration } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import type { MeetingResponse } from "@/lib/types";
 
 /**
- * One project: what is in it, and a chat that can only see what is in it.
+ * One folder: what is in it, and a chat that can only see what is in it.
  *
- * <p>The chat is the reason the grouping exists. A meeting chat answers about
- * one conversation and the workspace chat answers about everything, and neither
- * is the question people actually have — "where does the ABC work stand" is a
- * question about a body of work over weeks, which is exactly what a project is.
- *
- * <p>Both halves are on one screen rather than behind tabs. Reading the answer
- * and seeing which meetings could have produced it is the same act; separating
- * them would mean clicking back and forth to check whether an answer covers
- * what you think it covers.
+ * <p>The list comes first and is the shape of the page, because that is what
+ * anybody arriving here came for — which conversations are filed under this
+ * work. The chat sits below it rather than beside it: it is the reason the
+ * grouping exists ("where does the ABC work stand" is a question about a body of
+ * work over weeks), but it is not what you open a folder to see.
  */
-export default function ProjectPage() {
+export default function FolderPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const router = useRouter();
 
-  const { data: project, isLoading } = useGetProjectQuery(id);
+  const { data: folder, isLoading } = useGetProjectQuery(id);
   const { data: meetings } = useGetProjectMeetingsQuery(id);
 
   const [conversationId, setConversationId] = React.useState<string | null>(null);
@@ -68,10 +77,12 @@ export default function ProjectPage() {
   const [ask, { isLoading: asking }] = useAskProjectChatMutation();
   const [newConversation, { isLoading: starting }] = useCreateProjectConversationMutation();
   const [clear, { isLoading: clearing }] = useClearProjectChatMutation();
-  const [rename] = useRenameConversationMutation();
+  const [renameConv] = useRenameConversationMutation();
   const [removeConversation] = useDeleteConversationMutation();
   const [deleteExchange, { isLoading: deleting }] = useDeleteChatExchangeMutation();
   const [remove, { isLoading: removing }] = useDeleteProjectMutation();
+  const [update] = useUpdateProjectMutation();
+  const [renaming, setRenaming] = React.useState(false);
 
   const scope = `PRJ-${id}`;
 
@@ -96,10 +107,10 @@ export default function ProjectPage() {
     }
   }
 
-  async function onDeleteProject() {
+  async function onDeleteFolder() {
     if (
       !window.confirm(
-        `Delete “${project?.name}”? Its meetings are kept — they move back to Unfiled.`,
+        `Delete “${folder?.name}”? Its meetings are kept — they move back to Unfiled.`,
       )
     ) {
       return;
@@ -108,12 +119,12 @@ export default function ProjectPage() {
       const { unfiledMeetings } = await remove(id).unwrap();
       toast.success(
         unfiledMeetings > 0
-          ? `Project deleted. ${unfiledMeetings} meeting${unfiledMeetings === 1 ? "" : "s"} moved to Unfiled.`
-          : "Project deleted.",
+          ? `Folder deleted. ${unfiledMeetings} meeting${unfiledMeetings === 1 ? "" : "s"} moved to Unfiled.`
+          : "Folder deleted.",
       );
       router.push("/projects");
     } catch {
-      toast.error("Couldn't delete that project.");
+      toast.error("Couldn't delete that folder.");
     }
   }
 
@@ -126,249 +137,262 @@ export default function ProjectPage() {
     );
   }
 
-  if (!project) {
+  if (!folder) {
     return (
       <Card>
         <CardContent className="py-12 text-center text-sm text-muted-foreground">
-          That project no longer exists.{" "}
+          That folder no longer exists.{" "}
           <Link href="/projects" className="underline">
-            Back to projects
+            Back to folders
           </Link>
         </CardContent>
       </Card>
     );
   }
 
+  const rows = meetings ?? [];
+
   return (
     <div className="space-y-6">
-      <div>
-        <Link
-          href="/projects"
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" /> Projects
-        </Link>
-      </div>
+      <Link
+        href="/projects"
+        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft className="h-3.5 w-3.5" /> Folders
+      </Link>
 
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <ProjectHeading project={project} />
-        <div className="flex shrink-0 gap-2">
-          {/* The project as a search filter — the same grouping, applied to
-              decisions, commitments and transcripts rather than meetings. */}
-          <Button asChild variant="outline" size="sm" className="gap-1.5">
-            <Link href={`/search?project=${project.id}`}>
-              <SearchIcon className="h-3.5 w-3.5" /> Search in project
-            </Link>
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onDeleteProject}
-            disabled={removing}
-            className="gap-1.5 text-destructive hover:text-destructive"
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="truncate text-2xl font-bold tracking-tight">{folder.name}</h1>
+          {folder.description && (
+            <p className="text-sm text-muted-foreground">{folder.description}</p>
+          )}
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1">
+          {/* The star is the whole of "this is the folder I am in this week":
+              starred folders sort to the top of the rail and the folder list. */}
+          <button
+            type="button"
+            aria-label={folder.favorite ? "Remove star" : "Star this folder"}
+            aria-pressed={folder.favorite}
+            onClick={() => void update({ id, body: { favorite: !folder.favorite } })}
+            className="rounded p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
-            <Trash2 className="h-3.5 w-3.5" /> Delete
-          </Button>
+            <Star
+              className={cn("h-5 w-5", folder.favorite && "fill-amber-400 text-amber-400")}
+            />
+          </button>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label="Folder actions"
+                className="rounded p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <MoreHorizontal className="h-5 w-5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuItem onSelect={() => setRenaming(true)}>
+                <Pencil className="mr-2 h-4 w-4" /> Rename Folder
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                {/* The folder as a search filter — the same grouping, applied to
+                    decisions, commitments and transcripts rather than meetings. */}
+                <Link href={`/search?project=${folder.id}`}>
+                  <SearchIcon className="mr-2 h-4 w-4" /> Search in folder
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={removing}
+                onSelect={(e) => {
+                  e.preventDefault();
+                  void onDeleteFolder();
+                }}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2 className="mr-2 h-4 w-4" /> Delete Folder
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
-        <section className="space-y-2">
-          <h2 className="text-sm font-semibold">
-            Meetings{" "}
-            <span className="font-normal text-muted-foreground">
-              {project.meetingCount}
-            </span>
-          </h2>
-          <Card>
-            <CardContent className="p-0">
-              {(meetings ?? []).length === 0 ? (
-                <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-                  Nothing filed here yet. Open a meeting and choose this project,
-                  or pick it when you upload.
-                </p>
-              ) : (
-                <ul>
-                  {(meetings ?? []).map((m) => (
-                    <li key={m.id} className="border-b last:border-0">
-                      <Link
-                        href={`/meetings/${m.id}`}
-                        className="flex items-center justify-between gap-2 px-4 py-2.5 transition-colors hover:bg-accent/50"
-                      >
-                        <span className="min-w-0">
-                          <span className="block truncate text-sm">{m.title}</span>
-                          <span className="block text-xs text-muted-foreground">
-                            {formatDateTime(m.createdAt)} · {formatDuration(m.durationSeconds)}
-                          </span>
-                        </span>
-                        <StatusBadge status={m.status} />
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-        </section>
+      {/* Named, so it is a landmark a screen reader can jump to and so the
+          column header below is not confusable with the chat's own. */}
+      <section aria-label={`Conversations in ${folder.name}`}>
+        <div className="border-b px-1 pb-2 text-xs font-semibold text-muted-foreground">
+          Conversation
+        </div>
 
-        <section className="space-y-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="flex items-center gap-2 text-sm font-semibold">
-                <Sparkles className="h-4 w-4 text-primary" /> Ask Recallix about this project
-              </h2>
-              <p className="text-xs text-muted-foreground">
-                Answers are grounded in these {project.meetingCount} meeting
-                {project.meetingCount === 1 ? "" : "s"} and nothing else.
-              </p>
-            </div>
-            {(conversations?.length ?? 0) > 0 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={clearing}
-                onClick={async () => {
-                  if (!window.confirm("Delete every conversation about this project?")) return;
-                  try {
-                    await clear(id).unwrap();
-                    setConversationId(null);
-                  } catch {
-                    toast.error("Couldn't clear the conversation.");
-                  }
-                }}
-                className="shrink-0 gap-1.5 text-xs text-muted-foreground"
-              >
-                <Trash2 className="h-3.5 w-3.5" /> Clear all
-              </Button>
-            )}
+        {rows.length === 0 ? (
+          <p className="px-1 py-10 text-center text-sm text-muted-foreground">
+            Nothing filed here yet. Open a meeting and choose this folder, or pick
+            it when you upload.
+          </p>
+        ) : (
+          <ul>
+            {rows.map((meeting) => (
+              <ConversationRow key={meeting.id} meeting={meeting} folderName={folder.name} />
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="space-y-4 border-t pt-6">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="flex items-center gap-2 text-sm font-semibold">
+              <Sparkles className="h-4 w-4 text-primary" /> Ask Recallix about this folder
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              Answers are grounded in these {folder.meetingCount} meeting
+              {folder.meetingCount === 1 ? "" : "s"} and nothing else.
+            </p>
           </div>
+          {(conversations?.length ?? 0) > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={clearing}
+              onClick={async () => {
+                if (!window.confirm("Delete every conversation about this folder?")) return;
+                try {
+                  await clear(id).unwrap();
+                  setConversationId(null);
+                } catch {
+                  toast.error("Couldn't clear the conversation.");
+                }
+              }}
+              className="shrink-0 gap-1.5 text-xs text-muted-foreground"
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Clear all
+            </Button>
+          )}
+        </div>
 
-          <ScopedChat
-            messages={messages}
-            conversations={conversations ?? []}
-            conversationId={conversationId}
-            onSelectConversation={setConversationId}
-            loading={chatLoading}
-            asking={asking}
-            deleting={deleting}
-            starting={starting}
-            prompts={PROJECT_PROMPTS}
-            emptyLine={`Ask a question about “${project.name}”.`}
-            thinkingLine="Reading this project's meetings…"
-            placeholder={`Ask about ${project.name}…`}
-            onSend={send}
-            onNewConversation={async () => {
-              try {
-                const created = await newConversation(id).unwrap();
-                setConversationId(created.id);
-              } catch {
-                toast.error("Couldn't start a new chat.");
-              }
-            }}
-            onRename={async (cid, title) => {
-              await rename({ conversationId: cid, title, scope }).unwrap();
-            }}
-            onDeleteConversation={async (cid) => {
-              await removeConversation({ conversationId: cid, scope }).unwrap();
-              if (cid === conversationId) setConversationId(null);
-            }}
-            onDeleteExchange={async (messageId) => {
-              const result = await deleteExchange({ messageId, scope }).unwrap();
-              if (result.conversationDeleted) setConversationId(null);
-            }}
-          />
-        </section>
-      </div>
+        <ScopedChat
+          messages={messages}
+          conversations={conversations ?? []}
+          conversationId={conversationId}
+          onSelectConversation={setConversationId}
+          loading={chatLoading}
+          asking={asking}
+          deleting={deleting}
+          starting={starting}
+          prompts={PROJECT_PROMPTS}
+          emptyLine={`Ask a question about “${folder.name}”.`}
+          thinkingLine="Reading this folder's meetings…"
+          placeholder={`Ask about ${folder.name}…`}
+          onSend={send}
+          onNewConversation={async () => {
+            try {
+              const created = await newConversation(id).unwrap();
+              setConversationId(created.id);
+            } catch {
+              toast.error("Couldn't start a new chat.");
+            }
+          }}
+          onRename={async (cid, title) => {
+            await renameConv({ conversationId: cid, title, scope }).unwrap();
+          }}
+          onDeleteConversation={async (cid) => {
+            await removeConversation({ conversationId: cid, scope }).unwrap();
+            if (cid === conversationId) setConversationId(null);
+          }}
+          onDeleteExchange={async (messageId) => {
+            const result = await deleteExchange({ messageId, scope }).unwrap();
+            if (result.conversationDeleted) setConversationId(null);
+          }}
+        />
+      </section>
+
+      <FolderDialog open={renaming} onOpenChange={setRenaming} folder={folder} />
     </div>
   );
 }
 
-/** The name, renameable in place — the same pattern as the meeting title. */
-function ProjectHeading({ project }: { project: { id: string; name: string; description: string } }) {
-  const [editing, setEditing] = React.useState(false);
-  const [name, setName] = React.useState(project.name);
-  const [description, setDescription] = React.useState(project.description);
-  const [save, { isLoading: saving }] = useUpdateProjectMutation();
-
-  React.useEffect(() => {
-    setName(project.name);
-    setDescription(project.description);
-  }, [project.name, project.description]);
-
-  async function commit() {
-    const clean = name.trim();
-    if (!clean) {
-      setName(project.name);
-      setEditing(false);
-      return;
-    }
-    try {
-      await save({ id: project.id, body: { name: clean, description } }).unwrap();
-      setEditing(false);
-    } catch (err) {
-      const message =
-        typeof err === "object" && err && "data" in err
-          ? ((err as { data?: { message?: string } }).data?.message ?? "")
-          : "";
-      toast.error(message || "Couldn't rename that project.");
-    }
-  }
-
-  if (!editing) {
-    return (
-      <div className="min-w-0">
-        <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
-          <span className="truncate">{project.name}</span>
-          <button
-            type="button"
-            onClick={() => setEditing(true)}
-            aria-label="Rename project"
-            className="text-muted-foreground hover:text-foreground"
-          >
-            <Pencil className="h-4 w-4" />
-          </button>
-        </h1>
-        {project.description && (
-          <p className="text-sm text-muted-foreground">{project.description}</p>
-        )}
-      </div>
-    );
-  }
+/**
+ * One meeting in the folder.
+ *
+ * <p>The notes icon is only shown once there are notes. A row that carries the
+ * same mark whether or not the meeting has been processed says nothing, and this
+ * list is exactly where somebody looks to find out which of last week's calls
+ * are ready to read.
+ */
+function ConversationRow({
+  meeting,
+  folderName,
+}: {
+  meeting: MeetingResponse;
+  folderName: string;
+}) {
+  const [assign, { isLoading }] = useAssignProjectMutation();
+  const ready = meeting.status === "READY";
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
-      <Input
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        aria-label="Project name"
-        maxLength={120}
-        className="max-w-xs"
-      />
-      <Input
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-        aria-label="Project description"
-        placeholder="What is this project?"
-        maxLength={500}
-        className="max-w-sm"
-      />
-      <div className="flex gap-1">
-        <Button size="icon" variant="ghost" onClick={commit} disabled={saving} aria-label="Save">
-          <Check className="h-4 w-4" />
-        </Button>
-        <Button
-          size="icon"
-          variant="ghost"
-          onClick={() => {
-            setName(project.name);
-            setDescription(project.description);
-            setEditing(false);
-          }}
-          aria-label="Cancel"
-        >
-          <X className="h-4 w-4" />
-        </Button>
-      </div>
-    </div>
+    <li className="group flex items-center gap-3 border-b px-1 py-3 transition-colors hover:bg-accent/40">
+      <Link href={`/meetings/${meeting.id}`} className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5">
+          <span className="truncate font-semibold">{meeting.title}</span>
+          {ready && (
+            <FileText
+              className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+              aria-label="Notes ready"
+            />
+          )}
+        </span>
+        <span className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <Calendar className="h-3 w-3" />
+            {formatDateTime(meeting.createdAt)}
+          </span>
+          {meeting.durationSeconds != null && meeting.durationSeconds > 0 && (
+            <span className="flex items-center gap-1">
+              <Clock className="h-3 w-3" />
+              {formatDuration(meeting.durationSeconds)}
+            </span>
+          )}
+          {!ready && <StatusBadge status={meeting.status} />}
+        </span>
+      </Link>
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label={`Actions for ${meeting.title}`}
+            className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuItem asChild>
+            <Link href={`/meetings/${meeting.id}`}>
+              <FileText className="mr-2 h-4 w-4" /> Open conversation
+            </Link>
+          </DropdownMenuItem>
+          {/* Removing it from the folder, not deleting it. Deleting a recording
+              lives on the meeting page, behind the erase menu, where what is
+              about to go can be named one grain at a time. */}
+          <DropdownMenuItem
+            disabled={isLoading}
+            onSelect={async () => {
+              try {
+                await assign({ meetingId: meeting.id, projectId: null }).unwrap();
+                toast.success(`Removed from ${folderName}. The meeting is kept.`);
+              } catch {
+                toast.error("Couldn't remove that from the folder.");
+              }
+            }}
+          >
+            <FolderMinus className="mr-2 h-4 w-4" /> Remove from folder
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </li>
   );
 }

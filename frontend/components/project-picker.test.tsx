@@ -26,6 +26,7 @@ function project(id: string, name: string): Project {
     name,
     description: "",
     color: "",
+    favorite: false,
     meetingCount: 0,
     createdAt: "2026-08-01T09:00:00Z",
     updatedAt: "2026-08-01T09:00:00Z",

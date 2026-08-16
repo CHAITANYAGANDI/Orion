@@ -189,7 +189,7 @@ public class AccountExportService {
         retention.put("audioDays", user.getAudioRetentionDays());
         retention.put("meetingDays", user.getMeetingRetentionDays());
         account.put("retention", retention);
-        account.put("projects", projects.findByUserIdOrderByNameAsc(user.getId()));
+        account.put("projects", projects.findByUserIdOrderByFavoriteDescNameAsc(user.getId()));
         account.put("vocabulary", vocabulary.findByUserIdOrderByCategoryAscTermAsc(user.getId()));
         account.put("knownSpeakers", speakers.findByUserIdOrderByTimesUsedDescLastUsedAtDesc(user.getId()));
         account.put("shareLinks", shareRecords(user.getId()));

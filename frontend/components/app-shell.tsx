@@ -19,40 +19,16 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  Home,
-  Sparkles,
-  Plug,
-  Menu,
-  Mic,
-  LogOut,
-  ChevronRight,
-  ChevronDown,
-  FolderOpen,
-  Folder,
-  Search,
-  Upload,
-  Settings as SettingsIcon,
-  CreditCard,
-  ShieldCheck,
-} from "lucide-react";
+import { Home, Sparkles, Plug, Menu, Mic, Search, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useAuth } from "@/lib/auth";
-import { useGetProjectsQuery } from "@/lib/api";
 import { RecordingProvider, useRecording } from "@/lib/recording-context";
 import { formatDuration } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { NotificationBell } from "@/components/notification-bell";
 import { SearchCommand } from "@/components/search-command";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
+import { AccountMenu } from "@/components/account-menu";
+import { FolderTree } from "@/components/folder-tree";
 
 /**
  * The places.
@@ -114,7 +90,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
             <span className="font-semibold">Recallix</span>
           </div>
 
-          <AccountButton />
+          <AccountMenu />
 
           <nav className="flex flex-col gap-1 p-3">
             {NAV.map((item) => {
@@ -204,139 +180,6 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
       </div>
 
       <SearchCommand open={searching} onOpenChange={setSearching} />
-    </div>
-  );
-}
-
-/**
- * Who you are, and everything that is about the account rather than the work.
- *
- * At the top of the rail rather than the bottom, because it is also the only
- * route to Settings, Billing and Privacy now that none of them is a nav item.
- * Burying those three under an avatar at the very bottom of a scrolling sidebar
- * is how they become unreachable.
- */
-function AccountButton() {
-  const { userId, mode, setDevUserId, signOut } = useAuth();
-  const initials = (userId || "me").slice(-2).toUpperCase();
-
-  return (
-    <div className="px-3 pb-2">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className="flex w-full items-center gap-2 rounded-lg border px-2 py-2 text-left transition-colors hover:bg-accent"
-          >
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground">
-              {initials}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium">{userId || "user"}</span>
-              <span className="block truncate text-xs text-muted-foreground">
-                {mode === "dev" ? "Development session" : "Signed in"}
-              </span>
-            </span>
-            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-56">
-          <DropdownMenuLabel className="truncate">{userId}</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem asChild>
-            <Link href="/settings">
-              <SettingsIcon className="mr-2 h-4 w-4" /> Settings
-            </Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link href="/settings/security">
-              <ShieldCheck className="mr-2 h-4 w-4" /> Privacy &amp; data
-            </Link>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <Link href="/settings/plans">
-              <CreditCard className="mr-2 h-4 w-4" /> Plan &amp; usage
-            </Link>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          {mode === "dev" ? (
-            <DropdownMenuItem
-              onSelect={(e) => {
-                e.preventDefault();
-                const next = window.prompt("Switch dev user id", userId);
-                if (next) setDevUserId(next);
-              }}
-            >
-              Switch dev user
-            </DropdownMenuItem>
-          ) : (
-            <DropdownMenuItem onSelect={() => signOut?.()}>
-              <LogOut className="mr-2 h-4 w-4" /> Sign out
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
-  );
-}
-
-/**
- * Folders — what used to be called Projects.
- *
- * Collapsible and collapsed-by-default-when-empty, because a heading with
- * nothing under it reads as something broken rather than something unused. The
- * "All folders" row at the end is what makes creating one reachable, since the
- * rail itself is a list of what exists rather than a place to make more.
- */
-function FolderTree({ onNavigate }: { onNavigate: () => void }) {
-  const pathname = usePathname();
-  const { data: projects } = useGetProjectsQuery();
-  const [open, setOpen] = React.useState(true);
-  const folders = projects ?? [];
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col px-3 pb-4">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="flex items-center gap-1.5 px-1 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground"
-      >
-        {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-        Folders
-      </button>
-
-      {open && (
-        <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">
-          {folders.map((folder) => {
-            const active = pathname === `/projects/${folder.id}`;
-            return (
-              <Link
-                key={folder.id}
-                href={`/projects/${folder.id}`}
-                onClick={onNavigate}
-                className={cn(
-                  "flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors",
-                  active
-                    ? "bg-primary/10 text-primary"
-                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                )}
-              >
-                <Folder className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">{folder.name}</span>
-              </Link>
-            );
-          })}
-          <Link
-            href="/projects"
-            onClick={onNavigate}
-            className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-          >
-            <FolderOpen className="h-3.5 w-3.5 shrink-0" />
-            {folders.length === 0 ? "Create a folder" : "All folders"}
-          </Link>
-        </div>
-      )}
     </div>
   );
 }

@@ -1,21 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ChatConversation, ChatMessage, MeetingResponse, Project } from "@/lib/types";
 
 /**
- * A project's page, which is really two claims side by side: these meetings,
- * and an answer drawn only from them.
+ * A folder's page: what is filed here, and an answer drawn only from it.
  *
- * <p>The tests that matter are about that second claim. A project chat that
- * quietly answers from the whole workspace is worse than no project chat — it
- * looks scoped, reads as scoped, and is not — so the wiring is checked, and so
- * is the promise the page makes about what it read.
+ * <p>The list is the shape of the page, because that is what somebody opening a
+ * folder came for. But the tests that matter are about the second claim — a
+ * folder chat that quietly answers from the whole workspace is worse than no
+ * folder chat, since it looks scoped, reads as scoped, and is not.
  */
-const { askProject, chatQuery, deleteProject, push } = vi.hoisted(() => ({
+const { askProject, chatQuery, deleteProject, updateProject, assign, push } = vi.hoisted(() => ({
   askProject: vi.fn(),
   chatQuery: vi.fn(),
   deleteProject: vi.fn(),
+  updateProject: vi.fn(),
+  assign: vi.fn(),
   push: vi.fn(),
 }));
 
@@ -53,7 +54,21 @@ vi.mock("@/lib/api", () => ({
     { isLoading: false },
   ],
   useUpdateProjectMutation: () => [
-    () => ({ unwrap: () => Promise.resolve() }),
+    (arg: unknown) => {
+      updateProject(arg);
+      return { unwrap: () => Promise.resolve({}) };
+    },
+    { isLoading: false },
+  ],
+  useCreateProjectMutation: () => [
+    () => ({ unwrap: () => Promise.resolve({}) }),
+    { isLoading: false },
+  ],
+  useAssignProjectMutation: () => [
+    (arg: unknown) => {
+      assign(arg);
+      return { unwrap: () => Promise.resolve({}) };
+    },
     { isLoading: false },
   ],
   useDeleteProjectMutation: () => [
@@ -82,6 +97,7 @@ beforeEach(() => {
     name: "Client ABC",
     description: "The ABC engagement",
     color: "",
+    favorite: false,
     meetingCount: 3,
     createdAt: "2026-07-01T09:00:00Z",
     updatedAt: "2026-08-01T09:00:00Z",
@@ -102,12 +118,50 @@ beforeEach(() => {
 });
 
 describe("ProjectPage", () => {
-  it("shows the project's meetings beside the chat", () => {
+  it("lists what is filed here, under the folder's name", () => {
     render(<ProjectPage />);
 
-    // Reading an answer and seeing what could have produced it is one act.
-    expect(screen.getByText("Discovery Call")).toBeInTheDocument();
-    expect(screen.getByText(/Ask Recallix about this project/)).toBeInTheDocument();
+    const list = screen.getByRole("region", { name: "Conversations in Client ABC" });
+
+    expect(screen.getByRole("heading", { name: "Client ABC" })).toBeInTheDocument();
+    expect(within(list).getByText("Conversation")).toBeInTheDocument();
+    expect(within(list).getByText("Discovery Call")).toBeInTheDocument();
+  });
+
+  it("keeps the folder chat below the list", () => {
+    render(<ProjectPage />);
+
+    // Not what you open a folder to see, but the reason the grouping exists.
+    expect(screen.getByText(/Ask Recallix about this folder/)).toBeInTheDocument();
+  });
+
+  it("marks a meeting whose notes are ready", () => {
+    render(<ProjectPage />);
+
+    // A mark carried by every row whether or not it has been processed says
+    // nothing, and this list is where somebody checks what is ready to read.
+    expect(screen.getByLabelText("Notes ready")).toBeInTheDocument();
+  });
+
+  it("stars the folder, which is what sorts it to the top of the rail", async () => {
+    render(<ProjectPage />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Star this folder" }));
+
+    expect(updateProject).toHaveBeenCalledWith({ id: "prj_1", body: { favorite: true } });
+  });
+
+  it("takes a meeting out of the folder without deleting it", async () => {
+    render(<ProjectPage />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Discovery Call" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: /Remove from folder/ }));
+
+    // Deleting a recording lives on the meeting page, behind the erase menu,
+    // where what is about to go can be named one grain at a time.
+    await waitFor(() =>
+      expect(assign).toHaveBeenCalledWith({ meetingId: "mtg_1", projectId: null }),
+    );
   });
 
   it("says exactly what the answers are grounded in", () => {
@@ -141,10 +195,11 @@ describe("ProjectPage", () => {
     expect(screen.getByText("Where does this project stand?")).toBeInTheDocument();
   });
 
-  it("promises the meetings survive when the project is deleted", async () => {
+  it("promises the meetings survive when the folder is deleted", async () => {
     render(<ProjectPage />);
 
-    await userEvent.click(screen.getByRole("button", { name: /Delete/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Folder actions" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: /Delete Folder/ }));
 
     // The confirm text is the safeguard: a folder is cheap to delete and six
     // hours of audio is not.
@@ -160,21 +215,24 @@ describe("ProjectPage", () => {
     vi.mocked(window.confirm).mockReturnValue(false);
     render(<ProjectPage />);
 
-    await userEvent.click(screen.getByRole("button", { name: /Delete/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Folder actions" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: /Delete Folder/ }));
 
     expect(deleteProject).not.toHaveBeenCalled();
   });
 
-  it("links to a search already narrowed to this project", () => {
+  it("links to a search already narrowed to this folder", async () => {
     render(<ProjectPage />);
 
-    expect(screen.getByRole("link", { name: /Search in project/ })).toHaveAttribute(
+    await userEvent.click(screen.getByRole("button", { name: "Folder actions" }));
+
+    expect(screen.getByRole("menuitem", { name: /Search in folder/ })).toHaveAttribute(
       "href",
       "/search?project=prj_1",
     );
   });
 
-  it("says so when the project is gone", () => {
+  it("says so when the folder is gone", () => {
     project = undefined;
     render(<ProjectPage />);
 

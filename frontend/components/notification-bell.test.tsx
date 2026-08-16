@@ -36,6 +36,7 @@ const {
 
 let items: AppNotification[];
 let unread: number;
+let total: number | null;
 let refetchedCount: number;
 
 vi.mock("@/lib/ws", () => ({
@@ -53,11 +54,20 @@ vi.mock("@/lib/api", () => ({
       refetchedCount += 1;
     },
   }),
-  useGetNotificationsQuery: (_arg: unknown, opts: { skip?: boolean }) => ({
-    data: opts?.skip ? undefined : { content: items, page: 0, size: 20, totalElements: items.length, totalPages: 1 },
-    isLoading: false,
-    refetch: vi.fn(),
-  }),
+  // Honours `unread`, because the tab is a second query rather than a filter
+  // over rows already fetched — see the panel's comment.
+  useGetNotificationsQuery: (
+    arg: { size?: number; unread?: boolean } | undefined,
+    opts: { skip?: boolean },
+  ) => {
+    if (opts?.skip) return { data: undefined, isLoading: false, refetch: vi.fn() };
+    const shown = arg?.unread ? items.filter((n) => !n.read) : items;
+    return {
+      data: { content: shown, page: 0, size: 20, totalElements: total ?? shown.length, totalPages: 1 },
+      isLoading: false,
+      refetch: vi.fn(),
+    };
+  },
   useMarkNotificationReadMutation: () => [
     (arg: unknown) => {
       markRead(arg);
@@ -116,6 +126,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   items = [notification()];
   unread = 1;
+  total = null;
   refetchedCount = 0;
   socket.onPing = null;
 });
@@ -219,17 +230,19 @@ describe("NotificationBell list", () => {
   it("marks the lot read in one go", async () => {
     await openBell();
 
-    await userEvent.click(screen.getByRole("button", { name: /Mark all read/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Mark all as read/ }));
 
     expect(markAllRead).toHaveBeenCalled();
   });
 
-  it("offers nothing to mark when everything is read", async () => {
+  it("greys out marking-all rather than hiding it when everything is read", async () => {
     unread = 0;
     items = [notification({ read: true })];
     await openBell();
 
-    expect(screen.queryByRole("button", { name: /Mark all read/ })).not.toBeInTheDocument();
+    // A control that vanishes teaches nobody it exists. Greyed out, it says both
+    // what it does and that there is currently nothing to do.
+    expect(screen.getByRole("button", { name: /Mark all as read/ })).toBeDisabled();
   });
 
   it("clears the list", async () => {
@@ -240,12 +253,89 @@ describe("NotificationBell list", () => {
     expect(clearAll).toHaveBeenCalled();
   });
 
+  it("dates the list rather than leaving a wall of rows", async () => {
+    items = [
+      notification({ id: "n1", createdAt: new Date().toISOString() }),
+      notification({ id: "n2", createdAt: new Date(Date.now() - 86_400_000).toISOString() }),
+    ];
+    await openBell();
+
+    expect(screen.getByRole("heading", { name: /^Today, / })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^Yesterday, / })).toBeInTheDocument();
+  });
+
   it("offers a plain row for something with nowhere to go", async () => {
     items = [notification({ kind: "RECORDING_STARTED", link: null, title: "Recording started" })];
     await openBell();
 
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
     expect(screen.getByText("Recording started")).toBeInTheDocument();
+  });
+});
+
+describe("NotificationBell Inbox and Unread", () => {
+  it("opens on Inbox", async () => {
+    await openBell();
+
+    expect(screen.getByRole("button", { name: "Inbox" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("narrows to what has not been read", async () => {
+    items = [notification({ id: "n1", title: "Read one", read: true }), notification({ id: "n2", title: "New one" })];
+    await openBell();
+
+    await userEvent.click(screen.getByRole("button", { name: /^Unread/ }));
+
+    expect(screen.getByText("New one")).toBeInTheDocument();
+    expect(screen.queryByText("Read one")).not.toBeInTheDocument();
+  });
+
+  it("carries the count on the tab, so the number survives opening the panel", async () => {
+    unread = 3;
+    await openBell();
+
+    expect(screen.getByRole("button", { name: "Unread 3" })).toBeInTheDocument();
+  });
+
+  it("says so rather than looking broken when nothing is unread", async () => {
+    unread = 0;
+    items = [notification({ read: true })];
+    await openBell();
+
+    await userEvent.click(screen.getByRole("button", { name: /^Unread/ }));
+
+    expect(screen.getByText(/all caught up/i)).toBeInTheDocument();
+  });
+
+  it("goes back to Inbox once the panel is closed", async () => {
+    render(<NotificationBell />);
+    const bell = screen.getByRole("button", { name: /Notifications/ });
+
+    await userEvent.click(bell);
+    await userEvent.click(screen.getByRole("button", { name: /^Unread/ }));
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(bell);
+
+    // Otherwise the morning after marking everything read, the bell opens onto
+    // an empty pane and reads as one that has stopped working.
+    expect(screen.getByRole("button", { name: "Inbox" })).toHaveAttribute("aria-pressed", "true");
+  });
+});
+
+describe("NotificationBell end of the list", () => {
+  it("says the list is complete when it is", async () => {
+    await openBell();
+
+    expect(screen.getByText("That's all your notifications.")).toBeInTheDocument();
+  });
+
+  it("says how much is shown when there is more", async () => {
+    // Recallix keeps notifications until they are cleared, so the panel says
+    // what it is showing rather than claiming a retention window it has not got.
+    total = 64;
+    await openBell();
+
+    expect(screen.getByText("Showing the 1 most recent of 64.")).toBeInTheDocument();
   });
 });
 

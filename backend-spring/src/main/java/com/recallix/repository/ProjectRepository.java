@@ -10,7 +10,15 @@ import java.util.Optional;
 
 public interface ProjectRepository extends JpaRepository<Project, String> {
 
-    List<Project> findByUserIdOrderByNameAsc(String userId);
+    /**
+     * Starred first, then alphabetical.
+     *
+     * <p>The order is fixed here rather than left to the client because the
+     * sidebar and the folder list are the same list twice, and a workspace
+     * whose folders were in one order in the rail and another on the page would
+     * make somebody check they were looking at the same thing.
+     */
+    List<Project> findByUserIdOrderByFavoriteDescNameAsc(String userId);
 
     Optional<Project> findByIdAndUserId(String id, String userId);
 

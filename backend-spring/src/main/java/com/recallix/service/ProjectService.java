@@ -12,6 +12,7 @@ import com.recallix.repository.ProjectRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,7 +45,7 @@ public class ProjectService {
     @Transactional(readOnly = true)
     public List<ProjectResponse> list(String userId) {
         Map<String, Long> counts = countsByProject(userId);
-        return projects.findByUserIdOrderByNameAsc(userId).stream()
+        return projects.findByUserIdOrderByFavoriteDescNameAsc(userId).stream()
                 .map(p -> ProjectResponse.from(p, counts.getOrDefault(p.getId(), 0L)))
                 .toList();
     }
@@ -117,6 +118,9 @@ public class ProjectService {
         if (req.color() != null) {
             p.setColor(req.color().trim());
         }
+        if (req.favorite() != null) {
+            p.setFavorite(req.favorite());
+        }
 
         audit.record(userId, "PROJECT_UPDATED", "project", projectId);
         return ProjectResponse.from(p, countsByProject(userId).getOrDefault(projectId, 0L));
@@ -149,6 +153,10 @@ public class ProjectService {
      * caller's, and so must the project. Without the second check a valid
      * meeting id and a guessed project id would file somebody else's work into
      * your sidebar — and then answer questions from it.
+     *
+     * <p>Both the project it leaves and the project it joins are stamped. The
+     * folder list shows "Last Updated", and without this the column reads as
+     * the day the project was named however much has been filed into it since.
      */
     @Transactional
     public MeetingResponse assign(String userId, String meetingId, String projectId) {
@@ -157,7 +165,10 @@ public class ProjectService {
         if (projectId != null) {
             owned(userId, projectId);
         }
+        String previous = m.getProjectId();
         m.setProjectId(projectId);
+        touch(userId, previous);
+        touch(userId, projectId);
         audit.record(userId, projectId == null ? "MEETING_UNFILED" : "MEETING_FILED",
                 "meeting", meetingId);
         return MeetingResponse.from(m);
@@ -171,6 +182,20 @@ public class ProjectService {
             counts.put((String) row[0], ((Number) row[1]).longValue());
         }
         return counts;
+    }
+
+    /**
+     * Mark a project as having changed, for the "Last Updated" column.
+     *
+     * <p>Silent about a project id that no longer resolves: this is called on
+     * the way out of a project as well as into one, and a meeting whose old
+     * project was deleted underneath it must still be filable.
+     */
+    private void touch(String userId, String projectId) {
+        if (projectId == null) {
+            return;
+        }
+        projects.findByIdAndUserId(projectId, userId).ifPresent(p -> p.setUpdatedAt(Instant.now()));
     }
 
     private Project owned(String userId, String projectId) {

@@ -18,7 +18,14 @@ public record ProjectRequest(
         String description,
 
         @Size(max = 40)
-        String color
+        String color,
+
+        /**
+         * Starred or not. Boxed, because an omitted field has to be
+         * distinguishable from {@code false} — a rename that also silently
+         * unstarred the project would be a rename nobody asked for.
+         */
+        Boolean favorite
 ) {
     public String nameOrNull() {
         return name == null || name.isBlank() ? null : name.trim();

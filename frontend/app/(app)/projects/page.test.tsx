@@ -1,143 +1,207 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { MeetingResponse, Project } from "@/lib/types";
+import type { Project } from "@/lib/types";
 
 /**
- * The project tree.
+ * The folder list.
  *
- * <p>What is worth asserting is the loading discipline. A workspace with twenty
- * projects renders twenty rows, and fetching every one's meetings up front would
- * be twenty requests to draw a page where nineteen are collapsed. So the branch
- * loads when it opens — invisible in a screenshot, obvious in a network tab, and
- * the kind of thing an innocent refactor undoes.
+ * <p>The row is the whole page: a name, how much is in it, when it last changed,
+ * and the two things you can do to it. Two of those are worth guarding.
+ *
+ * <p><i>Deleting a folder must never read as deleting its meetings.</i> The
+ * confirmation says what survives, because "delete" over a folder full of
+ * recordings reads as worse than it is — and somebody who believes it keeps
+ * folders they do not want.
+ *
+ * <p><i>The star outranks the sort.</i> Whichever column header was last
+ * clicked, a starred folder is first; it is the only thing on this page that is
+ * a statement about what somebody is working on rather than about the data.
  */
-const { projectMeetings, unfiledQuery, createProject } = vi.hoisted(() => ({
-  projectMeetings: vi.fn(),
-  unfiledQuery: vi.fn(),
-  createProject: vi.fn(),
+const { update, remove, confirm } = vi.hoisted(() => ({
+  update: vi.fn(),
+  remove: vi.fn(),
+  confirm: vi.fn(),
 }));
 
-let projects: Project[];
-
-function meeting(id: string, title: string): MeetingResponse {
-  return {
-    id,
-    title,
-    status: "READY",
-    tags: [],
-    createdAt: "2026-08-01T10:00:00Z",
-    durationSeconds: 1800,
-  };
-}
+let folders: Project[];
 
 vi.mock("@/lib/api", () => ({
-  useGetProjectsQuery: () => ({ data: projects, isLoading: false }),
-  useGetProjectMeetingsQuery: (id: string) => {
-    projectMeetings(id);
-    return { data: [meeting("mtg_1", "Sprint Planning")], isLoading: false };
-  },
-  useGetUnfiledMeetingsQuery: (_arg: unknown, opts?: { skip?: boolean }) => {
-    if (!opts?.skip) unfiledQuery();
-    return {
-      data: opts?.skip ? undefined : [meeting("mtg_9", "Unsorted call")],
-      isLoading: false,
-    };
-  },
-  useCreateProjectMutation: () => [
-    (body: unknown) => {
-      createProject(body);
-      return { unwrap: () => Promise.resolve({ id: "prj_new" }) };
+  useGetProjectsQuery: () => ({ data: folders, isLoading: false }),
+  useUpdateProjectMutation: () => [
+    (arg: unknown) => {
+      update(arg);
+      return { unwrap: () => Promise.resolve({}) };
     },
     { isLoading: false },
   ],
+  useDeleteProjectMutation: () => [
+    (id: string) => {
+      remove(id);
+      return { unwrap: () => Promise.resolve({ unfiledMeetings: 3 }) };
+    },
+    { isLoading: false },
+  ],
+  useCreateProjectMutation: () => [() => ({ unwrap: () => Promise.resolve({}) }), { isLoading: false }],
 }));
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
-import ProjectsPage from "@/app/(app)/projects/page";
+import FoldersPage from "@/app/(app)/projects/page";
+
+function folder(over: Partial<Project> = {}): Project {
+  return {
+    id: "prj_1",
+    name: "Meetings",
+    description: "",
+    color: "",
+    favorite: false,
+    meetingCount: 1,
+    createdAt: "2026-07-01T09:00:00Z",
+    updatedAt: "2026-08-01T09:00:00Z",
+    ...over,
+  };
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
-  projects = [
-    {
-      id: "prj_1",
-      name: "Recallix Development",
-      description: "The product build",
-      color: "",
-      meetingCount: 3,
-      createdAt: "2026-07-01T09:00:00Z",
-      updatedAt: "2026-08-01T09:00:00Z",
-    },
-  ];
+  folders = [folder()];
+  window.confirm = confirm;
+  confirm.mockReturnValue(true);
 });
 
-describe("ProjectsPage", () => {
-  it("shows each project with how much is in it", () => {
-    render(<ProjectsPage />);
+describe("the list", () => {
+  it("shows each folder and how much is in it", () => {
+    render(<FoldersPage />);
 
-    expect(screen.getByText("Recallix Development")).toBeInTheDocument();
-    // The count is what makes the row worth reading, and says in advance
-    // whether asking the project anything can work.
-    expect(screen.getByText("3")).toBeInTheDocument();
-    expect(screen.getByText("The product build")).toBeInTheDocument();
+    expect(screen.getByText("Meetings")).toBeInTheDocument();
+    expect(screen.getByText("1 conversation")).toBeInTheDocument();
   });
 
-  it("does not fetch a project's meetings until it is opened", async () => {
-    render(<ProjectsPage />);
+  it("counts in the plural when it should", () => {
+    folders = [folder({ meetingCount: 4 })];
+    render(<FoldersPage />);
 
-    expect(projectMeetings).not.toHaveBeenCalled();
-
-    await userEvent.click(screen.getByLabelText("Expand Recallix Development"));
-
-    await waitFor(() => expect(projectMeetings).toHaveBeenCalledWith("prj_1"));
-    expect(screen.getByText("Sprint Planning")).toBeInTheDocument();
+    expect(screen.getByText("4 conversations")).toBeInTheDocument();
   });
 
-  it("closes a branch again", async () => {
-    render(<ProjectsPage />);
+  it("links a folder to itself", () => {
+    render(<FoldersPage />);
 
-    await userEvent.click(screen.getByLabelText("Expand Recallix Development"));
-    await screen.findByText("Sprint Planning");
-    await userEvent.click(screen.getByLabelText("Collapse Recallix Development"));
-
-    expect(screen.queryByText("Sprint Planning")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Meetings/ })).toHaveAttribute(
+      "href",
+      "/projects/prj_1",
+    );
   });
 
-  it("keeps unfiled meetings reachable rather than hidden", async () => {
-    render(<ProjectsPage />);
+  it("lists only folders — unfiled meetings are Home's job", () => {
+    render(<FoldersPage />);
 
-    // A grouping feature that makes ungrouped things harder to find has taken
-    // more than it gave.
-    expect(unfiledQuery).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByLabelText("Expand unfiled meetings"));
-
-    expect(await screen.findByText("Unsorted call")).toBeInTheDocument();
+    // This page was once the only meeting list there was. Home lists everything
+    // now, filed or not, so nothing is hidden by leaving Unfiled out of here.
+    expect(screen.queryByText(/Unfiled/)).not.toBeInTheDocument();
   });
 
-  it("creates a project and opens it", async () => {
-    render(<ProjectsPage />);
+  it("says what a folder is for when there are none", () => {
+    folders = [];
+    render(<FoldersPage />);
 
-    await userEvent.type(screen.getByLabelText("New project name"), "Client ABC");
-    await userEvent.click(screen.getByRole("button", { name: /Create/ }));
+    expect(screen.getByText("No folders yet")).toBeInTheDocument();
+  });
+});
 
-    expect(createProject).toHaveBeenCalledWith({ name: "Client ABC" });
-    // An empty project that stays collapsed looks like nothing happened.
-    await waitFor(() => expect(screen.getByLabelText("New project name")).toHaveValue(""));
+describe("ordering", () => {
+  it("opens on what changed most recently", () => {
+    folders = [
+      folder({ id: "old", name: "Older", updatedAt: "2026-01-01T09:00:00Z" }),
+      folder({ id: "new", name: "Newer", updatedAt: "2026-08-10T09:00:00Z" }),
+    ];
+    render(<FoldersPage />);
+
+    const names = screen.getAllByRole("link").map((el) => el.textContent);
+    expect(names[0]).toContain("Newer");
   });
 
-  it("will not create a project with no name", async () => {
-    render(<ProjectsPage />);
+  it("sorts by name when the column is clicked", async () => {
+    folders = [
+      folder({ id: "b", name: "Beta", updatedAt: "2026-08-10T09:00:00Z" }),
+      folder({ id: "a", name: "Alpha", updatedAt: "2026-01-01T09:00:00Z" }),
+    ];
+    render(<FoldersPage />);
 
-    await userEvent.type(screen.getByLabelText("New project name"), "   ");
+    await userEvent.click(screen.getByRole("button", { name: /Name/ }));
 
-    expect(screen.getByRole("button", { name: /Create/ })).toBeDisabled();
+    expect(screen.getAllByRole("link")[0].textContent).toContain("Alpha");
   });
 
-  it("says what to do when there are no projects yet", () => {
-    projects = [];
-    render(<ProjectsPage />);
+  it("puts a starred folder first whichever column is sorted", () => {
+    folders = [
+      folder({ id: "recent", name: "Recent", updatedAt: "2026-08-10T09:00:00Z" }),
+      folder({ id: "pinned", name: "Pinned", favorite: true, updatedAt: "2026-01-01T09:00:00Z" }),
+    ];
+    render(<FoldersPage />);
 
-    expect(screen.getByText(/No projects yet/)).toBeInTheDocument();
+    expect(screen.getAllByRole("link")[0].textContent).toContain("Pinned");
+  });
+});
+
+describe("the row menu", () => {
+  async function openMenu() {
+    render(<FoldersPage />);
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Meetings" }));
+  }
+
+  it("stars a folder", async () => {
+    await openMenu();
+
+    await userEvent.click(screen.getByRole("menuitem", { name: /Star folder/ }));
+
+    expect(update).toHaveBeenCalledWith({ id: "prj_1", body: { favorite: true } });
+  });
+
+  it("offers to take the star off one that has it", async () => {
+    folders = [folder({ favorite: true })];
+    await openMenu();
+
+    await userEvent.click(screen.getByRole("menuitem", { name: /Remove star/ }));
+
+    expect(update).toHaveBeenCalledWith({ id: "prj_1", body: { favorite: false } });
+  });
+
+  it("opens the rename form on the folder it was opened from", async () => {
+    await openMenu();
+
+    await userEvent.click(screen.getByRole("menuitem", { name: /Rename Folder/ }));
+
+    expect(await screen.findByRole("heading", { name: "Rename folder" })).toBeInTheDocument();
+  });
+
+  it("says the meetings survive before deleting the folder", async () => {
+    await openMenu();
+
+    await userEvent.click(screen.getByRole("menuitem", { name: /Delete Folder/ }));
+
+    await waitFor(() => expect(remove).toHaveBeenCalledWith("prj_1"));
+    // The sentence people read at the moment they are deciding.
+    expect(confirm.mock.calls[0][0]).toMatch(/are kept/);
+  });
+
+  it("deletes nothing when the confirmation is declined", async () => {
+    confirm.mockReturnValue(false);
+    await openMenu();
+
+    await userEvent.click(screen.getByRole("menuitem", { name: /Delete Folder/ }));
+
+    expect(remove).not.toHaveBeenCalled();
+  });
+});
+
+describe("creating", () => {
+  it("opens the form from the header", async () => {
+    render(<FoldersPage />);
+
+    await userEvent.click(screen.getByRole("button", { name: /New folder/ }));
+
+    expect(await screen.findByRole("heading", { name: "Create a folder" })).toBeInTheDocument();
   });
 });

@@ -103,7 +103,7 @@ class AccountExportServiceTest {
         when(moments.findByMeetingIdOrderByStartSecondsAscCreatedAtAsc(anyString())).thenReturn(List.of());
         when(segments.findByMeetingIdOrderByStartTimeAsc(anyString())).thenReturn(List.of());
         when(shares.findByUserIdAndRevokedFalseOrderByCreatedAtDesc(USER)).thenReturn(List.of());
-        when(projects.findByUserIdOrderByNameAsc(USER)).thenReturn(List.of());
+        when(projects.findByUserIdOrderByFavoriteDescNameAsc(USER)).thenReturn(List.of());
         when(vocabulary.findByUserIdOrderByCategoryAscTermAsc(USER)).thenReturn(List.of());
         when(speakers.findByUserIdOrderByTimesUsedDescLastUsedAtDesc(USER)).thenReturn(List.of());
         when(exports.render(anyString(), anyString(), any(ExportFormat.class), anyBoolean(), any(), any()))

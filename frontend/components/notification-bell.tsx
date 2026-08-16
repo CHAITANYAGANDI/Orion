@@ -22,6 +22,12 @@
  * meeting title in it would be a leak; see `NotificationPublisher` on the
  * server. The 90-second poll is what makes the socket an optimisation rather
  * than a dependency.
+ *
+ * <p><b>Inbox and Unread are two queries, not one list filtered twice.</b> The
+ * panel holds twenty rows; somebody with sixty notifications and four unread
+ * would otherwise open Unread and see whichever of the four happened to fall
+ * inside the most recent twenty. `GET /notifications?unread=true` filters in the
+ * database, so the tab means what it says however long the archive is.
  */
 
 import * as React from "react";
@@ -58,6 +64,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { groupByDay } from "@/lib/days";
 import type { AppNotification, NotificationKind } from "@/lib/types";
 
 /** How often to re-read the badge when the socket is not delivering. */
@@ -65,6 +72,12 @@ const POLL_MS = 90_000;
 
 /** Above this, the badge stops counting and starts gesturing. */
 const BADGE_MAX = 9;
+
+/** How many rows the panel holds. Beyond this it says so rather than pretending. */
+const PAGE_SIZE = 20;
+
+/** Everything, or only what has not been read. */
+type Filter = "inbox" | "unread";
 
 const ICONS: Record<NotificationKind, React.ComponentType<{ className?: string }>> = {
   RECORDING_STARTED: Mic,
@@ -96,10 +109,14 @@ export function ago(iso: string, now: number = Date.now()): string {
 
 export function NotificationBell() {
   const [open, setOpen] = React.useState(false);
+  const [filter, setFilter] = React.useState<Filter>("inbox");
   const count = useGetUnreadCountQuery(undefined, { pollingInterval: POLL_MS });
   // Only fetched when the panel is open: fifty tabs polling a list nobody has
   // looked at is the cost of a bell that nobody asked to be expensive.
-  const list = useGetNotificationsQuery({ size: 20 }, { skip: !open });
+  const list = useGetNotificationsQuery(
+    { size: PAGE_SIZE, unread: filter === "unread" },
+    { skip: !open },
+  );
 
   const [markRead] = useMarkNotificationReadMutation();
   const [markAllRead, { isLoading: markingAll }] = useMarkAllNotificationsReadMutation();
@@ -122,10 +139,24 @@ export function NotificationBell() {
   }, [channel, refetchCount, refetchList]);
 
   const unread = count.data?.unread ?? 0;
-  const items = list.data?.content ?? [];
+  const items = React.useMemo(() => list.data?.content ?? [], [list.data]);
+  const total = list.data?.totalElements ?? items.length;
+  // The clock is read once per render of the panel rather than per row, so a
+  // list open across midnight cannot put two notifications from the same
+  // evening under "Today" and "Yesterday".
+  const groups = React.useMemo(() => groupByDay(items), [items]);
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
+    <DropdownMenu
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        // Back to Inbox on close. Marking everything read leaves Unread empty,
+        // and a bell that opens onto "You're all caught up" the next morning
+        // reads as one that has stopped working.
+        if (!next) setFilter("inbox");
+      }}
+    >
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
@@ -146,32 +177,37 @@ export function NotificationBell() {
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="end" className="w-[min(24rem,calc(100vw-2rem))] p-0">
-        <div className="flex items-center justify-between border-b border-border px-3 py-2">
-          <span className="text-sm font-medium">Notifications</span>
-          <div className="flex items-center gap-1">
-            {unread > 0 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 gap-1.5 px-2 text-xs"
-                disabled={markingAll}
-                onClick={() => void markAllRead()}
-              >
-                <CheckCheck className="h-3.5 w-3.5" /> Mark all read
-              </Button>
-            )}
-            {items.length > 0 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 gap-1.5 px-2 text-xs text-muted-foreground"
-                disabled={clearing}
-                onClick={() => void clearAll()}
-              >
-                <Trash2 className="h-3.5 w-3.5" /> Clear
-              </Button>
-            )}
-          </div>
+        <div className="flex items-center justify-between gap-2 px-3 pb-1 pt-2.5">
+          <span className="text-base font-semibold">Notifications</span>
+          {/* Disabled rather than hidden when there is nothing unread. A control
+              that vanishes teaches nobody it exists; one that is greyed out
+              says both what it does and that there is nothing to do. */}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1.5 px-2 text-xs"
+            disabled={unread === 0 || markingAll}
+            onClick={() => void markAllRead()}
+          >
+            <CheckCheck className="h-3.5 w-3.5" /> Mark all as read
+          </Button>
+        </div>
+
+        {/* Two buttons rather than a tablist: this panel is inside a menu, and
+            nesting tab semantics in one is a promise to the screen reader that
+            the keyboard behaviour cannot keep. */}
+        <div className="flex gap-4 border-b border-border px-3">
+          <FilterTab
+            label="Inbox"
+            active={filter === "inbox"}
+            onSelect={() => setFilter("inbox")}
+          />
+          <FilterTab
+            label="Unread"
+            badge={unread}
+            active={filter === "unread"}
+            onSelect={() => setFilter("unread")}
+          />
         </div>
 
         <div className="max-h-[26rem] overflow-y-auto">
@@ -181,31 +217,114 @@ export function NotificationBell() {
 
           {!list.isLoading && items.length === 0 && (
             <div className="px-3 py-8 text-center">
-              <p className="text-sm font-medium">Nothing yet</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Recallix will tell you here when a meeting is ready, when work falls
-                due, and when a link you shared is opened.
-              </p>
+              {filter === "unread" ? (
+                <>
+                  <p className="text-sm font-medium">You&rsquo;re all caught up</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Everything here has been read. Switch to Inbox for the rest.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-medium">Nothing yet</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Recallix will tell you here when a meeting is ready, when work falls
+                    due, and when a link you shared is opened.
+                  </p>
+                </>
+              )}
             </div>
           )}
 
-          <ul>
-            {items.map((n) => (
-              <NotificationRow
-                key={n.id}
-                notification={n}
-                onOpen={() => {
-                  if (!n.read) void markRead({ id: n.id, read: true });
-                  setOpen(false);
-                }}
-                onToggleRead={() => void markRead({ id: n.id, read: !n.read })}
-                onDismiss={() => void remove(n.id)}
-              />
-            ))}
-          </ul>
+          {groups.map((group) => (
+            <div key={group.key}>
+              <h3 className="sticky top-0 z-10 bg-popover px-3 py-1.5 text-xs font-semibold text-muted-foreground">
+                {group.label}
+              </h3>
+              <ul>
+                {group.items.map((n) => (
+                  <NotificationRow
+                    key={n.id}
+                    notification={n}
+                    onOpen={() => {
+                      if (!n.read) void markRead({ id: n.id, read: true });
+                      setOpen(false);
+                    }}
+                    onToggleRead={() => void markRead({ id: n.id, read: !n.read })}
+                    onDismiss={() => void remove(n.id)}
+                  />
+                ))}
+              </ul>
+            </div>
+          ))}
         </div>
+
+        {items.length > 0 && (
+          <div className="flex items-center justify-between gap-2 border-t border-border px-3 py-2">
+            {/* What the end of the list means. Recallix keeps notifications
+                until they are cleared, so this says how much is shown rather
+                than inventing a retention window it does not have. */}
+            <span className="text-xs text-muted-foreground">
+              {total > items.length
+                ? `Showing the ${items.length} most recent of ${total}.`
+                : filter === "unread"
+                  ? "That's everything unread."
+                  : "That's all your notifications."}
+            </span>
+            {filter === "inbox" && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground"
+                disabled={clearing}
+                onClick={() => void clearAll()}
+              >
+                <Trash2 className="h-3.5 w-3.5" /> Clear
+              </Button>
+            )}
+          </div>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/**
+ * Inbox / Unread.
+ *
+ * `aria-pressed` rather than `aria-selected`, for the reason in the panel: these
+ * live inside a menu, where a tablist would be a lie about the arrow keys.
+ */
+function FilterTab({
+  label,
+  badge,
+  active,
+  onSelect,
+}: {
+  label: string;
+  badge?: number;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onSelect}
+      className={cn(
+        "-mb-px flex items-center gap-1.5 border-b-2 px-1 py-2 text-sm font-medium transition-colors",
+        active
+          ? "border-primary text-foreground"
+          : "border-transparent text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {label}
+      {badge != null && badge > 0 && (
+        <span className="rounded-full bg-primary/10 px-1.5 text-[10px] font-bold tabular-nums text-primary">
+          {badge > BADGE_MAX ? `${BADGE_MAX}+` : badge}
+        </span>
+      )}
+    </button>
   );
 }
 

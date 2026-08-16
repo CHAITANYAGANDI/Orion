@@ -4,274 +4,219 @@ import * as React from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
-  FolderOpen,
-  Folder,
   Plus,
-  ChevronRight,
-  Sparkles,
-  Inbox,
-  Loader2,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+  Star,
+  FolderOpen,
 } from "lucide-react";
 import {
   useGetProjectsQuery,
-  useGetProjectMeetingsQuery,
-  useGetUnfiledMeetingsQuery,
-  useCreateProjectMutation,
+  useUpdateProjectMutation,
+  useDeleteProjectMutation,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { StatusBadge } from "@/components/status-badge";
-import { formatDateTime } from "@/lib/format";
+import { FolderDialog } from "@/components/folder-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+import { sortFolders, type FolderSort } from "@/lib/folders";
+import { relativeDay } from "@/lib/days";
 import { cn } from "@/lib/utils";
-import type { MeetingResponse, Project } from "@/lib/types";
+import type { Project } from "@/lib/types";
 
 /**
- * Projects.
+ * Every folder, and nothing else.
  *
- * <p>The tree is the point: a project is only useful if you can see what is in
- * it without leaving the list. Each row expands in place, and the meetings load
- * when it opens rather than up front — a workspace with twenty projects would
- * otherwise make twenty requests to render a page where nineteen of them are
- * collapsed.
+ * <p>A table rather than the tree this used to be. The tree expanded each folder
+ * in place, which sounds helpful and meant the page could not answer the one
+ * question a list of folders is for — which of these did I touch last — because
+ * the answer was buried under whichever rows happened to be open.
  *
- * <p>Unfiled meetings are shown at the bottom rather than hidden. A grouping
- * feature that makes ungrouped things harder to find has taken more than it
- * gave, and this is also the list somebody works through the first time they
- * create a project.
+ * <p>What left with it: the Unfiled row. Home lists every meeting whether it is
+ * filed or not, so unfiled work is not hidden by leaving it out; it was here
+ * because this page was once the only meeting list there was.
  */
-export default function ProjectsPage() {
-  const { data: projects, isLoading } = useGetProjectsQuery();
-  const [create, { isLoading: creating }] = useCreateProjectMutation();
-  const [name, setName] = React.useState("");
-  const [open, setOpen] = React.useState<string | null>(null);
+export default function FoldersPage() {
+  const { data: folders, isLoading } = useGetProjectsQuery();
+  const [sort, setSort] = React.useState<FolderSort>("updated");
+  const [creating, setCreating] = React.useState(false);
+  const [renaming, setRenaming] = React.useState<Project | null>(null);
 
-  async function onCreate(e: React.FormEvent) {
-    e.preventDefault();
-    const clean = name.trim();
-    if (!clean || creating) return;
-    try {
-      const project = await create({ name: clean }).unwrap();
-      setName("");
-      // Open what was just made: an empty project that stays collapsed looks
-      // like nothing happened.
-      setOpen(project.id);
-    } catch (err) {
-      const message =
-        typeof err === "object" && err && "data" in err
-          ? ((err as { data?: { message?: string } }).data?.message ?? "")
-          : "";
-      toast.error(message || "Couldn't create that project.");
-    }
-  }
+  const rows = React.useMemo(() => sortFolders(folders ?? [], sort), [folders, sort]);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Projects</h1>
-        <p className="text-sm text-muted-foreground">
-          Group meetings by the work they belong to — then ask questions of the
-          whole project at once.
-        </p>
+    <div className="space-y-4">
+      <div className="flex items-center justify-end">
+        <Button onClick={() => setCreating(true)} className="gap-1.5">
+          <Plus className="h-4 w-4" /> New folder
+        </Button>
       </div>
 
-      <form onSubmit={onCreate} className="flex max-w-md gap-2">
-        <Input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="New project — e.g. Client ABC"
-          aria-label="New project name"
-          maxLength={120}
-        />
-        <Button type="submit" disabled={!name.trim() || creating} className="gap-1.5">
-          {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-          Create
-        </Button>
-      </form>
-
-      {isLoading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-14 w-full" />
-          ))}
+      <div>
+        {/* The header is the sort control. Two columns, so a dropdown of two
+            choices would be one more click than clicking the column itself. */}
+        <div className="flex items-center justify-between gap-4 border-b px-1 pb-2 text-xs font-semibold text-muted-foreground">
+          <SortButton label="Name" value="name" sort={sort} onSort={setSort} />
+          <SortButton label="Last Updated" value="updated" sort={sort} onSort={setSort} />
         </div>
-      ) : (
-        <div className="space-y-2">
-          {(projects ?? []).map((p) => (
-            <ProjectRow
-              key={p.id}
-              project={p}
-              open={open === p.id}
-              onToggle={() => setOpen(open === p.id ? null : p.id)}
-            />
-          ))}
 
-          {(projects ?? []).length === 0 && (
-            <Card>
-              <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                No projects yet. Create one above, then file meetings into it from
-                the meeting page or from the list below.
-              </CardContent>
-            </Card>
-          )}
+        {isLoading ? (
+          <div className="space-y-3 py-4">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Skeleton key={i} className="h-12 w-full" />
+            ))}
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="py-16 text-center">
+            <FolderOpen className="mx-auto h-8 w-8 text-muted-foreground/60" />
+            <p className="mt-3 text-sm font-medium">No folders yet</p>
+            <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
+              A folder groups meetings by the work they belong to — then you can
+              ask questions of the whole folder at once.
+            </p>
+            <Button variant="outline" className="mt-4 gap-1.5" onClick={() => setCreating(true)}>
+              <Plus className="h-4 w-4" /> New folder
+            </Button>
+          </div>
+        ) : (
+          <ul>
+            {rows.map((folder) => (
+              <FolderRow key={folder.id} folder={folder} onRename={() => setRenaming(folder)} />
+            ))}
+          </ul>
+        )}
+      </div>
 
-          <UnfiledRow open={open === "__unfiled"} onToggle={() => setOpen(open === "__unfiled" ? null : "__unfiled")} />
-        </div>
-      )}
+      <FolderDialog open={creating} onOpenChange={setCreating} />
+      <FolderDialog
+        open={renaming !== null}
+        onOpenChange={(open) => !open && setRenaming(null)}
+        folder={renaming}
+      />
     </div>
   );
 }
 
-function ProjectRow({
-  project,
-  open,
-  onToggle,
+function SortButton({
+  label,
+  value,
+  sort,
+  onSort,
 }: {
-  project: Project;
-  open: boolean;
-  onToggle: () => void;
+  label: string;
+  value: FolderSort;
+  sort: FolderSort;
+  onSort: (s: FolderSort) => void;
 }) {
+  const active = sort === value;
   return (
-    <Card>
-      <div className="flex items-center gap-2 px-4 py-3">
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-expanded={open}
-          aria-label={`${open ? "Collapse" : "Expand"} ${project.name}`}
-          className="flex min-w-0 flex-1 items-center gap-3 text-left"
-        >
-          <ChevronRight
-            className={cn(
-              "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
-              open && "rotate-90",
-            )}
-          />
-          {open ? (
-            <FolderOpen className="h-4 w-4 shrink-0 text-primary" />
-          ) : (
-            <Folder className="h-4 w-4 shrink-0 text-primary" />
-          )}
-          <span className="min-w-0">
-            <span className="block truncate font-medium">{project.name}</span>
-            {project.description && (
-              <span className="block truncate text-xs text-muted-foreground">
-                {project.description}
-              </span>
-            )}
-          </span>
-          <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] tabular-nums text-muted-foreground">
-            {project.meetingCount}
-          </span>
-        </button>
-
-        <Button asChild variant="ghost" size="sm" className="shrink-0 gap-1.5">
-          <Link href={`/projects/${project.id}`}>
-            <Sparkles className="h-3.5 w-3.5" />
-            Open
-          </Link>
-        </Button>
-      </div>
-
-      {open && <ProjectMeetings projectId={project.id} />}
-    </Card>
+    <button
+      type="button"
+      onClick={() => onSort(value)}
+      aria-pressed={active}
+      className={cn(
+        "flex items-center gap-1 transition-colors hover:text-foreground",
+        active && "text-foreground",
+      )}
+    >
+      {label}
+      <span aria-hidden className={cn("text-[9px]", !active && "opacity-0")}>
+        ▼
+      </span>
+    </button>
   );
 }
 
-/** Loaded only once the row is open — see the page comment. */
-function ProjectMeetings({ projectId }: { projectId: string }) {
-  const { data, isLoading } = useGetProjectMeetingsQuery(projectId);
+function FolderRow({ folder, onRename }: { folder: Project; onRename: () => void }) {
+  const [update] = useUpdateProjectMutation();
+  const [remove, { isLoading: removing }] = useDeleteProjectMutation();
 
-  if (isLoading) {
-    return (
-      <div className="space-y-2 border-t px-4 py-3">
-        <Skeleton className="h-9 w-full" />
-        <Skeleton className="h-9 w-2/3" />
-      </div>
-    );
+  async function onDelete() {
+    // The meetings survive — `ON DELETE SET NULL`, and the service unfiles them
+    // explicitly so it can say how many. Worth saying before, not only after:
+    // the word "delete" over a folder full of recordings reads as worse than it
+    // is, and somebody who believes it will keep folders they do not want.
+    if (
+      !window.confirm(
+        `Delete “${folder.name}”? Its ${folder.meetingCount} meeting${
+          folder.meetingCount === 1 ? "" : "s"
+        } are kept — they move back to Unfiled.`,
+      )
+    ) {
+      return;
+    }
+    try {
+      const { unfiledMeetings } = await remove(folder.id).unwrap();
+      toast.success(
+        unfiledMeetings > 0
+          ? `Folder deleted. ${unfiledMeetings} meeting${unfiledMeetings === 1 ? "" : "s"} moved to Unfiled.`
+          : "Folder deleted.",
+      );
+    } catch {
+      toast.error("Couldn't delete that folder.");
+    }
   }
-  return (
-    <MeetingBranch
-      meetings={data ?? []}
-      empty="Nothing filed here yet. File a meeting from its page, or when you upload it."
-    />
-  );
-}
 
-function UnfiledRow({ open, onToggle }: { open: boolean; onToggle: () => void }) {
-  const { data, isLoading } = useGetUnfiledMeetingsQuery(undefined, { skip: !open });
-  // The count comes with the list, so a collapsed row cannot show one without
-  // fetching everything it is meant to be deferring.
   return (
-    <Card className="border-dashed">
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        aria-label={`${open ? "Collapse" : "Expand"} unfiled meetings`}
-        className="flex w-full items-center gap-3 px-4 py-3 text-left"
-      >
-        <ChevronRight
-          className={cn(
-            "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
-            open && "rotate-90",
+    <li className="group flex items-center gap-3 border-b px-1 py-3 transition-colors hover:bg-accent/40">
+      <Link href={`/projects/${folder.id}`} className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5">
+          {folder.favorite && (
+            <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400" aria-label="Starred" />
           )}
-        />
-        <Inbox className="h-4 w-4 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1">
-          <span className="block font-medium">Unfiled</span>
-          <span className="block text-xs text-muted-foreground">
-            Meetings that do not belong to a project yet
-          </span>
+          <span className="truncate font-semibold">{folder.name}</span>
         </span>
-        {open && data && (
-          <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] tabular-nums text-muted-foreground">
-            {data.length}
-          </span>
-        )}
-      </button>
+        <span className="mt-0.5 block text-sm text-muted-foreground">
+          {folder.meetingCount} conversation{folder.meetingCount === 1 ? "" : "s"}
+        </span>
+      </Link>
 
-      {open &&
-        (isLoading ? (
-          <div className="space-y-2 border-t px-4 py-3">
-            <Skeleton className="h-9 w-full" />
-          </div>
-        ) : (
-          <MeetingBranch meetings={data ?? []} empty="Everything is filed." />
-        ))}
-    </Card>
-  );
-}
+      <span className="shrink-0 text-sm text-muted-foreground">
+        {relativeDay(folder.updatedAt)}
+      </span>
 
-function MeetingBranch({
-  meetings,
-  empty,
-}: {
-  meetings: MeetingResponse[];
-  empty: string;
-}) {
-  if (meetings.length === 0) {
-    return <p className="border-t px-4 py-4 text-sm text-muted-foreground">{empty}</p>;
-  }
-  return (
-    <ul className="border-t">
-      {meetings.map((m) => (
-        <li key={m.id} className="border-b last:border-0">
-          <Link
-            href={`/meetings/${m.id}`}
-            className="flex items-center justify-between gap-3 py-2 pl-11 pr-4 transition-colors hover:bg-accent/50"
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label={`Actions for ${folder.name}`}
+            className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
-            <span className="min-w-0">
-              <span className="block truncate text-sm">{m.title}</span>
-              <span className="block text-xs text-muted-foreground">
-                {formatDateTime(m.createdAt)}
-              </span>
-            </span>
-            <StatusBadge status={m.status} />
-          </Link>
-        </li>
-      ))}
-    </ul>
+            <MoreHorizontal className="h-4 w-4" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuItem
+            onSelect={() =>
+              void update({ id: folder.id, body: { favorite: !folder.favorite } })
+            }
+          >
+            <Star
+              className={cn("mr-2 h-4 w-4", folder.favorite && "fill-amber-400 text-amber-400")}
+            />
+            {folder.favorite ? "Remove star" : "Star folder"}
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={onRename}>
+            <Pencil className="mr-2 h-4 w-4" /> Rename Folder
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={removing}
+            onSelect={(e) => {
+              e.preventDefault();
+              void onDelete();
+            }}
+            className="text-destructive focus:text-destructive"
+          >
+            <Trash2 className="mr-2 h-4 w-4" /> Delete Folder
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </li>
   );
 }

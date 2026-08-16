@@ -56,12 +56,30 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
     setUserId(next);
   }, []);
 
+  /**
+   * Dev mode has no session to end, but it does have a stored identity — and
+   * leaving it in place is not harmless. Closing an account calls `signOut`, and
+   * with nothing behind it the browser carried on as the user it had just
+   * deleted, re-provisioning that id on the next request. Forgetting the stored
+   * id and reloading drops the cached data with it.
+   */
+  const signOut = React.useCallback(() => {
+    try {
+      window.localStorage.removeItem(DEV_USER_KEY);
+    } catch {
+      /* ignore */
+    }
+    authStore.devUserId = DEFAULT_DEV_USER;
+    window.location.href = "/";
+  }, []);
+
   const value: AuthContextValue = {
     mode: "dev",
     userId,
     setDevUserId,
     isSignedIn: true,
     isLoaded,
+    signOut,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

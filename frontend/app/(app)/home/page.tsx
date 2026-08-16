@@ -38,7 +38,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { ActionItemsPanel } from "@/components/action-items-panel";
 import { HomeChatPanel } from "@/components/home-chat-panel";
 import { formatDuration } from "@/lib/format";
-import { groupByDay } from "@/lib/home";
+import { groupByDay } from "@/lib/days";
 import type { MeetingResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -108,7 +108,7 @@ export default function HomePage() {
                   {group.label}
                 </h2>
                 <ul className="space-y-2">
-                  {group.meetings.map((meeting) => (
+                  {group.items.map((meeting) => (
                     <ConversationRow key={meeting.id} meeting={meeting} />
                   ))}
                 </ul>
