@@ -75,7 +75,7 @@ again in the worker.
 | POST | `/api/v1/meetings` | `MeetingCreateRequest` | `MeetingResponse` |
 | POST | `/api/v1/meetings/import` | `{ "url", "title"?, "tags"? }` | `201 MeetingResponse` |
 | GET  | `/api/v1/preferences` | — | `PreferencesResponse` |
-| PATCH | `/api/v1/preferences` | `{ "autoEmailRecap"?, "recapEmail"? }` | `PreferencesResponse` |
+| PATCH | `/api/v1/preferences` | `{ "autoEmailRecap"?, "recapEmail"?, "displayName"?, "taskReminders"? }` | `PreferencesResponse` |
 | GET  | `/api/v1/meetings` | `?page&size&search&tag&status` | `Page<MeetingResponse>` |
 | GET  | `/api/v1/meetings/{id}` | — | `MeetingResponse` |
 | PATCH | `/api/v1/meetings/{id}` | `{ "title"?, "tags"? }` | `MeetingResponse` |
@@ -616,17 +616,80 @@ annotation.
 ### Action items
 | Method | Endpoint | Body | Response |
 |---|---|---|---|
-| GET | `/api/v1/action-items` | `?page&size&status&priority` | `Page<ActionItemResponse>` |
+| GET | `/api/v1/action-items` | `?page&size&status&priority&owner&due&meetingId&mine` | `Page<ActionItemResponse>` |
+| GET | `/api/v1/action-items/overview` | — | `ActionItemOverview` |
 | GET | `/api/v1/meetings/{id}/action-items` | — | `ActionItemResponse[]` |
-| POST | `/api/v1/meetings/{id}/action-items` | `{ title, ownerName?, dueDate?, priority?, sourceSentence? }` | `201 ActionItemResponse` |
-| PATCH | `/api/v1/action-items/{id}` | `{ ownerName?, dueDate?, priority?, status? }` | `ActionItemResponse` |
+| POST | `/api/v1/meetings/{id}/action-items` | `{ title, ownerName?, dueDate?, priority?, sourceSentence?, sourceStartSeconds? }` | `201 ActionItemResponse` |
+| PATCH | `/api/v1/action-items/{id}` | `{ title?, ownerName?, dueDate?, priority?, status? }` | `ActionItemResponse` |
+| PATCH | `/api/v1/action-items` | `{ ids: [], status }` | `{ "changed": n }` |
+| DELETE | `/api/v1/action-items/{id}` | — | `204` |
+| GET | `/api/v1/action-items/{id}/comments` | — | `ActionItemCommentResponse[]` |
+| POST | `/api/v1/action-items/{id}/comments` | `{ body }` | `201 ActionItemCommentResponse` |
+| DELETE | `/api/v1/action-items/{id}/comments/{commentId}` | — | `204` |
 
 `POST` exists for the transcript's selection menu: until it did, the one thing a
 reader is most likely to notice — a commitment the extraction pass missed — was
 the one thing they could not record. Hand-added items go in the same table as
 extracted ones, with `sourceSentence` carrying the transcript line as evidence,
 because "what did we promise" split across two lists by how each row was noticed
-is two answers.
+is two answers. It is also how the tracker adds an item by hand, which is why
+`meetingId` is in the path and not optional: an item with no meeting behind it
+has no source sentence, no recording to seek to and nothing for the chat to read.
+
+**A deadline is two fields.** `dueDate` is free text and always has been — the
+extractor is told to record the timing "in the words used", so it holds
+"Tuesday", "end of day", "before the demo". `dueOn` is that read as a calendar
+date by `common/DueDates`, resolved **once at write time against the meeting's
+own date** (so "Tuesday" said on the 12th is the 14th, and the same word in next
+week's meeting is a different day). It is null whenever the phrasing had no
+single reading, and the parser refuses far more than it accepts — including every
+bare numeric form like `03/04`, where a reader in Boston and one in London
+disagree about the month. A due date we invented produces a red badge on a task
+nobody is late with and an email about it at seven in the morning.
+
+`dueStatus` (`OVERDUE｜TODAY｜SOON｜LATER｜NONE`) and `daysUntilDue` are computed
+server-side against UTC today. That is deliberate: the list, the badge, the
+filter tabs and the reminder digest all need to agree on what "overdue" means,
+and one of those runs on a scheduler rather than in the browser. A completed item
+is always `NONE` — a red badge on something already ticked off is noise that
+teaches people to ignore red badges.
+
+**Reprocessing no longer destroys tracked work.** `edited` marks a row a person
+has touched — ticked off, retitled, reassigned, commented on, or added by hand —
+and the sweep in `CallbackService.replaceActionItems` now spares those, as V24
+already did for insights. The titles of the survivors are skipped on the way back
+in, so an item somebody completed is not re-extracted as a fresh OPEN duplicate
+of itself on every reprocess.
+
+**`sourceStartSeconds` is where the sentence was said**, matched back to a
+transcript segment by `common/SentenceLocator` when the brief is persisted, and
+taken straight from the selection for items added by hand. Null when the sentence
+could not be placed with confidence — short, common lines are never matched at
+all, because a link that seeks to the wrong moment plays somebody saying
+something else and reads as the evidence being fabricated.
+
+**Comments are a private working log, not a discussion.** There is one account
+per workspace, so there is nobody to reply to; the UI calls them notes. They
+exist because a status of OPEN cannot say "waiting on legal until Thursday", and
+they are rows rather than one growing text field because each entry keeps its own
+time. Writing one marks the parent item `edited` — the log cascades away with the
+item, so a note has to be enough to protect the item it is written on.
+
+**`?mine=true` is matched against `displayName` from preferences.** Nothing joins
+an account to a transcript — the account has an email, the transcript has "Priya"
+— so it has to be asked once. Until it is answered the endpoint returns an **empty
+page** rather than falling back to everything: a list of the whole workspace under
+the heading "My tasks" reads as an answer and is not one. `ActionItemOverview`
+carries the tab counts, the owner names actually assigned work (with counts, so
+the filter is a pick rather than a spelling test) and `me`, which is what lets the
+page offer that pick.
+
+**Task reminders** (`taskReminders` in preferences, off by default) send one
+digest a morning — 08:00 UTC, `TaskReminderJob` — listing what is overdue, due
+today, and due within `DueStatus.SOON_DAYS`. Nothing is sent on a day when
+nothing is due, and `users.task_reminder_sent_on` is stamped only on a successful
+send, so a redeploy at the wrong minute cannot mail the same digest twice and an
+SMTP outage costs a day rather than being silently swallowed.
 
 ### Billing & usage
 | Method | Endpoint | Body | Response |

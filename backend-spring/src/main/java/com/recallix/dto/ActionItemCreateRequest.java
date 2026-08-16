@@ -14,6 +14,11 @@ import jakarta.validation.constraints.Size;
  * <p>{@code sourceSentence} carries the transcript line it came from, the same
  * field the extractor fills, so a hand-added item is evidenced the same way as
  * a generated one and the list does not need to distinguish them.
+ *
+ * <p>{@code sourceStartSeconds} is the one thing a hand-added item knows that a
+ * generated one has to be told: the selection it came from already sits at a
+ * known moment in the recording, so the "play the sentence" link works without
+ * matching any text back to a segment.
  */
 public record ActionItemCreateRequest(
         @NotBlank @Size(max = 500) String title,
@@ -21,6 +26,7 @@ public record ActionItemCreateRequest(
         /** ISO date, or null. Stored as text like the extractor's output. */
         @Size(max = 40) String dueDate,
         String priority,
-        @Size(max = 2000) String sourceSentence
+        @Size(max = 2000) String sourceSentence,
+        Double sourceStartSeconds
 ) {
 }

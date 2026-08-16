@@ -6,6 +6,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import java.time.LocalDate;
 
 @Entity
 @Table(name = "users")
@@ -30,6 +31,24 @@ public class UserEntity {
     @Column(name = "recap_email")
     private String recapEmail;
 
+    /**
+     * The name this user is called by in their own meetings.
+     *
+     * <p>The only way to answer "which of these tasks are mine". Nothing joins
+     * an account to a transcript: the account has an email, the transcript has
+     * "Priya", and there is no third fact relating them. Null means never told.
+     */
+    @Column(name = "display_name")
+    private String displayName;
+
+    /** Mail a daily digest of what is overdue or due soon. */
+    @Column(name = "task_reminders", nullable = false)
+    private boolean taskReminders = false;
+
+    /** The last day a digest went out — the guard against sending two. */
+    @Column(name = "task_reminder_sent_on")
+    private LocalDate taskReminderSentOn;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -50,6 +69,15 @@ public class UserEntity {
 
     public String getRecapEmail() { return recapEmail; }
     public void setRecapEmail(String recapEmail) { this.recapEmail = recapEmail; }
+
+    public String getDisplayName() { return displayName; }
+    public void setDisplayName(String displayName) { this.displayName = displayName; }
+
+    public boolean isTaskReminders() { return taskReminders; }
+    public void setTaskReminders(boolean taskReminders) { this.taskReminders = taskReminders; }
+
+    public LocalDate getTaskReminderSentOn() { return taskReminderSentOn; }
+    public void setTaskReminderSentOn(LocalDate taskReminderSentOn) { this.taskReminderSentOn = taskReminderSentOn; }
 
     /** Where recaps go: the override when set, otherwise the account address. */
     public String effectiveRecapEmail() {

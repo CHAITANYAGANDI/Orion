@@ -145,6 +145,11 @@ services:
       KAFKA_SASL_JAAS_CONFIG: ${KAFKA_SASL_JAAS_CONFIG:-}
       RECALLIX_AUTH_MODE: ${RECALLIX_AUTH_MODE:-dev}
       RECALLIX_INTERNAL_TOKEN: ${RECALLIX_INTERNAL_TOKEN:-dev-internal-token}
+      # When the daily action-item digest goes out (six-field cron, UTC).
+      # Exposed because it is the one scheduled job that contacts people: an
+      # environment that should never mail anybody moves it out of reach or
+      # turns mail off entirely with RECALLIX_MAIL_ENABLED.
+      RECALLIX_TASKS_REMINDER_CRON: "${RECALLIX_TASKS_REMINDER_CRON:-0 0 8 * * *}"
       CLERK_ISSUER: ${CLERK_ISSUER:-}
       CLERK_JWKS_URL: ${CLERK_JWKS_URL:-}
       AI_SERVICE_URL: http://ai-service:8000

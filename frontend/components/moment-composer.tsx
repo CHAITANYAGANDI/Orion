@@ -180,6 +180,10 @@ export function ActionItemDialog({
           // The verbatim line, kept as evidence exactly as the extractor keeps
           // it, so a hand-added item is as traceable as a generated one.
           sourceSentence: passage.quote || undefined,
+          // And where it was said. The selection already knows, so this one
+          // does not need matching back to a segment the way an extracted
+          // item's sentence does.
+          sourceStartSeconds: passage.startSeconds,
         },
       }).unwrap();
       toast.success("Action item added.");

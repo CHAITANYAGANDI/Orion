@@ -1,6 +1,8 @@
 package com.recallix.service;
 
+import com.recallix.common.DueDates;
 import com.recallix.common.IdGenerator;
+import com.recallix.common.SentenceLocator;
 import com.recallix.domain.MeetingStatus;
 import com.recallix.dto.StatusEvent;
 import com.recallix.dto.callback.AiActionItem;
@@ -27,6 +29,10 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 
 /**
@@ -105,7 +111,7 @@ public class CallbackService {
         replaceTranscript(meetingId, result);
         replaceSegments(meetingId, result.segmentsOrEmpty());
         replaceSummary(meetingId, result);
-        replaceActionItems(meetingId, result.actionItemsOrEmpty());
+        replaceActionItems(meeting, result.actionItemsOrEmpty(), result.segmentsOrEmpty());
         replaceInsights(meeting, result.insightsOrEmpty());
 
         meeting.setStatus(MeetingStatus.READY);
@@ -177,20 +183,90 @@ public class CallbackService {
         summaries.save(s);
     }
 
-    private void replaceActionItems(String meetingId, List<AiActionItem> list) {
-        actionItems.deleteByMeetingId(meetingId);
+    /**
+     * Replace the extracted action items, keeping anything a person owns.
+     *
+     * <p>This used to be a clean sweep, which was harmless while the rows were
+     * read-only. It stopped being harmless the moment they could be ticked off:
+     * reprocessing a meeting — the normal way to pick up a corrected transcript
+     * — would silently un-complete every task and delete every one added by
+     * hand, along with its comments. Rows marked {@code edited} are now spared,
+     * exactly as {@link #replaceInsights} spares corrected decisions.
+     *
+     * <p>Each survivor then claims the incoming item it stands for, which is
+     * skipped. Without that, an item somebody completed would be re-extracted as
+     * a fresh OPEN duplicate of itself on every reprocess, and the tracker would
+     * grow a second copy of the same promise each time.
+     *
+     * <p>Two things are resolved here rather than at read time, because both
+     * depend on facts this callback has and later requests do not: the spoken
+     * deadline against the meeting's own date, and the source sentence against
+     * the segments that were just written.
+     */
+    private void replaceActionItems(Meeting meeting, List<AiActionItem> list, List<AiSegment> segs) {
+        String meetingId = meeting.getId();
+        actionItems.deleteDerivedByMeetingId(meetingId);
+        List<MeetingActionItem> unclaimed = new ArrayList<>(actionItems.findEditedByMeetingId(meetingId));
+
+        LocalDate reference = meeting.getCreatedAt().atZone(ZoneOffset.UTC).toLocalDate();
+        List<SentenceLocator.Line> lines = segs.stream()
+                .map(s -> new SentenceLocator.Line(s.start(), s.text()))
+                .toList();
+
         for (AiActionItem a : list) {
+            if (claim(unclaimed, a)) {
+                continue;
+            }
             MeetingActionItem e = new MeetingActionItem();
             e.setId(IdGenerator.actionItem());
             e.setMeetingId(meetingId);
             e.setTitle(a.taskTitle());
             e.setOwnerName(a.ownerName());
             e.setDueDate(a.dueDate());
+            e.setDueOn(DueDates.resolve(a.dueDate(), reference));
             e.setPriority(a.priority() == null ? "medium" : a.priority());
             e.setStatus("OPEN");
             e.setSourceSentence(a.sourceSentence());
+            e.setSourceStartSeconds(SentenceLocator.locate(a.sourceSentence(), lines));
             actionItems.save(e);
         }
+    }
+
+    /**
+     * Decide whether one of the surviving rows already is this extracted item,
+     * and if so consume it.
+     *
+     * <p>Matched on the title <em>or</em> the sentence it came from. The title
+     * alone is not enough: somebody who corrects a title — which is one of the
+     * commonest edits — would get the extractor's original wording back beside
+     * their correction on the next reprocess. The source sentence does not
+     * change when a person edits a row, so it is the more stable identity of the
+     * two, and either matching is enough.
+     *
+     * <p>Consumed rather than merely tested, so one survivor suppresses exactly
+     * one incoming item. A meeting where somebody promised two things in one
+     * breath yields two items quoting the same sentence, and editing one of them
+     * must not delete the other.
+     */
+    private static boolean claim(List<MeetingActionItem> unclaimed, AiActionItem incoming) {
+        String title = normalise(incoming.taskTitle());
+        String sentence = normalise(incoming.sourceSentence());
+
+        for (Iterator<MeetingActionItem> it = unclaimed.iterator(); it.hasNext(); ) {
+            MeetingActionItem kept = it.next();
+            boolean same = (!title.isEmpty() && title.equals(normalise(kept.getTitle())))
+                    || (!sentence.isEmpty() && sentence.equals(normalise(kept.getSourceSentence())));
+            if (same) {
+                it.remove();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Case- and punctuation-insensitive, so "Draft the plan." and "draft the plan" are one task. */
+    private static String normalise(String text) {
+        return text == null ? "" : text.trim().toLowerCase().replaceAll("[^a-z0-9]+", " ").trim();
     }
 
     /**

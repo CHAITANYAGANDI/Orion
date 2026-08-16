@@ -112,11 +112,21 @@ export interface PreferencesResponse {
   recapEmail: string | null;
   /** Where recaps actually go — the override, or the account address. */
   effectiveRecapEmail: string | null;
+  /**
+   * What this user is called in their own meetings. The only thing that can
+   * turn a list of owners into "my tasks"; null until they say.
+   */
+  displayName: string | null;
+  /** Daily digest of what is overdue or due soon. */
+  taskReminders: boolean;
 }
 
 export interface PreferencesUpdateRequest {
   autoEmailRecap?: boolean;
   recapEmail?: string;
+  /** Blank clears it. */
+  displayName?: string;
+  taskReminders?: boolean;
 }
 
 export interface MeetingImportRequest {
@@ -287,6 +297,15 @@ export interface SummaryTemplateResponse {
   sectionTitles: string[];
 }
 
+/**
+ * How a task stands against its deadline, decided by the server.
+ *
+ * The list, the badge and the reminder email have to agree on what "overdue"
+ * means, and one of those runs on a scheduler rather than in this browser — so
+ * the rule lives in Java and this is the answer, not a second implementation.
+ */
+export type DueStatus = "NONE" | "OVERDUE" | "TODAY" | "SOON" | "LATER";
+
 // Spring ActionItemResponse — uses `title` (NOT the AI-side `taskTitle`).
 export interface ActionItemResponse {
   id: string;
@@ -294,18 +313,61 @@ export interface ActionItemResponse {
   meetingTitle?: string | null;
   title: string;
   ownerName?: string | null;
+  /** The deadline in the words it was said in — "Tuesday", "end of day". */
   dueDate?: string | null;
+  /** That deadline as a date, absent when the phrasing had no single reading. */
+  dueOn?: string | null;
+  dueStatus: DueStatus;
+  /** Negative when overdue, 0 today, null when there is no resolved date. */
+  daysUntilDue?: number | null;
   priority: Priority;
   status: ActionItemStatus;
   sourceSentence?: string | null;
+  /** Where the source sentence sits in the recording, when it could be located. */
+  sourceStartSeconds?: number | null;
+  completedAt?: string | null;
+  /** A person has changed this row, so a reprocess will leave it alone. */
+  edited: boolean;
+  commentCount: number;
   createdAt?: string;
+  updatedAt?: string;
 }
 
+/**
+ * A null field means "leave it alone".
+ *
+ * `dueDate` is the exception: an empty string clears it, because null cannot
+ * mean both "don't touch" and "remove".
+ */
 export interface ActionItemPatchRequest {
+  title?: string;
   ownerName?: string | null;
   dueDate?: string | null;
   priority?: Priority;
   status?: ActionItemStatus;
+}
+
+export interface ActionItemOverview {
+  counts: {
+    open: number;
+    overdue: number;
+    dueSoon: number;
+    mine: number;
+    done: number;
+  };
+  /** The names actually assigned work here — what the owner filter offers. */
+  owners: { name: string; count: number }[];
+  /** What this user is called in their own meetings, or null if never said. */
+  me?: string | null;
+}
+
+/** One entry in a task's private working log. No author — one account per workspace. */
+export interface ActionItemComment {
+  id: string;
+  actionItemId: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ReprocessResponse {
@@ -696,6 +758,11 @@ export interface ActionItemCreateRequest {
   priority?: Priority;
   /** The transcript line it came from — the same field the extractor fills. */
   sourceSentence?: string;
+  /**
+   * Where that line sits in the recording. A selection already knows; an
+   * extracted item's sentence has to be matched back to a segment server-side.
+   */
+  sourceStartSeconds?: number;
 }
 
 /** The anonymous view of a shared meeting — no ids, no audio, no owner. */
@@ -760,6 +827,13 @@ export interface MeetingListQuery {
 export interface ActionItemListQuery {
   page?: number;
   size?: number;
-  status?: ActionItemStatus;
+  /** `OPEN_ANY` is everything unfinished — the default view. */
+  status?: ActionItemStatus | "OPEN_ANY";
   priority?: Priority;
+  /** A name, or `unassigned` for the ones nobody owns. */
+  owner?: string;
+  due?: "overdue" | "soon" | "dated" | "none";
+  meetingId?: string;
+  /** Matched against the display name in settings; empty until one is set. */
+  mine?: boolean;
 }

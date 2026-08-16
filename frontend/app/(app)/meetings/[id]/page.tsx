@@ -81,7 +81,9 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { StatusBadge, PriorityBadge } from "@/components/status-badge";
+import { StatusBadge } from "@/components/status-badge";
+import { ActionItemRow } from "@/components/action-item-row";
+import { NewActionItemDialog } from "@/components/new-action-item-dialog";
 import { AudioPlayer, useAudioController } from "@/components/audio-player";
 import { ShareDialog } from "@/components/share-dialog";
 import { MeetingTitle, MeetingTags } from "@/components/meeting-title";
@@ -209,6 +211,9 @@ export default function MeetingDetailPage() {
   const summary = useGetSummaryQuery(id, { skip: !ready });
   const transcript = useGetTranscriptQuery(id, { skip: !ready });
   const actions = useGetMeetingActionItemsQuery(id, { skip: !ready });
+  // The tab counts what is left, not what was found. "Action items 6" beside a
+  // list where five are ticked off reads as six things to do.
+  const openActions = (actions.data ?? []).filter((a) => a.status !== "DONE").length;
   // Also read inside the transcript panel; RTK Query dedupes to one request.
   // Fetched here because the player needs it for "play highlights only".
   const moments = useGetMomentsQuery(id, { skip: !ready });
@@ -462,7 +467,7 @@ export default function MeetingDetailPage() {
             <TabsTrigger value="actions">
               Action items
               {actions.data ? (
-                <span className="tabular ml-1.5 font-mono text-xs text-muted-foreground">{actions.data.length}</span>
+                <span className="tabular ml-1.5 font-mono text-xs text-muted-foreground">{openActions}</span>
               ) : null}
             </TabsTrigger>
             <TabsTrigger value="transcript">Transcript</TabsTrigger>
@@ -494,37 +499,36 @@ export default function MeetingDetailPage() {
 
           <TabsContent value="actions">
             <Card>
-              <CardContent className="pt-6">
+              <CardContent className="space-y-3 pt-6">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm text-muted-foreground">
+                    {openActions === 0
+                      ? "Everything here is done."
+                      : `${openActions} of ${actions.data?.length ?? 0} still open.`}
+                  </p>
+                  {/* Nothing here needs a transcript selection: a commitment made
+                      in the room and never said aloud is exactly the one the
+                      extractor cannot find. */}
+                  <NewActionItemDialog meetingId={id} />
+                </div>
+
                 {actions.data && actions.data.length > 0 ? (
                   <ul className="divide-y divide-border">
                     {actions.data.map((a) => (
-                      <li
+                      <ActionItemRow
                         key={a.id}
-                        className="-mx-3 flex items-start justify-between gap-4 px-3 py-3 transition-colors first:pt-0 hover:bg-accent/60"
-                      >
-                        <div className="min-w-0">
-                          <p className="font-medium leading-snug">{a.title}</p>
-                          <p className="tabular mt-1 font-mono text-xs uppercase tracking-wide text-muted-foreground">
-                            {a.ownerName || "Unassigned"}
-                            {a.dueDate ? <> <span className="text-border" aria-hidden>/</span> due {a.dueDate}</> : null}
-                          </p>
-                          {/* The extracted sentence is evidence for the row above
-                              it, so it is set as a quotation with a rule rather
-                              than a third line of grey text. */}
-                          {a.sourceSentence && (
-                            <blockquote className="mt-2 border-l-2 border-highlight/40 pl-3 text-sm italic text-muted-foreground">
-                              {a.sourceSentence}
-                            </blockquote>
-                          )}
-                        </div>
-                        <PriorityBadge priority={a.priority} />
-                      </li>
+                        item={a}
+                        showMeeting={false}
+                        // There is a player on this page, so the sentence plays
+                        // here rather than opening the meeting again.
+                        onOpenSource={audio.seekTo}
+                      />
                     ))}
                   </ul>
                 ) : (
                   <EmptyText>No action items were extracted.</EmptyText>
                 )}
-                <Button variant="link" className="mt-2 px-0" asChild>
+                <Button variant="link" className="px-0" asChild>
                   <Link href="/action-items">Manage all action items →</Link>
                 </Button>
               </CardContent>

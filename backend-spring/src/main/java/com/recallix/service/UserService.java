@@ -48,18 +48,44 @@ public class UserService {
 
     /**
      * Apply a partial preferences update. A null field is left alone; a blank
-     * {@code recapEmail} clears the override so recaps fall back to the
-     * account address.
+     * {@code recapEmail} or {@code displayName} clears it — recaps then fall
+     * back to the account address, and My tasks goes back to not knowing who
+     * you are.
      */
     @Transactional
-    public UserEntity updatePreferences(String userId, Boolean autoEmailRecap, String recapEmail) {
+    public UserEntity updatePreferences(String userId, PreferencesPatch patch) {
         UserEntity user = require(userId);
-        if (autoEmailRecap != null) {
-            user.setAutoEmailRecap(autoEmailRecap);
+        if (patch.autoEmailRecap() != null) {
+            user.setAutoEmailRecap(patch.autoEmailRecap());
         }
-        if (recapEmail != null) {
-            user.setRecapEmail(recapEmail.isBlank() ? null : recapEmail.trim());
+        if (patch.recapEmail() != null) {
+            user.setRecapEmail(patch.recapEmail().isBlank() ? null : patch.recapEmail().trim());
+        }
+        if (patch.displayName() != null) {
+            user.setDisplayName(patch.displayName().isBlank() ? null : patch.displayName().trim());
+        }
+        if (patch.taskReminders() != null) {
+            user.setTaskReminders(patch.taskReminders());
+            // Turning them back on should send today's digest rather than wait
+            // for tomorrow, so the switch visibly does something.
+            if (patch.taskReminders()) {
+                user.setTaskReminderSentOn(null);
+            }
         }
         return user;
+    }
+
+    /**
+     * The mutable half of the preferences, as its own type.
+     *
+     * <p>Four nullable arguments in a row is a call nobody can read and a
+     * transposition nobody can see; this one is named at the call site.
+     */
+    public record PreferencesPatch(
+            Boolean autoEmailRecap,
+            String recapEmail,
+            String displayName,
+            Boolean taskReminders
+    ) {
     }
 }

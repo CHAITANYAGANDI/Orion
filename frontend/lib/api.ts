@@ -1,8 +1,11 @@
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
 import { buildAuthHeaders } from "@/lib/auth-store";
 import type {
+  ActionItemComment,
   ActionItemCreateRequest,
   ActionItemListQuery,
+  ActionItemOverview,
+  ActionItemStatus,
   ChatConversation,
   ActionItemPatchRequest,
   ActionItemResponse,
@@ -93,6 +96,7 @@ export const api = createApi({
     "Meetings",
     "ActionItem",
     "ActionItems",
+    "ActionItemComments",
     "Usage",
     "Preferences",
     "Chat",
@@ -757,6 +761,10 @@ export const api = createApi({
         params.set("size", String(query.size ?? 50));
         if (query.status) params.set("status", query.status);
         if (query.priority) params.set("priority", query.priority);
+        if (query.owner) params.set("owner", query.owner);
+        if (query.due) params.set("due", query.due);
+        if (query.meetingId) params.set("meetingId", query.meetingId);
+        if (query.mine) params.set("mine", "true");
         return `/action-items?${params.toString()}`;
       },
       providesTags: (result) =>
@@ -771,6 +779,18 @@ export const api = createApi({
           : [{ type: "ActionItems" as const, id: "LIST" }],
     }),
 
+    /**
+     * The tab counts, the owner filter's values and the caller's own name.
+     *
+     * Tagged with the same LIST tag as the rows, so completing something moves
+     * its count too — a tracker whose tabs disagree with its list is worse than
+     * one with no tabs.
+     */
+    getActionItemOverview: builder.query<ActionItemOverview, void>({
+      query: () => "/action-items/overview",
+      providesTags: [{ type: "ActionItems", id: "LIST" }],
+    }),
+
     patchActionItem: builder.mutation<
       ActionItemResponse,
       { id: string; body: ActionItemPatchRequest }
@@ -782,6 +802,58 @@ export const api = createApi({
       }),
       invalidatesTags: (_r, _e, arg) => [
         { type: "ActionItem", id: arg.id },
+        { type: "ActionItems", id: "LIST" },
+      ],
+    }),
+
+    /** One status, many items — see the backend for why the reply is a count. */
+    bulkPatchActionItems: builder.mutation<
+      { changed: number },
+      { ids: string[]; status: ActionItemStatus }
+    >({
+      query: (body) => ({ url: "/action-items", method: "PATCH", body }),
+      invalidatesTags: [{ type: "ActionItems", id: "LIST" }],
+    }),
+
+    deleteActionItem: builder.mutation<void, string>({
+      query: (id) => ({ url: `/action-items/${id}`, method: "DELETE" }),
+      invalidatesTags: [{ type: "ActionItems", id: "LIST" }],
+    }),
+
+    // ---- Action item comments ----
+    // Fetched per item and only when one is opened: a list of fifty tasks would
+    // otherwise be fifty requests for logs nobody is reading.
+    getActionItemComments: builder.query<ActionItemComment[], string>({
+      query: (id) => `/action-items/${id}/comments`,
+      providesTags: (_r, _e, id) => [{ type: "ActionItemComments", id }],
+    }),
+
+    addActionItemComment: builder.mutation<
+      ActionItemComment,
+      { id: string; body: string }
+    >({
+      query: ({ id, body }) => ({
+        url: `/action-items/${id}/comments`,
+        method: "POST",
+        body: { body },
+      }),
+      // The row shows a comment count, so the item list is stale too.
+      invalidatesTags: (_r, _e, arg) => [
+        { type: "ActionItemComments", id: arg.id },
+        { type: "ActionItems", id: "LIST" },
+      ],
+    }),
+
+    deleteActionItemComment: builder.mutation<
+      void,
+      { id: string; commentId: string }
+    >({
+      query: ({ id, commentId }) => ({
+        url: `/action-items/${id}/comments/${commentId}`,
+        method: "DELETE",
+      }),
+      invalidatesTags: (_r, _e, arg) => [
+        { type: "ActionItemComments", id: arg.id },
         { type: "ActionItems", id: "LIST" },
       ],
     }),
@@ -915,7 +987,13 @@ export const {
   useDeleteVocabularyTermMutation,
   useEditSegmentsMutation,
   useGetActionItemsQuery,
+  useGetActionItemOverviewQuery,
   usePatchActionItemMutation,
+  useBulkPatchActionItemsMutation,
+  useDeleteActionItemMutation,
+  useGetActionItemCommentsQuery,
+  useAddActionItemCommentMutation,
+  useDeleteActionItemCommentMutation,
   useGetShareQuery,
   useGetShareLinksQuery,
   useCreateShareMutation,

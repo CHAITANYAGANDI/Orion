@@ -30,6 +30,8 @@ public class PreferencesController {
     @PatchMapping
     public PreferencesResponse update(@Valid @RequestBody PreferencesUpdateRequest req) {
         return PreferencesResponse.from(users.updatePreferences(
-                SecurityUtils.currentUserId(), req.autoEmailRecap(), req.recapEmail()));
+                SecurityUtils.currentUserId(),
+                new UserService.PreferencesPatch(
+                        req.autoEmailRecap(), req.recapEmail(), req.displayName(), req.taskReminders())));
     }
 }

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { Mail } from "lucide-react";
+import { ListChecks, Mail } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useAppDispatch, useAppSelector } from "@/lib/hooks";
 import { setNotifyProcessingDone } from "@/lib/uiSlice";
@@ -50,6 +50,8 @@ export default function SettingsPage() {
       </Card>
 
       <RecapEmailCard />
+
+      <ActionItemsCard />
 
       <VocabularyCard />
 
@@ -169,6 +171,80 @@ function RecapEmailCard() {
         <p className="text-xs text-muted-foreground">
           The recap is drafted from the meeting&apos;s summary and action items,
           the same as the draft on each meeting page. It is sent once per meeting.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Two settings that only make sense together.
+ *
+ * The name is what makes "My tasks" possible at all: action items are assigned
+ * to whoever the transcript names, and nothing joins that to an account. The
+ * digest is the only thing in Recallix that contacts you without you opening it,
+ * and it is worth very little until it knows which of the tasks are yours.
+ */
+function ActionItemsCard() {
+  const prefs = useGetPreferencesQuery();
+  const [update, { isLoading }] = useUpdatePreferencesMutation();
+  const [name, setName] = React.useState<string | null>(null);
+
+  // Seeded once, so a refetch cannot clobber what is being typed.
+  const loaded = prefs.data;
+  React.useEffect(() => {
+    if (loaded && name === null) setName(loaded.displayName ?? "");
+  }, [loaded, name]);
+
+  async function save(patch: { displayName?: string; taskReminders?: boolean }) {
+    try {
+      await update(patch).unwrap();
+      toast.success("Saved.");
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <ListChecks className="h-4 w-4 text-primary" /> Action items
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-2">
+          <Label htmlFor="display-name">Your name in meetings</Label>
+          <div className="flex gap-2">
+            <Input
+              id="display-name"
+              value={name ?? ""}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Priya"
+            />
+            <Button
+              variant="outline"
+              disabled={isLoading}
+              onClick={() => save({ displayName: name ?? "" })}
+              className="shrink-0"
+            >
+              Save
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Spell it the way your transcripts do — that is what tasks are
+            assigned to. Used for My tasks, and nothing else.
+          </p>
+        </div>
+
+        <ToggleRow
+          label="Email me a daily digest of what is overdue or due soon"
+          checked={prefs.data?.taskReminders ?? false}
+          onChange={(v) => save({ taskReminders: v })}
+        />
+        <p className="text-xs text-muted-foreground">
+          One message a morning, and none at all on a day when nothing is due.
+          Goes to the same address as your recaps.
         </p>
       </CardContent>
     </Card>
