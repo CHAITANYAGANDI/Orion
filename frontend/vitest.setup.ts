@@ -28,6 +28,24 @@ if (!Element.prototype.scrollIntoView) {
 }
 
 /**
+ * jsdom implements no Pointer Events API.
+ *
+ * Radix's Select asks the element it is opening whether it currently has
+ * pointer capture, which throws rather than returning false. The failure names
+ * `hasPointerCapture` and surfaces as an unhandled exception outside the test
+ * that caused it, so a filter dropdown that works perfectly in a browser breaks
+ * an unrelated assertion several tests later.
+ *
+ * Capture is meaningless without a real pointer, so "nothing is captured" is
+ * both the honest answer and the one the component needs.
+ */
+if (!Element.prototype.hasPointerCapture) {
+  Element.prototype.hasPointerCapture = () => false;
+  Element.prototype.setPointerCapture = () => {};
+  Element.prototype.releasePointerCapture = () => {};
+}
+
+/**
  * jsdom has no media pipeline: `play()` throws "not implemented" and `pause()`
  * does nothing observable.
  *

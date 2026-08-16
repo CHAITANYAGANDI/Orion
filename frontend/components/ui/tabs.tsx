@@ -6,31 +6,53 @@ import { cn } from "@/lib/utils";
 
 const Tabs = TabsPrimitive.Root;
 
+/** `pill` is the shadcn default. `underline` reads as a document's section rule
+ *  rather than a control, which suits full-page views where the tabs are the
+ *  primary navigation instead of a widget inside a card. */
+type TabsVariant = "pill" | "underline";
+
+const TabsVariantContext = React.createContext<TabsVariant>("pill");
+
 const TabsList = React.forwardRef<
   React.ElementRef<typeof TabsPrimitive.List>,
-  React.ComponentPropsWithoutRef<typeof TabsPrimitive.List>
->(({ className, ...props }, ref) => (
-  <TabsPrimitive.List
-    ref={ref}
-    className={cn("inline-flex h-9 items-center justify-center rounded-lg bg-muted p-1 text-muted-foreground", className)}
-    {...props}
-  />
+  React.ComponentPropsWithoutRef<typeof TabsPrimitive.List> & { variant?: TabsVariant }
+>(({ className, variant = "pill", ...props }, ref) => (
+  <TabsVariantContext.Provider value={variant}>
+    <TabsPrimitive.List
+      ref={ref}
+      className={cn(
+        variant === "underline"
+          ? "inline-flex items-center gap-6 border-b border-border text-muted-foreground"
+          : "inline-flex h-9 items-center justify-center rounded-lg bg-muted p-1 text-muted-foreground",
+        className
+      )}
+      {...props}
+    />
+  </TabsVariantContext.Provider>
 ));
 TabsList.displayName = TabsPrimitive.List.displayName;
 
 const TabsTrigger = React.forwardRef<
   React.ElementRef<typeof TabsPrimitive.Trigger>,
   React.ComponentPropsWithoutRef<typeof TabsPrimitive.Trigger>
->(({ className, ...props }, ref) => (
-  <TabsPrimitive.Trigger
-    ref={ref}
-    className={cn(
-      "inline-flex items-center justify-center whitespace-nowrap rounded-md px-3 py-1 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow",
-      className
-    )}
-    {...props}
-  />
-));
+>(({ className, ...props }, ref) => {
+  const variant = React.useContext(TabsVariantContext);
+  return (
+    <TabsPrimitive.Trigger
+      ref={ref}
+      className={cn(
+        "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
+        variant === "underline"
+          ? // -1px pulls the active rule over the list's own border so they read
+            // as one line rather than two stacked.
+            "relative -mb-px border-b-2 border-transparent px-0 py-2 hover:text-foreground data-[state=active]:border-highlight data-[state=active]:text-foreground"
+          : "rounded-md px-3 py-1 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow",
+        className
+      )}
+      {...props}
+    />
+  );
+});
 TabsTrigger.displayName = TabsPrimitive.Trigger.displayName;
 
 const TabsContent = React.forwardRef<

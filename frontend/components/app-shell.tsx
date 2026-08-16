@@ -14,6 +14,7 @@ import {
   Mic,
   LogOut,
   Sparkles,
+  FolderOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
@@ -35,7 +36,11 @@ const NAV = [
   { href: "/record", label: "Record meeting", icon: Mic },
   { href: "/upload", label: "Upload meeting", icon: Upload },
   { href: "/ask", label: "Ask Recallix", icon: Sparkles },
-  { href: "/search", label: "Search meetings", icon: Search },
+  { href: "/projects", label: "Projects", icon: FolderOpen },
+  // Not "Search meetings" any more: it searches people, decisions, commitments
+  // and every sentence anyone said, and a label that promises less than the
+  // page does is a feature nobody finds.
+  { href: "/search", label: "Search", icon: Search },
   { href: "/action-items", label: "Action items", icon: ListChecks },
   { href: "/billing", label: "Billing", icon: CreditCard },
   { href: "/settings", label: "Settings", icon: SettingsIcon },

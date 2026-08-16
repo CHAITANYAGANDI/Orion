@@ -28,6 +28,7 @@ import com.recallix.repository.MeetingInsightRepository;
 import com.recallix.repository.MeetingRepository;
 import com.recallix.repository.MeetingSummaryRepository;
 import com.recallix.repository.MeetingTranscriptRepository;
+import com.recallix.repository.ProjectRepository;
 import com.recallix.repository.TranscriptSegmentRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -83,6 +84,8 @@ public class MeetingService {
     private final SummaryTemplateService templates;
     private final KnownSpeakerService knownSpeakers;
     private final VocabularyService vocabulary;
+    /** Only to verify a project id a client sent — see {@code createMeeting}. */
+    private final ProjectRepository projects;
 
     public MeetingService(MeetingRepository meetings,
                           MeetingTranscriptRepository transcripts,
@@ -97,7 +100,9 @@ public class MeetingService {
                           AiClient ai,
                           SummaryTemplateService templates,
                           KnownSpeakerService knownSpeakers,
-                          VocabularyService vocabulary) {
+                          VocabularyService vocabulary,
+                          ProjectRepository projects) {
+        this.projects = projects;
         this.meetings = meetings;
         this.transcripts = transcripts;
         this.segments = segments;
@@ -158,6 +163,14 @@ public class MeetingService {
             meeting.setDurationSeconds(req.durationSeconds());
         }
         meeting.setSummaryTemplate(templates.requireKnown(req.summaryTemplate()));
+        if (req.projectId() != null && !req.projectId().isBlank()) {
+            // Checked, not trusted: an id from the client could name somebody
+            // else's project, and filing into it would put this recording in
+            // their sidebar and inside the answers their project chat gives.
+            projects.findByIdAndUserId(req.projectId(), userId)
+                    .orElseThrow(() -> ApiException.notFound("Project not found"));
+            meeting.setProjectId(req.projectId());
+        }
         meeting.setStatus(MeetingStatus.QUEUED);
 
         enqueueProcessing(meeting);
@@ -677,7 +690,7 @@ public class MeetingService {
                 m.getTags(), audioUrl,
                 m.getDurationSeconds(), m.getCreatedAt(), m.getErrorMessage(),
                 m.getSourceType(), m.getSourceUrl(), m.getLanguage(),
-                m.getSummaryTemplate(), m.getContentType());
+                m.getSummaryTemplate(), m.getContentType(), m.getProjectId());
     }
 
     private void validateContentType(String contentType) {

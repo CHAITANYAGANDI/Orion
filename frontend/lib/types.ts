@@ -63,6 +63,13 @@ export interface MeetingCreateRequest {
   tags?: string[];
   contentType?: string;
   durationSeconds?: number;
+  summaryTemplate?: string;
+  /**
+   * File it as it arrives. The one piece of metadata worth asking for up front:
+   * whoever is uploading knows which project this belongs to before they have
+   * heard a word of it.
+   */
+  projectId?: string;
 }
 
 /** Renaming or re-tagging afterwards. Omitted fields are left alone. */
@@ -96,6 +103,8 @@ export interface MeetingResponse {
    * YouTube imports — both render as audio.
    */
   contentType?: string | null;
+  /** The project it is filed under, or null for unfiled (V30). */
+  projectId?: string | null;
 }
 
 export interface PreferencesResponse {
@@ -342,10 +351,38 @@ export interface ChatAskRequest {
 export interface ChatConversation {
   id: string;
   meetingId: string | null;
+  /** Set for a project chat. Both null is the workspace. */
+  projectId: string | null;
   title: string;
   messageCount: number;
   createdAt: string;
   updatedAt: string;
+}
+
+// ---- Projects (V30) ----
+
+/**
+ * A body of work meetings are filed into.
+ *
+ * Not a folder, and the difference is the feature: a project is a thing that is
+ * happening, which is what makes "ask Recallix about this project" a sensible
+ * sentence. Exactly one per meeting, or none — tags remain the many-to-many.
+ */
+export interface Project {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  /** What makes the row worth showing, and whether asking it anything can work. */
+  meetingCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectInput {
+  name?: string;
+  description?: string;
+  color?: string;
 }
 
 // ---- Workspace-wide chat & semantic search ----
@@ -371,6 +408,139 @@ export interface SemanticSearchHit {
   start?: number | null;
   end?: number | null;
   score: number; // cosine similarity in [0,1]
+}
+
+// ---- Workspace search (GET /search) ----
+
+/**
+ * The five kinds of thing a search can find. `risks` is a sixth group and not
+ * in the original sketch: decisions and risks are one store told apart by a
+ * `kind` (V24), so searching one and not the other would leave a hole with no
+ * explanation behind it — the term is in the archive, on the meeting page,
+ * under a heading right beside Decisions, and search would not admit it.
+ */
+export type SearchGroupKey =
+  | "meetings"
+  | "people"
+  | "decisions"
+  | "risks"
+  | "commitments"
+  | "mentions";
+
+/** A page of one kind of result, and how many there are in total. */
+export interface SearchGroup<T> {
+  total: number;
+  hits: T[];
+}
+
+export interface SearchMeetingHit {
+  id: string;
+  title: string;
+  status: MeetingStatus;
+  createdAt: string;
+  durationSeconds?: number | null;
+  tags: string[];
+  summaryTemplate: string;
+  /** Matching utterances inside it — why a meeting with an unrelated title is here. */
+  mentions: number;
+  titleMatch: boolean;
+}
+
+/**
+ * Someone in the archive. Not an account: Recallix has one of those per
+ * workspace. Anyone who spoke, owns a commitment, or has been named as a
+ * speaker before — `segments` counts what they said, `mentions` counts other
+ * people saying their name, `commitments` counts what they owe. A person can
+ * score high on the last two having attended nothing.
+ */
+export interface SearchPersonHit {
+  name: string;
+  meetings: number;
+  segments: number;
+  mentions: number;
+  commitments: number;
+}
+
+export interface SearchInsightHit {
+  id: string;
+  meetingId: string;
+  meetingTitle: string;
+  meetingCreatedAt: string;
+  kind: "DECISION" | "RISK";
+  text: string;
+}
+
+/** A commitment — which in Recallix is an action item. There is no second store. */
+export interface SearchCommitmentHit {
+  id: string;
+  meetingId: string;
+  meetingTitle: string;
+  meetingCreatedAt: string;
+  title: string;
+  owner?: string | null;
+  status: ActionItemStatus;
+  dueDate?: string | null;
+  priority: Priority;
+}
+
+export interface SearchMentionHit {
+  segmentId: string;
+  meetingId: string;
+  meetingTitle: string;
+  meetingCreatedAt: string;
+  speaker?: string | null;
+  /** Seconds into the recording — what makes the mention worth listing. */
+  start?: number | null;
+  text: string;
+}
+
+export interface SearchResponse {
+  query: string;
+  meetings: SearchGroup<SearchMeetingHit>;
+  people: SearchGroup<SearchPersonHit>;
+  decisions: SearchGroup<SearchInsightHit>;
+  risks: SearchGroup<SearchInsightHit>;
+  commitments: SearchGroup<SearchCommitmentHit>;
+  mentions: SearchGroup<SearchMentionHit>;
+}
+
+/**
+ * The filters, all optional. Absent means "not filtering", which the API reads
+ * as the empty string rather than null — see the Spring `SearchQuery`.
+ *
+ * There is no `participant` here and that is not an omission: V23 dropped the
+ * participants table, so the only record of who was in a meeting is who spoke
+ * in it. One concept, one filter.
+ */
+export interface SearchFilterState {
+  from?: string;
+  to?: string;
+  status?: MeetingStatus | "";
+  /** Summary-template slug — what a "meeting type" is in Recallix. */
+  type?: string;
+  tag?: string;
+  /** A project id, or `none` for meetings filed nowhere (V30). */
+  project?: string;
+  speaker?: string;
+  owner?: string;
+  withDecisions?: boolean;
+}
+
+export interface SearchQueryArgs extends SearchFilterState {
+  q: string;
+  /** Absent asks for every group; naming one is how "see all" pages into it. */
+  groups?: SearchGroupKey[];
+  limit?: number;
+  offset?: number;
+}
+
+/** What each filter can actually be set to in this workspace. */
+export interface SearchFacets {
+  speakers: string[];
+  tags: string[];
+  owners: string[];
+  types: string[];
+  statuses: MeetingStatus[];
 }
 
 // ---- Translation ----

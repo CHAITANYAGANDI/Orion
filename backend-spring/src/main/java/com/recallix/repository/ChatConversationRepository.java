@@ -11,18 +11,28 @@ public interface ChatConversationRepository extends JpaRepository<ChatConversati
     /**
      * The history picker's read: one scope, most recently spoken to first.
      *
-     * <p>Two methods rather than one with a nullable argument because JPQL
+     * <p>A method per scope rather than one with nullable arguments because JPQL
      * treats {@code = null} as unknown rather than as a match, so a single
      * derived query would silently return nothing for the workspace chat.
+     *
+     * <p>The workspace variants test <em>both</em> ids for null, which is the
+     * whole reason they changed in V30. "Workspace" used to mean "no meeting";
+     * with projects it means "no meeting and no project", and the old spelling
+     * would have listed every project's threads in the workspace history and
+     * deleted them when it was cleared.
      */
     List<ChatConversation> findByUserIdAndMeetingIdOrderByUpdatedAtDesc(String userId, String meetingId);
 
-    List<ChatConversation> findByUserIdAndMeetingIdIsNullOrderByUpdatedAtDesc(String userId);
+    List<ChatConversation> findByUserIdAndProjectIdOrderByUpdatedAtDesc(String userId, String projectId);
+
+    List<ChatConversation> findByUserIdAndMeetingIdIsNullAndProjectIdIsNullOrderByUpdatedAtDesc(String userId);
 
     /** The one to reopen when a chat is opened without naming a conversation. */
     Optional<ChatConversation> findFirstByUserIdAndMeetingIdOrderByUpdatedAtDesc(String userId, String meetingId);
 
-    Optional<ChatConversation> findFirstByUserIdAndMeetingIdIsNullOrderByUpdatedAtDesc(String userId);
+    Optional<ChatConversation> findFirstByUserIdAndProjectIdOrderByUpdatedAtDesc(String userId, String projectId);
+
+    Optional<ChatConversation> findFirstByUserIdAndMeetingIdIsNullAndProjectIdIsNullOrderByUpdatedAtDesc(String userId);
 
     Optional<ChatConversation> findByIdAndUserId(String id, String userId);
 }

@@ -51,6 +51,7 @@ import {
   useRenameConversationMutation,
   useDeleteConversationMutation,
   useDeleteChatExchangeMutation,
+  useAssignProjectMutation,
 } from "@/lib/api";
 import type {
   SpeakerStats,
@@ -82,6 +83,7 @@ import { StatusBadge, PriorityBadge } from "@/components/status-badge";
 import { AudioPlayer, useAudioController } from "@/components/audio-player";
 import { ShareDialog } from "@/components/share-dialog";
 import { MeetingTitle, MeetingTags } from "@/components/meeting-title";
+import { ProjectPicker } from "@/components/project-picker";
 import { InsightsPanel } from "@/components/insights-panel";
 import { downloadMarkdown } from "@/lib/export-markdown";
 import { subscribeMeetingStatus } from "@/lib/ws";
@@ -210,6 +212,7 @@ export default function MeetingDetailPage() {
 
   const [reprocess, reprocessState] = useReprocessMeetingMutation();
   const [remove, removeState] = useDeleteMeetingMutation();
+  const [assignProject, { isLoading: filing }] = useAssignProjectMutation();
 
   function onExportMarkdown(includeTranscript: boolean) {
     if (!meeting.data) return;
@@ -261,39 +264,74 @@ export default function MeetingDetailPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Masthead. The metadata sits in a monospaced rule under the title
+          rather than as a row of loose badges: these are facts about one
+          document, and setting them as a spec line keeps the title the only
+          thing competing for first read. */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <Link href="/search" className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-4 w-4" /> All meetings
           </Link>
           <MeetingTitle id={id} title={m.title} />
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 font-mono text-xs uppercase tracking-wide text-muted-foreground">
             <StatusBadge status={status} />
             {/* A document has no runtime, so a duration would be meaningless. */}
             {!isDocument && (
-              <span className="inline-flex items-center gap-1">
-                <Clock className="h-3.5 w-3.5" /> {formatDuration(m.durationSeconds)}
-              </span>
+              <>
+                <span className="text-border" aria-hidden>/</span>
+                <span className="tabular inline-flex items-center gap-1.5">
+                  <Clock className="h-3.5 w-3.5" /> {formatDuration(m.durationSeconds)}
+                </span>
+              </>
             )}
-            <span>{formatDateTime(m.createdAt)}</span>
+            <span className="text-border" aria-hidden>/</span>
+            <span className="tabular">{formatDateTime(m.createdAt)}</span>
             {/* Only worth showing when it isn't the default — an "English"
                 badge on every meeting is noise. */}
             {m.language && m.language.slice(0, 2).toLowerCase() !== "en" && (
-              <Badge variant="outline">{languageName(m.language)}</Badge>
+              <>
+                <span className="text-border" aria-hidden>/</span>
+                <span>{languageName(m.language)}</span>
+              </>
             )}
-            {isDocument && <Badge variant="outline">Document</Badge>}
+            {isDocument && (
+              <>
+                <span className="text-border" aria-hidden>/</span>
+                <span>Document</span>
+              </>
+            )}
             {m.sourceType === "YOUTUBE" && m.sourceUrl && (
-              <a
-                href={m.sourceUrl}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-foreground"
-              >
-                <Youtube className="h-3.5 w-3.5" /> Watch on YouTube
-              </a>
+              <>
+                <span className="text-border" aria-hidden>/</span>
+                <a
+                  href={m.sourceUrl}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="inline-flex items-center gap-1.5 underline underline-offset-2 hover:text-foreground"
+                >
+                  <Youtube className="h-3.5 w-3.5" /> YouTube
+                </a>
+              </>
             )}
             <MeetingTags id={id} tags={m.tags ?? []} />
+          </div>
+          {/* Filing, in the spec line rather than behind a menu: it is a fact
+              about the meeting like its date, and the moment somebody realises
+              which project a meeting belongs to is while they are reading it. */}
+          <div className="mt-2 no-print">
+            <ProjectPicker
+              value={m.projectId}
+              disabled={filing}
+              onChange={async (projectId) => {
+                try {
+                  await assignProject({ meetingId: id, projectId }).unwrap();
+                  toast.success(projectId ? "Filed." : "Moved to Unfiled.");
+                } catch {
+                  toast.error("Couldn't file that meeting.");
+                }
+              }}
+            />
           </div>
         </div>
         <div className="flex items-center gap-2 no-print">
@@ -367,10 +405,15 @@ export default function MeetingDetailPage() {
 
       {ready && (
         <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="flex-wrap">
+          <TabsList variant="underline" className="flex w-full flex-wrap gap-x-6">
             <TabsTrigger value="summary">Summary</TabsTrigger>
-            <TabsTrigger value="ask"><Sparkles className="mr-1 h-3.5 w-3.5" /> Ask</TabsTrigger>
-            <TabsTrigger value="actions">Action items {actions.data ? `(${actions.data.length})` : ""}</TabsTrigger>
+            <TabsTrigger value="ask"><Sparkles className="mr-1.5 h-3.5 w-3.5" /> Ask</TabsTrigger>
+            <TabsTrigger value="actions">
+              Action items
+              {actions.data ? (
+                <span className="tabular ml-1.5 font-mono text-xs text-muted-foreground">{actions.data.length}</span>
+              ) : null}
+            </TabsTrigger>
             <TabsTrigger value="transcript">Transcript</TabsTrigger>
           </TabsList>
 
@@ -402,15 +445,26 @@ export default function MeetingDetailPage() {
             <Card>
               <CardContent className="pt-6">
                 {actions.data && actions.data.length > 0 ? (
-                  <ul className="divide-y">
+                  <ul className="divide-y divide-border">
                     {actions.data.map((a) => (
-                      <li key={a.id} className="flex items-start justify-between gap-3 py-3">
-                        <div>
-                          <p className="font-medium">{a.title}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {a.ownerName || "Unassigned"}{a.dueDate ? ` · due ${a.dueDate}` : ""}
+                      <li
+                        key={a.id}
+                        className="-mx-3 flex items-start justify-between gap-4 px-3 py-3 transition-colors first:pt-0 hover:bg-accent/60"
+                      >
+                        <div className="min-w-0">
+                          <p className="font-medium leading-snug">{a.title}</p>
+                          <p className="tabular mt-1 font-mono text-xs uppercase tracking-wide text-muted-foreground">
+                            {a.ownerName || "Unassigned"}
+                            {a.dueDate ? <> <span className="text-border" aria-hidden>/</span> due {a.dueDate}</> : null}
                           </p>
-                          {a.sourceSentence && <p className="mt-1 text-xs italic text-muted-foreground">“{a.sourceSentence}”</p>}
+                          {/* The extracted sentence is evidence for the row above
+                              it, so it is set as a quotation with a rule rather
+                              than a third line of grey text. */}
+                          {a.sourceSentence && (
+                            <blockquote className="mt-2 border-l-2 border-highlight/40 pl-3 text-sm italic text-muted-foreground">
+                              {a.sourceSentence}
+                            </blockquote>
+                          )}
                         </div>
                         <PriorityBadge priority={a.priority} />
                       </li>

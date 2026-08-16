@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { ProjectPicker } from "@/components/project-picker";
 import { formatDuration } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +32,7 @@ export default function UploadPage() {
   const [phase, setPhase] = React.useState<Phase>("idle");
   const [progress, setProgress] = React.useState(0);
   const [dragging, setDragging] = React.useState(false);
+  const [projectId, setProjectId] = React.useState<string | null>(null);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   const busy = phase !== "idle";
@@ -74,6 +76,7 @@ export default function UploadPage() {
         objectKey: presign.objectKey,
         contentType: file.type,
         durationSeconds: duration ?? undefined,
+        projectId: projectId ?? undefined,
       }).unwrap();
 
       toast.success("Uploaded — processing started.");
@@ -168,6 +171,19 @@ export default function UploadPage() {
                 </>
               )}
             </div>
+
+            {/* The one piece of metadata worth asking for before anyone has
+                heard a word of it: whoever is uploading already knows which
+                project this belongs to, and filing it later means going back
+                through a list of things they have already dealt with. Renders
+                nothing until there is a project to choose. */}
+            <ProjectPicker
+              value={projectId}
+              onChange={setProjectId}
+              disabled={busy}
+              label="Project"
+              className="h-9 text-sm"
+            />
 
             {/* Live capture lives on its own page: it records the meeting tab as
                 well as the microphone, which is the difference between capturing

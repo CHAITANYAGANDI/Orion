@@ -29,7 +29,18 @@ public record MeetingCreateRequest(
          * Which summary shape to write these notes in. Null means General, so a
          * client that does not offer the picker still creates meetings.
          */
-        String summaryTemplate
+        String summaryTemplate,
+
+        /**
+         * File it as it arrives (V30). Null leaves it unfiled.
+         *
+         * <p>The one piece of metadata worth asking for up front, and the
+         * exception to everything said above: whoever is uploading knows which
+         * project this belongs to before they have heard a word of it, and
+         * filing later means going back through a list of things you have
+         * already dealt with.
+         */
+        String projectId
 ) {
     public List<String> tagsOrEmpty() {
         return tags == null ? List.of() : tags;

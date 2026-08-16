@@ -24,6 +24,7 @@ function at(iso: string, over: Partial<ChatConversation> = {}): ChatConversation
   return {
     id: "cnv_1",
     meetingId: null,
+    projectId: null,
     title: "A conversation",
     messageCount: 2,
     createdAt: iso,

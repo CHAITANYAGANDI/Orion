@@ -31,6 +31,15 @@ public class ChatConversation {
     @Column(name = "meeting_id")
     private String meetingId;
 
+    /**
+     * Set for a chat about one project (V30). Mutually exclusive with
+     * {@code meetingId} — a database constraint, not a convention, because a row
+     * with both would be read as a meeting thread by one query and a project
+     * thread by another and appear in two histories at once.
+     */
+    @Column(name = "project_id")
+    private String projectId;
+
     /** Generated from the first exchange, then owned by the user. */
     @Column(nullable = false)
     private String title = "";
@@ -49,6 +58,9 @@ public class ChatConversation {
 
     public String getMeetingId() { return meetingId; }
     public void setMeetingId(String meetingId) { this.meetingId = meetingId; }
+
+    public String getProjectId() { return projectId; }
+    public void setProjectId(String projectId) { this.projectId = projectId; }
 
     public String getTitle() { return title; }
     public void setTitle(String title) { this.title = title; }

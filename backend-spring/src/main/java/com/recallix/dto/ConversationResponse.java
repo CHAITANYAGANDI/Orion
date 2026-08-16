@@ -16,8 +16,10 @@ import java.time.Instant;
  */
 public record ConversationResponse(
         String id,
-        /** Null for the workspace-wide chat. */
+        /** Set for a meeting chat; null otherwise. */
         String meetingId,
+        /** Set for a project chat; null otherwise. Both null is the workspace. */
+        String projectId,
         String title,
         int messageCount,
         Instant createdAt,
@@ -27,6 +29,7 @@ public record ConversationResponse(
         return new ConversationResponse(
                 c.getId(),
                 c.getMeetingId(),
+                c.getProjectId(),
                 c.getTitle(),
                 (int) messageCount,
                 c.getCreatedAt(),

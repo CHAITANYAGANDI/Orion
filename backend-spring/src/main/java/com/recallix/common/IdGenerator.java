@@ -42,4 +42,5 @@ public final class IdGenerator {
     public static String insight()     { return generate("ins_"); }
     public static String moment()      { return generate("mom_"); }
     public static String conversation(){ return generate("cnv_"); }
+    public static String project()     { return generate("prj_"); }
 }

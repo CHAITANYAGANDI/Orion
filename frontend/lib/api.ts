@@ -26,7 +26,12 @@ import type {
   MeetingListQuery,
   MeetingResponse,
   Page,
+  Project,
+  ProjectInput,
   ReprocessResponse,
+  SearchFacets,
+  SearchQueryArgs,
+  SearchResponse,
   SemanticSearchHit,
   SegmentEdit,
   SemanticSearchRequest,
@@ -52,6 +57,31 @@ const baseQuery = fetchBaseQuery({
   },
 });
 
+/**
+ * Serialises a search, omitting anything unset.
+ *
+ * Every absent filter left out rather than sent empty, because the query string
+ * is also the RTK Query cache key: `?q=stripe` and `?q=stripe&tag=` are the same
+ * search and would otherwise be cached, and re-fetched, as two.
+ */
+function searchParams(args: SearchQueryArgs): string {
+  const params = new URLSearchParams();
+  params.set("q", args.q);
+  if (args.groups?.length) params.set("groups", args.groups.join(","));
+  if (args.limit != null) params.set("limit", String(args.limit));
+  if (args.offset) params.set("offset", String(args.offset));
+  if (args.from) params.set("from", args.from);
+  if (args.to) params.set("to", args.to);
+  if (args.status) params.set("status", args.status);
+  if (args.type) params.set("type", args.type);
+  if (args.tag) params.set("tag", args.tag);
+  if (args.project) params.set("project", args.project);
+  if (args.speaker) params.set("speaker", args.speaker);
+  if (args.owner) params.set("owner", args.owner);
+  if (args.withDecisions) params.set("withDecisions", "true");
+  return params.toString();
+}
+
 export const api = createApi({
   reducerPath: "api",
   baseQuery,
@@ -75,6 +105,8 @@ export const api = createApi({
     "Insights",
     "Moments",
     "Conversations",
+    "Search",
+    "Projects",
   ],
   endpoints: (builder) => ({
     // ---- Meetings ----
@@ -121,6 +153,10 @@ export const api = createApi({
       invalidatesTags: (_r, _e, arg) => [
         { type: "Meeting", id: arg.id },
         { type: "Meetings", id: "LIST" },
+        // A rename or a re-tag changes what this meeting matches, and the tag
+        // facet is read from the same column.
+        { type: "Search", id: "RESULTS" },
+        { type: "Search", id: "FACETS" },
       ],
     }),
 
@@ -441,6 +477,148 @@ export const api = createApi({
       query: (body) => ({ url: "/search/semantic", method: "POST", body }),
     }),
 
+    // ---- Projects ----
+    getProjects: builder.query<Project[], void>({
+      query: () => "/projects",
+      providesTags: [{ type: "Projects" as const, id: "LIST" }],
+    }),
+
+    getProject: builder.query<Project, string>({
+      query: (id) => `/projects/${id}`,
+      providesTags: (_r, _e, id) => [{ type: "Projects" as const, id }],
+    }),
+
+    getProjectMeetings: builder.query<MeetingResponse[], string>({
+      query: (id) => `/projects/${id}/meetings`,
+      providesTags: (_r, _e, id) => [{ type: "Projects" as const, id: `MEETINGS-${id}` }],
+    }),
+
+    /** Everything filed nowhere — shown at the bottom of the tree, not hidden. */
+    getUnfiledMeetings: builder.query<MeetingResponse[], void>({
+      query: () => "/projects/unfiled",
+      providesTags: [{ type: "Projects" as const, id: "UNFILED" }],
+    }),
+
+    createProject: builder.mutation<Project, ProjectInput>({
+      query: (body) => ({ url: "/projects", method: "POST", body }),
+      invalidatesTags: [{ type: "Projects", id: "LIST" }],
+    }),
+
+    updateProject: builder.mutation<Project, { id: string; body: ProjectInput }>({
+      query: ({ id, body }) => ({ url: `/projects/${id}`, method: "PATCH", body }),
+      invalidatesTags: (_r, _e, arg) => [
+        { type: "Projects", id: "LIST" },
+        { type: "Projects", id: arg.id },
+      ],
+    }),
+
+    /** Deletes the project; its meetings are unfiled, not deleted. */
+    deleteProject: builder.mutation<{ unfiledMeetings: number }, string>({
+      query: (id) => ({ url: `/projects/${id}`, method: "DELETE" }),
+      invalidatesTags: [
+        { type: "Projects", id: "LIST" },
+        { type: "Projects", id: "UNFILED" },
+        { type: "Meetings", id: "LIST" },
+        { type: "Search", id: "RESULTS" },
+      ],
+    }),
+
+    /**
+     * File a meeting, or send a null project to unfile it.
+     *
+     * Invalidates broadly on purpose: a meeting moving changes two projects'
+     * counts, both their lists, the unfiled list, and what the search filter
+     * returns. Working out which two would save one request and cost the
+     * correctness of five views.
+     */
+    assignProject: builder.mutation<
+      MeetingResponse,
+      { meetingId: string; projectId: string | null }
+    >({
+      query: ({ meetingId, projectId }) => ({
+        url: `/projects/meetings/${meetingId}`,
+        method: "PUT",
+        body: { projectId },
+      }),
+      invalidatesTags: (_r, _e, arg) => [
+        { type: "Meeting", id: arg.meetingId },
+        { type: "Meetings", id: "LIST" },
+        { type: "Projects", id: "LIST" },
+        { type: "Projects", id: "UNFILED" },
+        { type: "Search", id: "RESULTS" },
+      ],
+    }),
+
+    // ---- Project chat ----
+    getProjectChat: builder.query<
+      ChatMessage[],
+      { id: string; conversationId?: string }
+    >({
+      query: ({ id, conversationId }) =>
+        `/projects/${id}/chat${conversationId ? `?conversationId=${conversationId}` : ""}`,
+      providesTags: (_r, _e, arg) => [{ type: "Chat", id: `PRJ-${arg.id}` }],
+    }),
+
+    askProjectChat: builder.mutation<
+      ChatMessage,
+      { id: string; question: string; conversationId?: string }
+    >({
+      query: ({ id, question, conversationId }) => ({
+        url: `/projects/${id}/chat`,
+        method: "POST",
+        body: { question, conversationId },
+      }),
+      invalidatesTags: (_r, _e, arg) => [
+        { type: "Chat", id: `PRJ-${arg.id}` },
+        { type: "Conversations", id: `PRJ-${arg.id}` },
+      ],
+    }),
+
+    getProjectConversations: builder.query<ChatConversation[], string>({
+      query: (id) => `/projects/${id}/chat/conversations`,
+      providesTags: (_r, _e, id) => [{ type: "Conversations", id: `PRJ-${id}` }],
+    }),
+
+    createProjectConversation: builder.mutation<ChatConversation, string>({
+      query: (id) => ({ url: `/projects/${id}/chat/conversations`, method: "POST" }),
+      invalidatesTags: (_r, _e, id) => [{ type: "Conversations", id: `PRJ-${id}` }],
+    }),
+
+    clearProjectChat: builder.mutation<void, string>({
+      query: (id) => ({ url: `/projects/${id}/chat`, method: "DELETE" }),
+      invalidatesTags: (_r, _e, id) => [
+        { type: "Chat", id: `PRJ-${id}` },
+        { type: "Conversations", id: `PRJ-${id}` },
+      ],
+    }),
+
+    /**
+     * Workspace search: one request, every kind of result.
+     *
+     * A query rather than a mutation, and deliberately: it is idempotent, so
+     * RTK Query dedupes the identical request that a re-render or a second
+     * component would otherwise repeat, and typing back over a term you just
+     * deleted answers from cache instead of the network.
+     *
+     * The `Search` tag is coarse — one tag, not one per query. Results are
+     * assembled from meetings, insights and action items, so anything that
+     * changes those can invalidate this without having to know which searches
+     * are in flight.
+     */
+    search: builder.query<SearchResponse, SearchQueryArgs>({
+      query: (args) => `/search?${searchParams(args)}`,
+      providesTags: [{ type: "Search" as const, id: "RESULTS" }],
+    }),
+
+    /**
+     * What the filters can be set to. Read from the user's own rows, so the
+     * dropdowns offer what exists and nothing that does not.
+     */
+    getSearchFacets: builder.query<SearchFacets, void>({
+      query: () => "/search/facets",
+      providesTags: [{ type: "Search" as const, id: "FACETS" }],
+    }),
+
     // ---- Translation ----
     translateSummary: builder.mutation<
       TranslateResult,
@@ -559,6 +737,10 @@ export const api = createApi({
       invalidatesTags: [
         { type: "Meetings", id: "LIST" },
         { type: "Usage", id: "ME" },
+        // Its decisions, commitments and utterances went with it; leaving them
+        // in a cached result list means clicking through to a 404.
+        { type: "Search", id: "RESULTS" },
+        { type: "Search", id: "FACETS" },
       ],
     }),
 
@@ -683,6 +865,21 @@ export const {
   useDeleteConversationMutation,
   useDeleteChatExchangeMutation,
   useSemanticSearchMutation,
+  useSearchQuery,
+  useGetSearchFacetsQuery,
+  useGetProjectsQuery,
+  useGetProjectQuery,
+  useGetProjectMeetingsQuery,
+  useGetUnfiledMeetingsQuery,
+  useCreateProjectMutation,
+  useUpdateProjectMutation,
+  useDeleteProjectMutation,
+  useAssignProjectMutation,
+  useGetProjectChatQuery,
+  useAskProjectChatMutation,
+  useGetProjectConversationsQuery,
+  useCreateProjectConversationMutation,
+  useClearProjectChatMutation,
   useTranslateSummaryMutation,
   useRenameSpeakersMutation,
   useRematchSpeakerMutation,

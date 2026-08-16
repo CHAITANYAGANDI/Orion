@@ -4,9 +4,11 @@ import com.recallix.entity.Meeting;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.List;
 import java.util.Optional;
 
 public interface MeetingRepository extends JpaRepository<Meeting, String> {
@@ -28,6 +30,43 @@ public interface MeetingRepository extends JpaRepository<Meeting, String> {
     Optional<Meeting> findByUserIdAndSourceUrl(String userId, String sourceUrl);
 
     long countByUserId(String userId);
+
+    /** One project's meetings, newest first — the project page's list. */
+    List<Meeting> findByUserIdAndProjectIdOrderByCreatedAtDesc(String userId, String projectId);
+
+    /** Everything not filed anywhere, which the tree shows last. */
+    List<Meeting> findByUserIdAndProjectIdIsNullOrderByCreatedAtDesc(String userId);
+
+    /**
+     * What a project-scoped question is allowed to read.
+     *
+     * <p>Ids only: this feeds the retrieval filter, and loading whole meetings
+     * to throw away everything but the key would be a page of rows read per
+     * question asked.
+     */
+    @Query("SELECT m.id FROM Meeting m WHERE m.userId = :userId AND m.projectId = :projectId")
+    List<String> findIdsByUserIdAndProjectId(@Param("userId") String userId,
+                                             @Param("projectId") String projectId);
+
+    /**
+     * How many meetings each project holds, in one read.
+     *
+     * <p>Returned as rows of {@code [projectId, count]} rather than counted per
+     * project: the sidebar shows every project at once, and a count query each
+     * would be one round trip per row on the most-visited list in the app.
+     */
+    @Query("""
+            SELECT m.projectId, COUNT(m)
+              FROM Meeting m
+             WHERE m.userId = :userId AND m.projectId IS NOT NULL
+             GROUP BY m.projectId
+            """)
+    List<Object[]> countByProject(@Param("userId") String userId);
+
+    /** Unfile every meeting in a project — see {@code ProjectService.delete}. */
+    @Modifying
+    @Query("UPDATE Meeting m SET m.projectId = NULL WHERE m.userId = :userId AND m.projectId = :projectId")
+    int clearProject(@Param("userId") String userId, @Param("projectId") String projectId);
 
     /**
      * Owner-scoped search. Optional case-insensitive title match, status filter

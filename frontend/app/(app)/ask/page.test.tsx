@@ -72,6 +72,7 @@ beforeEach(() => {
     {
       id: "cnv_1",
       meetingId: null,
+      projectId: null,
       title: "Still open",
       messageCount: 2,
       createdAt: "2026-08-15T09:00:00Z",

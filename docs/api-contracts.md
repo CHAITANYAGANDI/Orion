@@ -177,6 +177,127 @@ deep-link to `/meetings/{id}?t={start}`.
 Persistence note: `chat_messages.meeting_id` is `NULL` for workspace turns —
 that is what distinguishes the two scopes.
 
+### Projects (V30)
+
+| Method | Endpoint | Body | Response |
+|---|---|---|---|
+| GET | `/api/v1/projects` | — | `ProjectResponse[]` (with `meetingCount`) |
+| GET | `/api/v1/projects/unfiled` | — | `MeetingResponse[]` |
+| GET | `/api/v1/projects/{id}` | — | `ProjectResponse` |
+| GET | `/api/v1/projects/{id}/meetings` | — | `MeetingResponse[]` |
+| POST | `/api/v1/projects` | `{ "name", "description"?, "color"? }` | `201 ProjectResponse` |
+| PATCH | `/api/v1/projects/{id}` | same, all optional | `ProjectResponse` |
+| DELETE | `/api/v1/projects/{id}` | — | `{ "unfiledMeetings": n }` |
+| PUT | `/api/v1/projects/meetings/{meetingId}` | `{ "projectId": id \| null }` | `MeetingResponse` |
+
+**A project is not a folder**, and the difference is the feature: it is a thing
+that is happening, which is what makes "ask Recallix about this project" a
+sensible sentence. The chat below is the point of the table; the grouping is how
+it knows what to read.
+
+**One project per meeting**, on `meetings.project_id`. Tags remain the
+many-to-many — a second one would leave two answers to "how do I group these",
+and a tree cannot draw a meeting under three parents. **No nesting**: no
+`parent_id`, deliberately, because sub-projects cost a recursive read on every
+list and a move-loop check on every rename for a hierarchy nobody in a
+single-person workspace is deep enough to need.
+
+**Deleting a project never deletes meetings.** `ON DELETE SET NULL` on the
+meeting, plus an explicit unfile in the service so the count can be returned:
+somebody tidying a sidebar is not asking to destroy six hours of audio. The
+opposite call for conversations (`ON DELETE CASCADE`) — a thread about a project
+that no longer exists is answers about meetings that are no longer grouped,
+reachable from nowhere.
+
+Assignment is its own endpoint rather than a field on `PATCH /meetings/{id}`,
+which leaves omitted fields alone: Jackson cannot tell an omitted `projectId`
+from one explicitly `null`, and "take it out of its project" is exactly the
+second case. `POST /meetings` also accepts `projectId`, so an upload can be
+filed as it arrives.
+
+### Project chat
+
+| Method | Endpoint | Body / Query | Response |
+|---|---|---|---|
+| GET | `/api/v1/projects/{id}/chat` | `?conversationId` | `ChatMessageResponse[]` |
+| POST | `/api/v1/projects/{id}/chat` | `{ "question", "conversationId"? }` | `ChatMessageResponse` |
+| GET | `/api/v1/projects/{id}/chat/conversations` | — | `ConversationResponse[]` |
+| POST | `/api/v1/projects/{id}/chat/conversations` | — | `201 ConversationResponse` |
+| DELETE | `/api/v1/projects/{id}/chat` | — | `204` (every thread on this project) |
+
+Retrieval is the workspace's, narrowed to the project's meeting ids — resolved
+server-side, because what a project contains is a fact about the database and
+not something a client should assert.
+
+**An empty project is answered without a model call.** Downstream an empty id
+list means "do not filter", so passing one would answer a question about this
+project from every meeting in the workspace and present it as the project's.
+
+**Scope is now a value, not a nullable column** (`ChatScope`). Two scopes fitted
+into "meeting id set or null"; three do not. Left as it was, a project thread
+and a workspace thread would both be "no meeting" — the workspace history would
+list every project's threads, and clearing it would delete them. A database
+constraint enforces the exclusion: `meeting_id IS NULL OR project_id IS NULL`.
+
+### Workspace search
+
+| Method | Endpoint | Query | Response |
+|---|---|---|---|
+| GET | `/api/v1/search` | see below | `SearchResponse` |
+| GET | `/api/v1/search/facets` | — | `SearchFacets` |
+
+`?q` plus `groups`, `limit`, `offset` and the filters `from`, `to`, `status`,
+`type`, `tag`, `project`, `speaker`, `owner`, `withDecisions`. Absent filters are the empty
+string, not `null`: these become parameters in native SQL, where an untyped null
+fails to plan rather than failing to match.
+
+**One request, six groups.** `SearchResponse` carries `meetings`, `people`,
+`decisions`, `risks`, `commitments` and `mentions`, each `{ total, hits[] }`.
+The counts are the interface — "27 transcript mentions, 0 decisions" is what
+tells a reader the term lives in the recordings and that nothing was settled
+about it — so each query counts its full result set with `COUNT(*) OVER ()` and
+returns a page of it. Five separate requests would render five counts at five
+different moments, each carrying the same filters, and a filter change would be
+five chances to disagree.
+
+Naming `groups` asks for one group deeply (`?groups=mentions&limit=50`), which
+is what "see all 27" does rather than re-running four queries it will not show.
+
+| Group | Read from |
+|---|---|
+| meetings | `meetings.title`, its tags, **and** matching utterances inside it |
+| people | `transcript_segments.speaker` ∪ `meeting_action_items.owner_name` ∪ `known_speakers` |
+| decisions / risks | `meeting_insights`, by `kind` |
+| commitments | `meeting_action_items` |
+| mentions | `transcript_segments.text` |
+
+Two of those need saying out loud. **A commitment is an action item** — there is
+no second store, and deliberately: the ai-service excludes a template's
+Commitments section from the insight pass precisely so a promise is not recorded
+twice, once where its state is tracked and once where it is not.
+
+And **a person is not an account**: Recallix has one user per workspace, so
+`people` is names, from three places. Diarized speakers alone would list
+everyone who talked and nobody who was talked about — search a name that owns
+three commitments and is said in nine sentences, and a speakers-only query
+answers "no such person". So the union, counted three ways (`segments`,
+`mentions`, `commitments`), and a row is only returned if one of the three is
+non-zero inside the current filters.
+
+Only `mentions` is served by an index (V29: a generated `search_tsv`, config
+`simple`, GIN). The other four tables hold tens of rows per user, where the
+index lookup costs more than the scan. `simple` rather than `english` because
+the archive is multilingual and because prefix matching — `stripe:*` from the
+third keystroke — is impossible under a stemmer.
+
+**What a "meeting type" is:** the summary template the meeting is written in
+(1:1, standup, interview). There is no second type field, and adding one would
+leave two answers to the same question. **There is no participant filter
+separate from speaker:** V23 dropped the participants table, so the only record
+of who was in a meeting is who spoke in it. **`project` takes a project id or
+the literal `none`** for meetings filed nowhere — "what have I not sorted yet" is
+a real question, and one nobody can ask by picking a project from a list.
+
 ### Playback
 
 No endpoints — it is worth a note anyway, because the player's least obvious

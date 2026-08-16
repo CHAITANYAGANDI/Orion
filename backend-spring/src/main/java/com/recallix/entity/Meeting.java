@@ -62,6 +62,18 @@ public class Meeting {
     @Column(columnDefinition = "jsonb")
     private List<String> tags = new ArrayList<>();
 
+    /**
+     * The project this meeting is filed under, or null for unfiled.
+     *
+     * <p>A plain id rather than a {@code @ManyToOne}: every read that wants the
+     * project name already has the project list in hand, and an association here
+     * would have Hibernate fetch a row per meeting on any page that lists them.
+     * See V30 for why there is exactly one, and why deleting a project only
+     * clears this.
+     */
+    @Column(name = "project_id")
+    private String projectId;
+
     @Column(name = "error_message")
     private String errorMessage;
 
@@ -126,6 +138,9 @@ public class Meeting {
 
     public List<String> getTags() { return tags; }
     public void setTags(List<String> tags) { this.tags = tags; }
+
+    public String getProjectId() { return projectId; }
+    public void setProjectId(String projectId) { this.projectId = projectId; }
 
     public String getErrorMessage() { return errorMessage; }
     public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }

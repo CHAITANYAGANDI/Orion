@@ -87,6 +87,50 @@ export const MEETING_PROMPTS: ChatPrompt[] = [
   },
 ];
 
+/**
+ * Grounded in one project's meetings.
+ *
+ * <p>Deliberately the questions you ask of a body of work rather than of a
+ * conversation: where it stands, what is late, what changed. A project is
+ * several meetings over weeks, so the useful questions are the ones no single
+ * meeting can answer — which is the reason for scoping a chat to it at all.
+ *
+ * <p>No generated set behind these yet: the suggestion generator reads the
+ * whole workspace and would propose questions about meetings that are not in
+ * this project, which reads worse than a fixed list that is at least always
+ * answerable here.
+ */
+export const PROJECT_PROMPTS: ChatPrompt[] = [
+  {
+    label: "Where does this project stand?",
+    prompt:
+      "Summarize where this project stands: what has been decided, what is in progress, and what is still open.",
+  },
+  {
+    label: "What's outstanding?",
+    prompt:
+      "What was committed to in this project's meetings that does not appear to have been completed? Say who owns each.",
+  },
+  {
+    label: "Every decision so far",
+    prompt: "List every decision made across this project's meetings, in order, with when it was made.",
+  },
+  {
+    label: "What changed recently?",
+    prompt:
+      "What changed in the most recent meetings compared with the earlier ones in this project?",
+  },
+  {
+    label: "Risks and blockers",
+    prompt: "What risks or blockers have been raised in this project, and were any of them resolved?",
+  },
+  {
+    label: "Catch me up",
+    prompt:
+      "I have been away. Catch me up on this project in a few paragraphs, most important first.",
+  },
+];
+
 /** Searches across every meeting, or the ones the user has selected. */
 export const WORKSPACE_PROMPTS: ChatPrompt[] = [
   {

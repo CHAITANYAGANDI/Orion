@@ -28,7 +28,9 @@ public record MeetingResponse(
          * video. Null for pre-V16 meetings and YouTube imports; both play as
          * audio, which is what they did before this field existed.
          */
-        String contentType
+        String contentType,
+        /** The project this meeting is filed under, or null for unfiled (V30). */
+        String projectId
 ) {
     public static MeetingResponse from(Meeting m) {
         return new MeetingResponse(
@@ -44,7 +46,8 @@ public record MeetingResponse(
                 m.getSourceUrl(),
                 m.getLanguage(),
                 m.getSummaryTemplate(),
-                m.getContentType()
+                m.getContentType(),
+                m.getProjectId()
         );
     }
 }

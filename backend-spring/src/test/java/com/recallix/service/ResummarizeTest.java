@@ -13,6 +13,7 @@ import com.recallix.entity.TranscriptSegment;
 import com.recallix.repository.MeetingActionItemRepository;
 import com.recallix.repository.MeetingInsightRepository;
 import com.recallix.repository.MeetingRepository;
+import com.recallix.repository.ProjectRepository;
 import com.recallix.repository.MeetingSummaryRepository;
 import com.recallix.repository.MeetingTranscriptRepository;
 import com.recallix.repository.TranscriptSegmentRepository;
@@ -70,13 +71,15 @@ class ResummarizeTest {
     @Mock private KnownSpeakerService knownSpeakers;
     @Mock private VocabularyService vocabulary;
 
+    @Mock private ProjectRepository projects;
+
     private MeetingService service;
     private Meeting meeting;
 
     @BeforeEach
     void setUp() {
         service = new MeetingService(meetings, transcripts, segments, summaries,
-                actionItems, insights, storage, usage, outbox, audit, ai, templates, knownSpeakers, vocabulary);
+                actionItems, insights, storage, usage, outbox, audit, ai, templates, knownSpeakers, vocabulary, projects);
 
         meeting = new Meeting();
         meeting.setId(MEETING);

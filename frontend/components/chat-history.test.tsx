@@ -20,6 +20,7 @@ function conversation(over: Partial<ChatConversation> = {}): ChatConversation {
   return {
     id: "cnv_1",
     meetingId: null,
+    projectId: null,
     title: "Action items last week",
     messageCount: 4,
     createdAt: iso,
