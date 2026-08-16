@@ -42,9 +42,13 @@ import type {
   SummaryResponse,
   SummaryTemplateResponse,
   TranscriptResponse,
+  AppNotification,
+  AudioDownload,
   AvailableTranslation,
   LanguageOption,
   MeetingTranslation,
+  NotificationCount,
+  NotificationKindOption,
   UploadUrlRequest,
   UploadUrlResponse,
   UsageResponse,
@@ -115,6 +119,7 @@ export const api = createApi({
     "Search",
     "Projects",
     "Translations",
+    "Notifications",
   ],
   endpoints: (builder) => ({
     // ---- Meetings ----
@@ -667,6 +672,86 @@ export const api = createApi({
       invalidatesTags: (_r, _e, arg) => [{ type: "Translations", id: arg.id }],
     }),
 
+    // ---- Notifications ----
+
+    /**
+     * The bell's list.
+     *
+     * <p>One tag for the lot: every mutation here changes the badge as well as
+     * the list, and a finer-grained scheme would mean each of them remembering
+     * to invalidate both.
+     */
+    getNotifications: builder.query<Page<AppNotification>, { page?: number; size?: number; unread?: boolean } | void>({
+      query: (q) => {
+        const params = new URLSearchParams();
+        const query = q || {};
+        if (query.page != null) params.set("page", String(query.page));
+        if (query.size != null) params.set("size", String(query.size));
+        if (query.unread) params.set("unread", "true");
+        return `/notifications?${params.toString()}`;
+      },
+      providesTags: [{ type: "Notifications", id: "LIST" }],
+    }),
+
+    /** The badge, and the socket channel that keeps it live. */
+    getUnreadCount: builder.query<NotificationCount, void>({
+      query: () => "/notifications/unread-count",
+      providesTags: [{ type: "Notifications", id: "COUNT" }],
+    }),
+
+    /** What can be switched off. Served, so the client keeps no copy of the enum. */
+    getNotificationKinds: builder.query<NotificationKindOption[], void>({
+      query: () => "/notifications/kinds",
+      keepUnusedDataFor: 3600,
+    }),
+
+    markNotificationRead: builder.mutation<AppNotification, { id: string; read: boolean }>({
+      query: ({ id, read }) => ({
+        url: `/notifications/${id}/${read ? "read" : "unread"}`,
+        method: "POST",
+      }),
+      invalidatesTags: [{ type: "Notifications", id: "LIST" }, { type: "Notifications", id: "COUNT" }],
+    }),
+
+    markAllNotificationsRead: builder.mutation<NotificationCount, void>({
+      query: () => ({ url: "/notifications/read-all", method: "POST" }),
+      invalidatesTags: [{ type: "Notifications", id: "LIST" }, { type: "Notifications", id: "COUNT" }],
+    }),
+
+    deleteNotification: builder.mutation<void, string>({
+      query: (id) => ({ url: `/notifications/${id}`, method: "DELETE" }),
+      invalidatesTags: [{ type: "Notifications", id: "LIST" }, { type: "Notifications", id: "COUNT" }],
+    }),
+
+    clearNotifications: builder.mutation<void, void>({
+      query: () => ({ url: "/notifications", method: "DELETE" }),
+      invalidatesTags: [{ type: "Notifications", id: "LIST" }, { type: "Notifications", id: "COUNT" }],
+    }),
+
+    /**
+     * Say that a recording has begun.
+     *
+     * <p>The server cannot know this any other way — the microphone and the
+     * decision to press record are both in the tab. Fire-and-forget: a failed
+     * ping must never stop somebody recording.
+     */
+    recordingStarted: builder.mutation<void, void>({
+      query: () => ({ url: "/recordings/started", method: "POST" }),
+      invalidatesTags: [{ type: "Notifications", id: "COUNT" }],
+    }),
+
+    /**
+     * A short-lived link to the original recording.
+     *
+     * Asked for on click rather than loaded with the meeting, because the link
+     * is signed and expires: one fetched when the page opened would be dead by
+     * the time somebody left the tab overnight and came back to it.
+     */
+    getAudioDownload: builder.query<AudioDownload, string>({
+      query: (id) => `/meetings/${id}/audio`,
+      keepUnusedDataFor: 60,
+    }),
+
     /**
      * Correct what the transcriber heard. Invalidates the transcript and the
      * meeting's chat: saving re-indexes the meeting, so previous answers were
@@ -1010,6 +1095,15 @@ export const {
   useGetLanguagesQuery,
   useGetTranslationsQuery,
   useTranslateMeetingMutation,
+  useLazyGetAudioDownloadQuery,
+  useGetNotificationsQuery,
+  useGetUnreadCountQuery,
+  useGetNotificationKindsQuery,
+  useMarkNotificationReadMutation,
+  useMarkAllNotificationsReadMutation,
+  useDeleteNotificationMutation,
+  useClearNotificationsMutation,
+  useRecordingStartedMutation,
   useRenameSpeakersMutation,
   useRematchSpeakerMutation,
   useGetKnownSpeakersQuery,

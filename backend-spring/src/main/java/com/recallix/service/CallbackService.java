@@ -16,6 +16,7 @@ import com.recallix.entity.MeetingInsight;
 import com.recallix.entity.MeetingSummary;
 import com.recallix.entity.MeetingTranscript;
 import com.recallix.entity.TranscriptSegment;
+import com.recallix.entity.UserEntity;
 import com.recallix.event.MeetingReadyEvent;
 import com.recallix.repository.MeetingActionItemRepository;
 import com.recallix.repository.MeetingInsightRepository;
@@ -23,6 +24,7 @@ import com.recallix.repository.MeetingRepository;
 import com.recallix.repository.MeetingSummaryRepository;
 import com.recallix.repository.MeetingTranscriptRepository;
 import com.recallix.repository.TranscriptSegmentRepository;
+import com.recallix.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -34,6 +36,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Handles internal callbacks from the FastAPI worker: relays status updates to
@@ -54,6 +57,8 @@ public class CallbackService {
     private final StatusPublisher statusPublisher;
     private final UsageLimitService usage;
     private final ApplicationEventPublisher events;
+    private final NotificationService notifications;
+    private final UserRepository users;
 
     public CallbackService(MeetingRepository meetings,
                            MeetingTranscriptRepository transcripts,
@@ -63,7 +68,11 @@ public class CallbackService {
                            MeetingInsightRepository insights,
                            StatusPublisher statusPublisher,
                            UsageLimitService usage,
-                           ApplicationEventPublisher events) {
+                           ApplicationEventPublisher events,
+                           NotificationService notifications,
+                           UserRepository users) {
+        this.notifications = notifications;
+        this.users = users;
         this.meetings = meetings;
         this.transcripts = transcripts;
         this.segments = segments;
@@ -84,6 +93,10 @@ public class CallbackService {
             }
             if (status == MeetingStatus.FAILED) {
                 m.setErrorMessage(req.message());
+                // The one people most need. An upload that failed while the tab
+                // was closed is otherwise indistinguishable from one still
+                // running, for as long as nobody goes looking.
+                notifications.processingFailed(m, req.message());
             }
             // READY is the worker's last word: the brief is persisted AND the
             // transcript is indexed into pgvector. Only now can Meeting Memory
@@ -137,7 +150,57 @@ public class CallbackService {
         if (meeting.getDurationSeconds() != null && meeting.getDurationSeconds() > 0) {
             usage.addAiMinutes(meeting.getUserId(), Math.round(meeting.getDurationSeconds() / 60.0f));
         }
+        announce(meeting, result);
         log.info("Persisted brief for meeting {} ({} actions).", meetingId, result.actionItemsOrEmpty().size());
+    }
+
+    /**
+     * Say what landed.
+     *
+     * <p><strong>Why this is not two notifications.</strong> The worker returns
+     * the transcript, the summary and the action items in a single result
+     * callback, so in this pipeline "transcript ready" and "summary ready" are
+     * the same instant and the same link. Both kinds exist because they are
+     * genuinely different events — a transcript can land without notes, and a
+     * summary can be rewritten later without a new transcript — but firing both
+     * for one arrival would be a product ringing twice to say one thing. So the
+     * notes win when there are notes, because notes imply a transcript.
+     *
+     * <p>Being assigned work is separate and worth its own line: it is about
+     * you rather than about the meeting, and it is the one that has somebody
+     * open the page rather than nod at it.
+     */
+    private void announce(Meeting meeting, MeetingBriefResult result) {
+        boolean hasSummary = result.shortSummary() != null && !result.shortSummary().isBlank();
+        if (hasSummary) {
+            notifications.summaryReady(meeting);
+        } else if (!result.segmentsOrEmpty().isEmpty()) {
+            notifications.transcriptReady(meeting);
+        }
+        notifications.mentionedIn(meeting, assignedToMe(meeting));
+    }
+
+    /**
+     * The action items this meeting just gave to the person who owns it.
+     *
+     * <p>Matched on the display name, which is the only fact relating an
+     * account to a "Priya" in a transcript. No display name means no match and
+     * no notification — a guess would be worse than silence, because the whole
+     * value of this one is that it is about you.
+     */
+    private List<MeetingActionItem> assignedToMe(Meeting meeting) {
+        String me = users.findById(meeting.getUserId())
+                .map(UserEntity::getDisplayName)
+                .filter(n -> n != null && !n.isBlank())
+                .map(n -> n.trim().toLowerCase(Locale.ROOT))
+                .orElse(null);
+        if (me == null) {
+            return List.of();
+        }
+        return actionItems.findByMeetingId(meeting.getId()).stream()
+                .filter(a -> a.getOwnerName() != null
+                        && a.getOwnerName().trim().toLowerCase(Locale.ROOT).equals(me))
+                .toList();
     }
 
     // --- replace helpers (idempotent) --------------------------------------- //

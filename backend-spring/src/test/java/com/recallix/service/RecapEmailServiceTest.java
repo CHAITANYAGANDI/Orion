@@ -45,13 +45,14 @@ class RecapEmailServiceTest {
     @Mock private FollowUpService followUp;
     @Mock private EmailService email;
     @Mock private AuditService audit;
+    @Mock private NotificationService notifications;
 
     private RecapEmailService service;
     private Meeting meeting;
 
     @BeforeEach
     void setUp() {
-        service = new RecapEmailService(meetings, users, followUp, email, audit);
+        service = new RecapEmailService(meetings, users, followUp, email, audit, notifications);
         meeting = new Meeting();
         meeting.setId(MEETING);
         meeting.setUserId(USER);

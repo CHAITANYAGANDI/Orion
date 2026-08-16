@@ -23,6 +23,7 @@
         <springdoc.version>2.6.0</springdoc.version>
         <resilience4j.version>2.2.0</resilience4j.version>
         <stripe.version>26.12.0</stripe.version>
+        <openpdf.version>3.0.5</openpdf.version>
         <testcontainers.version>1.20.3</testcontainers.version>
     </properties>
 
@@ -130,6 +131,23 @@
             <groupId>com.stripe</groupId>
             <artifactId>stripe-java</artifactId>
             <version>${stripe.version}</version>
+        </dependency>
+
+        <!--
+          PDF export. OpenPDF rather than PDFBox because it lays text out: page
+          flow, wrapping and — the part that is genuinely hard — bidirectional
+          text and Arabic joining, which a meeting held in Arabic needs and a
+          drawing API does not give you.
+
+          It also ships the Adobe CJK character maps, which is how Japanese and
+          Chinese cost nothing in the jar: no glyphs are embedded and the
+          reader resolves the font, as every CJK PDF that is not 15 MB does.
+          The other scripts are embedded from src/main/resources/fonts.
+        -->
+        <dependency>
+            <groupId>com.github.librepdf</groupId>
+            <artifactId>openpdf</artifactId>
+            <version>${openpdf.version}</version>
         </dependency>
 
         <!-- Resilience4j -->

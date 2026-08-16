@@ -38,6 +38,7 @@ import {
   useAskChatMutation,
   useTranslateMeetingMutation,
   useGetTranslationsQuery,
+  useGetLanguagesQuery,
   useRenameSpeakersMutation,
   useRematchSpeakerMutation,
   useGetKnownSpeakersQuery,
@@ -93,7 +94,7 @@ import { ShareDialog } from "@/components/share-dialog";
 import { MeetingTitle, MeetingTags } from "@/components/meeting-title";
 import { ProjectPicker } from "@/components/project-picker";
 import { InsightsPanel } from "@/components/insights-panel";
-import { downloadMarkdown } from "@/lib/export-markdown";
+import { ExportDialog } from "@/components/export-dialog";
 import { copyMinutes, copySummary } from "@/lib/minutes";
 import { subscribeMeetingStatus } from "@/lib/ws";
 import {
@@ -241,6 +242,9 @@ export default function MeetingDetailPage() {
   const [translate, { data: translation, isLoading: translating, reset: clearTranslation }] =
     useTranslateMeetingMutation();
   const availableTranslations = useGetTranslationsQuery(id, { skip: !ready });
+  // Also asked for by the translation bar; RTK Query serves both from one
+  // request. Read here so an export can say what the recording is still in.
+  const languages = useGetLanguagesQuery();
   const showing = readingIn === ORIGINAL ? undefined : translation;
 
   async function onReadIn(next: string, includeTranscript = false) {
@@ -261,16 +265,14 @@ export default function MeetingDetailPage() {
   const [remove, removeState] = useDeleteMeetingMutation();
   const [assignProject, { isLoading: filing }] = useAssignProjectMutation();
 
-  function onExportMarkdown(includeTranscript: boolean) {
-    if (!meeting.data) return;
-    downloadMarkdown({
-      meeting: meeting.data,
-      summary: summary.data,
-      actionItems: actions.data,
-      segments: transcript.data?.segments,
-      includeTranscript,
-    });
-  }
+  /**
+   * The download dialog, opened from the export menu.
+   *
+   * Held here rather than inside the menu because a Radix menu closes when an
+   * item is chosen, and a dialog mounted inside it would be unmounted in the
+   * same frame it was asked to open.
+   */
+  const [exporting, setExporting] = React.useState(false);
 
   /**
    * What goes on the clipboard, in two shapes.
@@ -437,20 +439,29 @@ export default function MeetingDetailPage() {
                     Copy formatted minutes
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onSelect={() => onExportMarkdown(false)}>
-                    Markdown (.md)
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onSelect={() => onExportMarkdown(true)}
-                    disabled={!transcript.data?.segments?.length}
-                  >
-                    Markdown with transcript
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => window.print()}>
-                    PDF (via print)
+                  {/* One item rather than four: the formats differ in a single
+                      choice, and the transcript — which is most of the file —
+                      is a decision that applies to all of them. */}
+                  <DropdownMenuItem onSelect={() => setExporting(true)}>
+                    Download as PDF, Word, Markdown or text…
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+              <ExportDialog
+                open={exporting}
+                onOpenChange={setExporting}
+                meetingId={id}
+                transcriptLines={transcript.data?.segments?.length ?? 0}
+                // The file is written in whatever the page is being read in, so
+                // exporting a translation you are looking at needs no second
+                // choice — and cannot silently give you the English instead.
+                language={readingIn === ORIGINAL ? null : readingIn}
+                languageName={showing?.languageName}
+                sourceLanguageName={
+                  languages.data?.find((l) => l.code === m.language)?.name ?? null
+                }
+                hasAudio={!isDocument && !!m.audioUrl}
+              />
             </>
           )}
           <Button variant="outline" size="sm" onClick={onReprocess} disabled={reprocessState.isLoading || !terminal}>

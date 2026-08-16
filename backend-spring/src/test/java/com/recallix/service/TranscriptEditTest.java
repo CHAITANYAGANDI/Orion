@@ -70,6 +70,7 @@ class TranscriptEditTest {
 
     @Mock private ProjectRepository projects;
     @Mock private MeetingTranslationRepository translations;
+    @Mock private NotificationService notifications;
 
     private MeetingService service;
     private MeetingTranscript transcript;
@@ -79,7 +80,7 @@ class TranscriptEditTest {
     @BeforeEach
     void setUp() {
         service = new MeetingService(meetings, transcripts, segments, summaries,
-                actionItems, insights, storage, usage, outbox, audit, ai, templates, knownSpeakers, vocabulary, projects, translations);
+                actionItems, insights, storage, usage, outbox, audit, ai, templates, knownSpeakers, vocabulary, projects, translations, notifications);
 
         Meeting meeting = new Meeting();
         meeting.setId(MEETING);

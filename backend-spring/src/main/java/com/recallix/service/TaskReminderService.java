@@ -52,6 +52,7 @@ public class TaskReminderService {
     private final MeetingRepository meetings;
     private final EmailService email;
     private final AuditService audit;
+    private final NotificationService notifications;
     private final String frontendUrl;
 
     public TaskReminderService(UserRepository users,
@@ -59,12 +60,14 @@ public class TaskReminderService {
                                MeetingRepository meetings,
                                EmailService email,
                                AuditService audit,
+                               NotificationService notifications,
                                @Value("${app.frontend-url:http://localhost:3000}") String frontendUrl) {
         this.users = users;
         this.actionItems = actionItems;
         this.meetings = meetings;
         this.email = email;
         this.audit = audit;
+        this.notifications = notifications;
         this.frontendUrl = frontendUrl.endsWith("/")
                 ? frontendUrl.substring(0, frontendUrl.length() - 1)
                 : frontendUrl;
@@ -93,6 +96,42 @@ public class TaskReminderService {
             log.info("Sent {} task reminder digest(s).", sent);
         }
         return sent;
+    }
+
+    /**
+     * Put today's deadlines in the bell, for everybody — not only the people
+     * who asked for the email.
+     *
+     * <p>Separate from {@link #sendDue} on purpose. Mailing somebody who did not
+     * ask is spam; a row in their own notification list is not, and the two
+     * audiences are genuinely different — most people want to see what is late
+     * without wanting a daily message about it.
+     *
+     * <p>Two notifications rather than one, because "3 overdue" and "3 due this
+     * week" prompt entirely different behaviour, and a merged sentence reads as
+     * neither. Both carry the day as their dedupe key, so a redeploy at the
+     * wrong minute cannot say it twice.
+     *
+     * @return how many users were notified
+     */
+    @Transactional
+    public int notifyDue(LocalDate today) {
+        int notified = 0;
+        for (Object[] row : actionItems.dueByUser(today, today.plusDays(DueStatus.SOON_DAYS))) {
+            String userId = (String) row[0];
+            int overdue = count(row[1]);
+            int soon = count(row[2]);
+            notifications.tasksOverdue(userId, overdue, today);
+            notifications.tasksDue(userId, soon, today);
+            if (overdue > 0 || soon > 0) {
+                notified++;
+            }
+        }
+        return notified;
+    }
+
+    private static int count(Object value) {
+        return value instanceof Number n ? n.intValue() : 0;
     }
 
     private boolean sendFor(UserEntity user, LocalDate today) {

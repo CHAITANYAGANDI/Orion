@@ -49,6 +49,7 @@ class TaskReminderServiceTest {
     @Mock private MeetingRepository meetings;
     @Mock private EmailService email;
     @Mock private AuditService audit;
+    @Mock private NotificationService notifications;
 
     private TaskReminderService service;
     private UserEntity user;
@@ -56,7 +57,7 @@ class TaskReminderServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new TaskReminderService(users, actionItems, meetings, email, audit,
+        service = new TaskReminderService(users, actionItems, meetings, email, audit, notifications,
                 "http://localhost:3000/");
         due.clear();
 

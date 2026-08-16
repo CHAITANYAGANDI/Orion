@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { ListChecks, Mail } from "lucide-react";
+import { Bell, ListChecks, Mail } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useAppDispatch, useAppSelector } from "@/lib/hooks";
 import { setNotifyProcessingDone } from "@/lib/uiSlice";
@@ -10,6 +10,7 @@ import {
   useGetUsageQuery,
   useGetPreferencesQuery,
   useUpdatePreferencesMutation,
+  useGetNotificationKindsQuery,
 } from "@/lib/api";
 import { KnownSpeakersCard } from "@/components/known-speakers-card";
 import { VocabularyCard } from "@/components/vocabulary-card";
@@ -57,9 +58,11 @@ export default function SettingsPage() {
 
       <KnownSpeakersCard />
 
+      <NotificationsCard />
+
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Notifications</CardTitle>
+          <CardTitle className="text-base">In this browser</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <ToggleRow
@@ -68,7 +71,8 @@ export default function SettingsPage() {
             onChange={(v) => dispatch(setNotifyProcessingDone(v))}
           />
           <p className="text-xs text-muted-foreground">
-            This one is stored locally in your browser.
+            A desktop pop-up, separate from the bell above. Stored locally, so it
+            applies to this browser rather than to your account.
           </p>
         </CardContent>
       </Card>
@@ -257,6 +261,81 @@ function errorMessage(err: unknown): string {
     if (data?.message) return data.message;
   }
   return "Couldn't save that.";
+}
+
+/**
+ * What the bell is allowed to say.
+ *
+ * <p>Switches, not a master off — a bell that can only be silenced entirely is
+ * one that gets silenced entirely the first time it says something useless, and
+ * then the failed upload goes unseen too.
+ *
+ * <p>The list of kinds comes from the server rather than being written here, so
+ * adding one is a backend change and the wording of the switch cannot drift
+ * from the wording of the notification. Failures have no switch at all: muting
+ * them makes "nothing happened" and "something broke" the same silence.
+ */
+function NotificationsCard() {
+  const kinds = useGetNotificationKindsQuery();
+  const prefs = useGetPreferencesQuery();
+  const [update, { isLoading }] = useUpdatePreferencesMutation();
+
+  const muted = React.useMemo(
+    () => new Set(prefs.data?.mutedNotifications ?? []),
+    [prefs.data?.mutedNotifications],
+  );
+
+  async function toggle(kind: string, on: boolean) {
+    const next = new Set(muted);
+    if (on) next.delete(kind);
+    else next.add(kind);
+    try {
+      // The whole set every time: the page holds every switch on screen, and a
+      // delta from a stale render is how two of them end up disagreeing.
+      await update({ mutedNotifications: Array.from(next) }).unwrap();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Bell className="h-4 w-4 text-primary" /> Notifications
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          What shows up in the bell. These stay in Recallix — none of them send email.
+        </p>
+        {(kinds.data ?? []).map((k) => (
+          <label
+            key={k.kind}
+            className="flex items-center justify-between gap-3 rounded-md border p-3"
+          >
+            <span className="min-w-0">
+              <span className="block text-sm">Tell me {k.setting}</span>
+              {!k.mutable && (
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  Always on — a failure you are not told about is a meeting that
+                  looks like it is still running.
+                </span>
+              )}
+            </span>
+            <input
+              type="checkbox"
+              checked={!muted.has(k.kind)}
+              disabled={!k.mutable || isLoading}
+              onChange={(e) => void toggle(k.kind, e.target.checked)}
+              aria-label={`Tell me ${k.setting}`}
+              className="h-4 w-4 shrink-0 accent-[hsl(var(--primary))] disabled:opacity-50"
+            />
+          </label>
+        ))}
+      </CardContent>
+    </Card>
+  );
 }
 
 function ToggleRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {

@@ -85,6 +85,7 @@ public class MeetingService {
     private final SummaryTemplateService templates;
     private final KnownSpeakerService knownSpeakers;
     private final VocabularyService vocabulary;
+    private final NotificationService notifications;
     /** Only to verify a project id a client sent — see {@code createMeeting}. */
     private final ProjectRepository projects;
     /** Only to flag translations when the words underneath them change (V33). */
@@ -105,7 +106,9 @@ public class MeetingService {
                           KnownSpeakerService knownSpeakers,
                           VocabularyService vocabulary,
                           ProjectRepository projects,
-                          MeetingTranslationRepository translations) {
+                          MeetingTranslationRepository translations,
+                          NotificationService notifications) {
+        this.notifications = notifications;
         this.projects = projects;
         this.translations = translations;
         this.meetings = meetings;
@@ -180,6 +183,7 @@ public class MeetingService {
 
         enqueueProcessing(meeting);
         audit.record(userId, "MEETING_CREATED", "meeting", meeting.getId());
+        notifications.processingStarted(meeting, "uploaded");
         return toResponse(meeting);
     }
 
@@ -241,6 +245,7 @@ public class MeetingService {
 
         enqueueProcessing(meeting);
         audit.record(userId, "MEETING_IMPORTED", "meeting", meeting.getId());
+        notifications.processingStarted(meeting, "imported");
         return toResponse(meeting);
     }
 
@@ -413,6 +418,9 @@ public class MeetingService {
         // Remembered on the meeting so a later reprocess keeps this shape.
         meeting.setSummaryTemplate(slug);
         audit.record(userId, "SUMMARY_RESUMMARIZED", "meeting", meetingId);
+        // A genuinely separate event from the first write: it takes seconds and
+        // people start it and switch tabs.
+        notifications.summaryRewritten(meeting, slug);
 
         return toResponse(meetingId, summary);
     }
@@ -656,6 +664,7 @@ public class MeetingService {
         translations.markStaleByMeetingId(meetingId);
         enqueueProcessing(meeting);
         audit.record(userId, "MEETING_REPROCESS", "meeting", meetingId);
+        notifications.processingStarted(meeting, "reprocessed");
         return new ReprocessResponse(meetingId, MeetingStatus.QUEUED);
     }
 

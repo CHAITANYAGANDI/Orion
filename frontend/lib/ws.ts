@@ -24,6 +24,65 @@ export interface MeetingStatusSubscription {
  * should implement a polling fallback (GET /meetings/{id}) if `onError`/
  * `onConnect` indicates the socket is unavailable.
  */
+/**
+ * Subscribe to the bell.
+ *
+ * <p>The frame carries an unread count and nothing else — see
+ * `NotificationPublisher` on the server for why. This is a nudge to re-read
+ * over the authenticated API, not a delivery mechanism, so the handler is given
+ * no content to render and cannot accidentally start rendering it.
+ *
+ * <p>The channel comes from `GET /notifications/unread-count`; the browser is
+ * authenticated as a Clerk subject and has never been told its internal user id.
+ */
+export function subscribeNotifications(
+  channel: string,
+  onPing: (unread: number) => void
+): MeetingStatusSubscription {
+  let client: Client | null = null;
+
+  try {
+    client = new Client({
+      webSocketFactory: () => new SockJS(WS_URL) as unknown as WebSocket,
+      reconnectDelay: 8000,
+      heartbeatIncoming: 20000,
+      heartbeatOutgoing: 20000,
+      onConnect: () => {
+        client?.subscribe(`/topic/users/${channel}/notifications`, (msg: IMessage) => {
+          try {
+            const body = JSON.parse(msg.body) as { unread?: number };
+            onPing(typeof body.unread === "number" ? body.unread : 0);
+          } catch {
+            // A frame we cannot read still means something changed, and the
+            // caller re-fetches either way.
+            onPing(-1);
+          }
+        });
+      },
+      onStompError: () => {
+        /* the caller's poll covers it */
+      },
+      onWebSocketError: () => {
+        /* likewise */
+      },
+    });
+    client.activate();
+  } catch {
+    // A browser with no WebSocket at all is not a broken bell, only a slower
+    // one: the caller polls.
+  }
+
+  return {
+    deactivate: () => {
+      try {
+        void client?.deactivate();
+      } catch {
+        /* ignore */
+      }
+    },
+  };
+}
+
 export function subscribeMeetingStatus(
   meetingId: string,
   handlers: StatusHandlers

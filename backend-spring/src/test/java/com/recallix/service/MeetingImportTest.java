@@ -73,13 +73,14 @@ class MeetingImportTest {
 
     @Mock private ProjectRepository projects;
     @Mock private MeetingTranslationRepository translations;
+    @Mock private NotificationService notifications;
 
     private MeetingService service;
 
     @BeforeEach
     void setUp() {
         service = new MeetingService(meetings, transcripts, segments, summaries,
-                actionItems, insights, storage, usage, outbox, audit, ai, templates, knownSpeakers, vocabulary, projects, translations);
+                actionItems, insights, storage, usage, outbox, audit, ai, templates, knownSpeakers, vocabulary, projects, translations, notifications);
         // The picker's validation is exercised in SummaryTemplateServiceTest;
         // here it stands in for "whatever the user chose is fine".
         when(templates.requireKnown(any())).thenReturn("general");

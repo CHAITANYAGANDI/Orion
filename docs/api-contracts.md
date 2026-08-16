@@ -300,6 +300,146 @@ Resolution failures stay indistinguishable: an invalid token, a revoked one and
 an expired one are all the same 404. Only "this link wants a password" is
 admitted, and only as a 401 — anyone holding the token knows that much already.
 
+### Exports
+
+| Method | Endpoint | Query | Response |
+|---|---|---|---|
+| GET | `/api/v1/meetings/{id}/export` | `format`, `transcript?`, `language?`, `tz?` | the file, `Content-Disposition: attachment` |
+| GET | `/api/v1/meetings/{id}/audio` | — | `AudioDownloadResponse` |
+
+`format` is `pdf`, `docx`, `md` or `txt`, and also accepts `word`, `markdown`
+and `text` because the button says "Word (.docx)". Anything else is a 400 naming
+what is on offer.
+
+**One document, four renderings.** `ExportService` builds an `ExportDocument` —
+title, spec line, and a short sealed set of blocks (heading, prose, bullets,
+tasks, transcript, aside) — and each renderer only decides how to draw it. All
+the deciding happens once: which parts go in, that an empty section keeps its
+heading with "Not discussed." under it, that a finished task stays in the list,
+that a deadline keeps the words somebody actually used. Previously the markdown
+export lived in the browser and the "PDF" was `window.print()`, and the two
+disagreed about most of that.
+
+**The transcript is opt-in.** It is ten to a hundred times the length of
+everything else, and somebody exporting a PDF to attach to an email wants the
+two pages rather than the forty.
+
+**Exporting a translation does not translate anything.** A download is a GET;
+`?language=es` reads a translation that already exists and 404s otherwise,
+pointing at `POST /translations`. In the app the reader has already switched the
+page into that language, which is what created it — and the export follows what
+is on screen rather than offering a second language choice that could silently
+disagree with it. Recallix's own headings ("Action items", "Transcript", "Not
+discussed.") are translated from a table in `ExportLabels`; the section titles
+come from the template and were translated with the brief.
+
+**PDF is where the eighteen languages cost something.** A DOCX names a font and
+Word finds one; a PDF that names a font the reader lacks draws empty boxes. So
+Noto Sans is embedded and subset for the thirteen Latin-script languages, Noto
+Sans Arabic / Hebrew / Devanagari for those three, and Japanese and Chinese
+reference the Adobe character collections that ship with OpenPDF — not embedded,
+which is why this repository does not carry a sixteen-megabyte font. Every run
+goes through a `FontSelector` holding the script font then Noto Sans, because
+Noto Sans Arabic has no letter A and an Arabic export would otherwise render
+"Stripe" as blanks. Right-to-left is a run direction on the writer and on each
+paragraph, which is also what joins the Arabic letters. **Known limit:**
+Devanagari needs conjunct formation and vowel reordering, which OpenPDF does not
+do — Hindi is legible but not correctly typeset, and a readable file beats
+refusing to export Hindi at all.
+
+**DOCX is written directly.** A `.docx` is a zip of five XML parts and this
+renderer emits a linear document; Apache POI would be ~20 MB of jars for a
+grammar entirely used in `DocxRenderer`. Bullets are real list items and headings
+are heading styles, so the file is something to rewrite rather than a wall of
+indented text. Zip entry times are fixed, so exporting an unchanged meeting twice
+gives the same bytes.
+
+**Filenames.** The stem is the meeting title reduced to letters and digits —
+letters, not ASCII letters, so a Japanese title downloads as itself. The header
+carries both spellings: `filename*=UTF-8''…` per RFC 5987 and a stripped plain
+`filename` for older clients. `Content-Disposition` is in the CORS
+`exposedHeaders`, without which the browser hides it cross-origin and every file
+lands under a fallback name.
+
+**Audio is a presigned link, not bytes through the API.** The recording is the
+largest thing Recallix stores, and proxying it to add nothing would tie up a
+request thread for the length of a download. The disposition is signed into the
+URL — the HTML `download` attribute is ignored cross-origin, so this is the only
+thing that makes the browser save `sprint-planning.mp3` instead of opening an
+object key. Asked for on click rather than with the meeting, because it expires.
+A `DOCUMENT` source has no recording and says so with a 400.
+
+### Notifications (V34)
+
+| Method | Endpoint | Body / Query | Response |
+|---|---|---|---|
+| GET | `/api/v1/notifications` | `page`, `size`, `unread?` | `Page<NotificationResponse>` |
+| GET | `/api/v1/notifications/unread-count` | — | `{ unread, channel }` |
+| GET | `/api/v1/notifications/kinds` | — | `NotificationKindResponse[]` |
+| POST | `/api/v1/notifications/{id}/read` | — | `NotificationResponse` |
+| POST | `/api/v1/notifications/{id}/unread` | — | `NotificationResponse` |
+| POST | `/api/v1/notifications/read-all` | — | `{ unread, channel }` |
+| DELETE | `/api/v1/notifications/{id}` | — | `204` |
+| DELETE | `/api/v1/notifications` | — | `204` |
+| POST | `/api/v1/recordings/started` | — | `202` |
+
+**Ten kinds, emitted from events that already existed.** `RECORDING_STARTED`,
+`PROCESSING_STARTED`, `TRANSCRIPT_READY`, `SUMMARY_READY`, `PROCESSING_FAILED`,
+`RECAP_SENT`, `ACTION_ITEM_DUE`, `ACTION_ITEM_OVERDUE`, `MENTIONED_IN_MEETING`,
+`SHARE_VIEWED`. Before this, all of it happened in the log: the only feedback
+surface was the live status socket on one meeting page, so closing the tab meant
+the product had nothing to say about the twenty minutes it spent working.
+
+**What a one-account product cannot notify about.** Recallix has no teams,
+members or invitations, so there is no "someone" to comment, to mention you or to
+share a meeting with you. Two of those three have real counterparts and are here
+under honest names: `MENTIONED_IN_MEETING` is a meeting assigning work to you
+**by name** — matched on `users.display_name`, with no display name meaning no
+notification, because a guess tells somebody they owe work they never agreed to —
+and `SHARE_VIEWED` is somebody outside opening a link you published, which is
+the only genuinely other-party event the product has. A comment from another
+person has no counterpart: action item notes are a private working log.
+
+**`PROCESSING_FAILED` is on nobody's list and is the one people need.** An upload
+that failed while the tab was closed is otherwise indistinguishable from one
+still running. It is the single kind that cannot be muted — `mutable: false` —
+because switching it off makes "nothing happened" and "something broke" the same
+silence.
+
+**Transcript and summary are one arrival.** The worker returns transcript, notes
+and action items in a single result callback, so both would fire at the same
+instant with the same link. `CallbackService.announce` emits the summary when
+there is one and the transcript only when that is all there is — notes imply a
+transcript, and ringing twice for one event is how a bell stops being read.
+
+**Muting is a list of what is off** (`users.muted_notifications`), so everything
+is on by default and a kind added later ships enabled rather than invisible. A
+muted kind is **never written**, not filtered on read: filtering at render time
+means switching a kind back on floods the bell with a month of things somebody
+had already decided they did not want.
+
+**Deduplication** is a unique index on `(user_id, kind, dedupe_key)`. An overdue
+task is overdue again tomorrow, a link shared with forty people is opened forty
+times, and a recording started three times while finding a quiet room is one
+decision. Keys are `day:{date}` for the deadline pair, `share:{id}:{date}`,
+`hour:{epoch-hour}` for recordings and `meeting:{id}` for mentions.
+
+**Deadlines notify everybody, not just the email subscribers.** `TaskReminderJob`
+now runs two passes: `sendDue` mails the people who opted in, `notifyDue` writes
+a bell row for everyone with work outstanding. Mailing somebody who did not ask
+is spam; a row in their own list is not, and the audiences are genuinely
+different.
+
+**Share views are an event, not a call.** `ShareService.resolve` publishes
+`ShareViewedEvent`; `ShareViewListener` consumes it after commit on another
+thread, sets the tenant (the share page is unauthenticated) and writes the
+notification. Inside the request it would be a public page failing on a
+dedupe-key collision, which is what forty simultaneous readers produce.
+
+**Nothing here may break what it reports on.** `NotificationService.emit`
+swallows everything and logs — a meeting that processed correctly must not be
+reported as failed because the sentence about it could not be written down.
+
 ### Projects (V30)
 
 | Method | Endpoint | Body | Response |
@@ -960,6 +1100,19 @@ Plan limits: FREE {meetings:5, minutes:60}, PRO {50, 600}, PREMIUM {unlimited=-1
 - Server pushes `StatusEvent` payloads.
 - Also mirrored into Redis key `meeting:status:{meetingId}` (TTL 1h) for polling fallback
   via `GET /api/v1/meetings/{id}` (status field) — no extra endpoint needed.
+- Client also subscribes to `/topic/users/{channel}/notifications`, where `channel`
+  comes from `GET /api/v1/notifications/unread-count` (the browser is
+  authenticated as a Clerk subject and has never been told its internal user id).
+
+**The notification frame carries `{ unread }` and nothing else, deliberately.**
+The STOMP endpoint is unauthenticated — a subscription is just a topic name — so
+anything published there is readable by anyone who can guess it. Meeting status
+survives that: a status and a percentage say almost nothing. A notification
+cannot, because its entire value is the meeting's title and the task's wording.
+So the frame is a nudge, the browser re-reads over the authenticated REST API,
+and a stranger guessing a user id learns that something happened and nothing
+about what. The client also polls the count every 90 seconds, which is what makes
+the socket an optimisation rather than a dependency.
 
 ---
 

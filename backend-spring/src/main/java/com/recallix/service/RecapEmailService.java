@@ -31,12 +31,15 @@ public class RecapEmailService {
     private final FollowUpService followUp;
     private final EmailService email;
     private final AuditService audit;
+    private final NotificationService notifications;
 
     public RecapEmailService(MeetingRepository meetings,
                              UserRepository users,
                              FollowUpService followUp,
                              EmailService email,
-                             AuditService audit) {
+                             AuditService audit,
+                             NotificationService notifications) {
+        this.notifications = notifications;
         this.meetings = meetings;
         this.users = users;
         this.followUp = followUp;
@@ -87,6 +90,7 @@ public class RecapEmailService {
             // recap eligible to go out on the next reprocess.
             meeting.setRecapSentAt(Instant.now());
             audit.record(userId, "RECAP_EMAIL_SENT", "meeting", meetingId);
+            notifications.recapSent(meeting, to);
         }
         return sent;
     }

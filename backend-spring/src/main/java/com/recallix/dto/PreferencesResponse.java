@@ -2,6 +2,8 @@ package com.recallix.dto;
 
 import com.recallix.entity.UserEntity;
 
+import java.util.List;
+
 /** Server-side user preferences (settings page). */
 public record PreferencesResponse(
         boolean autoEmailRecap,
@@ -14,7 +16,9 @@ public record PreferencesResponse(
          * The only thing that can turn a list of owners into "my tasks".
          */
         String displayName,
-        boolean taskReminders
+        boolean taskReminders,
+        /** Notification kinds switched off. Everything absent from this is on. */
+        List<String> mutedNotifications
 ) {
     public static PreferencesResponse from(UserEntity user) {
         return new PreferencesResponse(
@@ -22,6 +26,7 @@ public record PreferencesResponse(
                 user.getRecapEmail(),
                 user.effectiveRecapEmail(),
                 user.getDisplayName(),
-                user.isTaskReminders());
+                user.isTaskReminders(),
+                user.getMutedNotifications());
     }
 }

@@ -32,7 +32,11 @@ import {
   MonitorSpeaker,
   Users,
 } from "lucide-react";
-import { useCreateUploadUrlMutation, useCreateMeetingMutation } from "@/lib/api";
+import {
+  useCreateUploadUrlMutation,
+  useCreateMeetingMutation,
+  useRecordingStartedMutation,
+} from "@/lib/api";
 import { useRecording } from "@/lib/recording-context";
 import type { CaptureMode } from "@/lib/use-recorder";
 import { Button } from "@/components/ui/button";
@@ -48,11 +52,25 @@ export default function RecordPage() {
   const recorder = useRecording();
   const [createUploadUrl] = useCreateUploadUrlMutation();
   const [createMeeting] = useCreateMeetingMutation();
+  const [announceRecording] = useRecordingStartedMutation();
 
   const [consented, setConsented] = React.useState(false);
   const [mode, setMode] = React.useState<CaptureMode>("online");
   const [phase, setPhase] = React.useState<Phase>("idle");
   const [progress, setProgress] = React.useState(0);
+
+  /**
+   * Begin, and tell the server we did.
+   *
+   * The microphone is the one thing the server cannot observe, and the point of
+   * telling it is the other devices: a laptop recording and a phone in a pocket
+   * are the same account. Fired and forgotten on purpose — a notification that
+   * could not be written must never be the reason a recording did not start.
+   */
+  async function onStart() {
+    await recorder.start(mode);
+    void announceRecording();
+  }
 
   const busy = phase !== "idle";
   const live = recorder.state === "recording" || recorder.state === "paused";
@@ -211,7 +229,7 @@ export default function RecordPage() {
             <div className="flex flex-wrap items-center justify-center gap-2">
               {recorder.state === "idle" && (
                 <Button
-                  onClick={() => void recorder.start(mode)}
+                  onClick={() => void onStart()}
                   disabled={!consented || !recorder.supported}
                   className="gap-2"
                 >

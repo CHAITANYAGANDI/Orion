@@ -32,6 +32,7 @@ public class PreferencesController {
         return PreferencesResponse.from(users.updatePreferences(
                 SecurityUtils.currentUserId(),
                 new UserService.PreferencesPatch(
-                        req.autoEmailRecap(), req.recapEmail(), req.displayName(), req.taskReminders())));
+                        req.autoEmailRecap(), req.recapEmail(), req.displayName(),
+                        req.taskReminders(), req.mutedNotifications())));
     }
 }

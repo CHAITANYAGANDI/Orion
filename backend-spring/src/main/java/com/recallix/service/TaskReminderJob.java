@@ -38,12 +38,21 @@ public class TaskReminderJob {
 
     @Scheduled(cron = "${recallix.tasks.reminder-cron:0 0 8 * * *}", zone = "UTC")
     public void sendDailyDigest() {
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
         // Never let a failure here kill the scheduler's thread: a broken digest
         // must not take the outbox relay down with it.
         try {
-            TenantContext.runAsSystem(() -> reminders.sendDue(LocalDate.now(ZoneOffset.UTC)));
+            TenantContext.runAsSystem(() -> reminders.sendDue(today));
         } catch (RuntimeException e) {
             log.error("Task reminder digest failed: {}", e.getMessage(), e);
+        }
+        // Its own try: the bell is for everybody with work outstanding, and the
+        // people who never opted into the email are exactly the ones who would
+        // otherwise lose it to a mail-server failure.
+        try {
+            TenantContext.runAsSystem(() -> reminders.notifyDue(today));
+        } catch (RuntimeException e) {
+            log.error("Task reminder notifications failed: {}", e.getMessage(), e);
         }
     }
 }

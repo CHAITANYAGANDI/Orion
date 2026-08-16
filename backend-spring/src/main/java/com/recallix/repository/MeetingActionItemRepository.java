@@ -151,6 +151,28 @@ public interface MeetingActionItemRepository extends JpaRepository<MeetingAction
             """)
     List<Object[]> owners(@Param("userId") String userId);
 
+    /**
+     * Who has work coming due, and how much of it is already late.
+     *
+     * <p>Rows are {@code [userId, overdue, dueSoon]}. Grouped in the database
+     * rather than by asking {@link #findDueThrough} once per user, because the
+     * daily notification pass is for everybody with outstanding work — not just
+     * the people who opted into the email — and the set of "everybody" is a
+     * table scan the moment it is done in Java.
+     */
+    @Query("""
+            SELECT m.userId,
+                   SUM(CASE WHEN a.dueOn < :today THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN a.dueOn >= :today THEN 1 ELSE 0 END)
+            FROM MeetingActionItem a, Meeting m
+            WHERE m.id = a.meetingId
+              AND a.status <> 'DONE'
+              AND a.dueOn IS NOT NULL
+              AND a.dueOn <= :through
+            GROUP BY m.userId
+            """)
+    List<Object[]> dueByUser(@Param("today") LocalDate today, @Param("through") LocalDate through);
+
     /** Everything outstanding and dated on or before a day — the reminder digest. */
     @Query("SELECT a FROM MeetingActionItem a WHERE " + OWNED_BY + """
               AND a.status <> 'DONE'

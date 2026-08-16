@@ -4,9 +4,13 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "users")
@@ -49,6 +53,16 @@ public class UserEntity {
     @Column(name = "task_reminder_sent_on")
     private LocalDate taskReminderSentOn;
 
+    /**
+     * Notification kinds switched off.
+     *
+     * <p>A list of what is muted rather than of what is on, so everything is on
+     * by default and a kind added later ships enabled rather than invisible.
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "muted_notifications", columnDefinition = "jsonb")
+    private List<String> mutedNotifications = new ArrayList<>();
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -78,6 +92,14 @@ public class UserEntity {
 
     public LocalDate getTaskReminderSentOn() { return taskReminderSentOn; }
     public void setTaskReminderSentOn(LocalDate taskReminderSentOn) { this.taskReminderSentOn = taskReminderSentOn; }
+
+    public List<String> getMutedNotifications() {
+        return mutedNotifications == null ? new ArrayList<>() : mutedNotifications;
+    }
+
+    public void setMutedNotifications(List<String> mutedNotifications) {
+        this.mutedNotifications = mutedNotifications == null ? new ArrayList<>() : mutedNotifications;
+    }
 
     /** Where recaps go: the override when set, otherwise the account address. */
     public String effectiveRecapEmail() {

@@ -19,6 +19,8 @@ import com.recallix.repository.TranscriptSegmentRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import com.recallix.event.ShareViewedEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -78,6 +80,7 @@ public class ShareService {
     private final StorageService storage;
     private final EmailService email;
     private final AuditService audit;
+    private final ApplicationEventPublisher events;
     private final String frontendUrl;
 
     public ShareService(MeetingShareRepository shares,
@@ -89,6 +92,7 @@ public class ShareService {
                         StorageService storage,
                         EmailService email,
                         AuditService audit,
+                        ApplicationEventPublisher events,
                         @Value("${app.frontend-url:http://localhost:3000}") String frontendUrl) {
         this.shares = shares;
         this.meetings = meetings;
@@ -99,6 +103,7 @@ public class ShareService {
         this.storage = storage;
         this.email = email;
         this.audit = audit;
+        this.events = events;
         this.frontendUrl = stripTrailingSlash(frontendUrl);
     }
 
@@ -252,6 +257,10 @@ public class ShareService {
         // how often the link was found rather than read.
         share.setViewCount(share.getViewCount() + 1);
         share.setLastViewedAt(Instant.now());
+        // Told to the owner after this commits, on another thread: see
+        // ShareViewedEvent for why a public page must not carry that work.
+        events.publishEvent(new ShareViewedEvent(
+                share.getId(), meeting.getId(), meeting.getUserId()));
 
         String meetingId = meeting.getId();
         MeetingSummary summary = share.isIncludeSummary()

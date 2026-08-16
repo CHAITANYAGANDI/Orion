@@ -119,6 +119,8 @@ export interface PreferencesResponse {
   displayName: string | null;
   /** Daily digest of what is overdue or due soon. */
   taskReminders: boolean;
+  /** Notification kinds switched off. Everything absent from this is on. */
+  mutedNotifications: string[];
 }
 
 export interface PreferencesUpdateRequest {
@@ -127,6 +129,8 @@ export interface PreferencesUpdateRequest {
   /** Blank clears it. */
   displayName?: string;
   taskReminders?: boolean;
+  /** The whole set, not a delta — the settings page holds every switch at once. */
+  mutedNotifications?: string[];
 }
 
 export interface MeetingImportRequest {
@@ -665,6 +669,64 @@ export interface MeetingTranslation {
   stale: boolean;
   briefTranslatedAt?: string | null;
   transcriptTranslatedAt?: string | null;
+}
+
+/**
+ * Something Recallix did while you were not looking.
+ *
+ * <p>Named `AppNotification` rather than `Notification` because the DOM already
+ * owns that name globally, and shadowing it makes every `new Notification(...)`
+ * in this codebase mean something unexpected.
+ */
+export interface AppNotification {
+  id: string;
+  kind: NotificationKind;
+  kindLabel: string;
+  /** The words written when it happened, not a template filled in now. */
+  title: string;
+  body: string | null;
+  meetingId: string | null;
+  actionItemId: string | null;
+  link: string | null;
+  read: boolean;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export type NotificationKind =
+  | "RECORDING_STARTED"
+  | "PROCESSING_STARTED"
+  | "TRANSCRIPT_READY"
+  | "SUMMARY_READY"
+  | "PROCESSING_FAILED"
+  | "RECAP_SENT"
+  | "ACTION_ITEM_DUE"
+  | "ACTION_ITEM_OVERDUE"
+  | "MENTIONED_IN_MEETING"
+  | "SHARE_VIEWED";
+
+/** One switch on the settings page, described by the server. */
+export interface NotificationKindOption {
+  kind: NotificationKind;
+  label: string;
+  /** Reads as "Tell me {setting}". */
+  setting: string;
+  /** False for the ones that cannot be switched off — currently only failures. */
+  mutable: boolean;
+}
+
+export interface NotificationCount {
+  unread: number;
+  /** The STOMP topic suffix; the browser has never been told its own user id. */
+  channel: string;
+}
+
+/** Where to fetch the original recording, and what to call it once it lands. */
+export interface AudioDownload {
+  url: string;
+  filename: string;
+  contentType: string | null;
+  expiresInSeconds: number;
 }
 
 export interface AvailableTranslation {

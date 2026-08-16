@@ -12,6 +12,7 @@ import com.recallix.repository.MeetingRepository;
 import com.recallix.repository.MeetingSummaryRepository;
 import com.recallix.repository.MeetingTranscriptRepository;
 import com.recallix.repository.TranscriptSegmentRepository;
+import com.recallix.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -62,6 +63,8 @@ class ReprocessActionItemsTest {
     @Mock private StatusPublisher statusPublisher;
     @Mock private UsageLimitService usage;
     @Mock private ApplicationEventPublisher events;
+    @Mock private NotificationService notifications;
+    @Mock private UserRepository users;
 
     private CallbackService service;
 
@@ -71,7 +74,7 @@ class ReprocessActionItemsTest {
     @BeforeEach
     void setUp() {
         service = new CallbackService(meetings, transcripts, segments, summaries, actionItems,
-                insights, statusPublisher, usage, events);
+                insights, statusPublisher, usage, events, notifications, users);
         stored.clear();
 
         Meeting meeting = new Meeting();

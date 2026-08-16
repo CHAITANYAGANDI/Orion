@@ -81,7 +81,11 @@ public class SecurityConfig {
         config.setAllowedOrigins(List.of(frontendUrl));
         config.setAllowedMethods(List.of("GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
-        config.setExposedHeaders(List.of("X-Correlation-Id"));
+        // Content-Disposition is exposed because the API and the app are on
+        // different origins: without it the browser hides the header, and a
+        // download that had a name on the wire arrives as "meeting" or worse as
+        // the meeting id.
+        config.setExposedHeaders(List.of("X-Correlation-Id", "Content-Disposition"));
         config.setAllowCredentials(true);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);

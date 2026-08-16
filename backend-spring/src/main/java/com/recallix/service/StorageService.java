@@ -1,5 +1,6 @@
 package com.recallix.service;
 
+import com.recallix.export.Downloads;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -55,13 +56,30 @@ public class StorageService {
 
     /** Presigned GET URL so the frontend / AI worker can read the object. */
     public String presignDownload(String objectKey) {
-        GetObjectRequest get = GetObjectRequest.builder()
+        return presignDownload(objectKey, null);
+    }
+
+    /**
+     * The same, but the browser saves it under {@code downloadFilename} instead
+     * of playing it.
+     *
+     * <p>The disposition is signed into the URL rather than set by us on the
+     * way past, because there is no way past: the browser fetches the object
+     * from storage directly. S3 and MinIO both let a presigned GET override the
+     * response headers, and this is the only thing that turns a link into a
+     * download with a name on it — the HTML {@code download} attribute is
+     * ignored cross-origin.
+     */
+    public String presignDownload(String objectKey, String downloadFilename) {
+        GetObjectRequest.Builder get = GetObjectRequest.builder()
                 .bucket(bucket)
-                .key(objectKey)
-                .build();
+                .key(objectKey);
+        if (downloadFilename != null && !downloadFilename.isBlank()) {
+            get.responseContentDisposition(Downloads.attachment(downloadFilename));
+        }
         GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
                 .signatureDuration(Duration.ofSeconds(presignExpirySeconds))
-                .getObjectRequest(get)
+                .getObjectRequest(get.build())
                 .build();
         return presigner.presignGetObject(presignRequest).url().toString();
     }

@@ -72,13 +72,14 @@ class ShareServiceTest {
     @Mock private StorageService storage;
     @Mock private EmailService email;
     @Mock private AuditService audit;
+    @Mock private org.springframework.context.ApplicationEventPublisher events;
 
     private ShareService service;
 
     @BeforeEach
     void setUp() {
         service = new ShareService(shares, meetings, summaries, actionItems, transcripts,
-                segments, storage, email, audit, BASE);
+                segments, storage, email, audit, events, BASE);
         when(meetings.findByIdAndUserId(MEETING, USER)).thenReturn(Optional.of(meeting()));
         when(meetings.findById(MEETING)).thenReturn(Optional.of(meeting()));
         when(shares.findFirstByMeetingIdAndRevokedFalseAndStartSecondsIsNull(anyString()))

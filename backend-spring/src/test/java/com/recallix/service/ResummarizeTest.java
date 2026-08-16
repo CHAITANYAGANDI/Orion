@@ -74,6 +74,7 @@ class ResummarizeTest {
 
     @Mock private ProjectRepository projects;
     @Mock private MeetingTranslationRepository translations;
+    @Mock private NotificationService notifications;
 
     private MeetingService service;
     private Meeting meeting;
@@ -81,7 +82,7 @@ class ResummarizeTest {
     @BeforeEach
     void setUp() {
         service = new MeetingService(meetings, transcripts, segments, summaries,
-                actionItems, insights, storage, usage, outbox, audit, ai, templates, knownSpeakers, vocabulary, projects, translations);
+                actionItems, insights, storage, usage, outbox, audit, ai, templates, knownSpeakers, vocabulary, projects, translations, notifications);
 
         meeting = new Meeting();
         meeting.setId(MEETING);

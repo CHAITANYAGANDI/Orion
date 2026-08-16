@@ -22,6 +22,7 @@ import { RecordingProvider, useRecording } from "@/lib/recording-context";
 import { formatDuration } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { NotificationBell } from "@/components/notification-bell";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -117,6 +118,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
             <div className="flex-1" />
             <div className="flex items-center gap-2">
               <RecordingIndicator />
+              <NotificationBell />
               <ThemeToggle />
               <UserMenu />
             </div>

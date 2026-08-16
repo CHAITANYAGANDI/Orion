@@ -2,10 +2,16 @@ package com.recallix.service;
 
 import com.recallix.common.ApiException;
 import com.recallix.common.IdGenerator;
+import com.recallix.domain.NotificationKind;
 import com.recallix.entity.UserEntity;
 import com.recallix.repository.UserRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
 
 /** Maps Clerk (or dev) identities to local user rows and provisions on first use. */
 @Service
@@ -72,20 +78,34 @@ public class UserService {
                 user.setTaskReminderSentOn(null);
             }
         }
+        if (patch.mutedNotifications() != null) {
+            // Stored as the enum's own spelling and nothing else. An unknown
+            // string here would be a mute nobody could ever undo from the
+            // settings page, because the switch it belongs to does not exist.
+            user.setMutedNotifications(patch.mutedNotifications().stream()
+                    .map(NotificationKind::find)
+                    .flatMap(Optional::stream)
+                    .filter(NotificationKind::mutable)
+                    .map(NotificationKind::name)
+                    .distinct()
+                    .collect(Collectors.toCollection(ArrayList::new)));
+        }
         return user;
     }
 
     /**
      * The mutable half of the preferences, as its own type.
      *
-     * <p>Four nullable arguments in a row is a call nobody can read and a
+     * <p>Five nullable arguments in a row is a call nobody can read and a
      * transposition nobody can see; this one is named at the call site.
      */
     public record PreferencesPatch(
             Boolean autoEmailRecap,
             String recapEmail,
             String displayName,
-            Boolean taskReminders
+            Boolean taskReminders,
+            /** Notification kinds to switch off. Null leaves them; empty turns all on. */
+            List<String> mutedNotifications
     ) {
     }
 }

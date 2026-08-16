@@ -45,4 +45,5 @@ public final class IdGenerator {
     public static String project()     { return generate("prj_"); }
     public static String comment()     { return generate("cmt_"); }
     public static String translation() { return generate("trn_"); }
+    public static String notification(){ return generate("ntf_"); }
 }
