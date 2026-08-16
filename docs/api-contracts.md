@@ -177,6 +177,63 @@ deep-link to `/meetings/{id}?t={start}`.
 Persistence note: `chat_messages.meeting_id` is `NULL` for workspace turns —
 that is what distinguishes the two scopes.
 
+### Sharing
+
+| Method | Endpoint | Body | Response |
+|---|---|---|---|
+| POST | `/api/v1/meetings/{id}/share` | `ShareCreateRequest` | `ShareResponse` |
+| GET | `/api/v1/meetings/{id}/share` | — | `ShareResponse` or `204` |
+| GET | `/api/v1/meetings/{id}/share/links` | — | `ShareResponse[]` |
+| DELETE | `/api/v1/meetings/{id}/share` | — | `204` |
+| DELETE | `/api/v1/shares/{shareId}` | — | `204` (one link) |
+| POST | `/api/v1/meetings/{id}/share/email` | `{ "to": [], "message"? }` | `{ "sent": n }` |
+| GET | `/public/shared/{token}` | header `X-Share-Password` | `SharedMeetingResponse` |
+
+**There are no roles, and there cannot be.** Viewer, commenter and editor
+describe what a *person* may do, which presumes an account to attribute the
+writing to and to check on the next request. Everyone holding a link is the same
+anonymous reader. So what varies is not permission but **content**: four
+switches (`includeSummary`, `includeActionItems`, `includeTranscript`,
+`includeAudio`) saying what is visible. Summary and action items default on; the
+transcript and the recording default off, and the recording more firmly — a
+summary is a written account somebody can stand behind, the recording is
+everyone's unedited voice.
+
+**Omitted means "leave it alone".** `neverExpires` and `removePassword` exist
+because an absent value and an explicit empty one arrive identically, and one
+means "don't touch it" while the other means "take it off" — the same problem as
+unfiling a meeting from a project.
+
+**Password** (V31) is a bcrypt hash and is never returned; `passwordProtected` is
+a boolean. It is the second factor for a link that has leaked but not been
+noticed — the only control that helps *after* a URL is somewhere it should not
+be, since revoking requires knowing. The work factor is also the rate limit. It
+travels in a header rather than the query string, because a URL is written to
+server logs, browser history and every proxy in between. A wrong password is not
+counted as a view.
+
+**Moment links** carry `startSeconds`/`endSeconds` and clip the transcript to
+that range **in the query**, not in the browser — sending the whole hour and
+hiding all but ten seconds is not sharing a moment. They are always new rather
+than idempotent: folding the second into the first would silently re-point a URL
+somebody already holds. `quote` is denormalised so a link keeps showing what was
+shared after a reprocess replaces the segments underneath it. At most one live
+whole-meeting link per meeting; as many moment links as there are moments.
+
+**Audio** is a short-lived presigned URL, generated only when the dial is on —
+not merely filtered out of the payload, so there is no signed URL in a log for
+anyone to lift.
+
+**Email is delivery, not access control.** Naming an address grants it nothing;
+the link works for whoever ends up holding it. The endpoint sends an existing
+link and refuses to create one, because an endpoint that both publishes a meeting
+and posts the URL to arbitrary addresses is one mistaken click from a leak. The
+mail says a password will be needed and never carries the password.
+
+Resolution failures stay indistinguishable: an invalid token, a revoked one and
+an expired one are all the same 404. Only "this link wants a password" is
+admitted, and only as a 401 — anyone holding the token knows that much already.
+
 ### Projects (V30)
 
 | Method | Endpoint | Body | Response |

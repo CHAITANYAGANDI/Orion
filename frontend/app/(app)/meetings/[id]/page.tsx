@@ -44,6 +44,7 @@ import {
   useGetSummaryTemplatesQuery,
   useResummarizeMutation,
   useGetMomentsQuery,
+  useGetInsightsQuery,
   useCreateMomentMutation,
   useDeleteMomentMutation,
   useGetMeetingConversationsQuery,
@@ -78,6 +79,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
 import { AudioPlayer, useAudioController } from "@/components/audio-player";
@@ -86,6 +88,7 @@ import { MeetingTitle, MeetingTags } from "@/components/meeting-title";
 import { ProjectPicker } from "@/components/project-picker";
 import { InsightsPanel } from "@/components/insights-panel";
 import { downloadMarkdown } from "@/lib/export-markdown";
+import { copyMinutes, copySummary } from "@/lib/minutes";
 import { subscribeMeetingStatus } from "@/lib/ws";
 import {
   formatDateTime,
@@ -209,6 +212,9 @@ export default function MeetingDetailPage() {
   // Also read inside the transcript panel; RTK Query dedupes to one request.
   // Fetched here because the player needs it for "play highlights only".
   const moments = useGetMomentsQuery(id, { skip: !ready });
+  // And here because minutes open with the decisions. The InsightsPanel asks
+  // for the same thing, and RTK Query serves both from one request.
+  const insights = useGetInsightsQuery(id, { skip: !ready });
 
   const [reprocess, reprocessState] = useReprocessMeetingMutation();
   const [remove, removeState] = useDeleteMeetingMutation();
@@ -223,6 +229,41 @@ export default function MeetingDetailPage() {
       segments: transcript.data?.segments,
       includeTranscript,
     });
+  }
+
+  /**
+   * What goes on the clipboard, in two shapes.
+   *
+   * The summary is prose you paste into a reply; the minutes are a document you
+   * paste into a doc or an email. Speakers come from the transcript because
+   * "Present:" is the line every set of minutes opens with, and Recallix knows
+   * who spoke without anyone having typed an attendee list.
+   */
+  function minutesInput() {
+    const speakers = Array.from(
+      new Set((transcript.data?.segments ?? []).map((s) => s.speaker).filter(Boolean)),
+    );
+    return {
+      meeting: meeting.data!,
+      summary: summary.data,
+      actionItems: actions.data,
+      insights: insights.data,
+      speakers,
+    };
+  }
+
+  async function onCopySummary() {
+    if (!meeting.data) return;
+    const ok = await copySummary(minutesInput());
+    if (ok) toast.success("Summary copied.");
+    else toast.error("Nothing to copy yet.");
+  }
+
+  async function onCopyMinutes() {
+    if (!meeting.data) return;
+    const ok = await copyMinutes(minutesInput());
+    if (ok) toast.success("Minutes copied — paste into a doc or an email.");
+    else toast.error("Couldn't copy.");
   }
 
   async function onReprocess() {
@@ -345,6 +386,16 @@ export default function MeetingDetailPage() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
+                  {/* Copying comes first: it is what people actually do with a
+                      summary — paste it into a reply or a doc — and a download
+                      is the fallback for when a file is genuinely wanted. */}
+                  <DropdownMenuItem onSelect={() => void onCopySummary()}>
+                    Copy summary
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => void onCopyMinutes()}>
+                    Copy formatted minutes
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem onSelect={() => onExportMarkdown(false)}>
                     Markdown (.md)
                   </DropdownMenuItem>

@@ -13,6 +13,7 @@ import type {
   CheckoutResponse,
   KnownSpeaker,
   ShareCreateRequest,
+  ShareEmailRequest,
   ShareResponse,
   SpeakerRematch,
   VocabularyTerm,
@@ -812,6 +813,29 @@ export const api = createApi({
       invalidatesTags: (_r, _e, id) => [{ type: "Share", id }],
     }),
 
+    /** Every live link for the meeting, its moment links included. */
+    getShareLinks: builder.query<ShareResponse[], string>({
+      query: (id) => `/meetings/${id}/share/links`,
+      providesTags: (_r, _e, id) => [{ type: "Share", id }],
+    }),
+
+    /** Withdraw one link — how a single moment link is taken back. */
+    revokeShareLink: builder.mutation<void, { shareId: string; meetingId: string }>({
+      query: ({ shareId }) => ({ url: `/shares/${shareId}`, method: "DELETE" }),
+      invalidatesTags: (_r, _e, arg) => [{ type: "Share", id: arg.meetingId }],
+    }),
+
+    emailShare: builder.mutation<
+      { sent: number },
+      { id: string; body: ShareEmailRequest }
+    >({
+      query: ({ id, body }) => ({
+        url: `/meetings/${id}/share/email`,
+        method: "POST",
+        body,
+      }),
+    }),
+
     // ---- Billing & usage ----
     checkout: builder.mutation<CheckoutResponse, CheckoutRequest>({
       query: (body) => ({ url: "/billing/checkout", method: "POST", body }),
@@ -893,8 +917,11 @@ export const {
   useGetActionItemsQuery,
   usePatchActionItemMutation,
   useGetShareQuery,
+  useGetShareLinksQuery,
   useCreateShareMutation,
   useRevokeShareMutation,
+  useRevokeShareLinkMutation,
+  useEmailShareMutation,
   useCheckoutMutation,
   useGetUsageQuery,
 } = api;

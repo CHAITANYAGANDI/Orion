@@ -563,19 +563,58 @@ export interface SpeakerRenameRequest {
 }
 
 // ---- Sharing & follow-up ----
+/**
+ * What a share link should reveal, for how long, and to whom it opens.
+ *
+ * Every field is optional: omitted means "leave it as it is" on an existing
+ * link. `removePassword` and `neverExpires` exist because an absent value and an
+ * explicit empty one arrive identically, and one means "don't touch it" while
+ * the other means "take it off".
+ */
 export interface ShareCreateRequest {
+  includeSummary?: boolean;
+  includeActionItems?: boolean;
   includeTranscript?: boolean;
+  includeAudio?: boolean;
   expiresInDays?: number;
+  neverExpires?: boolean;
+  password?: string;
+  removePassword?: boolean;
+  label?: string;
+  /** Set together to share one excerpt rather than the whole meeting. */
+  startSeconds?: number;
+  endSeconds?: number;
+  quote?: string;
 }
 
 export interface ShareResponse {
+  id: string;
   token: string;
   url: string;
+  label: string;
+  includeSummary: boolean;
+  includeActionItems: boolean;
   includeTranscript: boolean;
+  includeAudio: boolean;
+  /** Whether one is set — never the password itself. */
+  passwordProtected: boolean;
   expiresAt?: string | null;
+  /** Null for a whole-meeting link; set for an excerpt. */
+  startSeconds?: number | null;
+  endSeconds?: number | null;
+  quote: string;
   viewCount: number;
   lastViewedAt?: string | null;
   createdAt: string;
+}
+
+/**
+ * Mailing an existing link. Delivery, not access control — naming an address
+ * grants it nothing, and the link works for whoever ends up holding it.
+ */
+export interface ShareEmailRequest {
+  to: string[];
+  message?: string;
 }
 
 /**
@@ -674,6 +713,12 @@ export interface SharedMeeting {
     priority: Priority;
   }[];
   transcript?: string | null;
+  /** Short-lived presigned media URL; absent unless the recording was shared. */
+  audioUrl?: string | null;
+  /** Set when the link points at one excerpt — the player and text are bounded. */
+  startSeconds?: number | null;
+  endSeconds?: number | null;
+  quote?: string | null;
 }
 
 // ---- Billing & usage ----

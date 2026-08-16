@@ -7,18 +7,25 @@
  * no RTK Query cache keyed to a signed-in user. It fetches the redacted payload
  * directly from the public endpoint, so a recipient with the link needs no
  * Recallix account.
+ *
+ * The page renders what it was given and never says what it was not. "The
+ * summary was hidden from you" tells a recipient there is something worth
+ * asking for; a section the owner withheld simply is not there, exactly as it
+ * would not be for a meeting that has none.
  */
 
 import * as React from "react";
 import { useParams } from "next/navigation";
-import { Mic, Loader2, Link2Off, CheckCircle2, AlertTriangle, Clock } from "lucide-react";
+import { Mic, Link2Off, Clock, Lock, Loader2, Scissors } from "lucide-react";
 import { API_BASE } from "@/lib/api";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatDateTime, formatDuration } from "@/lib/format";
+import { formatDateTime, formatDuration, timecode } from "@/lib/format";
 import type { SharedMeeting } from "@/lib/types";
 
-type Status = "loading" | "ok" | "gone";
+type Status = "loading" | "ok" | "gone" | "locked";
 
 export default function SharedMeetingPage() {
   const params = useParams<{ token: string }>();
@@ -26,27 +33,52 @@ export default function SharedMeetingPage() {
 
   const [status, setStatus] = React.useState<Status>("loading");
   const [meeting, setMeeting] = React.useState<SharedMeeting | null>(null);
+  const [password, setPassword] = React.useState("");
+  const [wrong, setWrong] = React.useState(false);
+  const [checking, setChecking] = React.useState(false);
+
+  /**
+   * The password travels in a header, never the query string: a URL is written
+   * to server logs, browser history and any proxy in between.
+   */
+  const load = React.useCallback(
+    async (secret?: string): Promise<Status> => {
+      try {
+        const res = await fetch(`${API_BASE}/public/shared/${encodeURIComponent(token)}`, {
+          headers: secret ? { "X-Share-Password": secret } : undefined,
+        });
+        if (res.status === 401) return "locked";
+        if (!res.ok) throw new Error(String(res.status));
+        setMeeting((await res.json()) as SharedMeeting);
+        return "ok";
+      } catch {
+        // Revoked, expired and never-existed are intentionally indistinguishable.
+        return "gone";
+      }
+    },
+    [token],
+  );
 
   React.useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`${API_BASE}/public/shared/${encodeURIComponent(token)}`);
-        if (!res.ok) throw new Error(String(res.status));
-        const data = (await res.json()) as SharedMeeting;
-        if (!cancelled) {
-          setMeeting(data);
-          setStatus("ok");
-        }
-      } catch {
-        // Revoked, expired and never-existed are intentionally indistinguishable.
-        if (!cancelled) setStatus("gone");
-      }
-    })();
+    void load().then((next) => {
+      if (!cancelled) setStatus(next);
+    });
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [load]);
+
+  async function unlock(e: React.FormEvent) {
+    e.preventDefault();
+    if (!password.trim() || checking) return;
+    setChecking(true);
+    setWrong(false);
+    const next = await load(password);
+    setChecking(false);
+    if (next === "ok") setStatus("ok");
+    else setWrong(true);
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -56,7 +88,9 @@ export default function SharedMeetingPage() {
             <Mic className="h-3.5 w-3.5" />
           </div>
           <span className="font-semibold">Recallix AI</span>
-          <span className="ml-auto text-xs text-muted-foreground">Shared meeting</span>
+          <span className="ml-auto text-xs text-muted-foreground">
+            {meeting?.startSeconds != null ? "Shared moment" : "Shared meeting"}
+          </span>
         </div>
       </header>
 
@@ -67,6 +101,33 @@ export default function SharedMeetingPage() {
             <Skeleton className="h-32 w-full" />
             <Skeleton className="h-24 w-full" />
           </div>
+        )}
+
+        {status === "locked" && (
+          <Card>
+            <CardContent className="py-12">
+              <form onSubmit={unlock} className="mx-auto flex max-w-sm flex-col items-center gap-3">
+                <Lock className="h-8 w-8 text-muted-foreground" />
+                <p className="font-medium">This link is password protected</p>
+                <p className="text-center text-sm text-muted-foreground">
+                  Whoever sent it to you will have the password.
+                </p>
+                <Input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  aria-label="Password"
+                  placeholder="Password"
+                  autoFocus
+                />
+                {wrong && <p className="text-sm text-destructive">That password is not right.</p>}
+                <Button type="submit" disabled={checking || !password.trim()} className="w-full gap-2">
+                  {checking && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Open
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
         )}
 
         {status === "gone" && (
@@ -89,8 +150,25 @@ export default function SharedMeetingPage() {
               <p className="mt-1 text-sm text-muted-foreground">
                 {formatDateTime(meeting.meetingDate)}
                 {meeting.durationSeconds ? ` · ${formatDuration(meeting.durationSeconds)}` : ""}
+                {meeting.startSeconds != null && (
+                  <>
+                    {" · "}
+                    <span className="inline-flex items-center gap-1">
+                      <Scissors className="h-3.5 w-3.5" />
+                      excerpt from {timecode(meeting.startSeconds)}
+                    </span>
+                  </>
+                )}
               </p>
             </div>
+
+            {meeting.audioUrl && (
+              <ClippedAudio
+                src={meeting.audioUrl}
+                start={meeting.startSeconds ?? null}
+                end={meeting.endSeconds ?? null}
+              />
+            )}
 
             {meeting.shortSummary && (
               <Card>
@@ -131,7 +209,9 @@ export default function SharedMeetingPage() {
             {meeting.transcript && (
               <Card>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Transcript</CardTitle>
+                  <CardTitle className="text-base">
+                    {meeting.startSeconds != null ? "What was said" : "Transcript"}
+                  </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
@@ -148,6 +228,61 @@ export default function SharedMeetingPage() {
         )}
       </main>
     </div>
+  );
+}
+
+/**
+ * The recording, bounded to the shared excerpt.
+ *
+ * <p>A plain {@code <audio>} rather than the app's transport: this page has no
+ * transcript to drive one, and a recipient wants play and a scrubber, not
+ * skip-silence. What it does add is the bound — the file behind a moment link is
+ * still the whole meeting, so the player starts at the excerpt and stops at the
+ * end of it rather than carrying on into an hour nobody was sent.
+ */
+function ClippedAudio({
+  src,
+  start,
+  end,
+}: {
+  src: string;
+  start: number | null;
+  end: number | null;
+}) {
+  const ref = React.useRef<HTMLAudioElement | null>(null);
+
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el || start == null) return;
+
+    const seekToStart = () => {
+      if (el.currentTime < start) el.currentTime = start;
+    };
+    const stopAtEnd = () => {
+      if (end != null && el.currentTime >= end) {
+        el.pause();
+        el.currentTime = start;
+      }
+    };
+    el.addEventListener("loadedmetadata", seekToStart);
+    el.addEventListener("timeupdate", stopAtEnd);
+    return () => {
+      el.removeEventListener("loadedmetadata", seekToStart);
+      el.removeEventListener("timeupdate", stopAtEnd);
+    };
+  }, [start, end]);
+
+  return (
+    <Card>
+      <CardContent className="py-4">
+        <audio ref={ref} src={src} controls preload="metadata" className="w-full" />
+        {start != null && end != null && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            {timecode(start)} – {timecode(end)} of the recording
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
