@@ -340,6 +340,11 @@ class WorkspaceChatRequest(CamelModel):
     question: str
     # Optional narrowing: search only these meetings instead of all of them.
     meeting_ids: list[str] | None = None
+    # How hard to look. "express" is the default and is what every caller got
+    # before this existed, so an old client keeps its exact behaviour; the two
+    # differ in retrieval width and in whether the answer is asked to enumerate.
+    # See RagService.answer_workspace.
+    mode: Literal["express", "advanced"] = "express"
 
 
 class SemanticSearchRequest(CamelModel):

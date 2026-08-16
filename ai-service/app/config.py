@@ -128,6 +128,10 @@ class Settings(BaseSettings):
     # Workspace-wide chat spans many meetings, so it needs a wider net than the
     # single-meeting chat above.
     rag_workspace_top_k: int = 10
+    # What "Advanced" retrieves instead. Two and a half times the width rather
+    # than ten: past roughly this the top-k stops adding calls and starts adding
+    # more of the same one, and the context window pays for all of it.
+    rag_workspace_deep_top_k: int = 25
     rag_search_limit: int = 20
     # Semantic search dedupes to one hit per meeting after the ANN scan, and the
     # owner filter discards some candidates, so the inner scan fetches this

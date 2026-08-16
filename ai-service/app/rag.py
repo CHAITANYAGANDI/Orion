@@ -214,7 +214,7 @@ class RagService:
         # "List every question that went unanswered" is an inventory here too,
         # even though this chat sees one meeting rather than the workspace.
         answer = await self._llm.answer(
-            question, context, exhaustive=wants_full_list(question)
+            question, context, exhaustive=deep or wants_full_list(question)
         )
         citations = [
             {"chunkIndex": r[0], "start": r[2], "end": r[3], "text": r[1]} for r in rows
@@ -467,18 +467,40 @@ class RagService:
         user_id: str,
         question: str,
         meeting_ids: list[str] | None = None,
+        mode: str = "express",
     ) -> tuple[str, list[dict]]:
         """Answer a question grounded in EVERY meeting the user owns.
 
         Retrieval is filtered by `user_id`, so a user can never be grounded in
         another user's transcript. `meeting_ids`, when given, narrows the search
         to a subset (e.g. "only these three calls").
+
+        `mode` decides how hard to look, and the two settings differ in exactly
+        two ways so that neither is a worse version of the other:
+
+        * **express** — the default, and precisely what every caller got before
+          the setting existed. `rag_workspace_top_k` passages, and the answer is
+          asked to enumerate only when the question sounds like a list.
+        * **advanced** — `rag_workspace_deep_top_k` passages, so an answer can
+          draw on more calls and more of each, and enumeration is always on.
+          Costs proportionally more context and takes proportionally longer,
+          which is why it is a choice rather than the default.
+
+        The commitment and decision ledgers are in both. They are the complete
+        record rather than a retrieved sample, and withholding them from the
+        cheaper mode would make it confidently wrong about what is outstanding
+        rather than merely shallower.
         """
         if not self.enabled:
             return ("Workspace chat is not configured on this deployment.", [])
 
+        deep = mode == "advanced"
         q_emb = (await self._embedder.embed([question]))[0]
-        top_k = self._settings.rag_workspace_top_k
+        top_k = (
+            self._settings.rag_workspace_deep_top_k
+            if deep
+            else self._settings.rag_workspace_top_k
+        )
 
         # "What changed since last week?" is a question about a period, and
         # nearest-neighbour search has no notion of one — it would answer from
@@ -564,7 +586,7 @@ class RagService:
         # line: fifteen tracked items come back as thirteen bullets, complete
         # and uncountable. This asks it to enumerate instead.
         answer = await self._llm.answer(
-            question, context, exhaustive=wants_full_list(question)
+            question, context, exhaustive=deep or wants_full_list(question)
         )
         citations = [
             {

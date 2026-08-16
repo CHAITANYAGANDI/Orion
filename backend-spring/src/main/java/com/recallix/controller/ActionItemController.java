@@ -50,6 +50,19 @@ public class ActionItemController {
     }
 
     /**
+     * Record something nobody said out loud (V36).
+     *
+     * <p>The workspace panel's write. Same table, same list, same reminders as
+     * a commitment lifted from a transcript — only the provenance differs, and
+     * "what did I promise" is one question with one answer.
+     */
+    @PostMapping("/api/v1/action-items")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ActionItemResponse createStandalone(@Valid @RequestBody ActionItemCreateRequest req) {
+        return actionItems.createStandalone(SecurityUtils.currentUserId(), req);
+    }
+
+    /**
      * The workspace tracker.
      *
      * <p>Defaults to everything outstanding rather than everything ever: the

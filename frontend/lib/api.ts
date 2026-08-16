@@ -50,6 +50,8 @@ import type {
   NotificationCount,
   NotificationKindOption,
   AccountClosed,
+  CalendarFeed,
+  ChatModeOption,
   PrivacyOverview,
   RetentionPolicy,
   RetentionUpdateRequest,
@@ -125,6 +127,7 @@ export const api = createApi({
     "Translations",
     "Notifications",
     "Privacy",
+    "Integrations",
   ],
   endpoints: (builder) => ({
     // ---- Meetings ----
@@ -313,6 +316,47 @@ export const api = createApi({
         body,
       }),
       invalidatesTags: [{ type: "ActionItems", id: "LIST" }],
+    }),
+
+    /**
+     * Record something nobody said out loud (V36).
+     *
+     * The home panel's one write. Same table and same list as a commitment
+     * lifted from a transcript — "what did I promise" is one question.
+     */
+    createStandaloneActionItem: builder.mutation<
+      ActionItemResponse,
+      ActionItemCreateRequest
+    >({
+      query: (body) => ({ url: "/action-items", method: "POST", body }),
+      invalidatesTags: [
+        { type: "ActionItems", id: "LIST" },
+        { type: "Privacy", id: "ME" },
+      ],
+    }),
+
+    // ---- Chat modes & integrations ----
+
+    getChatModes: builder.query<ChatModeOption[], void>({
+      query: () => "/chat/modes",
+      // Changes when the code does, so there is nothing to revalidate.
+      keepUnusedDataFor: 3600,
+    }),
+
+    getCalendarFeed: builder.query<CalendarFeed, void>({
+      query: () => "/integrations/calendar",
+      providesTags: [{ type: "Integrations", id: "ME" }],
+    }),
+
+    /** Creates the feed, or rotates the URL of one that exists. */
+    enableCalendarFeed: builder.mutation<CalendarFeed, void>({
+      query: () => ({ url: "/integrations/calendar", method: "POST" }),
+      invalidatesTags: [{ type: "Integrations", id: "ME" }],
+    }),
+
+    disableCalendarFeed: builder.mutation<void, void>({
+      query: () => ({ url: "/integrations/calendar", method: "DELETE" }),
+      invalidatesTags: [{ type: "Integrations", id: "ME" }],
     }),
 
     // ---- Transcript moments ----
@@ -1124,6 +1168,11 @@ export const {
   useResummarizeMutation,
   useGetMeetingActionItemsQuery,
   useCreateActionItemMutation,
+  useCreateStandaloneActionItemMutation,
+  useGetChatModesQuery,
+  useGetCalendarFeedQuery,
+  useEnableCalendarFeedMutation,
+  useDisableCalendarFeedMutation,
   useGetMomentsQuery,
   useCreateMomentMutation,
   useUpdateMomentMutation,

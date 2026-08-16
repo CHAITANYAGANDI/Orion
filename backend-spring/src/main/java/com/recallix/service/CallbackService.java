@@ -283,6 +283,10 @@ public class CallbackService {
             MeetingActionItem e = new MeetingActionItem();
             e.setId(IdGenerator.actionItem());
             e.setMeetingId(meetingId);
+            // Denormalised from the meeting since V36. This callback runs in
+            // system context with no tenant of its own, so the owner has to be
+            // carried across from the row that does know.
+            e.setUserId(meeting.getUserId());
             e.setTitle(a.taskTitle());
             e.setOwnerName(a.ownerName());
             e.setDueDate(a.dueDate());

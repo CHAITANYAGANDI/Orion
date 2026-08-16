@@ -70,13 +70,18 @@ public class AiClient {
      * filters retrieval by userId, so a caller can never be grounded in another
      * user's transcripts.
      */
-    public ChatResult workspaceChat(String userId, String question, List<String> meetingIds) {
+    public ChatResult workspaceChat(String userId, String question, List<String> meetingIds,
+                                    com.recallix.domain.ChatMode mode) {
         Map<String, Object> payload = new java.util.HashMap<>();
         payload.put("userId", userId);
         payload.put("question", question);
         if (meetingIds != null && !meetingIds.isEmpty()) {
             payload.put("meetingIds", meetingIds);
         }
+        // Always sent, even for the default: the ai-service defaults to express
+        // too, and a field that is only sometimes present is a field somebody
+        // eventually reads as "unset means advanced".
+        payload.put("mode", (mode == null ? com.recallix.domain.ChatMode.EXPRESS : mode).wire());
         JsonNode body = client.post()
                 .uri("/ai/workspace-chat")
                 .contentType(MediaType.APPLICATION_JSON)

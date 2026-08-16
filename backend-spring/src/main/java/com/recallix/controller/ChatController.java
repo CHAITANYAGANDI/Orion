@@ -1,8 +1,10 @@
 package com.recallix.controller;
 
+import com.recallix.domain.ChatMode;
 import com.recallix.domain.ChatScope;
 import com.recallix.dto.ChatAskRequest;
 import com.recallix.dto.ChatMessageResponse;
+import com.recallix.dto.ChatModeResponse;
 import com.recallix.dto.ConversationRenameRequest;
 import com.recallix.dto.ConversationResponse;
 import com.recallix.dto.EmailDraftResponse;
@@ -125,7 +127,18 @@ public class ChatController {
     @PostMapping("/api/v1/chat")
     public ChatMessageResponse askWorkspace(@Valid @RequestBody WorkspaceAskRequest req) {
         return chat.askWorkspace(SecurityUtils.currentUserId(), req.question(),
-                req.meetingIds(), req.conversationId());
+                req.meetingIds(), req.conversationId(), ChatMode.of(req.mode()));
+    }
+
+    /**
+     * What the composer's mode picker offers.
+     *
+     * <p>Read from the server rather than written into the client so the two
+     * cannot come to describe different behaviour.
+     */
+    @GetMapping("/api/v1/chat/modes")
+    public List<ChatModeResponse> modes() {
+        return ChatModeResponse.all();
     }
 
     @GetMapping("/api/v1/chat/conversations")

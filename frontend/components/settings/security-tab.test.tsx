@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { PrivacyOverview } from "@/lib/types";
 
 /**
- * The privacy page.
+ * The Security tab — what was the privacy page.
  *
  * <p>Nearly every test here is about a sentence being true rather than about a
  * control working. The page's whole value is that somebody uneasy about what a
@@ -69,7 +69,7 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
 
-import PrivacyPage from "./page";
+import { SecurityTab as PrivacyPage } from "@/components/settings/security-tab";
 
 function anOverview(patch: Partial<PrivacyOverview> = {}): PrivacyOverview {
   return {

@@ -13,10 +13,21 @@ import java.util.List;
  *
  * <p>{@code conversationId} is optional and means "add this to that thread".
  * Omitting it continues whichever thread was last used, or starts one.
+ *
+ * <p>{@code meetingIds} is also what the composer's "Add context" produces: a
+ * question asked with three calls picked out is the same question narrowed, not
+ * a different endpoint.
  */
 public record WorkspaceAskRequest(
         @NotBlank @Size(max = 2000) String question,
         @Size(max = 50) List<String> meetingIds,
-        String conversationId
+        String conversationId,
+        /**
+         * How hard to look — {@code express} or {@code advanced}.
+         *
+         * <p>Null means express, which is exactly what every caller got before
+         * this field existed. See {@link com.recallix.domain.ChatMode}.
+         */
+        String mode
 ) {
 }

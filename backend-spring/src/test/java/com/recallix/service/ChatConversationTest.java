@@ -3,6 +3,7 @@ package com.recallix.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.recallix.common.ApiException;
 import com.recallix.common.ConversationTitle;
+import com.recallix.domain.ChatMode;
 import com.recallix.domain.ChatScope;
 import com.recallix.dto.ChatMessageResponse;
 import com.recallix.dto.ExchangeDeleteResponse;
@@ -87,7 +88,7 @@ class ChatConversationTest {
 
         when(ai.chat(anyString(), anyString(), anyString()))
                 .thenReturn(new AiClient.ChatResult("An answer.", List.of()));
-        when(ai.workspaceChat(anyString(), anyString(), any()))
+        when(ai.workspaceChat(anyString(), anyString(), any(), any()))
                 .thenReturn(new AiClient.ChatResult("An answer.", List.of()));
 
         when(conversations.save(any())).thenAnswer(inv -> {
@@ -257,7 +258,7 @@ class ChatConversationTest {
         void refusesCrossScopeOtherWay() {
             existing("cnv_mtg", MTG, "Meeting thread", Instant.now());
 
-            assertThatThrownBy(() -> service.askWorkspace(USER, "A question?", null, "cnv_mtg"))
+            assertThatThrownBy(() -> service.askWorkspace(USER, "A question?", null, "cnv_mtg", ChatMode.EXPRESS))
                     .isInstanceOf(ApiException.class);
         }
 
@@ -265,7 +266,7 @@ class ChatConversationTest {
         @DisplayName("a meeting's threads are separate from the workspace's")
         void scopesAreSeparate() {
             service.ask(USER, MEETING, "About this meeting?", null);
-            service.askWorkspace(USER, "About everything?", null, null);
+            service.askWorkspace(USER, "About everything?", null, null, ChatMode.EXPRESS);
 
             assertThat(stored).hasSize(2);
             assertThat(service.listConversations(USER, MTG)).hasSize(1);
@@ -511,7 +512,7 @@ class ChatConversationTest {
 
             // Resolved here rather than accepted from the caller: what a project
             // contains is a fact about the database, not a client's assertion.
-            verify(ai).workspaceChat(USER, "What did we decide?", List.of("mtg_a", "mtg_b"));
+            verify(ai).workspaceChat(USER, "What did we decide?", List.of("mtg_a", "mtg_b"), ChatMode.EXPRESS);
         }
 
         @Test
@@ -525,7 +526,7 @@ class ChatConversationTest {
             // An empty id list means "do not filter" downstream, so sending one
             // would answer a question about this project from every meeting in
             // the workspace and present it as the project's.
-            verify(ai, never()).workspaceChat(anyString(), anyString(), any());
+            verify(ai, never()).workspaceChat(anyString(), anyString(), any(), any());
             assertThat(answer.content()).isEqualTo(ChatService.EMPTY_PROJECT);
         }
 
@@ -552,7 +553,7 @@ class ChatConversationTest {
         @DisplayName("project threads are not in the workspace history")
         void projectThreadsAreNotWorkspaceThreads() {
             service.askProject(USER, PROJECT, "About this project?", null);
-            service.askWorkspace(USER, "About everything?", null, null);
+            service.askWorkspace(USER, "About everything?", null, null, ChatMode.EXPRESS);
 
             assertThat(service.listConversations(USER, PRJ)).hasSize(1);
             assertThat(service.listConversations(USER, WS)).hasSize(1);
@@ -588,7 +589,7 @@ class ChatConversationTest {
         void cannotAskSomebodyElsesProject() {
             assertThatThrownBy(() -> service.askProject(OTHER, PROJECT, "A question?", null))
                     .isInstanceOf(ApiException.class);
-            verify(ai, never()).workspaceChat(anyString(), anyString(), any());
+            verify(ai, never()).workspaceChat(anyString(), anyString(), any(), any());
         }
     }
 }

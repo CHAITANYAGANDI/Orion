@@ -31,8 +31,24 @@ public class MeetingActionItem {
     @Id
     private String id;
 
-    @Column(name = "meeting_id", nullable = false)
+    /**
+     * The conversation it was promised in, or null for one added by hand.
+     *
+     * <p>Nullable since V36. Every action item used to be a fact extracted from
+     * a transcript; the workspace panel lets somebody type one, and that task
+     * belongs to them rather than to any call.
+     */
+    @Column(name = "meeting_id")
     private String meetingId;
+
+    /**
+     * Who owes this.
+     *
+     * <p>Held directly rather than read through the meeting, because there may
+     * not be a meeting — and because it is what row-level security now tests.
+     */
+    @Column(name = "user_id", nullable = false)
+    private String userId;
 
     @Column(nullable = false)
     private String title;
@@ -84,6 +100,12 @@ public class MeetingActionItem {
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
+
+    public String getUserId() { return userId; }
+    public void setUserId(String userId) { this.userId = userId; }
+
+    /** True for an item somebody typed rather than one a meeting produced. */
+    public boolean isStandalone() { return meetingId == null; }
 
     public String getMeetingId() { return meetingId; }
     public void setMeetingId(String meetingId) { this.meetingId = meetingId; }

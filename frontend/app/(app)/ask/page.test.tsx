@@ -44,6 +44,12 @@ vi.mock("@/lib/api", () => ({
     },
     { isLoading: false },
   ],
+  // The composer's two extras. Neither is what this file is about, but the
+  // page cannot mount without them — see lib/use-workspace-chat.
+  useGetChatModesQuery: () => ({ data: [] }),
+  useGetMeetingsQuery: () => ({ data: { content: [], page: 0, size: 0, totalElements: 0, totalPages: 0 } }),
+  useGetProjectsQuery: () => ({ data: [] }),
+  useGetProjectMeetingsQuery: () => ({ data: [] }),
 }));
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));

@@ -214,6 +214,72 @@ class ActionItemServiceTest {
                     new ActionItemCreateRequest("x", null, null, "urgent", null, null)))
                     .isInstanceOf(ApiException.class);
         }
+
+        @Test
+        @DisplayName("an item knows who owns it, so it is findable without its meeting")
+        void carriesTheOwner() {
+            service.create(USER, MEETING, creating("Send the pricing deck", null));
+
+            assertThat(stored.get(stored.size() - 1).getUserId()).isEqualTo(USER);
+        }
+    }
+
+    /**
+     * Tasks nobody said out loud.
+     *
+     * <p>The workspace panel's write. Same table and same list as a commitment
+     * lifted from a transcript, because "what did I promise" is one question —
+     * and a separate personal to-do list would be a second answer to it.
+     */
+    @Nested
+    class TypedByHand {
+
+        @Test
+        @DisplayName("is created with no meeting at all")
+        void hasNoMeeting() {
+            ActionItemResponse created = service.createStandalone(
+                    USER, new ActionItemCreateRequest("Write the migration", null, null, null, null, null));
+
+            assertThat(created.meetingId()).isNull();
+            assertThat(created.meetingTitle()).isNull();
+            assertThat(stored.get(stored.size() - 1).isStandalone()).isTrue();
+        }
+
+        @Test
+        @DisplayName("belongs to whoever typed it")
+        void belongsToTheTyper() {
+            service.createStandalone(
+                    USER, new ActionItemCreateRequest("Write the migration", null, null, null, null, null));
+
+            assertThat(stored.get(stored.size() - 1).getUserId()).isEqualTo(USER);
+        }
+
+        @Test
+        @DisplayName("is protected from every reprocess, having no meeting to be swept by")
+        void isEdited() {
+            service.createStandalone(
+                    USER, new ActionItemCreateRequest("Write the migration", null, null, null, null, null));
+
+            assertThat(stored.get(stored.size() - 1).isEdited()).isTrue();
+        }
+
+        @Test
+        @DisplayName("reads a deadline against today, since no meeting date could mean anything else")
+        void resolvesAgainstToday() {
+            ActionItemResponse created = service.createStandalone(
+                    USER, new ActionItemCreateRequest("Ship it", null, "friday", null, null, null));
+
+            assertThat(created.dueDate()).isEqualTo("friday");
+            assertThat(created.dueOn()).isNotNull();
+        }
+
+        @Test
+        @DisplayName("still refuses a priority that is not one")
+        void validatesPriority() {
+            assertThatThrownBy(() -> service.createStandalone(USER,
+                    new ActionItemCreateRequest("x", null, null, "urgent", null, null)))
+                    .isInstanceOf(ApiException.class);
+        }
     }
 
     @Nested

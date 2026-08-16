@@ -332,7 +332,14 @@ export type DueStatus = "NONE" | "OVERDUE" | "TODAY" | "SOON" | "LATER";
 // Spring ActionItemResponse — uses `title` (NOT the AI-side `taskTitle`).
 export interface ActionItemResponse {
   id: string;
-  meetingId: string;
+  /**
+   * The conversation it was promised in, or null for one typed by hand (V36).
+   *
+   * Nullable since the workspace panel learned to create tasks that were never
+   * said out loud. Every place that renders a link back to the meeting has to
+   * cope with there not being one.
+   */
+  meetingId?: string | null;
   meetingTitle?: string | null;
   title: string;
   ownerName?: string | null;
@@ -473,9 +480,45 @@ export interface ProjectInput {
 // ---- Workspace-wide chat & semantic search ----
 export interface WorkspaceAskRequest {
   question: string;
+  /** What "Add context" produces: the same question, narrowed to these calls. */
   meetingIds?: string[];
   /** Omit to continue the thread last used, or start one. */
   conversationId?: string;
+  /** Omit for express, which is what the chat did before the picker existed. */
+  mode?: ChatMode;
+}
+
+/** How hard the workspace chat looks before answering. */
+export type ChatMode = "express" | "advanced";
+
+/**
+ * One row of the composer's mode picker, described by the server.
+ *
+ * The wording comes from the thing whose behaviour it changes, so "Balanced for
+ * accuracy and speed" cannot drift away from what express actually does.
+ */
+export interface ChatModeOption {
+  mode: ChatMode;
+  label: string;
+  hint: string;
+  isDefault: boolean;
+}
+
+/**
+ * The deadline calendar feed — the one integration Recallix actually has.
+ *
+ * `url` is the https form to paste into Google Calendar; `webcalUrl` is the
+ * clickable form desktop calendars subscribe to. Both are null until a feed
+ * exists, and both are secrets: the URL is the only credential a calendar
+ * server can present.
+ */
+export interface CalendarFeed {
+  enabled: boolean;
+  url: string | null;
+  webcalUrl: string | null;
+  createdAt: string | null;
+  /** How many dated, unfinished items the feed currently publishes. */
+  deadlines: number;
 }
 
 export interface SemanticSearchRequest {

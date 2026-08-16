@@ -95,6 +95,11 @@ public class ActionItemService {
                 .toList();
     }
 
+    /** The meeting's name, or null for a task nobody said out loud. */
+    private static String titleOf(MeetingActionItem item, Map<String, String> titles) {
+        return item.getMeetingId() == null ? null : titles.get(item.getMeetingId());
+    }
+
     @Transactional(readOnly = true)
     public PageResponse<ActionItemResponse> list(String userId, ActionItemQuery q) {
         LocalDate today = today();
@@ -115,7 +120,7 @@ public class ActionItemService {
         Map<String, String> titles = titlesFor(result.getContent());
         Map<String, Integer> counts = commentCounts(result.getContent());
         List<ActionItemResponse> content = result.getContent().stream()
-                .map(a -> ActionItemResponse.from(a, titles.get(a.getMeetingId()), today,
+                .map(a -> ActionItemResponse.from(a, titleOf(a, titles), today,
                         counts.getOrDefault(a.getId(), 0)))
                 .toList();
         return PageResponse.from(result, content);
@@ -156,6 +161,7 @@ public class ActionItemService {
 
         MeetingActionItem item = new MeetingActionItem();
         item.setId(IdGenerator.actionItem());
+        item.setUserId(userId);
         item.setMeetingId(meetingId);
         item.setTitle(req.title().trim());
         item.setOwnerName(blankToNull(req.ownerName()));
@@ -171,11 +177,48 @@ public class ActionItemService {
         return ActionItemResponse.from(item, meeting.getTitle(), today(), 0);
     }
 
+    /**
+     * Record something somebody typed rather than said.
+     *
+     * <p>The workspace panel's one write. No meeting, because there is no
+     * conversation this came out of — see V36 for why attaching it to the most
+     * recent one would be worse than leaving it unattached.
+     *
+     * <p>Everything else is the same row in the same table, so a typed task is
+     * counted, filtered, reminded about, exported and deleted exactly like a
+     * spoken one. A parallel "personal to-do" list would be a second answer to
+     * the question this page exists to answer once.
+     */
+    @Transactional
+    public ActionItemResponse createStandalone(String userId, ActionItemCreateRequest req) {
+        MeetingActionItem item = new MeetingActionItem();
+        item.setId(IdGenerator.actionItem());
+        item.setUserId(userId);
+        item.setMeetingId(null);
+        item.setTitle(req.title().trim());
+        item.setOwnerName(blankToNull(req.ownerName()));
+        item.setPriority(validPriority(req.priority()));
+        item.setStatus("OPEN");
+        // Typed by a person, so a reprocess must never sweep it away.
+        item.setEdited(true);
+        // Resolved against today rather than a meeting's date: "Friday" typed
+        // this morning means this Friday, and there is no conversation whose
+        // date could mean anything else.
+        setDue(item, blankToNull(req.dueDate()), null);
+        actionItems.save(item);
+
+        return ActionItemResponse.from(item, null, today(), 0);
+    }
+
     @Transactional
     public ActionItemResponse patch(String userId, String id, ActionItemPatchRequest req) {
         MeetingActionItem item = actionItems.findByIdForUser(id, userId)
                 .orElseThrow(() -> ApiException.notFound("Action item not found"));
-        Meeting meeting = meetings.findById(item.getMeetingId()).orElse(null);
+        // Null for one typed on the home screen, and for one whose meeting has
+        // since been deleted. Both are ordinary, so every use below tolerates it.
+        Meeting meeting = item.getMeetingId() == null
+                ? null
+                : meetings.findById(item.getMeetingId()).orElse(null);
 
         if (req.title() != null) {
             String title = req.title().trim();
@@ -353,7 +396,12 @@ public class ActionItemService {
     }
 
     private Map<String, String> titlesFor(List<MeetingActionItem> items) {
-        Set<String> ids = items.stream().map(MeetingActionItem::getMeetingId).collect(Collectors.toSet());
+        // Nulls filtered out rather than fetched: since V36 an item may have no
+        // meeting at all, and findAllById on a set containing null throws.
+        Set<String> ids = items.stream()
+                .map(MeetingActionItem::getMeetingId)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toSet());
         return meetings.findAllById(ids).stream()
                 .collect(Collectors.toMap(Meeting::getId, Meeting::getTitle, (a, b) -> a));
     }

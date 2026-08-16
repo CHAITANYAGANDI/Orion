@@ -42,10 +42,10 @@ export default function LandingPage() {
           </div>
           <nav className="flex items-center gap-2">
             <Button variant="ghost" asChild>
-              <Link href="/dashboard">Sign in</Link>
+              <Link href="/home">Sign in</Link>
             </Button>
             <Button asChild>
-              <Link href="/dashboard">
+              <Link href="/home">
                 Open app <ArrowRight className="h-4 w-4" />
               </Link>
             </Button>
@@ -72,7 +72,7 @@ export default function LandingPage() {
               </Link>
             </Button>
             <Button size="lg" variant="outline" asChild>
-              <Link href="/dashboard">View dashboard</Link>
+              <Link href="/home">Open Recallix</Link>
             </Button>
           </div>
           <p className="mt-4 text-xs text-muted-foreground">

@@ -15,8 +15,17 @@ import java.util.Optional;
 
 public interface MeetingActionItemRepository extends JpaRepository<MeetingActionItem, String> {
 
-    /** Ownership is always through the parent meeting; every query below joins it. */
-    String OWNED_BY = " a.meetingId IN (SELECT m.id FROM Meeting m WHERE m.userId = :userId) ";
+    /**
+     * Ownership, tested on the row itself.
+     *
+     * <p>Was a subquery through the parent meeting until V36. It had to change
+     * when an action item stopped needing a meeting: a task typed on the home
+     * screen has no {@code meeting_id}, so the old predicate was false for
+     * exactly the rows somebody had just created, and their own work would have
+     * been invisible to them. It is also cheaper — one column comparison rather
+     * than a primary-key lookup per row.
+     */
+    String OWNED_BY = " a.userId = :userId ";
 
     /**
      * One deadline order, used everywhere a list of tasks is shown.
@@ -163,17 +172,20 @@ public interface MeetingActionItemRepository extends JpaRepository<MeetingAction
      * daily notification pass is for everybody with outstanding work — not just
      * the people who opted into the email — and the set of "everybody" is a
      * table scan the moment it is done in Java.
+     *
+     * <p>Grouped on the item's own {@code userId} since V36. Joining through
+     * {@code Meeting} would silently drop every task somebody typed by hand,
+     * which is the half of the list most likely to have a deadline on it.
      */
     @Query("""
-            SELECT m.userId,
+            SELECT a.userId,
                    SUM(CASE WHEN a.dueOn < :today THEN 1 ELSE 0 END),
                    SUM(CASE WHEN a.dueOn >= :today THEN 1 ELSE 0 END)
-            FROM MeetingActionItem a, Meeting m
-            WHERE m.id = a.meetingId
-              AND a.status <> 'DONE'
+            FROM MeetingActionItem a
+            WHERE a.status <> 'DONE'
               AND a.dueOn IS NOT NULL
               AND a.dueOn <= :through
-            GROUP BY m.userId
+            GROUP BY a.userId
             """)
     List<Object[]> dueByUser(@Param("today") LocalDate today, @Param("through") LocalDate through);
 

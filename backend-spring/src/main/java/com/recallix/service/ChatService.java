@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.recallix.common.ApiException;
 import com.recallix.common.ConversationTitle;
 import com.recallix.common.IdGenerator;
+import com.recallix.domain.ChatMode;
 import com.recallix.domain.ChatScope;
 import com.recallix.dto.ChatMessageResponse;
 import com.recallix.dto.ConversationResponse;
@@ -192,7 +193,10 @@ public class ChatService {
 
     private ChatMessageResponse answerFromMeetings(String userId, ChatConversation conversation,
                                                    String question, List<String> meetingIds) {
-        AiClient.ChatResult result = ai.workspaceChat(userId, question, meetingIds);
+        // A project chat has no mode picker, so it takes the default. The choice
+        // belongs to the composer that offers it.
+        AiClient.ChatResult result = ai.workspaceChat(
+                userId, question, meetingIds, ChatMode.EXPRESS);
         return persistTurn(userId, null, conversation, "assistant",
                 result.answer() == null ? "" : result.answer(), result.citations());
     }
@@ -204,15 +208,18 @@ public class ChatService {
      */
     @Transactional
     public ChatMessageResponse askWorkspace(String userId, String question,
-                                            List<String> meetingIds, String conversationId) {
+                                            List<String> meetingIds, String conversationId,
+                                            ChatMode mode) {
         // If the caller narrowed the search, verify they own what they named.
+        // This is also the check behind the composer's "Add context": the ids
+        // arrive from a picker, and a picker is a client-side control.
         if (meetingIds != null) {
             meetingIds.forEach(id -> requireOwnedMeeting(userId, id));
         }
         ChatConversation conversation = resolveForAsk(userId, ChatScope.WORKSPACE, conversationId);
 
         persistTurn(userId, null, conversation, "user", question, null);
-        AiClient.ChatResult result = ai.workspaceChat(userId, question, meetingIds);
+        AiClient.ChatResult result = ai.workspaceChat(userId, question, meetingIds, mode);
         ChatMessageResponse answer = persistTurn(userId, null, conversation, "assistant",
                 result.answer() == null ? "" : result.answer(), result.citations());
 

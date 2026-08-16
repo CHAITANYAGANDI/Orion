@@ -442,6 +442,96 @@ dedupe-key collision, which is what forty simultaneous readers produce.
 swallows everything and logs — a meeting that processed correctly must not be
 reported as failed because the sentence about it could not be written down.
 
+### Home, action items and integrations (V36)
+
+| Method | Endpoint | Body / Query | Response |
+|---|---|---|---|
+| POST | `/api/v1/action-items` | `{ title, ownerName?, dueDate?, priority? }` | `ActionItemResponse` |
+| GET | `/api/v1/chat/modes` | — | `ChatModeResponse[]` |
+| POST | `/api/v1/chat` | `{ question, meetingIds?, conversationId?, mode? }` | `ChatMessageResponse` |
+| GET | `/api/v1/integrations/calendar` | — | `Feed` |
+| POST | `/api/v1/integrations/calendar` | — | `Feed` (creates or rotates) |
+| DELETE | `/api/v1/integrations/calendar` | — | `204` |
+| GET | `/public/calendar/{token}.ics` | — | `text/calendar` |
+
+**An action item no longer needs a meeting.** Every one used to be a fact
+extracted from a transcript, which is why it hung off `meeting_id` and inherited
+its tenancy from the meeting. The home panel breaks that: "Write the migration"
+is typed into a box and belongs to the person, not to a conversation. Attaching
+it to the most recent meeting — the obvious dodge — would file it in a call it
+was never mentioned in and delete it the day that call is deleted. So
+`meeting_action_items` gained `user_id` (backfilled, NOT NULL), `meeting_id`
+became nullable, and the RLS policy changed from the meeting-owned `EXISTS` to a
+direct `user_id = app_current_user()` — the old predicate is false for exactly
+the rows somebody has just typed, so their own work would have been invisible to
+them. `MeetingActionItemRepository.OWNED_BY` and `dueByUser` changed with it;
+grouping the deadline pass through `Meeting` would have silently dropped every
+hand-typed task, which is the half most likely to carry a date.
+
+**Express and Advanced are a real difference, not a label.** `ChatMode` travels
+to the ai-service as `mode`, and the two settings differ in exactly two things so
+neither is a worse version of the other: retrieval width
+(`rag_workspace_top_k` = 10 vs `rag_workspace_deep_top_k` = 25) and whether the
+answer is asked to enumerate rather than summarise. The commitment and decision
+ledgers are in **both** — they are the complete record rather than a retrieved
+sample, and withholding them from the cheaper mode would make it confidently
+wrong about what is outstanding rather than merely shallower. Absent means
+express, which is precisely what every caller got before the field existed.
+
+**"Add context" is a narrowing, not an attachment.** The picker's chosen
+meetings arrive as `meetingIds` on the same endpoint — one question, narrowed.
+Folders are resolved to their meetings when the question is asked rather than
+when the chip is added, so a folder that gains a meeting tomorrow is still the
+right answer; the picker takes one folder at a time because React forbids a hook
+per selection, and the limit is enforced in the control rather than ignored
+later.
+
+**The calendar feed is the one integration, and it is outbound.** V8 added a
+table for *reading* somebody's calendar and nothing ever used it, because the
+only useful thing to do with a list of upcoming meetings is join them to record —
+and Recallix has no bot. The other direction works today and asks nothing of
+anybody: action items already carry resolved dates, every calendar application
+subscribes to an ICS URL, and there is no OAuth client to register or
+third-party credential to store. `users.calendar_token` is 192 bits from
+`SecureRandom`, unique, and null until asked for; the URL **is** the credential,
+because Google's servers fetch it with no session and no header we could add, so
+rotating the token is the only revoke a published URL can have. Served under
+`/public/**` so it inherits the existing tenant exemption.
+
+Deadlines become all-day `VEVENT`s — not timed ones, because the deadline
+Recallix knows is a date ("Friday") and inventing 09:00 would put false
+precision in somebody's calendar in whatever zone the server thinks in.
+`TRANSP:TRANSPARENT` so a deadline does not make you busy, a stable `UID` so a
+refresh does not delete and recreate every event, and folding by **octet** with a
+character-boundary check — a line split through a UTF-8 sequence is how a
+calendar full of names in Hindi or Japanese gets rejected wholesale by a reader
+that was happy with the ASCII one.
+
+**Settings became one page with seven tabs.** `/settings/<tab>` —
+General, Meetings, Plans, Integrations, Emails, Templates, Security — replacing
+four routes in three places (Settings, Billing and Privacy were all sidebar
+items; Integrations was nowhere). The tab is in the URL rather than in state so
+it can be linked, and `/privacy`, `/billing` and `/integrations` still render
+their tab under their old paths rather than redirecting: `RETENTION_APPLIED`
+notification rows carry `/privacy` in their link column, and those rows are a
+record of something that happened. Only the open tab mounts — Templates costs a
+round trip to the ai-service and Security counts every row a workspace owns, and
+neither should be paid for by somebody changing their recap address. An
+unrecognised path falls back to General, because a blank pane under a tab bar
+reads as a page that failed to load rather than a URL that was mistyped. Mapping
+lives in `lib/settings-tabs.ts`.
+
+**Frontend shape.** `/home` replaces the dashboard: conversations grouped by day
+on the left, and a two-tab rail on the right holding the same chat thread as
+`/ask` (see `useWorkspaceChat`) and the workspace action items. Search moved out
+of a filter bar into one box with a small grammar — `from:`, `in:`, `tag:`,
+`type:`, `status:`, `owner:`, `when:`, `decided:` — parsed by
+`lib/search-query.ts`, which resolves values against the workspace's own facets
+and **drops** anything that matches nothing rather than sending a filter that
+returns an empty page looking like a broken search. A prefix matching two
+speakers resolves to neither, because picking the first would answer a question
+about Priya with Priyanka's lines and nothing on screen would reveal it.
+
 ### Privacy & data (V35)
 
 | Method | Endpoint | Body / Query | Response |
