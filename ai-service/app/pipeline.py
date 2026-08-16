@@ -104,6 +104,11 @@ class Pipeline:
     async def translate(self, text: str, target_language: str) -> str:
         return await self._llm.translate(text, target_language)
 
+    async def translate_lines(
+        self, lines: list[str], target_language: str
+    ) -> list[str]:
+        return await self._llm.translate_lines(lines, target_language)
+
     async def draft_followup_email(self, brief: DraftEmailRequest) -> DraftEmailResponse:
         return await self._llm.draft_followup_email(brief)
 

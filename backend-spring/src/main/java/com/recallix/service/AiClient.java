@@ -12,6 +12,7 @@ import org.springframework.web.client.RestClient;
 
 import java.net.http.HttpClient;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -374,6 +375,40 @@ public class AiClient {
                 .retrieve()
                 .body(JsonNode.class);
         return text(body, "text");
+    }
+
+    /**
+     * Translate a list, keeping it a list of the same length in the same order.
+     *
+     * <p>Every caller indexes the result against what it sent — key points
+     * against key points, utterances against the speakers who said them — so
+     * the length is the contract and is checked here as well as in the
+     * ai-service. A reply of the wrong size is not partially useful; it is
+     * words attributed to the wrong person. Returning the untranslated source
+     * on any doubt is visibly untranslated, which is a state a reader can
+     * understand and act on.
+     */
+    public List<String> translateLines(List<String> lines, String targetLanguage) {
+        if (lines == null || lines.isEmpty()) {
+            return List.of();
+        }
+        JsonNode body = client.post()
+                .uri("/ai/translate-lines")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("lines", lines, "targetLanguage", targetLanguage))
+                .retrieve()
+                .body(JsonNode.class);
+
+        JsonNode out = body == null ? null : body.get("lines");
+        if (out == null || !out.isArray() || out.size() != lines.size()) {
+            return List.copyOf(lines);
+        }
+        List<String> translated = new ArrayList<>(lines.size());
+        for (int i = 0; i < lines.size(); i++) {
+            String value = out.get(i).asText("");
+            translated.add(value.isBlank() ? lines.get(i) : value);
+        }
+        return translated;
     }
 
     private static String text(JsonNode node, String field) {

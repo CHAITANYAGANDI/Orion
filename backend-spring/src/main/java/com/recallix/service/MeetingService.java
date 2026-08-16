@@ -27,6 +27,7 @@ import com.recallix.repository.MeetingActionItemRepository;
 import com.recallix.repository.MeetingInsightRepository;
 import com.recallix.repository.MeetingRepository;
 import com.recallix.repository.MeetingSummaryRepository;
+import com.recallix.repository.MeetingTranslationRepository;
 import com.recallix.repository.MeetingTranscriptRepository;
 import com.recallix.repository.ProjectRepository;
 import com.recallix.repository.TranscriptSegmentRepository;
@@ -86,6 +87,8 @@ public class MeetingService {
     private final VocabularyService vocabulary;
     /** Only to verify a project id a client sent — see {@code createMeeting}. */
     private final ProjectRepository projects;
+    /** Only to flag translations when the words underneath them change (V33). */
+    private final MeetingTranslationRepository translations;
 
     public MeetingService(MeetingRepository meetings,
                           MeetingTranscriptRepository transcripts,
@@ -101,8 +104,10 @@ public class MeetingService {
                           SummaryTemplateService templates,
                           KnownSpeakerService knownSpeakers,
                           VocabularyService vocabulary,
-                          ProjectRepository projects) {
+                          ProjectRepository projects,
+                          MeetingTranslationRepository translations) {
         this.projects = projects;
+        this.translations = translations;
         this.meetings = meetings;
         this.transcripts = transcripts;
         this.segments = segments;
@@ -385,6 +390,9 @@ public class MeetingService {
         // Freshly written from the current transcript, whatever it said before.
         summary.setStale(false);
         summaries.save(summary);
+        // And every translation of the summary it replaces is now a translation
+        // of prose nobody can see any more.
+        translations.markStaleByMeetingId(meetingId);
 
         // The decisions and risks were read out of the sections that have just
         // been replaced, so leaving them would put the store and the notes in
@@ -641,6 +649,11 @@ public class MeetingService {
         }
         meeting.setStatus(MeetingStatus.QUEUED);
         meeting.setErrorMessage(null);
+        // Everything downstream is about to be rewritten from the audio, so any
+        // translation of it now describes text that is on its way out. Flagged
+        // here rather than when the result lands, because from this moment on
+        // nobody should read a translated page as current.
+        translations.markStaleByMeetingId(meetingId);
         enqueueProcessing(meeting);
         audit.record(userId, "MEETING_REPROCESS", "meeting", meetingId);
         return new ReprocessResponse(meetingId, MeetingStatus.QUEUED);
@@ -653,6 +666,7 @@ public class MeetingService {
         segments.deleteByMeetingId(meetingId);
         summaries.deleteByMeetingId(meetingId);
         actionItems.deleteByMeetingId(meetingId);
+        translations.deleteByMeetingId(meetingId);
         storage.delete(meeting.getObjectKey());
         meetings.delete(meeting);
         audit.record(userId, "MEETING_DELETED", "meeting", meetingId);
@@ -668,19 +682,24 @@ public class MeetingService {
     }
 
     /**
-     * Mark the summary as no longer matching its transcript.
+     * Mark the summary, and every translation of it, as no longer matching the
+     * transcript.
      *
-     * <p>Called from every path that changes what the transcript says. The
-     * summary is not rewritten here: doing so would put a model call behind a
-     * one-word correction, and behind each of the next nineteen. Flagging it
-     * leaves the choice with the person who can see both.
+     * <p>Called from every path that changes what the transcript says. Nothing
+     * is rewritten here: doing so would put a model call behind a one-word
+     * correction, and behind each of the next nineteen — and with translations
+     * in the picture it would be one call per language on top. Flagging leaves
+     * the choice with the person who can see both.
      *
-     * <p>A meeting with no summary yet is simply skipped — there is nothing to
-     * have gone stale, and the pipeline will write one from the current text.
+     * <p>The translations matter more than the summary does, because they are
+     * further from the source and there is nothing on a translated page that
+     * would otherwise hint the words underneath have moved on. A meeting with no
+     * summary and no translations is simply skipped.
      */
     private void markSummaryStale(String meetingId) {
         summaries.findFirstByMeetingIdOrderByCreatedAtDesc(meetingId)
                 .ifPresent(s -> s.setStale(true));
+        translations.markStaleByMeetingId(meetingId);
     }
 
     private MeetingResponse toResponse(Meeting m) {

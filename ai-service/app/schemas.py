@@ -389,6 +389,24 @@ class TranslateResponse(CamelModel):
     target_language: str
 
 
+class TranslateLinesRequest(CamelModel):
+    """Many short texts whose positions carry meaning.
+
+    Used for key points, summary bullets, action items and transcript
+    utterances — lists where line 4 belongs to whoever line 4 belonged to
+    before. The response is guaranteed to be the same length in the same order;
+    anything that could not be translated comes back as its source text.
+    """
+
+    lines: list[str]
+    target_language: str
+
+
+class TranslateLinesResponse(CamelModel):
+    lines: list[str]
+    target_language: str
+
+
 # --------------------------------------------------------------------------- #
 # Kafka event shapes (§6)
 # --------------------------------------------------------------------------- #

@@ -119,6 +119,27 @@ class LlmPort(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def translate_lines(
+        self, lines: list[str], target_language: str
+    ) -> list[str]:
+        """Translate many short texts, returning **exactly** as many as it was given.
+
+        Separate from `translate` because the callers that need it — key points,
+        summary bullets, action items, transcript utterances — are lists whose
+        positions carry meaning. Joining them into one blob and splitting the
+        answer back apart is where that meaning is lost: a model that merges two
+        bullets shifts every line after it, and on a transcript that puts one
+        speaker's words under another's name.
+
+        The contract is therefore the length, not the quality. Implementations
+        must return a list of the same size in the same order, falling back to
+        the untranslated source for anything they cannot align. An untranslated
+        line is visibly untranslated; a misaligned one reads as a quotation from
+        somebody who never said it.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     async def draft_followup_email(self, brief: DraftEmailRequest) -> DraftEmailResponse:
         """Write a recap email the user can send without editing.
 

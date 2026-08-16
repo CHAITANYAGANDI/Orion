@@ -606,11 +606,73 @@ export interface SearchFacets {
 }
 
 // ---- Translation ----
-export interface TranslateResult {
-  targetLanguage: string;
+
+/**
+ * One language Recallix works in.
+ *
+ * The same list bounds what audio can be transcribed and what a brief can be
+ * translated into — see the backend's `domain/Language` for why those are
+ * currently the same eighteen, and why they need not stay that way. Fetched
+ * rather than hard-coded here so the picker and the validation that rejects a
+ * bad target cannot drift apart.
+ */
+export interface LanguageOption {
+  /** ISO-639-1. */
+  code: string;
+  name: string;
+  /** The endonym — "日本語" is what somebody scanning for their own language sees. */
+  nativeName: string;
+  rightToLeft: boolean;
+}
+
+/** A task in the reader's language, or in the original when the wording moved on. */
+export interface TranslatedTask {
+  id: string;
+  title: string;
+  ownerName?: string | null;
+  dueDate?: string | null;
+  /** False when the source was edited after this was made, so the title is the current original. */
+  translated: boolean;
+}
+
+/** One utterance. Words only — speaker and timings come from the live segment. */
+export interface TranslatedSegment {
+  id: string;
+  text: string;
+}
+
+/**
+ * A meeting read in another language.
+ *
+ * Shaped like the untranslated brief so one component renders either. Two
+ * absences are deliberate: no quotations, because a translated quote is a
+ * paraphrase in quotation marks; and no transcript until `hasTranscript`, which
+ * is the expensive half and is asked for separately.
+ */
+export interface MeetingTranslation {
+  language: string;
+  languageName: string;
+  rightToLeft: boolean;
   shortSummary: string;
   detailedSummary: string;
   keyPoints: string[];
+  sections: SummarySection[];
+  actionItems: TranslatedTask[];
+  segments: TranslatedSegment[];
+  hasBrief: boolean;
+  hasTranscript: boolean;
+  /** The meeting changed after this was made. */
+  stale: boolean;
+  briefTranslatedAt?: string | null;
+  transcriptTranslatedAt?: string | null;
+}
+
+export interface AvailableTranslation {
+  language: string;
+  languageName: string;
+  hasTranscript: boolean;
+  stale: boolean;
+  updatedAt: string;
 }
 
 /** One corrected line. Text only — timings come from the recording. */

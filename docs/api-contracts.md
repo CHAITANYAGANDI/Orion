@@ -168,7 +168,6 @@ deep-link to `/meetings/{id}?t={start}`.
 | GET | `/api/v1/meetings/{id}/chat` | `?conversationId` | `ChatMessageResponse[]` |
 | POST | `/api/v1/meetings/{id}/chat` | `{ "question", "conversationId"? }` | `ChatMessageResponse` |
 | DELETE | `/api/v1/meetings/{id}/chat` | — | `204` (every thread on this meeting) |
-| POST | `/api/v1/meetings/{id}/translate` | `{ "targetLanguage" }` | `TranslateResponse` |
 | GET | `/api/v1/chat` | `?conversationId` | `ChatMessageResponse[]` |
 | POST | `/api/v1/chat` | `{ "question", "meetingIds"?, "conversationId"? }` | `ChatMessageResponse` |
 | DELETE | `/api/v1/chat` | — | `204` (every workspace thread) |
@@ -176,6 +175,73 @@ deep-link to `/meetings/{id}?t={start}`.
 
 Persistence note: `chat_messages.meeting_id` is `NULL` for workspace turns —
 that is what distinguishes the two scopes.
+
+### Translation
+| Method | Endpoint | Body | Response |
+|---|---|---|---|
+| GET | `/api/v1/languages` | — | `LanguageResponse[]` |
+| GET | `/api/v1/meetings/{id}/translations` | — | `Available[]` |
+| POST | `/api/v1/meetings/{id}/translations` | `{ targetLanguage, includeTranscript? }` | `TranslationResponse` |
+| GET | `/api/v1/meetings/{id}/translations/{language}` | — | `TranslationResponse` |
+| DELETE | `/api/v1/meetings/{id}/translations/{language}` | — | `204` |
+
+**Eighteen languages, and the asymmetry behind that number.** Transcription runs
+on AssemblyAI's Universal-3.5 Pro, which supports eighteen spoken languages — so
+a meeting held in Telugu is not transcribable at all, and no amount of
+translation downstream fixes that, because there is nothing to translate.
+Translation itself is not so limited; the provider supports a hundred-odd
+targets, and an English meeting could in principle be read in Telugu. Offering
+that today would mean one picker holding two very different lists and a rule
+nobody can keep in their head, so **the target list is the same eighteen**.
+Widening it is adding entries to `domain/Language` and a flag saying which side
+they belong to; nothing else changes. `GET /languages` is the single source —
+the browser's picker and the validation that rejects a bad target read the same
+list, and `targetLanguage` accepts a code, an English name or an endonym while
+storage is always the bare two-letter code.
+
+**A translation is stored, not recomputed.** A brief is a few hundred words; an
+hour of speech is several thousand across hundreds of utterances, and costs real
+money and tens of seconds. So `meeting_translations` (V33) holds one row per
+meeting per language, and `POST` is idempotent: asking again returns what is
+stored without spending a model call, which is what lets the client fire it on
+every language switch without tracking what exists.
+
+**The two halves are translated separately.** Choosing a language does the
+brief — summary, key points, **sections** and action items. `includeTranscript`
+is opt-in because doing it for everyone who switched language to read a summary
+spends their money on a tab they never opened. `hasBrief` / `hasTranscript` say
+which exist rather than leaving the reader to infer it from an empty list.
+
+**Alignment is the contract, not translation quality.** `/ai/translate-lines`
+takes a list and returns one of exactly the same length in the same order —
+key points, bullets, tasks and utterances are all lists whose positions carry
+meaning. A reply one item short does not degrade gracefully: it slides every
+line up by one and puts one speaker's words under another's name, which reads as
+a quotation from somebody who never said it. Chunks are validated individually
+and fall back to their own source lines, so partial translation is a real and
+deliberately visible outcome — and it is checked again in `AiClient` and again
+in the route, because the cost of being wrong is silent misattribution.
+
+**What is never translated.** Quotations, because a quote claims to be the exact
+words somebody said and a translated quote is a paraphrase in quotation marks.
+A section's `key` and `kind`, which the renderer switches on rather than reads.
+People's names. And a task whose wording was corrected after the translation was
+made — `TranslatedTask.sourceTitle` is compared against the live title, and a
+mismatch shows the current original with `translated: false` rather than a
+translation of a sentence that has been replaced.
+
+**Staleness** works as V25's does, one layer further out: editing a transcript,
+rewriting a summary or reprocessing marks every translation of that meeting
+stale, and nothing is re-translated automatically — that would be one model call
+per language behind a one-word correction. Refreshing a stale brief **drops the
+stored transcript translation** unless the transcript is refreshed too, because a
+translation that is half up to date has no truthful flag to fly.
+
+**The translated transcript is read-only in the UI.** Correcting, highlighting
+and quoting all record exact words or character offsets; running any of them
+against translated text saves something that was never said — a "correction"
+that overwrites the recording's own words, a highlight pointing into a sentence
+nobody spoke. The reading view says where to go to edit.
 
 ### Sharing
 
@@ -726,6 +792,7 @@ Base: `http://ai-service:8000`
 | POST | `/ai/workspace-chat` | `{ "userId","question","meetingIds"? }` | `{ "answer","citations":[Citation] }` |
 | POST | `/ai/semantic-search` | `{ "userId","query","limit"? }` | `{ "hits":[SemanticSearchHit] }` |
 | POST | `/ai/translate` | `{ "text","targetLanguage" }` | `{ "text","targetLanguage" }` |
+| POST | `/ai/translate-lines` | `{ "lines":[],"targetLanguage" }` | `{ "lines":[] }` — **same length, same order** |
 | GET  | `/health` | — | `{ "status":"ok","provider":"openai\|mock" }` |
 
 `/ai/summarize` returns `insights` as well as `sections`, derived from those

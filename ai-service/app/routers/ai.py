@@ -36,6 +36,8 @@ from app.schemas import (
     TranscribeRequest,
     TranscriptInput,
     TranscriptResponse,
+    TranslateLinesRequest,
+    TranslateLinesResponse,
     TranslateRequest,
     TranslateResponse,
     WorkspaceChatRequest,
@@ -219,3 +221,22 @@ async def translate(
 ) -> TranslateResponse:
     translated = await pipeline.translate(body.text, body.target_language)
     return TranslateResponse(text=translated, target_language=body.target_language)
+
+
+@router.post("/translate-lines", response_model=TranslateLinesResponse)
+async def translate_lines(
+    body: TranslateLinesRequest, pipeline: Pipeline = Depends(get_pipeline)
+) -> TranslateLinesResponse:
+    """Translate a list without changing its shape.
+
+    The length is the contract — see `LlmPort.translate_lines`. Enforced again
+    here rather than trusted, because every caller indexes the result against
+    the list it sent, and a short reply would silently attribute one speaker's
+    words to another.
+    """
+    translated = await pipeline.translate_lines(body.lines, body.target_language)
+    if len(translated) != len(body.lines):
+        translated = list(body.lines)
+    return TranslateLinesResponse(
+        lines=translated, target_language=body.target_language
+    )

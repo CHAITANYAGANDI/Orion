@@ -7,13 +7,10 @@ import com.recallix.dto.ConversationRenameRequest;
 import com.recallix.dto.ConversationResponse;
 import com.recallix.dto.EmailDraftResponse;
 import com.recallix.dto.ExchangeDeleteResponse;
-import com.recallix.dto.TranslateRequest;
-import com.recallix.dto.TranslateResponse;
 import com.recallix.dto.WorkspaceAskRequest;
 import com.recallix.security.SecurityUtils;
 import com.recallix.service.ChatService;
 import com.recallix.service.FollowUpService;
-import com.recallix.service.TranslationService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -30,8 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * RAG chat at three scopes — one meeting, one project, or the whole workspace —
- * plus summary translation.
+ * RAG chat at three scopes — one meeting, one project, or the whole workspace.
  *
  * <p>All three are organised into named conversations (V28, V30). The scope is
  * carried in the path for a meeting or a project, and by its absence for the
@@ -43,14 +39,10 @@ import java.util.List;
 public class ChatController {
 
     private final ChatService chat;
-    private final TranslationService translation;
     private final FollowUpService followUp;
 
-    public ChatController(ChatService chat,
-                          TranslationService translation,
-                          FollowUpService followUp) {
+    public ChatController(ChatService chat, FollowUpService followUp) {
         this.chat = chat;
-        this.translation = translation;
         this.followUp = followUp;
     }
 
@@ -183,11 +175,6 @@ public class ChatController {
     }
 
     // --- other per-meeting AI actions --------------------------------------- //
-
-    @PostMapping("/api/v1/meetings/{id}/translate")
-    public TranslateResponse translate(@PathVariable String id, @Valid @RequestBody TranslateRequest req) {
-        return translation.translateSummary(SecurityUtils.currentUserId(), id, req.targetLanguage());
-    }
 
     /** Draft the recap email for this meeting, grounded in its brief. */
     @PostMapping("/api/v1/meetings/{id}/follow-up-email")

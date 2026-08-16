@@ -44,4 +44,5 @@ public final class IdGenerator {
     public static String conversation(){ return generate("cnv_"); }
     public static String project()     { return generate("prj_"); }
     public static String comment()     { return generate("cmt_"); }
+    public static String translation() { return generate("trn_"); }
 }

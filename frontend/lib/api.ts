@@ -42,7 +42,9 @@ import type {
   SummaryResponse,
   SummaryTemplateResponse,
   TranscriptResponse,
-  TranslateResult,
+  AvailableTranslation,
+  LanguageOption,
+  MeetingTranslation,
   UploadUrlRequest,
   UploadUrlResponse,
   UsageResponse,
@@ -112,6 +114,7 @@ export const api = createApi({
     "Conversations",
     "Search",
     "Projects",
+    "Translations",
   ],
   endpoints: (builder) => ({
     // ---- Meetings ----
@@ -625,15 +628,43 @@ export const api = createApi({
     }),
 
     // ---- Translation ----
-    translateSummary: builder.mutation<
-      TranslateResult,
-      { id: string; targetLanguage: string }
+    /**
+     * The languages Recallix works in.
+     *
+     * A property of the product rather than of the caller, so it is fetched
+     * once and kept: `keepUnusedDataFor` is deliberately long here because this
+     * list changes when the transcription model does, which is never within a
+     * session.
+     */
+    getLanguages: builder.query<LanguageOption[], void>({
+      query: () => "/languages",
+      keepUnusedDataFor: 3600,
+    }),
+
+    /** Which languages this meeting already exists in. */
+    getTranslations: builder.query<AvailableTranslation[], string>({
+      query: (id) => `/meetings/${id}/translations`,
+      providesTags: (_r, _e, id) => [{ type: "Translations", id }],
+    }),
+
+    /**
+     * Translate the meeting, or refresh a translation it has outgrown.
+     *
+     * Safe to fire on every language switch: the server returns what it already
+     * has without spending a model call, so the client does not have to track
+     * what exists. `includeTranscript` is the expensive half and is asked for
+     * separately — see the backend for why.
+     */
+    translateMeeting: builder.mutation<
+      MeetingTranslation,
+      { id: string; targetLanguage: string; includeTranscript?: boolean }
     >({
-      query: ({ id, targetLanguage }) => ({
-        url: `/meetings/${id}/translate`,
+      query: ({ id, targetLanguage, includeTranscript }) => ({
+        url: `/meetings/${id}/translations`,
         method: "POST",
-        body: { targetLanguage },
+        body: { targetLanguage, includeTranscript: !!includeTranscript },
       }),
+      invalidatesTags: (_r, _e, arg) => [{ type: "Translations", id: arg.id }],
     }),
 
     /**
@@ -976,7 +1007,9 @@ export const {
   useGetProjectConversationsQuery,
   useCreateProjectConversationMutation,
   useClearProjectChatMutation,
-  useTranslateSummaryMutation,
+  useGetLanguagesQuery,
+  useGetTranslationsQuery,
+  useTranslateMeetingMutation,
   useRenameSpeakersMutation,
   useRematchSpeakerMutation,
   useGetKnownSpeakersQuery,

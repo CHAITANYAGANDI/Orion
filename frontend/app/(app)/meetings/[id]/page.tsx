@@ -36,7 +36,8 @@ import {
   useDeleteMeetingMutation,
   useGetChatQuery,
   useAskChatMutation,
-  useTranslateSummaryMutation,
+  useTranslateMeetingMutation,
+  useGetTranslationsQuery,
   useRenameSpeakersMutation,
   useRematchSpeakerMutation,
   useGetKnownSpeakersQuery,
@@ -57,6 +58,7 @@ import {
 import type {
   SpeakerStats,
   SpokenWord,
+  MeetingTranslation,
   SummaryResponse,
   SummarySection,
 } from "@/lib/types";
@@ -84,6 +86,8 @@ import {
 import { StatusBadge } from "@/components/status-badge";
 import { ActionItemRow } from "@/components/action-item-row";
 import { NewActionItemDialog } from "@/components/new-action-item-dialog";
+import { TranslationBar, ORIGINAL } from "@/components/translation-bar";
+import { TranslatedTranscript } from "@/components/translated-transcript";
 import { AudioPlayer, useAudioController } from "@/components/audio-player";
 import { ShareDialog } from "@/components/share-dialog";
 import { MeetingTitle, MeetingTags } from "@/components/meeting-title";
@@ -220,6 +224,38 @@ export default function MeetingDetailPage() {
   // And here because minutes open with the decisions. The InsightsPanel asks
   // for the same thing, and RTK Query serves both from one request.
   const insights = useGetInsightsQuery(id, { skip: !ready });
+
+  /**
+   * What language the meeting is being read in.
+   *
+   * Held here rather than in a panel because it applies to all three tabs: the
+   * brief, the tasks and the transcript are one meeting, and translating the
+   * summary while the transcript beside it stays in the source language is the
+   * behaviour this replaced.
+   *
+   * The mutation is fired on every switch, including back to a language already
+   * translated — the server returns what it has without spending a model call,
+   * which is what lets this component avoid tracking what exists.
+   */
+  const [readingIn, setReadingIn] = React.useState<string>(ORIGINAL);
+  const [translate, { data: translation, isLoading: translating, reset: clearTranslation }] =
+    useTranslateMeetingMutation();
+  const availableTranslations = useGetTranslationsQuery(id, { skip: !ready });
+  const showing = readingIn === ORIGINAL ? undefined : translation;
+
+  async function onReadIn(next: string, includeTranscript = false) {
+    setReadingIn(next);
+    if (next === ORIGINAL) {
+      clearTranslation();
+      return;
+    }
+    try {
+      await translate({ id, targetLanguage: next, includeTranscript }).unwrap();
+    } catch {
+      toast.error("Could not translate this meeting.");
+      setReadingIn(ORIGINAL);
+    }
+  }
 
   const [reprocess, reprocessState] = useReprocessMeetingMutation();
   const [remove, removeState] = useDeleteMeetingMutation();
@@ -460,6 +496,18 @@ export default function MeetingDetailPage() {
       )}
 
       {ready && (
+        <TranslationBar
+          sourceLanguage={m.language}
+          value={readingIn}
+          onChange={(v) => void onReadIn(v)}
+          translation={showing}
+          available={availableTranslations.data}
+          busy={translating}
+          onRetranslate={() => void onReadIn(readingIn, !!showing?.hasTranscript)}
+        />
+      )}
+
+      {ready && (
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList variant="underline" className="flex w-full flex-wrap gap-x-6">
             <TabsTrigger value="summary">Summary</TabsTrigger>
@@ -479,6 +527,7 @@ export default function MeetingDetailPage() {
               meetingId={id}
               loading={summary.isLoading}
               summary={summary.data}
+              translation={showing}
               onSeek={audio.seekTo}
             />
             {/* Below the summary, not above it: these are read out of it, and
@@ -519,6 +568,11 @@ export default function MeetingDetailPage() {
                         key={a.id}
                         item={a}
                         showMeeting={false}
+                        // The row reads in the chosen language; the edit form
+                        // inside it stays in the original, because that is the
+                        // text an edit would replace.
+                        translation={showing?.actionItems.find((t) => t.id === a.id)}
+                        rightToLeft={showing?.rightToLeft}
                         // There is a player on this page, so the sentence plays
                         // here rather than opening the meeting again.
                         onOpenSource={audio.seekTo}
@@ -536,6 +590,50 @@ export default function MeetingDetailPage() {
           </TabsContent>
 
           <TabsContent value="transcript">
+            {showing ? (
+              showing.hasTranscript ? (
+                <Card>
+                  <CardContent className="pt-6">
+                    <TranslatedTranscript
+                      segments={transcript.data?.segments ?? []}
+                      translation={showing}
+                      currentTime={audio.currentTime}
+                      onSeek={audio.seekTo}
+                      onShowOriginal={() => void onReadIn(ORIGINAL)}
+                    />
+                  </CardContent>
+                </Card>
+              ) : (
+                /* Asked for rather than done automatically. An hour of speech
+                   is thousands of words: doing it for everyone who switched
+                   language to read the summary would spend their money and
+                   half a minute of their time on a tab they never opened. */
+                <Card>
+                  <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
+                    <p className="font-medium">
+                      The transcript is still in its original language.
+                    </p>
+                    <p className="max-w-md text-sm text-muted-foreground">
+                      Translating every utterance takes longer than the summary
+                      did, so it is done on request.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={translating}
+                      onClick={() => void onReadIn(readingIn, true)}
+                    >
+                      {translating ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Languages className="h-4 w-4" />
+                      )}
+                      Translate the transcript into {showing.languageName}
+                    </Button>
+                  </CardContent>
+                </Card>
+              )
+            ) : (
             <TranscriptPanel
               meetingId={id}
               loading={transcript.isLoading}
@@ -550,6 +648,7 @@ export default function MeetingDetailPage() {
               onSeek={audio.seekTo}
               onAskAbout={askAbout}
             />
+            )}
           </TabsContent>
         </Tabs>
       )}
@@ -558,7 +657,6 @@ export default function MeetingDetailPage() {
 }
 
 /* ----------------------------- Summary panel ----------------------------- */
-const LANGUAGES = ["Spanish", "French", "German", "Hindi", "Japanese", "Portuguese", "Arabic"];
 
 /**
  * One section, drawn by its `kind`.
@@ -618,31 +716,22 @@ function SummaryPanel({
   meetingId,
   loading,
   summary,
+  translation,
   onSeek,
 }: {
   meetingId: string;
   loading: boolean;
   summary?: SummaryResponse;
+  /** The brief in the reading language, when one has been chosen. */
+  translation?: MeetingTranslation;
   /** Plays from a quotation's moment. Shared with the transcript and chat. */
   onSeek: (seconds: number) => void;
 }) {
-  const [translate, { data: translated, isLoading: translating, reset }] = useTranslateSummaryMutation();
-  const [lang, setLang] = React.useState("Spanish");
   const { data: templates } = useGetSummaryTemplatesQuery();
   const [resummarize, { isLoading: rewriting }] = useResummarizeMutation();
-
-  async function onTranslate() {
-    try {
-      await translate({ id: meetingId, targetLanguage: lang }).unwrap();
-    } catch {
-      toast.error("Translation failed.");
-    }
-  }
+  const translated = translation;
 
   async function onTemplateChange(slug: string) {
-    // Drop any translation first: it belongs to the summary being replaced,
-    // and leaving it up would show translated text under new headings.
-    reset();
     try {
       await resummarize({ id: meetingId, template: slug }).unwrap();
       toast.success("Summary rewritten.");
@@ -652,13 +741,16 @@ function SummaryPanel({
   }
 
   const view = translated ?? summary;
-  // Translation returns the flat fields only, so while one is showing we fall
-  // back to the classic layout rather than render half-translated sections.
+  // The translation carries the sections too, so the translated brief is the
+  // same document in another language rather than a thinner one — which is
+  // what it used to be, and what made switching language quietly show the
+  // reader less of the meeting than staying in English did.
+  //
   // Memoised because the topics below are derived from it: a fresh array
   // identity on every render would recompute them on every render, which is
   // cheap here and exactly the habit that stops being cheap later.
   const sections = React.useMemo(
-    () => (translated ? [] : summary?.sections ?? []),
+    () => translated?.sections ?? summary?.sections ?? [],
     [translated, summary?.sections],
   );
   // Hidden alongside the sections while a translation is showing: a quotation is
@@ -690,7 +782,13 @@ function SummaryPanel({
 
   return (
     <Card>
-      <CardContent className="space-y-6 pt-6">
+      <CardContent
+        className="space-y-6 pt-6"
+        // Set from the language rather than sniffed from the characters:
+        // Arabic and Hebrew laid out left-to-right are not merely ugly, they
+        // are hard to read.
+        dir={translated?.rightToLeft ? "rtl" : undefined}
+      >
         {loading ? (
           <Skeleton className="h-24 w-full" />
         ) : view ? (
@@ -742,20 +840,7 @@ function SummaryPanel({
                     </SelectContent>
                   </Select>
                 )}
-                <Select value={lang} onValueChange={(v) => { setLang(v); reset(); }}>
-                  <SelectTrigger className="h-8 w-[150px]"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {LANGUAGES.map((l) => <SelectItem key={l} value={l}>{l}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <Button variant="outline" size="sm" onClick={onTranslate} disabled={translating}>
-                  {translating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Languages className="h-4 w-4" />}
-                  Translate
-                </Button>
               </div>
-              {translated && (
-                <Button variant="ghost" size="sm" onClick={() => reset()}>Show original</Button>
-              )}
             </div>
 
             {sections.length > 0 ? (
@@ -818,8 +903,9 @@ function SummaryPanel({
                 )}
               </div>
             ) : (
-              /* Summaries written before templates existed, and translations,
-                 which only carry the flat fields. */
+              /* Summaries written before templates existed, which have no
+                 sections to lay out. A translation carries them, so it takes
+                 the branch above. */
               <>
                 <p className="text-base">{view.shortSummary}</p>
                 {view.keyPoints.length > 0 && (

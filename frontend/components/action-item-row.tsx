@@ -46,7 +46,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { ActionItemResponse, Priority } from "@/lib/types";
+import type { ActionItemResponse, Priority, TranslatedTask } from "@/lib/types";
 
 export interface ActionItemRowProps {
   item: ActionItemResponse;
@@ -61,6 +61,15 @@ export interface ActionItemRowProps {
    * player; omitted elsewhere, where the row links to the meeting instead.
    */
   onOpenSource?: (seconds: number) => void;
+  /**
+   * This task in the language the meeting is being read in.
+   *
+   * Only the row reads in it. The edit form underneath stays in the original,
+   * because that is the text an edit would replace — typing a correction over
+   * a translation would save the translation as the task.
+   */
+  translation?: TranslatedTask;
+  rightToLeft?: boolean;
 }
 
 export function ActionItemRow({
@@ -70,6 +79,8 @@ export function ActionItemRow({
   selected = false,
   onSelectedChange,
   onOpenSource,
+  translation,
+  rightToLeft,
 }: ActionItemRowProps) {
   const [open, setOpen] = React.useState(false);
   const [patch, { isLoading: saving }] = usePatchActionItemMutation();
@@ -83,8 +94,13 @@ export function ActionItemRow({
     }
   }
 
-  const deadline = dueLabel(item);
+  // The deadline label is computed from the resolved date, so it stays in the
+  // reader's locale either way; only the words that were said are translated.
+  const deadline = dueLabel(
+    translation?.dueDate ? { ...item, dueDate: translation.dueDate } : item,
+  );
   const said = spokenDeadline(item);
+  const title = translation?.title ?? item.title;
 
   return (
     <li className="py-2">
@@ -93,7 +109,7 @@ export function ActionItemRow({
           <input
             type="checkbox"
             checked={selected}
-            aria-label={`Select “${item.title}”`}
+            aria-label={`Select “${title}”`}
             onChange={(e) => onSelectedChange?.(e.target.checked)}
             className="mt-1.5 h-4 w-4 shrink-0 accent-[hsl(var(--muted-foreground))]"
           />
@@ -103,13 +119,14 @@ export function ActionItemRow({
           type="checkbox"
           checked={done}
           disabled={saving}
-          aria-label={`Mark “${item.title}” complete`}
+          aria-label={`Mark “${title}” complete`}
           onChange={(e) => update({ status: e.target.checked ? "DONE" : "OPEN" })}
           className="mt-1.5 h-4 w-4 shrink-0 accent-[hsl(var(--primary))]"
         />
 
         <div className="min-w-0 flex-1">
           <p
+            dir={rightToLeft && translation?.translated ? "rtl" : undefined}
             className={cn(
               "font-medium leading-snug",
               // Struck through rather than removed: a finished item is still
@@ -118,7 +135,7 @@ export function ActionItemRow({
               done && "text-muted-foreground line-through",
             )}
           >
-            {item.title}
+            {title}
           </p>
 
           <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs">
@@ -167,7 +184,16 @@ export function ActionItemRow({
       </div>
 
       {open && (
-        <ActionItemDetails item={item} onOpenSource={onOpenSource} onPatch={update} busy={saving} />
+        <>
+          {/* Said once, where it matters: the fields below hold the words the
+              meeting was in, not the ones on the row above. */}
+          {translation?.translated && (
+            <p className="ml-7 mt-2 text-xs text-muted-foreground">
+              Editing works on the original wording: “{item.title}”.
+            </p>
+          )}
+          <ActionItemDetails item={item} onOpenSource={onOpenSource} onPatch={update} busy={saving} />
+        </>
       )}
     </li>
   );

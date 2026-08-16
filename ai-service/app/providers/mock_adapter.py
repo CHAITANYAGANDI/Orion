@@ -341,6 +341,14 @@ class MockLlmAdapter(LlmPort):
     async def translate(self, text: str, target_language: str) -> str:
         return f"[{target_language}] {text}"
 
+    async def translate_lines(
+        self, lines: list[str], target_language: str
+    ) -> list[str]:
+        # Same length in, same length out — the one property callers depend on,
+        # so the mock has to honour it or it hides alignment bugs rather than
+        # exposing them.
+        return [f"[{target_language}] {line}" if line.strip() else line for line in lines]
+
     async def draft_followup_email(self, brief: DraftEmailRequest) -> DraftEmailResponse:
         """Assemble a recap from the brief's own words — no generation involved."""
         lines: list[str] = ["Hi all,", "", f"Thanks for the time on {brief.title}."]

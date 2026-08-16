@@ -116,6 +116,34 @@ async def _with_retries(
     return fallback
 
 
+# How much of a list goes into one translation request. Both limits matter: the
+# character budget keeps a chunk of long paragraphs inside the context, and the
+# line count keeps a chunk of one-word utterances — a transcript is full of
+# "Yeah." — from becoming four hundred items the model has to keep aligned.
+_TRANSLATE_CHUNK_CHARS = 5000
+_TRANSLATE_CHUNK_LINES = 40
+
+
+def _chunk_lines(lines: list[str]) -> list[list[str]]:
+    """Split a list into request-sized batches, never splitting a line."""
+    chunks: list[list[str]] = []
+    current: list[str] = []
+    size = 0
+    for line in lines:
+        length = len(line) + 8  # the index prefix and newline
+        if current and (
+            size + length > _TRANSLATE_CHUNK_CHARS
+            or len(current) >= _TRANSLATE_CHUNK_LINES
+        ):
+            chunks.append(current)
+            current, size = [], 0
+        current.append(line)
+        size += length
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 def prompt_hint(vocabulary: list[str] | None, limit: int = 200) -> str:
     """The user's vocabulary as a Whisper decoding prompt.
 
@@ -744,6 +772,68 @@ class OpenAiLlmAdapter(LlmPort):
             attempts=self._settings.openai_max_retries + 1,
             fallback=text,
             label="translate",
+        )
+
+    async def translate_lines(
+        self, lines: list[str], target_language: str
+    ) -> list[str]:
+        """Translate a list, preserving its length above all else.
+
+        Chunked, because a two-hour transcript is thousands of utterances and no
+        single request survives that. Each chunk is validated on its own and
+        falls back to its own source lines, so one badly-behaved chunk costs a
+        paragraph of untranslated text rather than the whole transcript.
+        """
+        if not lines:
+            return []
+
+        out: list[str] = []
+        for chunk in _chunk_lines(lines):
+            out.extend(await self._translate_chunk(chunk, target_language))
+        return out
+
+    async def _translate_chunk(
+        self, chunk: list[str], target_language: str
+    ) -> list[str]:
+        # Indexed rather than positional: asking for a JSON object keyed by the
+        # line number means a dropped line is a missing key we can fill from the
+        # source, instead of a silent shift of everything after it.
+        numbered = "\n".join(f"{i} {line}" for i, line in enumerate(chunk))
+        system = (
+            f"Translate each numbered line into {target_language}. "
+            'Reply with JSON: {"lines": {"0": "...", "1": "..."}} — one entry per '
+            "input line, keyed by the same number. Translate every line, including "
+            "short ones. Never merge, split, reorder or omit lines. Keep names, "
+            "product names and numbers as they are. If a line is already in "
+            f"{target_language} or cannot be translated, repeat it unchanged."
+        )
+
+        async def _op() -> list[str]:
+            data = await self._chat_json(system, numbered)
+            translated = data.get("lines") or {}
+            if isinstance(translated, list):
+                # Accepted as well as the keyed form: the length is what matters,
+                # and a model that returns the array is not wrong, only literal.
+                if len(translated) != len(chunk):
+                    raise ValueError(
+                        f"expected {len(chunk)} lines, got {len(translated)}"
+                    )
+                return [str(v) if str(v).strip() else src
+                        for v, src in zip(translated, chunk)]
+            if not isinstance(translated, dict):
+                raise ValueError("translate_lines returned neither an object nor a list")
+            # Missing keys keep their source text. Partial is a real outcome and
+            # a much better one than a chunk of the wrong speaker's words.
+            return [
+                str(translated.get(str(i)) or "").strip() or chunk[i]
+                for i in range(len(chunk))
+            ]
+
+        return await _with_retries(
+            _op,
+            attempts=self._settings.openai_max_retries + 1,
+            fallback=list(chunk),
+            label="translate_lines",
         )
 
 

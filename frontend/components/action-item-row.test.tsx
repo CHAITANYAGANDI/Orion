@@ -279,6 +279,45 @@ describe("ActionItemRow notes", () => {
   });
 });
 
+describe("ActionItemRow translated", () => {
+  const translated = {
+    id: "ai_1",
+    title: "Terminar la validación JWT",
+    ownerName: "Priya",
+    dueDate: "viernes",
+    translated: true,
+  };
+
+  it("reads in the chosen language", () => {
+    render(<ActionItemRow item={item()} translation={translated} />);
+
+    expect(screen.getByText("Terminar la validación JWT")).toBeInTheDocument();
+  });
+
+  it("edits the original, and says so", async () => {
+    render(<ActionItemRow item={item()} translation={translated} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /Show details/ }));
+
+    // Typing a correction over a translation would save the translation as the
+    // task, which nobody would notice until the next reader opened it.
+    expect(screen.getByLabelText("What needs to happen")).toHaveValue("Finish the JWT validation");
+    expect(screen.getByText(/Editing works on the original/)).toBeInTheDocument();
+  });
+
+  it("shows the original when the wording moved on since it was translated", () => {
+    render(
+      <ActionItemRow
+        item={item()}
+        translation={{ ...translated, title: "Finish the JWT validation", translated: false }}
+      />,
+    );
+
+    expect(screen.getByText("Finish the JWT validation")).toBeInTheDocument();
+    expect(screen.queryByText(/Editing works on the original/)).not.toBeInTheDocument();
+  });
+});
+
 describe("ActionItemRow selection", () => {
   it("offers a separate control for selecting, distinct from completing", async () => {
     const onSelectedChange = vi.fn();
