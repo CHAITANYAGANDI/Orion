@@ -1,0 +1,9 @@
+# Keeps `public/` in the repository.
+#
+# Next.js serves this directory as static assets, and frontend/Dockerfile:44
+# does `COPY --from=builder /app/public ./public`, which fails the whole image
+# build if the directory is absent. Git does not track empty directories, so
+# without a file in here the build works only on machines where the folder
+# happens to exist and fails on every fresh clone.
+#
+# Delete this once there is a real asset alongside it.

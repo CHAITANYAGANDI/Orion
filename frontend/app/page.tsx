@@ -12,6 +12,23 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { PLAN_NAME } from "@/lib/plan";
+
+/**
+ * The headline of the one plan.
+ *
+ * Deliberately shorter than the full list on the Plans tab — a landing page is
+ * read standing up — but drawn from the same facts in `lib/plan.ts`, and it
+ * quotes the one limit that binds rather than burying it.
+ */
+const LANDING_INCLUDED = [
+  "Five meetings a month, recorded in the browser or imported",
+  "Transcription in 18 languages, with speakers separated and named",
+  "Summaries with decisions, risks and action items",
+  "AI Chat on one meeting or across every meeting you have",
+  "Search, folders, share links, and export to PDF, Word, Markdown or text",
+  "No card, no trial, no seat count",
+];
 
 const FEATURES = [
   { icon: FileText, title: "Accurate transcripts", body: "Upload audio or video and get a clean, timestamped transcript in seconds." },
@@ -122,37 +139,48 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Pricing */}
+      {/* Pricing.
+
+          One card, because there is one plan. What stood here was three — Free,
+          Pro at $19, Premium at $49 — and the two paid ones described work that
+          does not exist. A pricing table is the single most load-bearing thing
+          on a landing page: everything else is a claim about quality, and that
+          is a claim about what somebody will be charged. */}
       <section className="mx-auto max-w-6xl px-4 py-20">
-        <h2 className="text-center text-3xl font-bold tracking-tight">Simple pricing</h2>
-        <div className="mt-12 grid gap-6 md:grid-cols-3">
-          {[
-            { name: "Free", price: "$0", features: ["5 meetings / month", "60 AI minutes", "Transcripts & summaries"] },
-            { name: "Pro", price: "$19", features: ["50 meetings / month", "600 AI minutes", "Exports & search", "Agent follow-ups"], highlight: true },
-            { name: "Premium", price: "$49", features: ["Unlimited meetings", "Unlimited AI minutes", "Priority processing", "Priority support"] },
-          ].map((p) => (
-            <Card key={p.name} className={p.highlight ? "border-primary shadow-md" : ""}>
-              <CardContent className="pt-6">
-                {p.highlight && <Badge className="mb-3">Most popular</Badge>}
-                <h3 className="text-lg font-semibold">{p.name}</h3>
-                <p className="mt-2 text-3xl font-bold">
-                  {p.price}
-                  <span className="text-sm font-normal text-muted-foreground">/mo</span>
-                </p>
-                <ul className="mt-4 space-y-2 text-sm">
-                  {p.features.map((f) => (
-                    <li key={f} className="flex items-center gap-2">
-                      <CheckCircle2 className="h-4 w-4 text-success" /> {f}
-                    </li>
-                  ))}
-                </ul>
-                <Button className="mt-6 w-full" variant={p.highlight ? "default" : "outline"} asChild>
-                  <Link href="/billing">Get started</Link>
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <h2 className="text-center text-3xl font-bold tracking-tight">Pricing</h2>
+        <p className="mx-auto mt-4 max-w-xl text-center text-muted-foreground">
+          One plan, free. There is no paid tier, so nothing below is a trial and
+          nothing is being held back to sell you later.
+        </p>
+
+        <Card className="mx-auto mt-12 max-w-lg border-primary">
+          <CardContent className="pt-6">
+            <h3 className="text-lg font-semibold">{PLAN_NAME}</h3>
+            <p className="mt-2 text-3xl font-bold">
+              Free
+              <span className="text-sm font-normal text-muted-foreground"> — for everyone</span>
+            </p>
+            <ul className="mt-6 space-y-2 text-sm">
+              {LANDING_INCLUDED.map((f) => (
+                <li key={f} className="flex items-start gap-2">
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" /> {f}
+                </li>
+              ))}
+            </ul>
+
+            {/* The absence a reader would otherwise discover after the meeting
+                they expected to be recorded. */}
+            <p className="mt-6 border-t pt-4 text-sm text-muted-foreground">
+              Recallix records in your own browser tab. It never joins a Zoom,
+              Teams or Meet call, and there is no phone app — the full list of
+              what it does not do is on the Plans tab.
+            </p>
+
+            <Button className="mt-6 w-full" asChild>
+              <Link href="/home">Open Recallix</Link>
+            </Button>
+          </CardContent>
+        </Card>
       </section>
 
       <footer className="border-t">
