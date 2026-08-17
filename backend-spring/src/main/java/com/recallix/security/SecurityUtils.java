@@ -21,4 +21,20 @@ public final class SecurityUtils {
         }
         return auth.getName();
     }
+
+    /**
+     * What the caller's credential said about how they signed in.
+     *
+     * <p>Falls back to a dev session rather than throwing, because every caller
+     * of this is describing the account to its owner: a settings page that
+     * cannot render because the details were not attached is worse than one that
+     * says the least alarming true thing.
+     */
+    public static SignInSecurity signInSecurity() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getDetails() instanceof SignInSecurity details) {
+            return details;
+        }
+        return SignInSecurity.dev();
+    }
 }

@@ -120,6 +120,11 @@ export default function RecordPage() {
         // button. It is the only record that anybody was asked, and the only
         // thing the privacy page can honestly say about how this was captured.
         consentConfirmed: consentGiven,
+        // Says which of the two clients this was, and nothing more. It is what
+        // lets "email me my meeting summaries" mean recordings without also
+        // meaning every file somebody imports. Unconditional, unlike consent
+        // above: a recording made without ticking that box is still a recording.
+        recorded: true,
       }).unwrap();
 
       toast.success("Recording saved — processing started.");

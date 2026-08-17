@@ -38,6 +38,8 @@ public class PreferencesController {
                         req.shareIncludeTranscript(), req.shareIncludeAudio(),
                         req.shareExpiryDays(), req.shareNeverExpires(),
                         req.chatHistoryDays(), req.chatReadsEverything(),
-                        req.taskReminders(), req.mutedNotifications())));
+                        req.taskReminders(), req.digestWeekly(),
+                        req.emailsEnabled(), req.recapForImports(), req.shareOpenedEmail(),
+                        req.mutedNotifications())));
     }
 }

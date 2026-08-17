@@ -3,20 +3,24 @@
 /**
  * Account Settings.
  *
- * One page with seven tabs, where there used to be four separate routes in
- * three different places — Settings in the sidebar, Billing in the sidebar,
- * Privacy in the sidebar, Integrations nowhere. That arrangement made every
- * "where do I change…" question a hunt, and put "close my account" and "which
- * summary template" at the same level of the navigation.
+ * One page with six tabs, where there used to be four separate routes in three
+ * different places — Settings in the sidebar, Billing in the sidebar, Privacy
+ * in the sidebar, Integrations nowhere. That arrangement made every "where do I
+ * change…" question a hunt, and put "close my account" and "which recap
+ * address" at the same level of the navigation.
  *
  * The tab is in the URL rather than in state, so a tab can be linked to, opened
  * in a new window and bookmarked — which matters most for Security, the one
  * somebody is sent to by a notification about their own data.
  *
+ * There is no Templates tab. A summary template is chosen per meeting — on the
+ * upload page as a recording arrives, and from a meeting's own summary
+ * afterwards — so a settings tab about them was a read-only catalogue sitting
+ * one click from where the choice is never made.
+ *
  * Each tab is its own component and fetches its own data. Nothing is loaded for
- * a tab that is not open: Templates costs a round trip to the AI service and
- * Security counts every row a workspace owns, and neither should be paid for by
- * somebody changing their recap address.
+ * a tab that is not open: Security counts every row a workspace owns, and that
+ * should not be paid for by somebody changing their recap address.
  */
 
 import * as React from "react";
@@ -28,7 +32,6 @@ import { MeetingsTab } from "@/components/settings/meetings-tab";
 import { PlansTab } from "@/components/settings/plans-tab";
 import { IntegrationsTab } from "@/components/settings/integrations-tab";
 import { EmailsTab } from "@/components/settings/emails-tab";
-import { TemplatesTab } from "@/components/settings/templates-tab";
 import { SecurityTab } from "@/components/settings/security-tab";
 import { cn } from "@/lib/utils";
 
@@ -81,8 +84,6 @@ function TabBody({ tab }: { tab: SettingsTab }) {
       return <IntegrationsTab />;
     case "emails":
       return <EmailsTab />;
-    case "templates":
-      return <TemplatesTab />;
     case "security":
       return <SecurityTab />;
     case "general":

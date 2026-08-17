@@ -29,6 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.List;
@@ -305,6 +306,56 @@ public class ShareService {
     }
 
     // --- helpers --------------------------------------------------------------- //
+
+    /**
+     * Mail the owner that somebody opened their link (V40).
+     *
+     * <p>Off by default and deliberately so. The bell absorbs a link that a
+     * mailing list opens forty times in an afternoon; an inbox does not. This is
+     * for the other case — a link sent to one person, where the thing the sender
+     * wants to know is whether it was read.
+     *
+     * <p>Once a day per link, stamped on the share rather than reusing the
+     * notification's dedupe key. The two are separately switchable, and the
+     * bell's key is only ever written when its kind is unmuted — so borrowing it
+     * would mail somebody on every open the moment they silenced the bell.
+     *
+     * @return true when a message was sent
+     */
+    @Transactional
+    public boolean emailOwnerOnOpen(String ownerUserId, String shareId, Meeting meeting, LocalDate today) {
+        UserEntity owner = users.require(ownerUserId);
+        if (!owner.isEmailsEnabled() || !owner.isShareOpenedEmail()) {
+            return false;
+        }
+        String to = owner.effectiveRecapEmail();
+        if (to == null || to.isBlank()) {
+            return false;
+        }
+        MeetingShare share = shares.findById(shareId).orElse(null);
+        if (share == null || today.equals(share.getOpenEmailedOn())) {
+            return false;
+        }
+
+        String title = meeting == null ? "a meeting" : meeting.getTitle();
+        String where = meeting == null ? frontendUrl + "/meetings" : frontendUrl + "/meetings/" + meeting.getId();
+        boolean sent = email.send(to,
+                "Somebody opened your shared link",
+                "The link you shared for \"" + title + "\" has been opened.\n\n"
+                        + "Opened " + share.getViewCount() + " time"
+                        + (share.getViewCount() == 1 ? "" : "s") + " in total.\n"
+                        + where + "\n\n"
+                        + "You will not be emailed again about this link today, however many "
+                        + "times it is opened.\n\n"
+                        + "—\nSent automatically by Recallix. "
+                        + "Turn this off in Account Settings → Emails.");
+        if (sent) {
+            // Only on success, so a mail server that was down for a minute does
+            // not cost the owner the day's one notice.
+            share.setOpenEmailedOn(today);
+        }
+        return sent;
+    }
 
     /**
      * The text this link is allowed to show.

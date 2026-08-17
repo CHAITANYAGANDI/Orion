@@ -55,8 +55,28 @@ public record MeetingCreateRequest(
          * what they did, which is the only form this can take and is also the
          * only form anybody would ever want it in.
          */
-        Boolean consentConfirmed
+        Boolean consentConfirmed,
+
+        /**
+         * The recorder saying this was captured here (V40).
+         *
+         * <p>Separate from {@code consentConfirmed} even though only the
+         * recorder sends either, because that one is conditional on a tickbox
+         * and this one is not — a recording made without confirming consent is
+         * still a recording. Conflating them would have made the recap
+         * preference depend on whether somebody ticked an unrelated box.
+         *
+         * <p>Absent is false, which reads as "arrived some other way". That is
+         * right for every client that is not the recorder, including any future
+         * one that never learns to send this.
+         */
+        Boolean recorded
 ) {
+
+    /** Absent and false are the same thing: not captured here. */
+    public boolean recordedHere() {
+        return Boolean.TRUE.equals(recorded);
+    }
     public List<String> tagsOrEmpty() {
         return tags == null ? List.of() : tags;
     }

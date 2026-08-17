@@ -9,6 +9,17 @@ export const AUTH_MODE: AuthMode =
 export const DEV_USER_KEY = "recallix.devUserId";
 export const DEFAULT_DEV_USER = "usr_dev";
 
+/**
+ * Where a second factor is actually switched on.
+ *
+ * Recallix never sees a sign-in — it verifies a token Clerk issued — so it
+ * cannot enrol a factor it will never be asked to check. This is the address of
+ * the provider's own account page, and it is absent rather than guessed when
+ * nobody set it: a "Set up" button pointing at a URL invented by a UI is a
+ * security control that leads nowhere, which is worse than no button.
+ */
+export const ACCOUNT_PORTAL_URL = (process.env.NEXT_PUBLIC_ACCOUNT_PORTAL_URL ?? "").trim();
+
 interface AuthStore {
   mode: AuthMode;
   devUserId: string;

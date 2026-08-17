@@ -692,4 +692,91 @@ class ShareServiceTest {
         s.setToken(token);
         return s;
     }
+
+    /**
+     * Telling the owner their link was opened (V40).
+     *
+     * <p>Opt-in, and rate-limited to one a day per link. A link posted to a
+     * mailing list is opened dozens of times in an afternoon, and the whole
+     * value of the message is lost the moment it becomes forty messages.
+     */
+    @org.junit.jupiter.api.Nested
+    @DisplayName("share open email")
+    class OpenEmail {
+
+        private static final java.time.LocalDate TODAY = java.time.LocalDate.of(2026, 8, 17);
+
+        private com.recallix.entity.UserEntity owner(boolean wants, boolean masterOn) {
+            com.recallix.entity.UserEntity u = new com.recallix.entity.UserEntity();
+            u.setId(USER);
+            u.setEmail("ana@example.com");
+            u.setShareOpenedEmail(wants);
+            u.setEmailsEnabled(masterOn);
+            return u;
+        }
+
+        private Meeting meeting() {
+            Meeting m = new Meeting();
+            m.setId(MEETING);
+            m.setUserId(USER);
+            m.setTitle("Sprint planning");
+            return m;
+        }
+
+        @Test
+        @DisplayName("says nothing unless the owner asked for it")
+        void offByDefault() {
+            when(users.require(USER)).thenReturn(owner(false, true));
+
+            assertThat(service.emailOwnerOnOpen(USER, "shr_1", meeting(), TODAY)).isFalse();
+            verify(email, never()).send(anyString(), anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("mails the owner the first time a link is opened")
+        void mailsOnFirstOpen() {
+            MeetingShare s = share("tok_1");
+            when(users.require(USER)).thenReturn(owner(true, true));
+            when(shares.findById("shr_1")).thenReturn(java.util.Optional.of(s));
+            when(email.send(anyString(), anyString(), anyString())).thenReturn(true);
+
+            assertThat(service.emailOwnerOnOpen(USER, "shr_1", meeting(), TODAY)).isTrue();
+            assertThat(s.getOpenEmailedOn()).isEqualTo(TODAY);
+        }
+
+        @Test
+        @DisplayName("does not mail twice in one day however often the link is opened")
+        void oncePerDay() {
+            MeetingShare s = share("tok_1");
+            s.setOpenEmailedOn(TODAY);
+            when(users.require(USER)).thenReturn(owner(true, true));
+            when(shares.findById("shr_1")).thenReturn(java.util.Optional.of(s));
+
+            assertThat(service.emailOwnerOnOpen(USER, "shr_1", meeting(), TODAY)).isFalse();
+            verify(email, never()).send(anyString(), anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("leaves the day unstamped when the mail did not go out")
+        void failureLeavesItEligible() {
+            MeetingShare s = share("tok_1");
+            when(users.require(USER)).thenReturn(owner(true, true));
+            when(shares.findById("shr_1")).thenReturn(java.util.Optional.of(s));
+            when(email.send(anyString(), anyString(), anyString())).thenReturn(false);
+
+            // An SMTP server down for a minute must not cost the owner the day's
+            // one notice.
+            assertThat(service.emailOwnerOnOpen(USER, "shr_1", meeting(), TODAY)).isFalse();
+            assertThat(s.getOpenEmailedOn()).isNull();
+        }
+
+        @Test
+        @DisplayName("the master switch silences it")
+        void masterSwitchWins() {
+            when(users.require(USER)).thenReturn(owner(true, false));
+
+            assertThat(service.emailOwnerOnOpen(USER, "shr_1", meeting(), TODAY)).isFalse();
+            verify(email, never()).send(anyString(), anyString(), anyString());
+        }
+    }
 }

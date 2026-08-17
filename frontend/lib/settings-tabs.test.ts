@@ -21,16 +21,23 @@ import {
  */
 
 describe("the tabs themselves", () => {
-  it("are the seven the page offers, in reading order", () => {
+  it("are the six the page offers, in reading order", () => {
     expect(SETTINGS_TABS.map((t) => t.id)).toEqual([
       "general",
       "meetings",
       "plans",
       "integrations",
       "emails",
-      "templates",
       "security",
     ]);
+  });
+
+  it("does not offer Templates", () => {
+    // A summary template is chosen per meeting, so a settings tab listing them
+    // was a catalogue beside the one place the choice is never made.
+    expect(SETTINGS_TABS.map((t) => t.id)).not.toContain("templates");
+    // And the URL that used to open it still lands somewhere rather than blank.
+    expect(tabFromPath("/settings/templates")).toBe(DEFAULT_TAB);
   });
 
   it("open on General and end on Security", () => {

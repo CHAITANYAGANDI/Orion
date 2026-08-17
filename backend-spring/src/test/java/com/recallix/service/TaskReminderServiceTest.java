@@ -236,6 +236,62 @@ class TaskReminderServiceTest {
         }
     }
 
+    /**
+     * Cadence and the master switch (V40).
+     *
+     * <p>A weekly digest is the same message on one day in seven, so the tests
+     * are the two days: Monday sends, anything else does not. The dates are
+     * spelled out rather than derived, because a cadence test that computes its
+     * own weekday can agree with a bug.
+     */
+    @Nested
+    @DisplayName("cadence")
+    class Cadence {
+
+        private static final LocalDate MONDAY = LocalDate.of(2026, 8, 17);
+        private static final LocalDate SUNDAY = LocalDate.of(2026, 8, 16);
+
+        @Test
+        @DisplayName("a weekly digest waits for Monday")
+        void weeklyIsSilentMidweek() {
+            user.setDigestWeekly(true);
+            task("Ship the thing", SUNDAY, "Priya");
+
+            assertThat(service.sendDue(SUNDAY)).isZero();
+            verify(email, never()).send(anyString(), anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("a weekly digest goes out on Monday")
+        void weeklyArrivesOnMonday() {
+            user.setDigestWeekly(true);
+            task("Ship the thing", MONDAY, "Priya");
+
+            assertThat(service.sendDue(MONDAY)).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("a daily digest is unaffected by the day of the week")
+        void dailyIgnoresTheCalendar() {
+            task("Ship the thing", SUNDAY, "Priya");
+
+            assertThat(service.sendDue(SUNDAY)).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("the master switch silences the digest without forgetting it was wanted")
+        void masterSwitchSilencesTheDigest() {
+            user.setEmailsEnabled(false);
+            task("Ship the thing", MONDAY, "Priya");
+
+            assertThat(service.sendDue(MONDAY)).isZero();
+            verify(email, never()).send(anyString(), anyString(), anyString());
+            // Checked at send time, so the preference survives to be honoured
+            // again the moment the master goes back on.
+            assertThat(user.isTaskReminders()).isTrue();
+        }
+    }
+
     /** Runs the digest, then reads the subject it sent. */
     private String subjectSentAfter() {
         service.sendDue(TODAY);

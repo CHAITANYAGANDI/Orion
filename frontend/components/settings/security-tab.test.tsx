@@ -100,6 +100,12 @@ function anOverview(patch: Partial<PrivacyOverview> = {}): PrivacyOverview {
       rowLevelSecurity: true,
       ...(patch.storage ?? {}),
     },
+    signIn: {
+      mode: "dev",
+      managedExternally: false,
+      secondFactor: null,
+      ...(patch.signIn ?? {}),
+    },
     liveLinks: patch.liveLinks ?? [],
   };
 }
@@ -329,5 +335,86 @@ describe("closing the account", () => {
 
     expect(screen.queryByLabelText(/type/i)).not.toBeInTheDocument();
     expect(closeAccount).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Two-factor authentication.
+ *
+ * <p>Recallix never sees a sign-in — it verifies a token Clerk issued — so this
+ * card reports and points rather than enrolling anything. The tests are mostly
+ * about the three-valued status: "the provider said off" and "the provider said
+ * nothing" are different, and collapsing the second into the first would tell
+ * somebody who has 2FA switched on that they do not.
+ */
+describe("two-factor authentication", () => {
+  it("explains itself in terms of signing in, not of Recallix", () => {
+    render(<PrivacyPage />);
+
+    expect(screen.getByText("Two-factor Authentication")).toBeInTheDocument();
+    expect(screen.getByText(/a stolen password is not enough/i)).toBeInTheDocument();
+  });
+
+  it("says a dev session has no sign-in to protect", () => {
+    render(<PrivacyPage />);
+
+    expect(screen.getByText(/development session — there is no sign-in/i)).toBeInTheDocument();
+    // No Set up button, because there is nothing a header-based session could
+    // enrol and nowhere to send anybody.
+    expect(screen.queryByRole("link", { name: /set up/i })).not.toBeInTheDocument();
+  });
+
+  it("reports it as on when the credential said so", () => {
+    overview = anOverview({
+      signIn: { mode: "clerk", managedExternally: true, secondFactor: true },
+    });
+    render(<PrivacyPage />);
+
+    expect(screen.getByText("Two-factor authentication is turned on")).toBeInTheDocument();
+  });
+
+  it("reports it as off when the credential said so", () => {
+    overview = anOverview({
+      signIn: { mode: "clerk", managedExternally: true, secondFactor: false },
+    });
+    render(<PrivacyPage />);
+
+    expect(screen.getByText("Two-factor authentication is turned off")).toBeInTheDocument();
+  });
+
+  it("does not call silence 'off'", () => {
+    overview = anOverview({
+      signIn: { mode: "clerk", managedExternally: true, secondFactor: null },
+    });
+    render(<PrivacyPage />);
+
+    // Clerk's default token carries no such claim. Guessing "off" here would be
+    // wrong in the one direction somebody acts on.
+    expect(screen.getByText("Your sign-in provider hasn't said")).toBeInTheDocument();
+    expect(screen.queryByText(/turned off/i)).not.toBeInTheDocument();
+  });
+
+  it("says where to look when no account page is configured", () => {
+    overview = anOverview({
+      signIn: { mode: "clerk", managedExternally: true, secondFactor: false },
+    });
+    render(<PrivacyPage />);
+
+    // A Set up button pointing at a URL the UI invented is a security control
+    // that leads nowhere, so the env var's absence is stated instead.
+    expect(screen.getByText(/No account page has been\s+configured/i)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /set up/i })).not.toBeInTheDocument();
+  });
+
+  it("offers no enrolment of its own, in any state", () => {
+    overview = anOverview({
+      signIn: { mode: "clerk", managedExternally: true, secondFactor: false },
+    });
+    render(<PrivacyPage />);
+
+    // The failure this whole card is written to avoid: a TOTP flow here would
+    // produce a factor that sign-in never checks.
+    expect(screen.queryByText(/scan (the|this) QR/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /set up|enable two|verify code/i })).not.toBeInTheDocument();
   });
 });

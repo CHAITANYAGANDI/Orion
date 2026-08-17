@@ -55,6 +55,21 @@ public class Meeting {
     @Column(name = "source_url")
     private String sourceUrl;
 
+    /**
+     * Captured by the browser recorder rather than brought in (V40).
+     *
+     * <p>Asserted by the recorder and by no other client, so false covers both
+     * "uploaded" and "we were never told" — which is the truthful reading, since
+     * a file that arrived over the upload page was captured somewhere Recallix
+     * was not present.
+     *
+     * <p>{@code sourceType} cannot answer this: a recording and an uploaded
+     * audio file are both {@link SourceType#AUDIO} and reach the same endpoint.
+     * Only the client knows which it is.
+     */
+    @Column(name = "recorded", nullable = false)
+    private boolean recorded = false;
+
     @Column(name = "duration_seconds")
     private Integer durationSeconds;
 
@@ -155,6 +170,9 @@ public class Meeting {
 
     public String getSourceUrl() { return sourceUrl; }
     public void setSourceUrl(String sourceUrl) { this.sourceUrl = sourceUrl; }
+
+    public boolean isRecorded() { return recorded; }
+    public void setRecorded(boolean recorded) { this.recorded = recorded; }
 
     public Integer getDurationSeconds() { return durationSeconds; }
     public void setDurationSeconds(Integer durationSeconds) { this.durationSeconds = durationSeconds; }

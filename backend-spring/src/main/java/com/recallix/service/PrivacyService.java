@@ -13,6 +13,8 @@ import com.recallix.repository.MeetingShareRepository;
 import com.recallix.repository.ProjectRepository;
 import com.recallix.repository.TranscriptMomentRepository;
 import com.recallix.repository.UserRepository;
+import com.recallix.security.SecurityUtils;
+import com.recallix.security.SignInSecurity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -117,6 +119,7 @@ public class PrivacyService {
                 held(userId, owned),
                 retentionOf(user, userId, today),
                 storageFacts(),
+                signIn(),
                 liveLinks(userId, owned));
     }
 
@@ -155,6 +158,23 @@ public class PrivacyService {
                 user.getMeetingRetentionDays(),
                 due.recordings(),
                 due.meetings());
+    }
+
+    /**
+     * How the caller signed in.
+     *
+     * <p>Read from the credential this request arrived with rather than from the
+     * database, because it is a fact about the credential. Recallix never sees a
+     * sign-in — it verifies a token somebody else issued — so this is the whole
+     * of what it can honestly say about factors, and the settings page is
+     * written to say exactly that much and no more.
+     */
+    private PrivacyOverviewResponse.SignIn signIn() {
+        SignInSecurity credential = SecurityUtils.signInSecurity();
+        return new PrivacyOverviewResponse.SignIn(
+                credential.authMode(),
+                credential.managedExternally(),
+                credential.secondFactor());
     }
 
     private PrivacyOverviewResponse.StorageFacts storageFacts() {

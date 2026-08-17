@@ -36,10 +36,14 @@ public class ShareViewListener {
 
     private final NotificationService notifications;
     private final MeetingRepository meetings;
+    private final ShareService shares;
 
-    public ShareViewListener(NotificationService notifications, MeetingRepository meetings) {
+    public ShareViewListener(NotificationService notifications,
+                             MeetingRepository meetings,
+                             ShareService shares) {
         this.notifications = notifications;
         this.meetings = meetings;
+        this.shares = shares;
     }
 
     // No @Transactional here: Spring rejects it on an AFTER_COMMIT listener
@@ -50,10 +54,19 @@ public class ShareViewListener {
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onShareViewed(ShareViewedEvent event) {
         TenantContext.setUserId(event.ownerUserId());
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
         try {
             Meeting meeting = meetings.findById(event.meetingId()).orElse(null);
-            notifications.shareViewed(event.ownerUserId(), meeting, event.shareId(),
-                    LocalDate.now(ZoneOffset.UTC));
+            notifications.shareViewed(event.ownerUserId(), meeting, event.shareId(), today);
+
+            // Its own try (V40): the bell is the reliable channel and must not
+            // be lost to an unreachable mail server, and the email is opt-in and
+            // must not be lost to a bell that is muted.
+            try {
+                shares.emailOwnerOnOpen(event.ownerUserId(), event.shareId(), meeting, today);
+            } catch (Exception e) {
+                log.warn("Share open email failed for {}: {}", event.shareId(), e.toString());
+            }
         } catch (Exception e) {
             log.warn("Share view notification failed for {}: {}", event.shareId(), e.toString());
         } finally {

@@ -6,6 +6,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import java.time.LocalDate;
 
 /**
  * A revocable, unauthenticated link to one meeting's brief.
@@ -82,6 +83,17 @@ public class MeetingShare {
     @Column(name = "last_viewed_at")
     private Instant lastViewedAt;
 
+    /**
+     * The last day an "your link was opened" email went out for this link (V40).
+     *
+     * <p>Its own dedupe rather than the notification's, because the two are
+     * separately switchable: somebody who muted the bell kind but wants the
+     * email would otherwise be mailed on every single open, since the bell's
+     * dedupe row is never written when the kind is muted.
+     */
+    @Column(name = "open_emailed_on")
+    private LocalDate openEmailedOn;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -149,6 +161,9 @@ public class MeetingShare {
 
     public Instant getLastViewedAt() { return lastViewedAt; }
     public void setLastViewedAt(Instant lastViewedAt) { this.lastViewedAt = lastViewedAt; }
+
+    public LocalDate getOpenEmailedOn() { return openEmailedOn; }
+    public void setOpenEmailedOn(LocalDate openEmailedOn) { this.openEmailedOn = openEmailedOn; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

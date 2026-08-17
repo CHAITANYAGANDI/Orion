@@ -173,6 +173,10 @@ public class MeetingService {
         if (req.durationSeconds() != null) {
             meeting.setDurationSeconds(req.durationSeconds());
         }
+        // Which of the two clients this was (V40). Both reach here, and only one
+        // of them says so, which is what lets the recap preference tell a
+        // recording apart from an uploaded file.
+        meeting.setRecorded(req.recordedHere());
         meeting.setSummaryTemplate(templates.requireKnown(req.summaryTemplate()));
         if (req.projectId() != null && !req.projectId().isBlank()) {
             // Checked, not trusted: an id from the client could name somebody

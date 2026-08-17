@@ -49,15 +49,16 @@ class UserPreferencesTest {
     /**
      * A patch of nulls, so each test names only the fields it is about.
      *
-     * <p>Sixteen positional nulls at every call site is how a transposition
-     * gets written and never noticed — the record exists to be named, and these
-     * three helpers are where the naming happens for tests.
+     * <p>Twenty positional nulls at every call site is how a transposition gets
+     * written and never noticed — the record exists to be named, and these five
+     * helpers are where the naming happens for tests.
      */
     private static UserService.PreferencesPatch profile(String displayName, String department,
                                                         String jobRole, String language) {
         return new UserService.PreferencesPatch(
                 null, null, displayName, department, jobRole, language,
-                null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null);
     }
 
     private static UserService.PreferencesPatch sharing(Boolean summary, Boolean actionItems,
@@ -66,19 +67,31 @@ class UserPreferencesTest {
         return new UserService.PreferencesPatch(
                 null, null, null, null, null, null,
                 summary, actionItems, transcript, audio, expiryDays, neverExpires,
-                null, null, null, null);
+                null, null, null, null, null, null, null, null);
     }
 
     private static UserService.PreferencesPatch chatWindow(Integer days, Boolean everything) {
         return new UserService.PreferencesPatch(
                 null, null, null, null, null, null,
-                null, null, null, null, null, null, days, everything, null, null);
+                null, null, null, null, null, null, days, everything,
+                null, null, null, null, null, null);
     }
 
     private static UserService.PreferencesPatch muting(List<String> kinds) {
         return new UserService.PreferencesPatch(
                 null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null, null, kinds);
+                null, null, null, null, null, null, null, null,
+                null, null, null, null, null, kinds);
+    }
+
+    /** The V40 email switches: the digest cadence and the three around it. */
+    private static UserService.PreferencesPatch email(Boolean taskReminders, Boolean digestWeekly,
+                                                      Boolean emailsEnabled, Boolean recapForImports,
+                                                      Boolean shareOpenedEmail) {
+        return new UserService.PreferencesPatch(
+                null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null,
+                taskReminders, digestWeekly, emailsEnabled, recapForImports, shareOpenedEmail, null);
     }
 
     @BeforeEach
@@ -308,6 +321,60 @@ class UserPreferencesTest {
 
             // Silence and "nothing happened" would be the same signal.
             assertThat(user.getMutedNotifications()).isEmpty();
+        }
+    }
+
+    /**
+     * The V40 email switches.
+     *
+     * <p>The one that needs guarding is the master. A master switch that cleared
+     * the switches underneath it would turn "mute me for a fortnight" into a
+     * one-way door: everything would come back off, and the person would have to
+     * remember what they had chosen — which is exactly what nobody does.
+     */
+    @Nested
+    class EmailSwitches {
+
+        @Test
+        @DisplayName("the master leaves every switch underneath it alone")
+        void masterDoesNotRewriteTheRest() {
+            user.setAutoEmailRecap(true);
+            user.setRecapForImports(true);
+            user.setTaskReminders(true);
+            user.setShareOpenedEmail(true);
+
+            service.updatePreferences(USER, email(null, null, false, null, null));
+
+            assertThat(user.isEmailsEnabled()).isFalse();
+            assertThat(user.isAutoEmailRecap()).isTrue();
+            assertThat(user.isRecapForImports()).isTrue();
+            assertThat(user.isTaskReminders()).isTrue();
+            assertThat(user.isShareOpenedEmail()).isTrue();
+        }
+
+        @Test
+        @DisplayName("each switch moves on its own")
+        void switchesAreIndependent() {
+            service.updatePreferences(USER, email(null, true, null, true, true));
+
+            assertThat(user.isDigestWeekly()).isTrue();
+            assertThat(user.isRecapForImports()).isTrue();
+            assertThat(user.isShareOpenedEmail()).isTrue();
+            // Untouched by a patch that did not mention it.
+            assertThat(user.isTaskReminders()).isFalse();
+        }
+
+        @Test
+        @DisplayName("an omitted switch is not a switch set to false")
+        void omittedMeansUnchanged() {
+            user.setShareOpenedEmail(true);
+            user.setDigestWeekly(true);
+
+            service.updatePreferences(USER, email(true, null, null, null, null));
+
+            assertThat(user.isTaskReminders()).isTrue();
+            assertThat(user.isShareOpenedEmail()).isTrue();
+            assertThat(user.isDigestWeekly()).isTrue();
         }
     }
 }

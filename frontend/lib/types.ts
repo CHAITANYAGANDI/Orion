@@ -77,6 +77,14 @@ export interface MeetingCreateRequest {
    * present when the recording started. Recorded, not verified.
    */
   consentConfirmed?: boolean;
+  /**
+   * The recorder saying this was captured here (V40).
+   *
+   * Separate from `consentConfirmed`, which is conditional on a tickbox — a
+   * recording made without ticking it is still a recording. Absent is false,
+   * which reads as "arrived some other way" and is right for the upload page.
+   */
+  recorded?: boolean;
 }
 
 /** Renaming or re-tagging afterwards. Omitted fields are left alone. */
@@ -157,8 +165,16 @@ export interface PreferencesResponse {
   shareExpiryDays: number | null;
   /** How far back workspace chat reads transcripts; null is every meeting. */
   chatHistoryDays: number | null;
-  /** Daily digest of what is overdue or due soon. */
+  /** Digest of what is overdue or due soon. */
   taskReminders: boolean;
+  /** That digest on Mondays instead of every morning. */
+  digestWeekly: boolean;
+  /** The master over automatic email. Off silences everything below it. */
+  emailsEnabled: boolean;
+  /** Recap for imported meetings; `autoEmailRecap` covers recorded ones. */
+  recapForImports: boolean;
+  /** Email when somebody opens a link you published. */
+  shareOpenedEmail: boolean;
   /** Notification kinds switched off. Everything absent from this is on. */
   mutedNotifications: string[];
 }
@@ -183,6 +199,11 @@ export interface PreferencesUpdateRequest {
   chatHistoryDays?: number;
   chatReadsEverything?: boolean;
   taskReminders?: boolean;
+  digestWeekly?: boolean;
+  /** The master. Never rewrites the switches underneath it. */
+  emailsEnabled?: boolean;
+  recapForImports?: boolean;
+  shareOpenedEmail?: boolean;
   /** The whole set, not a delta — the settings page holds every switch at once. */
   mutedNotifications?: string[];
 }
@@ -1075,10 +1096,26 @@ export interface LiveLink {
   createdAt: string;
 }
 
+/**
+ * How the caller signed in.
+ *
+ * `secondFactor` is three-valued and must stay that way. `null` means the
+ * credential said nothing — Clerk's default session token carries no such
+ * claim — and rendering that as "off" would tell somebody who has 2FA switched
+ * on at their provider that they do not, which is the one direction this
+ * display must never be wrong in.
+ */
+export interface SignInFacts {
+  mode: string;
+  managedExternally: boolean;
+  secondFactor: boolean | null;
+}
+
 export interface PrivacyOverview {
   held: HeldData;
   retention: RetentionPolicy;
   storage: StorageFacts;
+  signIn: SignInFacts;
   liveLinks: LiveLink[];
 }
 

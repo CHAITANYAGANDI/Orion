@@ -56,6 +56,23 @@ public record PreferencesUpdateRequest(
         Boolean chatReadsEverything,
 
         Boolean taskReminders,
+        /** Send the deadline digest on Mondays instead of every morning (V40). */
+        Boolean digestWeekly,
+
+        /**
+         * The master switch over automatic email (V40).
+         *
+         * <p>Deliberately does not clear the switches underneath it. Somebody
+         * turning everything off for a fortnight and back on again expects to
+         * find their choices where they left them, and a master that rewrote
+         * them would make that a one-way door.
+         */
+        Boolean emailsEnabled,
+        /** Recap for imported meetings; {@code autoEmailRecap} covers recorded ones. */
+        Boolean recapForImports,
+        /** Email the owner when a published link is opened. */
+        Boolean shareOpenedEmail,
+
         /**
          * Notification kinds to switch off, replacing whatever was muted before.
          *

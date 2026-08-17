@@ -113,6 +113,21 @@ public class UserService {
                 user.setTaskReminderSentOn(null);
             }
         }
+        if (patch.digestWeekly() != null) {
+            user.setDigestWeekly(patch.digestWeekly());
+        }
+        // The master leaves the switches underneath it alone. Turning email off
+        // for a fortnight and back on again should return somebody to the
+        // choices they made, not to the defaults.
+        if (patch.emailsEnabled() != null) {
+            user.setEmailsEnabled(patch.emailsEnabled());
+        }
+        if (patch.recapForImports() != null) {
+            user.setRecapForImports(patch.recapForImports());
+        }
+        if (patch.shareOpenedEmail() != null) {
+            user.setShareOpenedEmail(patch.shareOpenedEmail());
+        }
         if (patch.mutedNotifications() != null) {
             // Stored as the enum's own spelling and nothing else. An unknown
             // string here would be a mute nobody could ever undo from the
@@ -149,7 +164,7 @@ public class UserService {
     /**
      * The mutable half of the preferences, as its own type.
      *
-     * <p>Sixteen nullable arguments in a row is a call nobody can read and a
+     * <p>Twenty nullable arguments in a row is a call nobody can read and a
      * transposition nobody can see; this one is named at the call site.
      */
     public record PreferencesPatch(
@@ -170,6 +185,14 @@ public class UserService {
             Integer chatHistoryDays,
             Boolean chatReadsEverything,
             Boolean taskReminders,
+            /** Mondays instead of every morning (V40). */
+            Boolean digestWeekly,
+            /** The master over automatic email. Never rewrites the switches below it. */
+            Boolean emailsEnabled,
+            /** Recap for imported meetings; {@code autoEmailRecap} covers recorded ones. */
+            Boolean recapForImports,
+            /** Email the owner when a published link is opened. */
+            Boolean shareOpenedEmail,
             /** Notification kinds to switch off. Null leaves them; empty turns all on. */
             List<String> mutedNotifications
     ) {

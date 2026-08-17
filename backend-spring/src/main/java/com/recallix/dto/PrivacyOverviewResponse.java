@@ -19,8 +19,31 @@ public record PrivacyOverviewResponse(
         Held held,
         Retention retention,
         StorageFacts storage,
+        SignIn signIn,
         List<LiveLinkResponse> liveLinks
 ) {
+
+    /**
+     * How the caller got in, and whether a second factor was involved.
+     *
+     * <p>On the same response as the rest for the reason in the class comment:
+     * "is my account protected" is asked in the same breath as "who can see my
+     * meetings", and a second endpoint would be a second loading state on a page
+     * somebody opened because they were already uneasy.
+     *
+     * @param mode            {@code clerk} or {@code dev}
+     * @param managedExternally whether sign-in belongs to a provider, which is
+     *                          also where a second factor is switched on
+     * @param secondFactor    what the credential asserted, or null if it said
+     *                        nothing — see {@code SignInSecurity} on why that is
+     *                        not the same as false
+     */
+    public record SignIn(
+            String mode,
+            boolean managedExternally,
+            Boolean secondFactor
+    ) {
+    }
 
     /**
      * What is actually stored, counted.

@@ -78,6 +78,11 @@ public class AuthenticationFilter extends OncePerRequestFilter {
 
                 var auth = new UsernamePasswordAuthenticationToken(
                         localUserId, null, List.of(new SimpleGrantedAuthority("ROLE_USER")));
+                // Carried on the authentication rather than stored on the user:
+                // it describes this credential, and a row in the database would
+                // go stale the moment somebody changed their factors at Clerk
+                // and then be wrong on a page whose whole job is being right.
+                auth.setDetails(new SignInSecurity(authMode, identity.secondFactor()));
                 SecurityContextHolder.getContext().setAuthentication(auth);
             }
         } catch (Exception ex) {
@@ -106,23 +111,56 @@ public class AuthenticationFilter extends OncePerRequestFilter {
      * left every Clerk-authenticated user with a null address — silently
      * disabling recap email in production while it worked fine in dev.
      */
-    private record Identity(String subject, String email) {
+    private record Identity(String subject, String email, Boolean secondFactor) {
     }
+
+    /**
+     * Claim names that may say whether a second factor was used.
+     *
+     * <p>Several spellings for the same reason the email claim has several:
+     * Clerk's default session token carries none of them, so whichever one
+     * arrives depends on how somebody wrote the JWT template. Absent stays
+     * absent — see {@link SignInSecurity} on why that must not become false.
+     */
+    private static final List<String> SECOND_FACTOR_CLAIMS = List.of(
+            "two_factor_enabled", "twoFactorEnabled", "two_factor", "tfa", "mfa");
 
     private Identity resolveIdentity(HttpServletRequest request) {
         if ("clerk".equalsIgnoreCase(authMode)) {
             String header = request.getHeader("Authorization");
             if (header == null || !header.startsWith("Bearer ")) {
-                return new Identity(null, null);
+                return new Identity(null, null, null);
             }
             Jwt jwt = decoder().decode(header.substring(7));
-            return new Identity(jwt.getSubject(), emailClaim(jwt));
+            return new Identity(jwt.getSubject(), emailClaim(jwt), secondFactorClaim(jwt));
         }
         // dev mode
         String devUser = request.getHeader("X-Dev-User");
         String subject = (devUser == null || devUser.isBlank()) ? DEV_FALLBACK_USER : devUser;
         String email = request.getHeader("X-Dev-Email");
-        return new Identity(subject, (email == null || email.isBlank()) ? null : email);
+        return new Identity(subject, (email == null || email.isBlank()) ? null : email, null);
+    }
+
+    /** What the token said about a second factor, or null if it said nothing. */
+    static Boolean secondFactorClaim(Jwt jwt) {
+        for (String claim : SECOND_FACTOR_CLAIMS) {
+            Object value = jwt.getClaim(claim);
+            if (value instanceof Boolean b) {
+                return b;
+            }
+            // Templates that render it through a string interpolation produce
+            // "true"/"false" rather than a JSON boolean. Anything else is not
+            // an assertion and is treated as silence.
+            if (value instanceof String s) {
+                if ("true".equalsIgnoreCase(s.trim())) {
+                    return Boolean.TRUE;
+                }
+                if ("false".equalsIgnoreCase(s.trim())) {
+                    return Boolean.FALSE;
+                }
+            }
+        }
+        return null;
     }
 
     private static String emailClaim(Jwt jwt) {

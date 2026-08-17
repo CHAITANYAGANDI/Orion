@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
@@ -88,6 +89,9 @@ public class TaskReminderService {
         List<UserEntity> due = users.findAwaitingTaskReminder(today);
         int sent = 0;
         for (UserEntity user : due) {
+            if (!scheduledToday(user, today)) {
+                continue;
+            }
             if (sendFor(user, today)) {
                 sent++;
             }
@@ -96,6 +100,26 @@ public class TaskReminderService {
             log.info("Sent {} task reminder digest(s).", sent);
         }
         return sent;
+    }
+
+    /**
+     * Whether this user's digest is owed on this date (V40).
+     *
+     * <p>Two gates. The master email switch, checked here rather than in the
+     * query so that turning email off never silently loses the {@code
+     * task_reminder_sent_on} bookkeeping that stops a double send. And the
+     * cadence: a weekly digest goes out on Monday, chosen rather than
+     * configurable because Recallix stores no timezone and therefore cannot
+     * honour "my Monday" any better than it can honour "my morning".
+     *
+     * <p>A weekly reader who has nothing due on a Monday gets nothing, the same
+     * as a daily one — the digest is silent on an empty day either way.
+     */
+    private static boolean scheduledToday(UserEntity user, LocalDate today) {
+        if (!user.isEmailsEnabled()) {
+            return false;
+        }
+        return !user.isDigestWeekly() || today.getDayOfWeek() == DayOfWeek.MONDAY;
     }
 
     /**

@@ -7,13 +7,13 @@ import { render, screen } from "@testing-library/react";
  * What matters here is the frame rather than the contents — each tab has its own
  * tests. Two things:
  *
- * The whole tab bar is always visible, whichever tab is open. Seven tabs that
+ * The whole tab bar is always visible, whichever tab is open. Six tabs that
  * appeared and disappeared depending on where you were would make "where do I
  * change…" a hunt again, which is the thing this page exists to end.
  *
- * And only the open tab is mounted. Templates costs a round trip to the AI
- * service and Security counts every row a workspace owns; somebody changing
- * their recap address should pay for neither.
+ * And only the open tab is mounted. Security counts every row a workspace owns
+ * and Plans reads the usage period; somebody changing their recap address
+ * should pay for neither.
  */
 const { rendered } = vi.hoisted(() => ({ rendered: vi.fn() }));
 
@@ -33,7 +33,6 @@ vi.mock("@/components/settings/meetings-tab", () => ({ MeetingsTab: stub("meetin
 vi.mock("@/components/settings/plans-tab", () => ({ PlansTab: stub("plans") }));
 vi.mock("@/components/settings/integrations-tab", () => ({ IntegrationsTab: stub("integrations") }));
 vi.mock("@/components/settings/emails-tab", () => ({ EmailsTab: stub("emails") }));
-vi.mock("@/components/settings/templates-tab", () => ({ TemplatesTab: stub("templates") }));
 vi.mock("@/components/settings/security-tab", () => ({ SecurityTab: stub("security") }));
 
 import { AccountSettings } from "@/components/settings/account-settings";
@@ -49,7 +48,7 @@ describe("the frame", () => {
     expect(screen.getByRole("heading", { name: "Account Settings" })).toBeInTheDocument();
   });
 
-  it("shows all seven tabs, whichever one is open", () => {
+  it("shows all six tabs, whichever one is open", () => {
     pathname = "/settings/integrations";
     render(<AccountSettings />);
 
@@ -59,11 +58,25 @@ describe("the frame", () => {
       "Plans",
       "Integrations",
       "Emails",
-      "Templates",
       "Security",
     ]) {
       expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
     }
+  });
+
+  it("has no Templates tab", () => {
+    render(<AccountSettings />);
+
+    // A summary template is picked per meeting, on the upload page and from a
+    // meeting's own summary. A tab here only ever listed them.
+    expect(screen.queryByRole("link", { name: "Templates" })).not.toBeInTheDocument();
+  });
+
+  it("shows General rather than a blank pane under the old Templates URL", () => {
+    pathname = "/settings/templates";
+    render(<AccountSettings />);
+
+    expect(screen.getByTestId("tab-general")).toBeInTheDocument();
   });
 
   it("links each tab to its own URL, so one can be bookmarked or sent", () => {
@@ -101,8 +114,8 @@ describe("which tab is open", () => {
   });
 
   it("mounts only that one", () => {
-    // Templates costs a round trip to the AI service; Security counts every row
-    // the workspace owns. Neither is paid for by opening Emails.
+    // Security counts every row the workspace owns, and Plans reads usage.
+    // Neither is paid for by somebody opening Emails.
     pathname = "/settings/emails";
     render(<AccountSettings />);
 

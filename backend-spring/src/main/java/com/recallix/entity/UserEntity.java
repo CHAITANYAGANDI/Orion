@@ -111,9 +111,53 @@ public class UserEntity {
     @Column(name = "task_reminders", nullable = false)
     private boolean taskReminders = false;
 
+    /**
+     * Send that digest on Mondays instead of every morning (V40).
+     *
+     * <p>Read only when {@link #taskReminders} is on; a cadence for a message
+     * nobody receives is not a state worth reasoning about.
+     */
+    @Column(name = "digest_weekly", nullable = false)
+    private boolean digestWeekly = false;
+
     /** The last day a digest went out — the guard against sending two. */
     @Column(name = "task_reminder_sent_on")
     private LocalDate taskReminderSentOn;
+
+    /**
+     * The master switch over automatic email (V40).
+     *
+     * <p>On by default, because it governs messages that are each already
+     * opt-in — arriving with everything pre-suppressed would mean a switch
+     * somebody turned on doing nothing, which is worse than either state.
+     *
+     * <p>Automatic only. Sharing a meeting by email is something the account
+     * holder just did on purpose, and refusing to send it because of a
+     * preference about notifications would make the button a liar.
+     */
+    @Column(name = "emails_enabled", nullable = false)
+    private boolean emailsEnabled = true;
+
+    /**
+     * Recap email for meetings that arrived as a file or a link (V40).
+     *
+     * <p>The counterpart of {@link #autoEmailRecap}, which now covers only
+     * meetings recorded here. Split because importing an archive and recording
+     * a call are different acts at wildly different volumes, and one switch
+     * over both meant anybody doing the first had to give up the second.
+     */
+    @Column(name = "recap_for_imports", nullable = false)
+    private boolean recapForImports = false;
+
+    /**
+     * Email when somebody opens a link you published (V40).
+     *
+     * <p>Off by default, unlike the bell notification it accompanies. A link
+     * sent to a mailing list can be opened fifty times in an afternoon, and the
+     * bell absorbs that where an inbox does not.
+     */
+    @Column(name = "share_opened_email", nullable = false)
+    private boolean shareOpenedEmail = false;
 
     /**
      * Notification kinds switched off.
@@ -207,6 +251,18 @@ public class UserEntity {
 
     public boolean isTaskReminders() { return taskReminders; }
     public void setTaskReminders(boolean taskReminders) { this.taskReminders = taskReminders; }
+
+    public boolean isDigestWeekly() { return digestWeekly; }
+    public void setDigestWeekly(boolean digestWeekly) { this.digestWeekly = digestWeekly; }
+
+    public boolean isEmailsEnabled() { return emailsEnabled; }
+    public void setEmailsEnabled(boolean emailsEnabled) { this.emailsEnabled = emailsEnabled; }
+
+    public boolean isRecapForImports() { return recapForImports; }
+    public void setRecapForImports(boolean recapForImports) { this.recapForImports = recapForImports; }
+
+    public boolean isShareOpenedEmail() { return shareOpenedEmail; }
+    public void setShareOpenedEmail(boolean shareOpenedEmail) { this.shareOpenedEmail = shareOpenedEmail; }
 
     public LocalDate getTaskReminderSentOn() { return taskReminderSentOn; }
     public void setTaskReminderSentOn(LocalDate taskReminderSentOn) { this.taskReminderSentOn = taskReminderSentOn; }

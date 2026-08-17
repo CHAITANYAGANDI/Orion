@@ -83,6 +83,10 @@ beforeEach(() => {
     shareExpiryDays: null,
     chatHistoryDays: null,
     taskReminders: false,
+    digestWeekly: false,
+    emailsEnabled: true,
+    recapForImports: false,
+    shareOpenedEmail: false,
     mutedNotifications: [],
   };
 });

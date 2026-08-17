@@ -57,6 +57,10 @@ class RecapEmailServiceTest {
         meeting.setId(MEETING);
         meeting.setUserId(USER);
         meeting.setTitle("Sprint planning");
+        // Recorded here, so `autoEmailRecap` is the switch that governs it.
+        // Everything below predates the V40 split and is about a recording; the
+        // imported half has its own section at the end.
+        meeting.setRecorded(true);
 
         when(meetings.findByIdAndUserId(MEETING, USER)).thenReturn(Optional.of(meeting));
         when(users.findById(USER)).thenReturn(Optional.of(user(true, null, "ana@example.com")));
@@ -204,5 +208,66 @@ class RecapEmailServiceTest {
         u.setAutoEmailRecap(autoEmail);
         u.setRecapEmail(recapEmail);
         return u;
+    }
+
+    // --- recorded vs imported (V40) ------------------------------------------- //
+
+    /**
+     * Two switches over one message.
+     *
+     * <p>The point of the split is somebody who records four calls a week and
+     * imports a sixty-file archive. Before V40 they had to choose between sixty
+     * unwanted emails and none at all, so the tests that matter are the two
+     * crossings: a recording must not be mailed by the import switch, and an
+     * import must not be mailed by the recording one.
+     */
+    @Test
+    @DisplayName("an imported meeting is not mailed by the recording switch")
+    void importIsNotCoveredByTheRecordingSwitch() {
+        meeting.setRecorded(false);
+        UserEntity u = user(true, null, "ana@example.com");
+        u.setRecapForImports(false);
+        when(users.findById(USER)).thenReturn(Optional.of(u));
+
+        assertThat(service.sendIfEnabled(MEETING, USER)).isFalse();
+        verify(email, never()).send(anyString(), anyString(), anyString());
+        verify(followUp, never()).draft(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("an imported meeting is mailed when imports are switched on")
+    void importIsMailedByItsOwnSwitch() {
+        meeting.setRecorded(false);
+        UserEntity u = user(false, null, "ana@example.com");
+        u.setRecapForImports(true);
+        when(users.findById(USER)).thenReturn(Optional.of(u));
+
+        assertThat(service.sendIfEnabled(MEETING, USER)).isTrue();
+    }
+
+    @Test
+    @DisplayName("a recording is not mailed by the import switch")
+    void recordingIsNotCoveredByTheImportSwitch() {
+        UserEntity u = user(false, null, "ana@example.com");
+        u.setRecapForImports(true);
+        when(users.findById(USER)).thenReturn(Optional.of(u));
+
+        assertThat(service.sendIfEnabled(MEETING, USER)).isFalse();
+        verify(email, never()).send(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("the master switch silences a recap the user did ask for")
+    void masterSwitchSilencesEverything() {
+        UserEntity u = user(true, null, "ana@example.com");
+        u.setEmailsEnabled(false);
+        when(users.findById(USER)).thenReturn(Optional.of(u));
+
+        // Turning the master off must not cost the switches underneath it, so it
+        // is checked at send time rather than by rewriting the preferences.
+        assertThat(service.sendIfEnabled(MEETING, USER)).isFalse();
+        verify(email, never()).send(anyString(), anyString(), anyString());
+        verify(followUp, never()).draft(anyString(), anyString());
+        assertThat(u.isAutoEmailRecap()).isTrue();
     }
 }

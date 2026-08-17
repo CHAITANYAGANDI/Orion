@@ -1,5 +1,5 @@
 /**
- * The seven tabs of Account Settings, and how a URL maps onto one.
+ * The six tabs of Account Settings, and how a URL maps onto one.
  *
  * Pure, and separate from the page, for two reasons. The routing is a
  * catch-all — `/settings`, `/settings/integrations`, and anything anybody types
@@ -16,7 +16,6 @@ export type SettingsTab =
   | "plans"
   | "integrations"
   | "emails"
-  | "templates"
   | "security";
 
 export interface TabSpec {
@@ -36,7 +35,6 @@ export const SETTINGS_TABS: TabSpec[] = [
   { id: "plans", label: "Plans" },
   { id: "integrations", label: "Integrations" },
   { id: "emails", label: "Emails" },
-  { id: "templates", label: "Templates" },
   { id: "security", label: "Security" },
 ];
 

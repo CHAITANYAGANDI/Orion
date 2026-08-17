@@ -39,6 +39,14 @@ public record PreferencesResponse(
         /** How far back workspace chat reads transcripts; null is everything. */
         Integer chatHistoryDays,
         boolean taskReminders,
+        /** Mondays rather than every morning. Only read when taskReminders is on. */
+        boolean digestWeekly,
+        /** The master switch over automatic email (V40). */
+        boolean emailsEnabled,
+        /** Recap for meetings imported as a file or link; autoEmailRecap covers recorded ones. */
+        boolean recapForImports,
+        /** Email when somebody opens a link you published. */
+        boolean shareOpenedEmail,
         /** Notification kinds switched off. Everything absent from this is on. */
         List<String> mutedNotifications
 ) {
@@ -59,6 +67,10 @@ public record PreferencesResponse(
                 user.getShareExpiryDays(),
                 user.getChatHistoryDays(),
                 user.isTaskReminders(),
+                user.isDigestWeekly(),
+                user.isEmailsEnabled(),
+                user.isRecapForImports(),
+                user.isShareOpenedEmail(),
                 user.getMutedNotifications());
     }
 }

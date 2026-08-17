@@ -55,7 +55,17 @@ public class RecapEmailService {
     @Transactional
     public boolean sendIfEnabled(String meetingId, String userId) {
         UserEntity user = users.findById(userId).orElse(null);
-        if (user == null || !user.isAutoEmailRecap()) {
+        if (user == null || !user.isEmailsEnabled()) {
+            return false;
+        }
+
+        // The meeting is loaded before the switch is read, because which switch
+        // applies depends on how the meeting arrived (V40).
+        Meeting meeting = meetings.findByIdAndUserId(meetingId, userId).orElse(null);
+        if (meeting == null) {
+            return false;
+        }
+        if (!wanted(user, meeting)) {
             return false;
         }
 
@@ -65,10 +75,6 @@ public class RecapEmailService {
             return false;
         }
 
-        Meeting meeting = meetings.findByIdAndUserId(meetingId, userId).orElse(null);
-        if (meeting == null) {
-            return false;
-        }
         if (meeting.getRecapSentAt() != null) {
             log.debug("Recap for {} already sent at {}; skipping.", meetingId, meeting.getRecapSentAt());
             return false;
@@ -95,8 +101,25 @@ public class RecapEmailService {
         return sent;
     }
 
+    /**
+     * Whether this user asked for a recap of <em>this</em> meeting.
+     *
+     * <p>Two switches rather than one, because recording a call and importing an
+     * archive are different acts at wildly different volumes. Somebody who
+     * imports sixty files does not want sixty emails, and before V40 the only
+     * way to stop them was to give up recaps for the meetings they actually
+     * attended.
+     *
+     * <p>A meeting is "recorded" only when the recorder said so. Everything
+     * else — uploads, YouTube links, documents — counts as imported, which is
+     * the reading that matches where the file was captured.
+     */
+    private static boolean wanted(UserEntity user, Meeting meeting) {
+        return meeting.isRecorded() ? user.isAutoEmailRecap() : user.isRecapForImports();
+    }
+
     private static String withFooter(String body) {
         return body + "\n\n—\nSent automatically by Recallix. "
-                + "Turn this off in Settings → Notifications.";
+                + "Turn this off in Account Settings → Emails.";
     }
 }
