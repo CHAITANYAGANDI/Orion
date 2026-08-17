@@ -236,6 +236,12 @@ services:
         NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-http://localhost:8080/ws}
         NEXT_PUBLIC_AUTH_MODE: ${NEXT_PUBLIC_AUTH_MODE:-dev}
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+        # `git rev-parse --short HEAD` from your shell, or nothing — the footer
+        # says "dev build" when it is absent rather than showing a fake hash.
+        NEXT_PUBLIC_APP_VERSION: ${NEXT_PUBLIC_APP_VERSION:-0.1.0}
+        NEXT_PUBLIC_BUILD_SHA: ${NEXT_PUBLIC_BUILD_SHA:-}
+        NEXT_PUBLIC_TERMS_URL: ${NEXT_PUBLIC_TERMS_URL:-}
+        NEXT_PUBLIC_PRIVACY_URL: ${NEXT_PUBLIC_PRIVACY_URL:-}
     ports:
       - "3000:3000"
     depends_on:

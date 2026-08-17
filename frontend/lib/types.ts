@@ -127,6 +127,13 @@ export interface MeetingResponse {
 }
 
 export interface PreferencesResponse {
+  /**
+   * The address the sign-in provider gave us, or null.
+   *
+   * Read-only: it is the provider's fact, and a development session has no
+   * provider and therefore no address at all. `recapEmail` is the editable one.
+   */
+  email: string | null;
   autoEmailRecap: boolean;
   recapEmail: string | null;
   /** Where recaps actually go — the override, or the account address. */
@@ -136,6 +143,11 @@ export interface PreferencesResponse {
    * turn a list of owners into "my tasks"; null until they say.
    */
   displayName: string | null;
+  /** Descriptive only — nothing routes by either (V38). */
+  department: string | null;
+  jobRole: string | null;
+  /** ISO-639-1 spoken language for transcription; null means auto-detect. */
+  defaultLanguage: string | null;
   /** Daily digest of what is overdue or due soon. */
   taskReminders: boolean;
   /** Notification kinds switched off. Everything absent from this is on. */
@@ -147,6 +159,10 @@ export interface PreferencesUpdateRequest {
   recapEmail?: string;
   /** Blank clears it. */
   displayName?: string;
+  department?: string;
+  jobRole?: string;
+  /** ISO-639-1 code; blank restores auto-detect. */
+  defaultLanguage?: string;
   taskReminders?: boolean;
   /** The whole set, not a delta — the settings page holds every switch at once. */
   mutedNotifications?: string[];

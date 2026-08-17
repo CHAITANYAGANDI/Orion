@@ -45,6 +45,32 @@ public class UserEntity {
     @Column(name = "display_name")
     private String displayName;
 
+    /**
+     * Descriptive profile fields, on the account page beside the name.
+     *
+     * <p>Nothing routes by either of them — Recallix has no teams, so there is
+     * nothing a department could route to. They exist because somebody may want
+     * to record them and because they go into the account export: what a user
+     * typed about themselves is data Recallix holds of theirs. See V38.
+     */
+    @Column(name = "department")
+    private String department;
+
+    @Column(name = "job_role")
+    private String jobRole;
+
+    /**
+     * The language meetings are held in, or null to auto-detect.
+     *
+     * <p>Unlike the two above, this one changes the transcript. Detection is
+     * good and not perfect, and a wrong guess on a short or bilingual recording
+     * comes back as words in the wrong language with nothing downstream able to
+     * fix it. Resolved when a job is queued and sent with the event, the same as
+     * the vocabulary — see {@code MeetingService.enqueueProcessing}.
+     */
+    @Column(name = "default_language")
+    private String defaultLanguage;
+
     /** Mail a daily digest of what is overdue or due soon. */
     @Column(name = "task_reminders", nullable = false)
     private boolean taskReminders = false;
@@ -115,6 +141,15 @@ public class UserEntity {
 
     public String getDisplayName() { return displayName; }
     public void setDisplayName(String displayName) { this.displayName = displayName; }
+
+    public String getDepartment() { return department; }
+    public void setDepartment(String department) { this.department = department; }
+
+    public String getJobRole() { return jobRole; }
+    public void setJobRole(String jobRole) { this.jobRole = jobRole; }
+
+    public String getDefaultLanguage() { return defaultLanguage; }
+    public void setDefaultLanguage(String defaultLanguage) { this.defaultLanguage = defaultLanguage; }
 
     public boolean isTaskReminders() { return taskReminders; }
     public void setTaskReminders(boolean taskReminders) { this.taskReminders = taskReminders; }

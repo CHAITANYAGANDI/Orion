@@ -149,7 +149,7 @@ async def test_document_pipeline_skips_transcription():
     """A PDF has no audio, so the transcription port must never be touched."""
 
     class ExplodingTranscriber(MockTranscriptionAdapter):
-        async def transcribe(self, audio, filename, vocabulary=None):  # noqa: ANN001
+        async def transcribe(self, audio, filename, vocabulary=None, language=None):  # noqa: ANN001
             raise AssertionError("a document must not be transcribed")
 
     pipeline = Pipeline(ExplodingTranscriber(), MockLlmAdapter())

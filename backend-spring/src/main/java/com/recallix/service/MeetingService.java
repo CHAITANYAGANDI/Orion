@@ -90,6 +90,7 @@ public class MeetingService {
     private final MeetingTranslationRepository translations;
     /** Owns every grain of deletion, so the button and the retention pass agree (V35). */
     private final ErasureService erasure;
+    private final UserService users;
 
     public MeetingService(MeetingRepository meetings,
                           MeetingTranscriptRepository transcripts,
@@ -107,7 +108,9 @@ public class MeetingService {
                           ProjectRepository projects,
                           MeetingTranslationRepository translations,
                           NotificationService notifications,
-                          ErasureService erasure) {
+                          ErasureService erasure,
+                          UserService users) {
+        this.users = users;
         this.erasure = erasure;
         this.notifications = notifications;
         this.projects = projects;
@@ -293,8 +296,29 @@ public class MeetingService {
                 // with the job keeps that boundary intact. It also pins the
                 // vocabulary to what it was when the job was queued, so a term
                 // added mid-run cannot change a transcript halfway through.
-                "vocabulary", vocabulary.boostTermsFor(meeting.getUserId())
+                "vocabulary", vocabulary.boostTermsFor(meeting.getUserId()),
+                // Same reasoning as the vocabulary, and the same read: the
+                // worker has no user context to look this up in. Blank means
+                // auto-detect, which is what every account did before the
+                // setting existed.
+                "language", language(meeting.getUserId())
         ));
+    }
+
+    /**
+     * The language this user says their meetings are in, or blank to detect.
+     *
+     * <p>Never fatal. A profile that cannot be read is not a reason to refuse to
+     * transcribe a recording somebody has already uploaded — detection is the
+     * behaviour they had before the setting existed.
+     */
+    private String language(String userId) {
+        try {
+            String code = users.require(userId).getDefaultLanguage();
+            return code == null ? "" : code;
+        } catch (RuntimeException e) {
+            return "";
+        }
     }
 
     // --- reads -------------------------------------------------------------- //

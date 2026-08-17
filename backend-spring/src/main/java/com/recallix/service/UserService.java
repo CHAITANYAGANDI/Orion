@@ -2,6 +2,7 @@ package com.recallix.service;
 
 import com.recallix.common.ApiException;
 import com.recallix.common.IdGenerator;
+import com.recallix.domain.Language;
 import com.recallix.domain.NotificationKind;
 import com.recallix.entity.UserEntity;
 import com.recallix.repository.UserRepository;
@@ -70,6 +71,15 @@ public class UserService {
         if (patch.displayName() != null) {
             user.setDisplayName(patch.displayName().isBlank() ? null : patch.displayName().trim());
         }
+        if (patch.department() != null) {
+            user.setDepartment(patch.department().isBlank() ? null : patch.department().trim());
+        }
+        if (patch.jobRole() != null) {
+            user.setJobRole(patch.jobRole().isBlank() ? null : patch.jobRole().trim());
+        }
+        if (patch.defaultLanguage() != null) {
+            user.setDefaultLanguage(resolveLanguage(patch.defaultLanguage()));
+        }
         if (patch.taskReminders() != null) {
             user.setTaskReminders(patch.taskReminders());
             // Turning them back on should send today's digest rather than wait
@@ -94,15 +104,36 @@ public class UserService {
     }
 
     /**
+     * The language meetings are held in, normalised, or null for auto-detect.
+     *
+     * <p>Refused rather than ignored when it is not a language transcription
+     * supports. Silently dropping it would leave the settings page showing a
+     * choice the pipeline never received, and the difference is a transcript in
+     * the wrong language — the exact failure the setting exists to prevent.
+     */
+    private String resolveLanguage(String raw) {
+        if (raw.isBlank()) {
+            return null;
+        }
+        return Language.find(raw)
+                .map(Language::code)
+                .orElseThrow(() -> ApiException.badRequest(
+                        "Recallix cannot transcribe " + raw.trim() + " yet."));
+    }
+
+    /**
      * The mutable half of the preferences, as its own type.
      *
-     * <p>Five nullable arguments in a row is a call nobody can read and a
+     * <p>Eight nullable arguments in a row is a call nobody can read and a
      * transposition nobody can see; this one is named at the call site.
      */
     public record PreferencesPatch(
             Boolean autoEmailRecap,
             String recapEmail,
             String displayName,
+            String department,
+            String jobRole,
+            String defaultLanguage,
             Boolean taskReminders,
             /** Notification kinds to switch off. Null leaves them; empty turns all on. */
             List<String> mutedNotifications

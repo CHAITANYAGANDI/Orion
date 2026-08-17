@@ -23,7 +23,11 @@ class TranscriptionPort(ABC):
 
     @abstractmethod
     async def transcribe(
-        self, audio: bytes, filename: str, vocabulary: list[str] | None = None
+        self,
+        audio: bytes,
+        filename: str,
+        vocabulary: list[str] | None = None,
+        language: str | None = None,
     ) -> TranscriptResponse:
         """Transcribe raw audio bytes into text + segments.
 
@@ -33,7 +37,14 @@ class TranscriptionPort(ABC):
         heard and does not rewrite "coordinates" into it. Adapters whose
         provider cannot express boosting ignore the argument.
 
-        Optional with a default so existing callers and tests are unaffected.
+        `language` is the ISO-639-1 code the user says their meetings are held
+        in. None means detect, which is right for a multilingual user and wrong
+        for the short or bilingual recordings detection gets wrong — and a wrong
+        detection is not a cosmetic label, it is a transcript in a language
+        nobody spoke. Adapters whose provider cannot be told ignore it.
+
+        Both are optional with defaults so existing callers and tests are
+        unaffected.
         """
         raise NotImplementedError
 

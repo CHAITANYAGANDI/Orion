@@ -205,6 +205,9 @@ class KafkaWorker:
         # None rather than [] so adapters can distinguish "no hints" from an
         # empty list without each of them re-checking for falsiness.
         vocabulary = event.vocabulary or None
+        # Same shape as the vocabulary: None means "no preference", which is
+        # what the adapters read as detect-the-language.
+        language = (event.language or "").strip() or None
 
         if event.source_type == "YOUTUBE":
             await progress_hook(
@@ -217,7 +220,7 @@ class KafkaWorker:
             source = await fetch_youtube(event.source_url or "", self._settings)
             result = await self._pipeline.process(
                 meeting_id, source.audio or b"", source.filename, progress_hook,
-                transcript_hook, template_slug, vocabulary,
+                transcript_hook, template_slug, vocabulary, language,
             )
             # Spring created this meeting before anything was known about the
             # video; hand back the real title and length so it can replace them.
@@ -249,7 +252,7 @@ class KafkaWorker:
         )
         return await self._pipeline.process(
             meeting_id, audio, filename, progress_hook, transcript_hook,
-            template_slug, vocabulary,
+            template_slug, vocabulary, language,
         )
 
     async def _handle(self, event: MeetingUploadedEvent) -> None:

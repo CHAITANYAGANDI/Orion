@@ -33,6 +33,7 @@ public class PreferencesController {
                 SecurityUtils.currentUserId(),
                 new UserService.PreferencesPatch(
                         req.autoEmailRecap(), req.recapEmail(), req.displayName(),
+                        req.department(), req.jobRole(), req.defaultLanguage(),
                         req.taskReminders(), req.mutedNotifications())));
     }
 }

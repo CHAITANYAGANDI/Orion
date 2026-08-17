@@ -1,21 +1,27 @@
 "use client";
 
 /**
- * Emails — the only two things Recallix sends without being opened.
+ * What Recallix sends you, by channel.
  *
- * Both off by default and both on this one tab, because the question somebody
- * comes here to answer is "what is this going to send me", and an answer split
- * across two pages is two answers.
+ * The two emails first — the only things it sends without being opened — and
+ * then the bell, which is the same question asked of a different channel. They
+ * are together because "what is this going to tell me, and where" is one
+ * question, and an answer split across two tabs is two answers.
  *
- * Server-side, unlike the browser toggle on General: the recap is decided by a
- * worker callback long after the tab that set it has gone, and the digest by a
- * scheduler at eight in the morning.
+ * All of it server-side, unlike the browser toggle on General: the recap is
+ * decided by a worker callback long after the tab that set it has gone, the
+ * digest by a scheduler at eight in the morning, and the bell by whatever
+ * happened while nobody was looking.
  */
 
 import * as React from "react";
 import { toast } from "sonner";
-import { Mail, ListChecks } from "lucide-react";
-import { useGetPreferencesQuery, useUpdatePreferencesMutation } from "@/lib/api";
+import { Mail, ListChecks, Bell } from "lucide-react";
+import {
+  useGetPreferencesQuery,
+  useUpdatePreferencesMutation,
+  useGetNotificationKindsQuery,
+} from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +33,7 @@ export function EmailsTab() {
     <div className="space-y-6">
       <RecapCard />
       <DigestCard />
+      <NotificationsCard />
     </div>
   );
 }
@@ -135,8 +142,81 @@ function DigestCard() {
         <p className="text-xs text-muted-foreground">
           One message a morning, and none at all on a day when nothing is due.
           Goes to the same address as your recaps. The bell shows the same
-          deadlines whether or not this is on — see Notifications under General.
+          deadlines whether or not this is on — see below.
         </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * What the bell is allowed to say.
+ *
+ * Switches, not a master off — a bell that can only be silenced entirely gets
+ * silenced entirely the first time it says something useless, and then the
+ * failed upload goes unseen too. The list comes from the server, so adding a
+ * kind is a backend change and the wording of the switch cannot drift from the
+ * wording of the notification it governs.
+ */
+function NotificationsCard() {
+  const kinds = useGetNotificationKindsQuery();
+  const prefs = useGetPreferencesQuery();
+  const [update, { isLoading }] = useUpdatePreferencesMutation();
+
+  const muted = React.useMemo(
+    () => new Set(prefs.data?.mutedNotifications ?? []),
+    [prefs.data?.mutedNotifications],
+  );
+
+  async function toggle(kind: string, on: boolean) {
+    const next = new Set(muted);
+    if (on) next.delete(kind);
+    else next.add(kind);
+    try {
+      // The whole set every time: the page holds every switch on screen, and a
+      // delta from a stale render is how two of them end up disagreeing.
+      await update({ mutedNotifications: Array.from(next) }).unwrap();
+    } catch (err) {
+      toast.error(settingsError(err));
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Bell className="h-4 w-4 text-primary" /> In-app notifications
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          What shows up in the bell. None of these send email — the two above are
+          the only things that do.
+        </p>
+        {(kinds.data ?? []).map((k) => (
+          <label
+            key={k.kind}
+            className="flex items-center justify-between gap-3 rounded-md border p-3"
+          >
+            <span className="min-w-0">
+              <span className="block text-sm">Tell me {k.setting}</span>
+              {!k.mutable && (
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  Always on — silence here would be indistinguishable from
+                  nothing having happened.
+                </span>
+              )}
+            </span>
+            <input
+              type="checkbox"
+              checked={!muted.has(k.kind)}
+              disabled={!k.mutable || isLoading}
+              onChange={(e) => void toggle(k.kind, e.target.checked)}
+              aria-label={`Tell me ${k.setting}`}
+              className="h-4 w-4 shrink-0 accent-[hsl(var(--primary))] disabled:opacity-50"
+            />
+          </label>
+        ))}
       </CardContent>
     </Card>
   );

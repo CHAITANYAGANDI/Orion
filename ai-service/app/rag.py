@@ -213,8 +213,11 @@ class RagService:
         context = [r[1] for r in rows]
         # "List every question that went unanswered" is an inventory here too,
         # even though this chat sees one meeting rather than the workspace.
+        # No `deep` in this scope on purpose: Express/Advanced is a property of
+        # the workspace chat, which chooses how far to retrieve across an entire
+        # archive. One meeting's transcript is retrieved in full either way.
         answer = await self._llm.answer(
-            question, context, exhaustive=deep or wants_full_list(question)
+            question, context, exhaustive=wants_full_list(question)
         )
         citations = [
             {"chunkIndex": r[0], "start": r[2], "end": r[3], "text": r[1]} for r in rows

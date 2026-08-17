@@ -69,6 +69,7 @@ class SpeakerRematchTest {
     @Mock private MeetingTranslationRepository translations;
     @Mock private NotificationService notifications;
     @Mock private ErasureService erasure;
+    @Mock private UserService userService;
 
     private MeetingService service;
     private MeetingTranscript transcript;
@@ -80,7 +81,7 @@ class SpeakerRematchTest {
     void setUp() {
         service = new MeetingService(meetings, transcripts, segments, summaries,
                 insights, storage, usage, outbox, audit, ai, templates,
-                knownSpeakers, vocabulary, projects, translations, notifications, erasure);
+                knownSpeakers, vocabulary, projects, translations, notifications, erasure, userService);
 
         Meeting meeting = new Meeting();
         meeting.setId(MEETING);

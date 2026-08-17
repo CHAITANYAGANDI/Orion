@@ -184,7 +184,11 @@ class OpenAiTranscriptionAdapter(TranscriptionPort):
         )
 
     async def transcribe(
-        self, audio: bytes, filename: str, vocabulary: list[str] | None = None
+        self,
+        audio: bytes,
+        filename: str,
+        vocabulary: list[str] | None = None,
+        language: str | None = None,
     ) -> TranscriptResponse:
         async def _op() -> TranscriptResponse:
             buffer = io.BytesIO(audio)
@@ -194,6 +198,10 @@ class OpenAiTranscriptionAdapter(TranscriptionPort):
                 "file": buffer,
                 "response_format": "verbose_json",
             }
+            # Whisper takes the language as an ISO-639-1 code and detects when
+            # it is absent, which is exactly this setting's contract.
+            if (language or "").strip():
+                request["language"] = language.strip()
             # Whisper has no boosting parameter. Its `prompt` is the documented
             # stand-in: it biases decoding toward the style and spellings it
             # contains. Comma-separated terms are the shape OpenAI's own

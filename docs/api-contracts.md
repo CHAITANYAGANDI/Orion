@@ -75,7 +75,7 @@ again in the worker.
 | POST | `/api/v1/meetings` | `MeetingCreateRequest` | `MeetingResponse` |
 | POST | `/api/v1/meetings/import` | `{ "url", "title"?, "tags"? }` | `201 MeetingResponse` |
 | GET  | `/api/v1/preferences` | — | `PreferencesResponse` |
-| PATCH | `/api/v1/preferences` | `{ "autoEmailRecap"?, "recapEmail"?, "displayName"?, "taskReminders"? }` | `PreferencesResponse` |
+| PATCH | `/api/v1/preferences` | `{ "autoEmailRecap"?, "recapEmail"?, "displayName"?, "department"?, "jobRole"?, "defaultLanguage"?, "taskReminders"?, "mutedNotifications"? }` | `PreferencesResponse` |
 | GET  | `/api/v1/meetings` | `?page&size&search&tag&status` | `Page<MeetingResponse>` |
 | GET  | `/api/v1/meetings/{id}` | — | `MeetingResponse` |
 | PATCH | `/api/v1/meetings/{id}` | `{ "title"?, "tags"? }` | `MeetingResponse` |
@@ -86,6 +86,28 @@ again in the worker.
 | PATCH | `/api/v1/meetings/{id}/speakers/rematch` | `{ "fromSpeaker"?, "toSpeaker", "segmentIds"? }` | `TranscriptResponse` |
 | POST | `/api/v1/meetings/{id}/reprocess` | — | `202 { "meetingId","status" }` |
 | DELETE | `/api/v1/meetings/{id}` | — | `204` |
+
+**The account profile (V38).** `department` and `jobRole` are descriptive and
+read by nothing — Recallix has no teams for a department to route to. They exist
+because the account page asks for them and because they go into the account
+export: what somebody typed about themselves is data Recallix holds of theirs.
+`email` is returned and not writable; it is the sign-in provider's fact, and a
+development session has no provider and therefore no address at all. The
+editable one is `recapEmail`, which is where mail should go rather than who you
+are.
+
+**`defaultLanguage` is the one that changes a transcript.** Blank/null means
+auto-detect, which stays the default because it is right for a multilingual
+user, and wrong for exactly the recordings people complain about: a short voice
+note, a noisy first minute, a standup held half in each of two languages. A
+mis-detection is not a cosmetic label — the words come back in a language nobody
+spoke, the summary is written in it, and nothing downstream repairs that. The
+code is validated against `Language` (the eighteen transcription supports) and
+refused with a 400 rather than dropped, because a silently ignored setting leaves
+the page showing a choice the pipeline never received. It is resolved at enqueue
+and travels on `meeting.uploaded` as `language`, the same as `vocabulary` and for
+the same reason: the worker runs as a system context with no user to read it in.
+The account setting wins over the deployment-wide `ASSEMBLYAI_LANGUAGE`.
 
 **Creating a meeting takes almost nothing.** `MeetingCreateRequest` is
 `{ "objectKey", "title"?, "tags"?, "contentType"?, "durationSeconds"?,
@@ -1300,7 +1322,7 @@ Plan limits: FREE {meetings:5, minutes:60}, PRO {50, 600}, PREMIUM {unlimited=-1
 
 | Topic | Produced by | Consumed by | Payload |
 |---|---|---|---|
-| `meeting_uploaded` | Spring | FastAPI | `{ meetingId, userId, audioUrl, objectKey }` |
+| `meeting_uploaded` | Spring | FastAPI | `{ meetingId, userId, audioUrl, objectKey, sourceType, sourceUrl, summaryTemplate, vocabulary, language }` |
 | `transcription_started` | FastAPI | Spring | `StatusEvent` |
 | `transcription_completed` | FastAPI | Spring | `StatusEvent` |
 | `summary_generated` | FastAPI | Spring | `StatusEvent` |

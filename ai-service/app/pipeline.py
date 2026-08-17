@@ -76,9 +76,13 @@ class Pipeline:
 
     # --- individual stages (used directly by HTTP endpoints) ---------------- #
     async def transcribe(
-        self, audio: bytes, filename: str, vocabulary: list[str] | None = None
+        self,
+        audio: bytes,
+        filename: str,
+        vocabulary: list[str] | None = None,
+        language: str | None = None,
     ) -> TranscriptResponse:
-        return await self._transcription.transcribe(audio, filename, vocabulary)
+        return await self._transcription.transcribe(audio, filename, vocabulary, language)
 
     async def summarize(
         self,
@@ -122,6 +126,7 @@ class Pipeline:
         transcript_hook: TranscriptHook | None = None,
         template_slug: str | None = None,
         vocabulary: list[str] | None = None,
+        language: str | None = None,
     ) -> MeetingBriefResult:
         """Run the full pipeline, emitting stage events through the hook."""
 
@@ -137,7 +142,7 @@ class Pipeline:
 
         # 1) Transcription
         await emit(TOPIC_TRANSCRIPTION_STARTED, "TRANSCRIBING", 10, "Generating transcript from audio...")
-        transcript = await self._transcription.transcribe(audio, filename, vocabulary)
+        transcript = await self._transcription.transcribe(audio, filename, vocabulary, language)
         # Providers report one language for the whole recording, which is wrong
         # for the meetings people actually notice: half in one language, half in
         # another. This marks the utterances that differ, leaving the rest None.

@@ -275,10 +275,15 @@ class MockTranscriptionAdapter(TranscriptionPort):
     """Returns one of the scripted sprint meetings."""
 
     async def transcribe(
-        self, audio: bytes, filename: str, vocabulary: list[str] | None = None
+        self,
+        audio: bytes,
+        filename: str,
+        vocabulary: list[str] | None = None,
+        language: str | None = None,
     ) -> TranscriptResponse:
-        # Vocabulary is accepted and ignored: the scripts are fixed text, so
-        # there is nothing for a boosting hint to change.
+        # Vocabulary and language are accepted and ignored: the scripts are
+        # fixed English text, so there is nothing for a boosting hint to change
+        # and nothing a language code could change it into.
         script = select_script(filename, audio)
         return TranscriptResponse(
             transcript=script.transcript,

@@ -178,6 +178,11 @@ public class AccountExportService {
         account.put("id", user.getId());
         account.put("email", user.getEmail());
         account.put("displayName", user.getDisplayName());
+        // Descriptive fields nothing else reads. They are in the export because
+        // what somebody typed about themselves is data Recallix holds of theirs.
+        account.put("department", user.getDepartment());
+        account.put("jobRole", user.getJobRole());
+        account.put("defaultLanguage", user.getDefaultLanguage());
         account.put("plan", user.getPlan());
         account.put("createdAt", user.getCreatedAt());
         account.put("preferences", Map.of(

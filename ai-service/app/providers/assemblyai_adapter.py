@@ -66,13 +66,17 @@ class AssemblyAiTranscriptionAdapter(TranscriptionPort):
 
     # --- the port ----------------------------------------------------------- #
     async def transcribe(
-        self, audio: bytes, filename: str, vocabulary: list[str] | None = None
+        self,
+        audio: bytes,
+        filename: str,
+        vocabulary: list[str] | None = None,
+        language: str | None = None,
     ) -> TranscriptResponse:
         attempts = self._settings.assemblyai_max_retries + 1
         delay = 1.0
         for attempt in range(1, attempts + 1):
             try:
-                return await self._run(audio, vocabulary)
+                return await self._run(audio, vocabulary, language)
             except Exception as exc:  # noqa: BLE001 — httpx raises a wide range.
                 logger.warning(
                     "AssemblyAI transcribe attempt %d/%d failed: %s", attempt, attempts, exc
@@ -88,22 +92,26 @@ class AssemblyAiTranscriptionAdapter(TranscriptionPort):
         return _EMPTY
 
     async def _run(
-        self, audio: bytes, vocabulary: list[str] | None = None
+        self,
+        audio: bytes,
+        vocabulary: list[str] | None = None,
+        language: str | None = None,
     ) -> TranscriptResponse:
         if self._client is not None:
-            return await self._transcribe_with(self._client, audio, vocabulary)
+            return await self._transcribe_with(self._client, audio, vocabulary, language)
         timeout = httpx.Timeout(self._settings.assemblyai_timeout_seconds, connect=15.0)
         async with httpx.AsyncClient(timeout=timeout) as client:
-            return await self._transcribe_with(client, audio, vocabulary)
+            return await self._transcribe_with(client, audio, vocabulary, language)
 
     async def _transcribe_with(
         self,
         client: httpx.AsyncClient,
         audio: bytes,
         vocabulary: list[str] | None = None,
+        language: str | None = None,
     ) -> TranscriptResponse:
         upload_url = await self._upload(client, audio)
-        job_id = await self._submit(client, upload_url, vocabulary)
+        job_id = await self._submit(client, upload_url, vocabulary, language)
         payload = await self._poll(client, job_id)
         return parse_response(payload)
 
@@ -125,6 +133,7 @@ class AssemblyAiTranscriptionAdapter(TranscriptionPort):
         client: httpx.AsyncClient,
         upload_url: str,
         vocabulary: list[str] | None = None,
+        language: str | None = None,
     ) -> str:
         settings = self._settings
         # A priority list, not a single model: if the detected language is not
@@ -146,8 +155,9 @@ class AssemblyAiTranscriptionAdapter(TranscriptionPort):
             # items are extracted from this text.
             "format_text": True,
         }
-        if settings.assemblyai_language:
-            body["language_code"] = settings.assemblyai_language
+        chosen = language_choice(language, settings.assemblyai_language)
+        if chosen:
+            body["language_code"] = chosen
         else:
             body["language_detection"] = True
 
@@ -197,6 +207,20 @@ class AssemblyAiTranscriptionAdapter(TranscriptionPort):
 # --------------------------------------------------------------------------- #
 # Response mapping — pure, so it can be tested without a network or a key.
 # --------------------------------------------------------------------------- #
+
+def language_choice(requested: str | None, configured: str | None) -> str | None:
+    """Which language to transcribe in, or None to let the provider detect.
+
+    The account setting wins over the deployment-wide env var: the env var is
+    what this Recallix defaults to, and the account setting is somebody saying
+    they know better about their own meetings. Neither means detect, which is
+    right for a multilingual user and wrong for exactly the recordings detection
+    gets wrong — short ones, noisy first minutes, and meetings held in two
+    languages. A wrong detection is not a cosmetic label: the words come back in
+    a language nobody spoke and nothing downstream repairs that.
+    """
+    return (requested or "").strip() or (configured or "").strip() or None
+
 
 def word_boost(vocabulary: list[str] | None) -> list[str]:
     """The user's vocabulary as AssemblyAI's `word_boost` list.

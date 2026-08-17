@@ -66,7 +66,11 @@ class DeepgramTranscriptionAdapter(TranscriptionPort):
             logger.error("Deepgram selected but DEEPGRAM_API_KEY is empty; transcription will fail.")
 
     async def transcribe(
-        self, audio: bytes, filename: str, vocabulary: list[str] | None = None
+        self,
+        audio: bytes,
+        filename: str,
+        vocabulary: list[str] | None = None,
+        language: str | None = None,
     ) -> TranscriptResponse:
         async def _op() -> TranscriptResponse:
             params: dict[str, Any] = {
@@ -78,8 +82,9 @@ class DeepgramTranscriptionAdapter(TranscriptionPort):
                 # matters because action items are extracted from this text.
                 "smart_format": "true",
             }
-            if self._settings.deepgram_language:
-                params["language"] = self._settings.deepgram_language
+            chosen = (language or "").strip() or self._settings.deepgram_language
+            if chosen:
+                params["language"] = chosen
             else:
                 params["detect_language"] = "true"
 

@@ -17,6 +17,18 @@ public record PreferencesUpdateRequest(
         /** What this user is called in their own transcripts; blank clears it. */
         @Size(max = 120, message = "That name is too long")
         String displayName,
+        /** Descriptive; blank clears. */
+        @Size(max = 120, message = "That department is too long")
+        String department,
+        @Size(max = 120, message = "That role is too long")
+        String jobRole,
+        /**
+         * ISO-639-1 code of the language meetings are held in; blank restores
+         * auto-detect. Checked against the Language enum in the service, so an
+         * unknown code is a 400 rather than a transcript in the wrong language.
+         */
+        @Size(max = 8, message = "That is not a language code")
+        String defaultLanguage,
         Boolean taskReminders,
         /**
          * Notification kinds to switch off, replacing whatever was muted before.

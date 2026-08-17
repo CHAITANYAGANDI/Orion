@@ -441,6 +441,11 @@ class MeetingUploadedEvent(CamelModel):
     # added mid-run from changing a transcript halfway through. Defaults empty
     # so events published before this field existed still validate.
     vocabulary: list[str] = []
+    # ISO-639-1 code the user says their meetings are held in, resolved by
+    # Spring at enqueue for the same reason as the vocabulary: the worker has
+    # no user context to read it in. None or empty means detect, which is what
+    # every job did before the setting existed.
+    language: str | None = None
 
 
 class ProcessingFailedEvent(CamelModel):
