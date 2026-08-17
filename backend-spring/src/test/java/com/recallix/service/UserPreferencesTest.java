@@ -46,10 +46,39 @@ class UserPreferencesTest {
     private UserService service;
     private UserEntity user;
 
-    private static UserService.PreferencesPatch patch(String displayName, String department,
-                                                      String jobRole, String language) {
+    /**
+     * A patch of nulls, so each test names only the fields it is about.
+     *
+     * <p>Sixteen positional nulls at every call site is how a transposition
+     * gets written and never noticed — the record exists to be named, and these
+     * three helpers are where the naming happens for tests.
+     */
+    private static UserService.PreferencesPatch profile(String displayName, String department,
+                                                        String jobRole, String language) {
         return new UserService.PreferencesPatch(
-                null, null, displayName, department, jobRole, language, null, null);
+                null, null, displayName, department, jobRole, language,
+                null, null, null, null, null, null, null, null, null, null);
+    }
+
+    private static UserService.PreferencesPatch sharing(Boolean summary, Boolean actionItems,
+                                                       Boolean transcript, Boolean audio,
+                                                       Integer expiryDays, Boolean neverExpires) {
+        return new UserService.PreferencesPatch(
+                null, null, null, null, null, null,
+                summary, actionItems, transcript, audio, expiryDays, neverExpires,
+                null, null, null, null);
+    }
+
+    private static UserService.PreferencesPatch chatWindow(Integer days, Boolean everything) {
+        return new UserService.PreferencesPatch(
+                null, null, null, null, null, null,
+                null, null, null, null, null, null, days, everything, null, null);
+    }
+
+    private static UserService.PreferencesPatch muting(List<String> kinds) {
+        return new UserService.PreferencesPatch(
+                null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, kinds);
     }
 
     @BeforeEach
@@ -69,7 +98,7 @@ class UserPreferencesTest {
         @Test
         @DisplayName("department and role are stored, trimmed")
         void stored() {
-            service.updatePreferences(USER, patch(null, "  IT  ", " Individual contributor ", null));
+            service.updatePreferences(USER, profile(null, "  IT  ", " Individual contributor ", null));
 
             assertThat(user.getDepartment()).isEqualTo("IT");
             assertThat(user.getJobRole()).isEqualTo("Individual contributor");
@@ -78,9 +107,9 @@ class UserPreferencesTest {
         @Test
         @DisplayName("blank clears them rather than storing an empty string")
         void blankClears() {
-            service.updatePreferences(USER, patch(null, "IT", "IC", null));
+            service.updatePreferences(USER, profile(null, "IT", "IC", null));
 
-            service.updatePreferences(USER, patch(null, "   ", "", null));
+            service.updatePreferences(USER, profile(null, "   ", "", null));
 
             // Null and "" would render identically and compare differently.
             assertThat(user.getDepartment()).isNull();
@@ -90,9 +119,9 @@ class UserPreferencesTest {
         @Test
         @DisplayName("an omitted field is left alone")
         void omittedSurvives() {
-            service.updatePreferences(USER, patch(null, "IT", "IC", null));
+            service.updatePreferences(USER, profile(null, "IT", "IC", null));
 
-            service.updatePreferences(USER, patch("Priya Raman", null, null, null));
+            service.updatePreferences(USER, profile("Priya Raman", null, null, null));
 
             // The account block saves three fields at once; a rename that also
             // wiped the other two would be a rename nobody asked for.
@@ -108,7 +137,7 @@ class UserPreferencesTest {
         @Test
         @DisplayName("a supported language is stored as its bare code")
         void storesTheCode() {
-            service.updatePreferences(USER, patch(null, null, null, "es"));
+            service.updatePreferences(USER, profile(null, null, null, "es"));
 
             assertThat(user.getDefaultLanguage()).isEqualTo("es");
         }
@@ -118,10 +147,10 @@ class UserPreferencesTest {
         void normalises() {
             // Providers and pickers both send variations; one spelling reaches
             // the database or the same choice compares unequal to itself.
-            service.updatePreferences(USER, patch(null, null, null, "pt-BR"));
+            service.updatePreferences(USER, profile(null, null, null, "pt-BR"));
             assertThat(user.getDefaultLanguage()).isEqualTo("pt");
 
-            service.updatePreferences(USER, patch(null, null, null, "Japanese"));
+            service.updatePreferences(USER, profile(null, null, null, "Japanese"));
             assertThat(user.getDefaultLanguage()).isEqualTo("ja");
         }
 
@@ -132,7 +161,7 @@ class UserPreferencesTest {
             // to translate because there is nothing to transcribe. Dropping it
             // quietly would leave the settings page showing a choice the
             // pipeline never received.
-            assertThatThrownBy(() -> service.updatePreferences(USER, patch(null, null, null, "te")))
+            assertThatThrownBy(() -> service.updatePreferences(USER, profile(null, null, null, "te")))
                     .isInstanceOf(ApiException.class)
                     .hasMessageContaining("te");
 
@@ -142,9 +171,9 @@ class UserPreferencesTest {
         @Test
         @DisplayName("blank restores auto-detect")
         void blankDetects() {
-            service.updatePreferences(USER, patch(null, null, null, "de"));
+            service.updatePreferences(USER, profile(null, null, null, "de"));
 
-            service.updatePreferences(USER, patch(null, null, null, ""));
+            service.updatePreferences(USER, profile(null, null, null, ""));
 
             // Null is what the worker reads as "detect", which is the behaviour
             // every account had before this setting existed.
@@ -154,11 +183,109 @@ class UserPreferencesTest {
         @Test
         @DisplayName("omitting it leaves the choice alone")
         void omittedSurvives() {
-            service.updatePreferences(USER, patch(null, null, null, "fr"));
+            service.updatePreferences(USER, profile(null, null, null, "fr"));
 
-            service.updatePreferences(USER, patch("Priya Raman", null, null, null));
+            service.updatePreferences(USER, profile("Priya Raman", null, null, null));
 
             assertThat(user.getDefaultLanguage()).isEqualTo("fr");
+        }
+    }
+
+    @Nested
+    class ShareDefaults {
+
+        @Test
+        @DisplayName("a new account shares notes and not the recording")
+        void safeOutOfTheBox() {
+            // The same defaults that were constants in ShareService. A
+            // transcript is every word somebody said and a recording is their
+            // voice; neither leaves an account because a box was pre-ticked.
+            assertThat(user.isShareIncludeSummary()).isTrue();
+            assertThat(user.isShareIncludeActionItems()).isTrue();
+            assertThat(user.isShareIncludeTranscript()).isFalse();
+            assertThat(user.isShareIncludeAudio()).isFalse();
+            assertThat(user.getShareExpiryDays()).isNull();
+        }
+
+        @Test
+        @DisplayName("each flag is set on its own")
+        void flagsAreIndependent() {
+            service.updatePreferences(USER, sharing(null, null, true, null, null, null));
+
+            assertThat(user.isShareIncludeTranscript()).isTrue();
+            assertThat(user.isShareIncludeSummary()).isTrue();
+            assertThat(user.isShareIncludeAudio()).isFalse();
+        }
+
+        @Test
+        @DisplayName("an expiry is stored in days")
+        void expiryIsStored() {
+            service.updatePreferences(USER, sharing(null, null, null, null, 30, null));
+
+            assertThat(user.getShareExpiryDays()).isEqualTo(30);
+        }
+
+        @Test
+        @DisplayName("never-expires needs its own flag, since absent means unchanged")
+        void neverExpiresClears() {
+            service.updatePreferences(USER, sharing(null, null, null, null, 30, null));
+
+            service.updatePreferences(USER, sharing(null, null, null, null, null, true));
+
+            // The same problem as removing a share password: an absent number
+            // and an explicit "no expiry" arrive identically over JSON.
+            assertThat(user.getShareExpiryDays()).isNull();
+        }
+
+        @Test
+        @DisplayName("changing the flags leaves the expiry alone")
+        void independentOfEachOther() {
+            service.updatePreferences(USER, sharing(null, null, null, null, 7, null));
+
+            service.updatePreferences(USER, sharing(false, null, null, null, null, null));
+
+            assertThat(user.getShareExpiryDays()).isEqualTo(7);
+            assertThat(user.isShareIncludeSummary()).isFalse();
+        }
+    }
+
+    @Nested
+    class ChatWindow {
+
+        @Test
+        @DisplayName("a new account lets chat read everything")
+        void everythingByDefault() {
+            assertThat(user.getChatHistoryDays()).isNull();
+        }
+
+        @Test
+        @DisplayName("a window is stored in days")
+        void storesTheWindow() {
+            service.updatePreferences(USER, chatWindow(365, null));
+
+            assertThat(user.getChatHistoryDays()).isEqualTo(365);
+        }
+
+        @Test
+        @DisplayName("reading everything again needs its own flag")
+        void clearing() {
+            service.updatePreferences(USER, chatWindow(90, null));
+
+            service.updatePreferences(USER, chatWindow(null, true));
+
+            // Null is what the ai-service reads as "no floor", and an absent
+            // number cannot say the difference between that and "leave it".
+            assertThat(user.getChatHistoryDays()).isNull();
+        }
+
+        @Test
+        @DisplayName("an unrelated change leaves the window alone")
+        void survivesOtherEdits() {
+            service.updatePreferences(USER, chatWindow(90, null));
+
+            service.updatePreferences(USER, profile("Priya Raman", null, null, null));
+
+            assertThat(user.getChatHistoryDays()).isEqualTo(90);
         }
     }
 
@@ -168,9 +295,7 @@ class UserPreferencesTest {
         @Test
         @DisplayName("an unknown kind is dropped rather than stored")
         void dropsUnknown() {
-            service.updatePreferences(USER, new UserService.PreferencesPatch(
-                    null, null, null, null, null, null, null,
-                    List.of("SUMMARY_READY", "NOT_A_KIND")));
+            service.updatePreferences(USER, muting(List.of("SUMMARY_READY", "NOT_A_KIND")));
 
             // A string with no switch behind it is a mute nobody could undo.
             assertThat(user.getMutedNotifications()).containsExactly("SUMMARY_READY");
@@ -179,9 +304,7 @@ class UserPreferencesTest {
         @Test
         @DisplayName("a kind that cannot be muted stays on")
         void keepsUnmutable() {
-            service.updatePreferences(USER, new UserService.PreferencesPatch(
-                    null, null, null, null, null, null, null,
-                    List.of("PROCESSING_FAILED", "RETENTION_APPLIED")));
+            service.updatePreferences(USER, muting(List.of("PROCESSING_FAILED", "RETENTION_APPLIED")));
 
             // Silence and "nothing happened" would be the same signal.
             assertThat(user.getMutedNotifications()).isEmpty();

@@ -69,6 +69,7 @@ class ChatConversationTest {
     @Mock private MeetingRepository meetings;
     @Mock private ProjectRepository projects;
     @Mock private AiClient ai;
+    @Mock private UserService users;
 
     private ChatService service;
     private final List<ChatConversation> stored = new ArrayList<>();
@@ -76,7 +77,9 @@ class ChatConversationTest {
 
     @BeforeEach
     void setUp() {
-        service = new ChatService(messages, conversations, meetings, projects, ai, new ObjectMapper());
+        service = new ChatService(messages, conversations, meetings, projects, ai, users,
+                new ObjectMapper());
+        when(users.require(anyString())).thenReturn(new com.recallix.entity.UserEntity());
         stored.clear();
         turns.clear();
 
@@ -88,7 +91,7 @@ class ChatConversationTest {
 
         when(ai.chat(anyString(), anyString(), anyString()))
                 .thenReturn(new AiClient.ChatResult("An answer.", List.of()));
-        when(ai.workspaceChat(anyString(), anyString(), any(), any()))
+        when(ai.workspaceChat(anyString(), anyString(), any(), any(), any()))
                 .thenReturn(new AiClient.ChatResult("An answer.", List.of()));
 
         when(conversations.save(any())).thenAnswer(inv -> {
@@ -512,7 +515,8 @@ class ChatConversationTest {
 
             // Resolved here rather than accepted from the caller: what a project
             // contains is a fact about the database, not a client's assertion.
-            verify(ai).workspaceChat(USER, "What did we decide?", List.of("mtg_a", "mtg_b"), ChatMode.EXPRESS);
+            verify(ai).workspaceChat(USER, "What did we decide?", List.of("mtg_a", "mtg_b"),
+                    ChatMode.EXPRESS, null);
         }
 
         @Test
@@ -526,7 +530,7 @@ class ChatConversationTest {
             // An empty id list means "do not filter" downstream, so sending one
             // would answer a question about this project from every meeting in
             // the workspace and present it as the project's.
-            verify(ai, never()).workspaceChat(anyString(), anyString(), any(), any());
+            verify(ai, never()).workspaceChat(anyString(), anyString(), any(), any(), any());
             assertThat(answer.content()).isEqualTo(ChatService.EMPTY_PROJECT);
         }
 
@@ -589,7 +593,7 @@ class ChatConversationTest {
         void cannotAskSomebodyElsesProject() {
             assertThatThrownBy(() -> service.askProject(OTHER, PROJECT, "A question?", null))
                     .isInstanceOf(ApiException.class);
-            verify(ai, never()).workspaceChat(anyString(), anyString(), any(), any());
+            verify(ai, never()).workspaceChat(anyString(), anyString(), any(), any(), any());
         }
     }
 }

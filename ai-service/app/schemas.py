@@ -345,6 +345,11 @@ class WorkspaceChatRequest(CamelModel):
     # differ in retrieval width and in whether the answer is asked to enumerate.
     # See RagService.answer_workspace.
     mode: Literal["express", "advanced"] = "express"
+    # How far back to read, in days. None means every meeting the user owns,
+    # which is what every caller got before the setting existed. A scope
+    # control rather than a privacy boundary: nothing is hidden or deleted, and
+    # the meeting's own chat still answers about it.
+    history_days: int | None = None
 
 
 class SemanticSearchRequest(CamelModel):

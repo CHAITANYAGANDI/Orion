@@ -55,7 +55,7 @@ export function GeneralTab() {
         icon={<SpellCheck className="h-4 w-4" />}
         title="Manage Vocabulary"
         description="Names of people, and custom vocabulary"
-        href="/settings/meetings"
+        href="/settings/meetings#vocabulary"
       />
       <BrowserRow />
       <DeleteAccountRow />

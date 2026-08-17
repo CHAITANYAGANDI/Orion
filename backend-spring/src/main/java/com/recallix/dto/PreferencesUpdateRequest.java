@@ -1,6 +1,8 @@
 package com.recallix.dto;
 
 import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
 
 import java.util.List;
@@ -29,6 +31,30 @@ public record PreferencesUpdateRequest(
          */
         @Size(max = 8, message = "That is not a language code")
         String defaultLanguage,
+
+        /** Defaults for new share links; each one is left alone when omitted. */
+        Boolean shareIncludeSummary,
+        Boolean shareIncludeActionItems,
+        Boolean shareIncludeTranscript,
+        Boolean shareIncludeAudio,
+        /**
+         * Days until a new link expires. The same bound as the per-link field,
+         * so a default cannot be set that creating a link would then refuse.
+         * {@code shareNeverExpires} is how "never" is expressed, for the reason
+         * in {@link ShareCreateRequest}: an absent number and an explicit null
+         * arrive identically.
+         */
+        @Min(value = 1, message = "A link has to last at least a day")
+        @Max(value = 365, message = "A link can last at most a year")
+        Integer shareExpiryDays,
+        Boolean shareNeverExpires,
+
+        /** How far back workspace chat reads. {@code chatReadsEverything} clears it. */
+        @Min(value = 1, message = "Chat has to be able to read at least a day")
+        @Max(value = 3650, message = "Ten years is the most Recallix will look back")
+        Integer chatHistoryDays,
+        Boolean chatReadsEverything,
+
         Boolean taskReminders,
         /**
          * Notification kinds to switch off, replacing whatever was muted before.

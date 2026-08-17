@@ -76,6 +76,12 @@ beforeEach(() => {
     department: "IT",
     jobRole: "Individual contributor",
     defaultLanguage: null,
+    shareIncludeSummary: true,
+    shareIncludeActionItems: true,
+    shareIncludeTranscript: false,
+    shareIncludeAudio: false,
+    shareExpiryDays: null,
+    chatHistoryDays: null,
     taskReminders: false,
     mutedNotifications: [],
   };
@@ -219,7 +225,7 @@ describe("the rest of the page", () => {
 
     expect(screen.getByRole("link", { name: /Manage Vocabulary/ })).toHaveAttribute(
       "href",
-      "/settings/meetings",
+      "/settings/meetings#vocabulary",
     );
   });
 

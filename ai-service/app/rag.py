@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from app.config import Settings
 from app.providers.ports import EmbeddingPort, LlmPort
@@ -26,6 +26,20 @@ logger = logging.getLogger("ai-service.rag")
 def _vec_literal(embedding: list[float]) -> str:
     """Encode a vector as a pgvector text literal: '[0.1,0.2,...]'."""
     return "[" + ",".join(f"{x:.6f}" for x in embedding) + "]"
+
+
+def _history_floor(history_days: int | None) -> datetime | None:
+    """The oldest meeting the workspace chat may read, or None for no floor.
+
+    A scope control rather than a privacy boundary: nothing is hidden, deleted
+    or made unreadable, and the meeting's own page still answers about it. Its
+    value is in the other direction — a workspace with three years of standups
+    answers "what did we decide about pricing" better when it is not competing
+    with a decision that was reversed eighteen months ago.
+    """
+    if history_days is None or history_days <= 0:
+        return None
+    return datetime.now(timezone.utc) - timedelta(days=history_days)
 
 
 def _passage(row: tuple) -> str:
@@ -426,6 +440,7 @@ class RagService:
         limit: int,
         since: datetime | None = None,
         until: datetime | None = None,
+        not_before: datetime | None = None,
     ) -> list[tuple]:
         """Nearest chunks for one embedding, optionally inside a date range.
 
@@ -454,6 +469,13 @@ class RagService:
         if since is not None:
             sql += " AND m.created_at >= %s"
             params.append(since)
+        # The account's floor, applied on top of whatever the question asked
+        # for. Separate from `since` rather than folded into it so a question
+        # about last March still says "I found nothing from March" instead of
+        # quietly answering from whatever the floor happened to leave visible.
+        if not_before is not None:
+            sql += " AND m.created_at >= %s"
+            params.append(not_before)
         if until is not None:
             sql += " AND m.created_at < %s"
             params.append(until)
@@ -471,6 +493,7 @@ class RagService:
         question: str,
         meeting_ids: list[str] | None = None,
         mode: str = "express",
+        history_days: int | None = None,
     ) -> tuple[str, list[dict]]:
         """Answer a question grounded in EVERY meeting the user owns.
 
@@ -493,6 +516,12 @@ class RagService:
         record rather than a retrieved sample, and withholding them from the
         cheaper mode would make it confidently wrong about what is outstanding
         rather than merely shallower.
+
+        `history_days` is the account's own floor on how far back retrieval
+        reaches. It bounds transcripts and deliberately not the ledgers, for the
+        same reason: a task owed since March is still owed, and dropping it
+        because its transcript is out of window would make the answer wrong
+        rather than narrower.
         """
         if not self.enabled:
             return ("Workspace chat is not configured on this deployment.", [])
@@ -510,10 +539,13 @@ class RagService:
         # whichever passages sit closest in embedding space, quite possibly from
         # March. When the question names a window, retrieval is run inside it.
         window = detect_window(question)
+        floor = _history_floor(history_days)
 
         try:
             if window is None:
-                rows = await self._retrieve(user_id, q_emb, meeting_ids, top_k)
+                rows = await self._retrieve(
+                    user_id, q_emb, meeting_ids, top_k, not_before=floor
+                )
                 recent, earlier = rows, []
             else:
                 # A comparison needs both halves or there is nothing to have
@@ -523,11 +555,13 @@ class RagService:
                 # window is the same size either way.
                 half = max(1, top_k // 2) if window.comparative else top_k
                 recent = await self._retrieve(
-                    user_id, q_emb, meeting_ids, half, since=window.start, until=window.end
+                    user_id, q_emb, meeting_ids, half,
+                    since=window.start, until=window.end, not_before=floor,
                 )
                 earlier = (
                     await self._retrieve(
-                        user_id, q_emb, meeting_ids, top_k - half, until=window.start
+                        user_id, q_emb, meeting_ids, top_k - half,
+                        until=window.start, not_before=floor,
                     )
                     if window.comparative
                     else []

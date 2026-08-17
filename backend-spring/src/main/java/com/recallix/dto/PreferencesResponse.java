@@ -29,6 +29,15 @@ public record PreferencesResponse(
         String jobRole,
         /** ISO-639-1 spoken language, or null for auto-detect. */
         String defaultLanguage,
+        /** What a NEW share link is set to. Existing links keep their own. */
+        boolean shareIncludeSummary,
+        boolean shareIncludeActionItems,
+        boolean shareIncludeTranscript,
+        boolean shareIncludeAudio,
+        /** Days until a new link expires, or null for never. */
+        Integer shareExpiryDays,
+        /** How far back workspace chat reads transcripts; null is everything. */
+        Integer chatHistoryDays,
         boolean taskReminders,
         /** Notification kinds switched off. Everything absent from this is on. */
         List<String> mutedNotifications
@@ -43,6 +52,12 @@ public record PreferencesResponse(
                 user.getDepartment(),
                 user.getJobRole(),
                 user.getDefaultLanguage(),
+                user.isShareIncludeSummary(),
+                user.isShareIncludeActionItems(),
+                user.isShareIncludeTranscript(),
+                user.isShareIncludeAudio(),
+                user.getShareExpiryDays(),
+                user.getChatHistoryDays(),
                 user.isTaskReminders(),
                 user.getMutedNotifications());
     }

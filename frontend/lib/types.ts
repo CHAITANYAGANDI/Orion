@@ -148,6 +148,15 @@ export interface PreferencesResponse {
   jobRole: string | null;
   /** ISO-639-1 spoken language for transcription; null means auto-detect. */
   defaultLanguage: string | null;
+  /** What a NEW share link is set to. Existing links keep their own (V39). */
+  shareIncludeSummary: boolean;
+  shareIncludeActionItems: boolean;
+  shareIncludeTranscript: boolean;
+  shareIncludeAudio: boolean;
+  /** Days until a new link expires, or null for never. */
+  shareExpiryDays: number | null;
+  /** How far back workspace chat reads transcripts; null is every meeting. */
+  chatHistoryDays: number | null;
   /** Daily digest of what is overdue or due soon. */
   taskReminders: boolean;
   /** Notification kinds switched off. Everything absent from this is on. */
@@ -163,6 +172,16 @@ export interface PreferencesUpdateRequest {
   jobRole?: string;
   /** ISO-639-1 code; blank restores auto-detect. */
   defaultLanguage?: string;
+  shareIncludeSummary?: boolean;
+  shareIncludeActionItems?: boolean;
+  shareIncludeTranscript?: boolean;
+  shareIncludeAudio?: boolean;
+  /** Omitted leaves the expiry; `shareNeverExpires` is how "never" is sent. */
+  shareExpiryDays?: number;
+  shareNeverExpires?: boolean;
+  /** Omitted leaves the window; `chatReadsEverything` clears it. */
+  chatHistoryDays?: number;
+  chatReadsEverything?: boolean;
   taskReminders?: boolean;
   /** The whole set, not a delta — the settings page holds every switch at once. */
   mutedNotifications?: string[];

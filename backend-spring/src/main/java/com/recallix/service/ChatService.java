@@ -44,6 +44,7 @@ public class ChatService {
     private final MeetingRepository meetings;
     private final ProjectRepository projects;
     private final AiClient ai;
+    private final UserService users;
     private final ObjectMapper mapper;
 
     public ChatService(ChatMessageRepository messages,
@@ -51,12 +52,14 @@ public class ChatService {
                        MeetingRepository meetings,
                        ProjectRepository projects,
                        AiClient ai,
+                       UserService users,
                        ObjectMapper mapper) {
         this.messages = messages;
         this.conversations = conversations;
         this.meetings = meetings;
         this.projects = projects;
         this.ai = ai;
+        this.users = users;
         this.mapper = mapper;
     }
 
@@ -195,8 +198,12 @@ public class ChatService {
                                                    String question, List<String> meetingIds) {
         // A project chat has no mode picker, so it takes the default. The choice
         // belongs to the composer that offers it.
+        // No history window here on purpose: a project chat was pointed at a
+        // set of meetings by name, and quietly dropping the older half of a
+        // folder somebody explicitly opened would be answering a different
+        // question from the one asked.
         AiClient.ChatResult result = ai.workspaceChat(
-                userId, question, meetingIds, ChatMode.EXPRESS);
+                userId, question, meetingIds, ChatMode.EXPRESS, null);
         return persistTurn(userId, null, conversation, "assistant",
                 result.answer() == null ? "" : result.answer(), result.citations());
     }
@@ -219,12 +226,31 @@ public class ChatService {
         ChatConversation conversation = resolveForAsk(userId, ChatScope.WORKSPACE, conversationId);
 
         persistTurn(userId, null, conversation, "user", question, null);
-        AiClient.ChatResult result = ai.workspaceChat(userId, question, meetingIds, mode);
+        // The account's window applies to the whole-workspace question and not
+        // to a narrowed one: "Add context" names the meetings, and a named
+        // meeting outside the window is still a meeting somebody chose.
+        Integer window = (meetingIds == null || meetingIds.isEmpty()) ? historyDays(userId) : null;
+        AiClient.ChatResult result = ai.workspaceChat(userId, question, meetingIds, mode, window);
         ChatMessageResponse answer = persistTurn(userId, null, conversation, "assistant",
                 result.answer() == null ? "" : result.answer(), result.citations());
 
         touch(conversation, question);
         return answer;
+    }
+
+    /**
+     * How far back this account lets the workspace chat read, or null for all.
+     *
+     * <p>Never fatal. A preferences row that cannot be read is not a reason to
+     * refuse to answer a question — reading everything is what the chat did
+     * before the setting existed, and it is the more useful failure.
+     */
+    private Integer historyDays(String userId) {
+        try {
+            return users.require(userId).getChatHistoryDays();
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     // --- deleting one exchange ---------------------------------------------- //

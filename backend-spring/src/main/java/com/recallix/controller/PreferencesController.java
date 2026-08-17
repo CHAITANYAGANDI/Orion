@@ -34,6 +34,10 @@ public class PreferencesController {
                 new UserService.PreferencesPatch(
                         req.autoEmailRecap(), req.recapEmail(), req.displayName(),
                         req.department(), req.jobRole(), req.defaultLanguage(),
+                        req.shareIncludeSummary(), req.shareIncludeActionItems(),
+                        req.shareIncludeTranscript(), req.shareIncludeAudio(),
+                        req.shareExpiryDays(), req.shareNeverExpires(),
+                        req.chatHistoryDays(), req.chatReadsEverything(),
                         req.taskReminders(), req.mutedNotifications())));
     }
 }

@@ -73,13 +73,18 @@ class ShareServiceTest {
     @Mock private EmailService email;
     @Mock private AuditService audit;
     @Mock private org.springframework.context.ApplicationEventPublisher events;
+    @Mock private UserService users;
 
     private ShareService service;
 
     @BeforeEach
     void setUp() {
         service = new ShareService(shares, meetings, summaries, actionItems, transcripts,
-                segments, storage, email, audit, events, BASE);
+                segments, storage, email, audit, events, users, BASE);
+        // A fresh link starts from the account's defaults. The stock entity is
+        // set to exactly the constants this replaced, so every existing
+        // expectation below still describes an untouched account.
+        when(users.require(anyString())).thenReturn(new com.recallix.entity.UserEntity());
         when(meetings.findByIdAndUserId(MEETING, USER)).thenReturn(Optional.of(meeting()));
         when(meetings.findById(MEETING)).thenReturn(Optional.of(meeting()));
         when(shares.findFirstByMeetingIdAndRevokedFalseAndStartSecondsIsNull(anyString()))

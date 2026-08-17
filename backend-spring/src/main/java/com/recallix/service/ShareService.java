@@ -10,12 +10,15 @@ import com.recallix.entity.Meeting;
 import com.recallix.entity.MeetingShare;
 import com.recallix.entity.MeetingSummary;
 import com.recallix.entity.TranscriptSegment;
+import com.recallix.entity.UserEntity;
 import com.recallix.repository.MeetingActionItemRepository;
 import com.recallix.repository.MeetingRepository;
 import com.recallix.repository.MeetingShareRepository;
 import com.recallix.repository.MeetingSummaryRepository;
 import com.recallix.repository.MeetingTranscriptRepository;
 import com.recallix.repository.TranscriptSegmentRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -54,6 +57,8 @@ import java.util.Optional;
 @Service
 public class ShareService {
 
+    private static final Logger log = LoggerFactory.getLogger(ShareService.class);
+
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final int TOKEN_BYTES = 24; // 192 bits, URL-safe base64
 
@@ -81,6 +86,7 @@ public class ShareService {
     private final EmailService email;
     private final AuditService audit;
     private final ApplicationEventPublisher events;
+    private final UserService users;
     private final String frontendUrl;
 
     public ShareService(MeetingShareRepository shares,
@@ -93,6 +99,7 @@ public class ShareService {
                         EmailService email,
                         AuditService audit,
                         ApplicationEventPublisher events,
+                        UserService users,
                         @Value("${app.frontend-url:http://localhost:3000}") String frontendUrl) {
         this.shares = shares;
         this.meetings = meetings;
@@ -104,6 +111,7 @@ public class ShareService {
         this.email = email;
         this.audit = audit;
         this.events = events;
+        this.users = users;
         this.frontendUrl = stripTrailingSlash(frontendUrl);
     }
 
@@ -346,7 +354,36 @@ public class ShareService {
         fresh.setMeetingId(meetingId);
         fresh.setUserId(userId);
         fresh.setToken(newToken());
+        applyAccountDefaults(fresh, userId);
         return fresh;
+    }
+
+    /**
+     * Set a fresh link to whatever this account said new links should be.
+     *
+     * <p>Only on creation, and only before {@code apply} runs, so anything the
+     * request asked for still wins. Never on an existing link: rewriting the
+     * expiry of a URL somebody has already sent would revoke access nobody
+     * asked to revoke.
+     *
+     * <p>Silent about a profile it cannot read. The defaults on the entity are
+     * the same ones this would set, and failing to create a share link because
+     * a preferences row was unreadable would be a worse outcome than a link
+     * with the standard settings.
+     */
+    private void applyAccountDefaults(MeetingShare share, String userId) {
+        try {
+            UserEntity user = users.require(userId);
+            share.setIncludeSummary(user.isShareIncludeSummary());
+            share.setIncludeActionItems(user.isShareIncludeActionItems());
+            share.setIncludeTranscript(user.isShareIncludeTranscript());
+            share.setIncludeAudio(user.isShareIncludeAudio());
+            if (user.getShareExpiryDays() != null) {
+                share.setExpiresAt(Instant.now().plus(user.getShareExpiryDays(), ChronoUnit.DAYS));
+            }
+        } catch (RuntimeException e) {
+            log.warn("Could not read share defaults for {}; using the built-in ones.", userId);
+        }
     }
 
     /** Only what the caller sent. Omitted fields keep whatever the link had. */

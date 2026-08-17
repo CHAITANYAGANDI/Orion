@@ -193,7 +193,7 @@ async def workspace_chat(
     if a caller passes someone else's meeting ids.
     """
     answer, citations = await rag.answer_workspace(
-        body.user_id, body.question, body.meeting_ids, body.mode
+        body.user_id, body.question, body.meeting_ids, body.mode, body.history_days
     )
     return ChatResponse(answer=answer, citations=[Citation(**c) for c in citations])
 

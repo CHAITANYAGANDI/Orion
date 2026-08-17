@@ -75,7 +75,7 @@ again in the worker.
 | POST | `/api/v1/meetings` | `MeetingCreateRequest` | `MeetingResponse` |
 | POST | `/api/v1/meetings/import` | `{ "url", "title"?, "tags"? }` | `201 MeetingResponse` |
 | GET  | `/api/v1/preferences` | — | `PreferencesResponse` |
-| PATCH | `/api/v1/preferences` | `{ "autoEmailRecap"?, "recapEmail"?, "displayName"?, "department"?, "jobRole"?, "defaultLanguage"?, "taskReminders"?, "mutedNotifications"? }` | `PreferencesResponse` |
+| PATCH | `/api/v1/preferences` | `{ "autoEmailRecap"?, "recapEmail"?, "displayName"?, "department"?, "jobRole"?, "defaultLanguage"?, "shareInclude*"?, "shareExpiryDays"?, "shareNeverExpires"?, "chatHistoryDays"?, "chatReadsEverything"?, "taskReminders"?, "mutedNotifications"? }` | `PreferencesResponse` |
 | GET  | `/api/v1/meetings` | `?page&size&search&tag&status` | `Page<MeetingResponse>` |
 | GET  | `/api/v1/meetings/{id}` | — | `MeetingResponse` |
 | PATCH | `/api/v1/meetings/{id}` | `{ "title"?, "tags"? }` | `MeetingResponse` |
@@ -108,6 +108,32 @@ the page showing a choice the pipeline never received. It is resolved at enqueue
 and travels on `meeting.uploaded` as `language`, the same as `vocabulary` and for
 the same reason: the worker runs as a system context with no user to read it in.
 The account setting wins over the deployment-wide `ASSEMBLYAI_LANGUAGE`.
+
+**Share and chat defaults (V39).** `shareIncludeSummary` /
+`shareIncludeActionItems` / `shareIncludeTranscript` / `shareIncludeAudio` and
+`shareExpiryDays` are what a **new** share link starts from — they were constants
+in `ShareService` and are now the account's. `ShareService.applyAccountDefaults`
+runs in `newShare` only, before the request is applied, so anything the caller
+asked for still wins and a link already sent is never rewritten: changing a
+default must not revoke access nobody asked to revoke. The four flags default to
+summary and action items on, transcript and recording off, because a transcript
+is every word somebody said and a recording is their voice.
+
+`chatHistoryDays` bounds how far back the **workspace** chat retrieves
+transcripts. It travels as `historyDays` on `POST /ai/workspace-chat` and becomes
+one extra `m.created_at >= floor` in `RagService._retrieve` — kept separate from
+the question's own date window so "what happened last March" still says it found
+nothing from March rather than quietly answering from whatever the floor left
+visible. It does **not** apply when `meetingIds` is given (Add context and folder
+chat both name their meetings), and it does not bound the commitment ledger: a
+task owed since March is still owed, and dropping it would make the answer wrong
+rather than narrower. A scope control, not a privacy boundary — nothing is
+hidden, and the meeting's own chat still answers about it.
+
+Both pairs express "none" with a companion flag (`shareNeverExpires`,
+`chatReadsEverything`) for the reason in `ShareCreateRequest`: over JSON an
+omitted number and an explicit null are the same thing, and one means "leave it"
+while the other means "clear it".
 
 **Creating a meeting takes almost nothing.** `MeetingCreateRequest` is
 `{ "objectKey", "title"?, "tags"?, "contentType"?, "durationSeconds"?,

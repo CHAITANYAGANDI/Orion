@@ -71,7 +71,7 @@ public class AiClient {
      * user's transcripts.
      */
     public ChatResult workspaceChat(String userId, String question, List<String> meetingIds,
-                                    com.recallix.domain.ChatMode mode) {
+                                    com.recallix.domain.ChatMode mode, Integer historyDays) {
         Map<String, Object> payload = new java.util.HashMap<>();
         payload.put("userId", userId);
         payload.put("question", question);
@@ -82,6 +82,12 @@ public class AiClient {
         // too, and a field that is only sometimes present is a field somebody
         // eventually reads as "unset means advanced".
         payload.put("mode", (mode == null ? com.recallix.domain.ChatMode.EXPRESS : mode).wire());
+        // Omitted rather than sent as null when the account reads everything:
+        // the ai-service treats an absent window as no floor, which is what it
+        // did before the setting existed.
+        if (historyDays != null) {
+            payload.put("historyDays", historyDays);
+        }
         JsonNode body = client.post()
                 .uri("/ai/workspace-chat")
                 .contentType(MediaType.APPLICATION_JSON)

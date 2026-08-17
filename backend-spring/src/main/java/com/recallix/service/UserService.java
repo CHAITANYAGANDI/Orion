@@ -80,6 +80,31 @@ public class UserService {
         if (patch.defaultLanguage() != null) {
             user.setDefaultLanguage(resolveLanguage(patch.defaultLanguage()));
         }
+        if (patch.shareIncludeSummary() != null) {
+            user.setShareIncludeSummary(patch.shareIncludeSummary());
+        }
+        if (patch.shareIncludeActionItems() != null) {
+            user.setShareIncludeActionItems(patch.shareIncludeActionItems());
+        }
+        if (patch.shareIncludeTranscript() != null) {
+            user.setShareIncludeTranscript(patch.shareIncludeTranscript());
+        }
+        if (patch.shareIncludeAudio() != null) {
+            user.setShareIncludeAudio(patch.shareIncludeAudio());
+        }
+        // "Never" and "unchanged" are both an absent number, so the flag is
+        // what distinguishes them — the same problem, and the same answer, as
+        // removing a password from a share link.
+        if (Boolean.TRUE.equals(patch.shareNeverExpires())) {
+            user.setShareExpiryDays(null);
+        } else if (patch.shareExpiryDays() != null) {
+            user.setShareExpiryDays(patch.shareExpiryDays());
+        }
+        if (Boolean.TRUE.equals(patch.chatReadsEverything())) {
+            user.setChatHistoryDays(null);
+        } else if (patch.chatHistoryDays() != null) {
+            user.setChatHistoryDays(patch.chatHistoryDays());
+        }
         if (patch.taskReminders() != null) {
             user.setTaskReminders(patch.taskReminders());
             // Turning them back on should send today's digest rather than wait
@@ -124,7 +149,7 @@ public class UserService {
     /**
      * The mutable half of the preferences, as its own type.
      *
-     * <p>Eight nullable arguments in a row is a call nobody can read and a
+     * <p>Sixteen nullable arguments in a row is a call nobody can read and a
      * transposition nobody can see; this one is named at the call site.
      */
     public record PreferencesPatch(
@@ -134,6 +159,16 @@ public class UserService {
             String department,
             String jobRole,
             String defaultLanguage,
+            Boolean shareIncludeSummary,
+            Boolean shareIncludeActionItems,
+            Boolean shareIncludeTranscript,
+            Boolean shareIncludeAudio,
+            /** Null leaves the expiry; {@code shareNeverExpires} clears it. */
+            Integer shareExpiryDays,
+            Boolean shareNeverExpires,
+            /** Null leaves the window; {@code chatReadsEverything} clears it. */
+            Integer chatHistoryDays,
+            Boolean chatReadsEverything,
             Boolean taskReminders,
             /** Notification kinds to switch off. Null leaves them; empty turns all on. */
             List<String> mutedNotifications
