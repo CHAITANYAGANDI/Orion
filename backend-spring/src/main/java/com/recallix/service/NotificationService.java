@@ -294,10 +294,15 @@ public class NotificationService {
         if (meetings > 0) {
             body.append(count(meetings, "meeting", "meetings")).append(" in full");
         }
+        // No link. This used to point at the retention dials on the privacy
+        // tab so the reader could adjust the policy that had just deleted
+        // something; those controls were removed, and a notification that
+        // offers to take you somewhere and then does not is worse than one
+        // that simply reports. The sentence still says what went.
         emit(userId, NotificationKind.RETENTION_APPLIED,
                 "Retention deleted " + count(recordings + meetings, "item", "items"),
                 body.append(". This cannot be undone.").toString(),
-                null, null, "/privacy",
+                null, null, null,
                 "day:" + today);
     }
 

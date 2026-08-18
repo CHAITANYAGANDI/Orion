@@ -5,7 +5,7 @@
  *
  * Five things, in the order somebody needs them: the identity block, the
  * language your meetings are held in, the words Recallix keeps getting wrong,
- * what this browser stores, and account deletion at the bottom.
+ * and what this browser stores.
  *
  * Two of the fields here are descriptive and two are not, and the difference is
  * worth stating. Department and Role are yours to record and nothing reads them
@@ -58,7 +58,6 @@ export function GeneralTab() {
         href="/settings/meetings#vocabulary"
       />
       <BrowserRow />
-      <DeleteAccountRow />
       <Footer />
     </div>
   );
@@ -288,32 +287,6 @@ function BrowserRow() {
         and not on your phone. Recallix sets no tracking cookies — this is the
         whole of what it keeps locally.
       </p>
-    </div>
-  );
-}
-
-/**
- * Deletion, linked rather than repeated.
- *
- * <p>The button goes to Security, where the account export sits directly above
- * the same control. Closing an account is irreversible and there is exactly one
- * thing that makes it recoverable; a second entry point that skips past it would
- * be the wrong shortcut to offer.
- */
-function DeleteAccountRow() {
-  return (
-    <div className="flex items-center justify-between gap-4 py-5">
-      <div className="min-w-0">
-        <p className="flex items-center gap-2 font-medium text-destructive">
-          <ShieldAlert className="h-4 w-4" /> Delete account
-        </p>
-        <p className="mt-0.5 text-sm text-muted-foreground">
-          Delete your account and all account data
-        </p>
-      </div>
-      <Button variant="outline" asChild className="shrink-0 text-destructive hover:text-destructive">
-        <Link href="/settings/security">Delete account</Link>
-      </Button>
     </div>
   );
 }

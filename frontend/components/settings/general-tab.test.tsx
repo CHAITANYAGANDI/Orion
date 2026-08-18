@@ -233,14 +233,14 @@ describe("the rest of the page", () => {
     );
   });
 
-  it("sends account deletion to where the export sits above it", () => {
+  it("offers no route to closing an account, because there is nowhere to send it", () => {
     render(<GeneralTab />);
 
-    // Closing an account is irreversible and exactly one thing makes it
-    // recoverable. A second entry point that skipped the export would be the
-    // wrong shortcut.
-    const links = screen.getAllByRole("link", { name: "Delete account" });
-    expect(links[0]).toHaveAttribute("href", "/settings/security");
+    // The control this pointed at was removed from the Security tab. A link
+    // that still read "Delete account" and landed on two-factor status would be
+    // worse than its absence: it would look like the feature had broken rather
+    // than been withdrawn.
+    expect(screen.queryByRole("link", { name: "Delete account" })).not.toBeInTheDocument();
   });
 
   it("names the build rather than inventing one", () => {
