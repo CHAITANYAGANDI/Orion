@@ -542,7 +542,7 @@ function Dial({
         ))}
       </div>
       {dueNow > 0 && (
-        <p className="mt-2 flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+        <p className="mt-2 flex items-start gap-1.5 text-xs text-amber-400">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           Tonight this deletes {dueNow} {dueNoun}
           {dueNow === 1 ? "" : "s"} you already have.

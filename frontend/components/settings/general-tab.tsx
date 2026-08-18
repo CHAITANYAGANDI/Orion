@@ -285,8 +285,8 @@ function BrowserRow() {
       />
       <p className="mt-1.5 text-xs text-muted-foreground">
         Stored in this browser rather than on your account, so it applies here
-        and not on your phone. Recallix sets no tracking cookies — this and your
-        theme are the whole of what it keeps locally.
+        and not on your phone. Recallix sets no tracking cookies — this is the
+        whole of what it keeps locally.
       </p>
     </div>
   );

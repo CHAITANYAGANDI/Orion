@@ -1,7 +1,11 @@
 import type { Config } from "tailwindcss";
 
 const config: Config = {
-  darkMode: ["class"],
+  // No dark variant, because there is no light one to vary from. The palette
+  // is a single set of variables on :root (see globals.css); a `dark:`
+  // utility here would compile to a rule keyed on a class nothing adds, and
+  // so would silently never apply.
+  darkMode: [],
   content: [
     "./app/**/*.{ts,tsx}",
     "./components/**/*.{ts,tsx}",

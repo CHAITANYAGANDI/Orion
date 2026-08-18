@@ -373,7 +373,7 @@ function Notice({
         "flex items-start gap-2 rounded-md border p-3 text-sm",
         tone === "error"
           ? "border-destructive/40 bg-destructive/10 text-destructive"
-          : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+          : "border-amber-500/40 bg-amber-500/10 text-amber-400",
       )}
     >
       <Icon className="mt-0.5 h-4 w-4 shrink-0" />

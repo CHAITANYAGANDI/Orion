@@ -473,7 +473,7 @@ function NoAudioNotice() {
   return (
     <div
       role="status"
-      className="pointer-events-auto w-full max-w-3xl rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-800 shadow-lg backdrop-blur dark:text-amber-300"
+      className="pointer-events-auto w-full max-w-3xl rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-300 shadow-lg backdrop-blur"
     >
       <div className="flex items-start gap-2">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />

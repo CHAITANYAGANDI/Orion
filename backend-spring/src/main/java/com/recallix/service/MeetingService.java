@@ -37,6 +37,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -268,12 +269,19 @@ public class MeetingService {
 
     @Transactional(readOnly = true)
     public PageResponse<MeetingResponse> list(String userId, int page, int size,
-                                              String search, String tag, MeetingStatus status) {
+                                              String search, String tag, MeetingStatus status,
+                                              Instant from, Instant to) {
+        // Filtered in the query rather than after the page is built. Narrowing a
+        // page of twenty in memory would answer "meetings from July" with
+        // whichever of the twenty most recent happened to fall in July — and
+        // would report a total that counted the ones it had just hidden.
         Page<Meeting> result = meetings.search(
                 userId,
                 blankToNull(search),
                 status == null ? null : status.name(),
                 blankToNull(tag),
+                from,
+                to,
                 PageRequest.of(page, size));
         List<MeetingResponse> content = result.getContent().stream().map(this::toResponse).toList();
         return PageResponse.from(result, content);

@@ -10,6 +10,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -79,6 +80,29 @@ public class GlobalExceptionHandler {
         log.debug("{} not supported for {}", request.getMethod(), request.getRequestURI());
         return build(HttpStatus.METHOD_NOT_ALLOWED, "METHOD_NOT_ALLOWED",
                 request.getMethod() + " is not supported here", request);
+    }
+
+    /**
+     * A query parameter the server could not read as the type it is declared as.
+     *
+     * <p>Third of the same kind as the two above, and the same fault: unhandled,
+     * {@code ?status=NONSENSE} or {@code ?from=notadate} fell through to
+     * {@link #handleUnexpected} and came back "an unexpected error occurred" —
+     * a server fault for a request the client got wrong, logged at ERROR with a
+     * stack trace each time. Nothing about it is unexpected.
+     *
+     * <p>The parameter is named because it is the only useful thing to say: a
+     * client sending a date in the wrong format cannot tell from a bare 400
+     * which of several it should look at. The offending *value* is not echoed —
+     * it came from the caller and reflecting it into a response body is how a
+     * reflected-XSS gets its foothold.
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException ex,
+                                                            HttpServletRequest request) {
+        log.debug("Bad value for parameter {} on {}", ex.getName(), request.getRequestURI());
+        return build(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR",
+                "'" + ex.getName() + "' is not in a format this endpoint accepts", request);
     }
 
     @ExceptionHandler(Exception.class)

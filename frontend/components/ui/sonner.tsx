@@ -1,15 +1,17 @@
 "use client";
 
-import { useTheme } from "next-themes";
 import { Toaster as Sonner } from "sonner";
 
 type ToasterProps = React.ComponentProps<typeof Sonner>;
 
 export function Toaster(props: ToasterProps) {
-  const { theme = "system" } = useTheme();
   return (
     <Sonner
-      theme={theme as ToasterProps["theme"]}
+      // Fixed, because the app is. Sonner picks its own surface colours from
+      // this rather than from the CSS variables below, so leaving it on
+      // "system" would put a light toast over a dark page for anybody whose OS
+      // is set to light.
+      theme="dark"
       className="toaster group"
       toastOptions={{
         classNames: {

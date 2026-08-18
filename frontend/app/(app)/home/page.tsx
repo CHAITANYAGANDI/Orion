@@ -29,6 +29,7 @@ import {
   Mic,
   PanelRightClose,
   PanelRightOpen,
+  CalendarDays,
 } from "lucide-react";
 import { useGetMeetingsQuery } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -36,6 +37,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/status-badge";
 import { ActionItemsPanel } from "@/components/action-items-panel";
+import { DateFilter, ANY_TIME, type DateWindow } from "@/components/date-filter";
 import { HomeChatPanel } from "@/components/home-chat-panel";
 import { formatDuration } from "@/lib/format";
 import { groupByDay } from "@/lib/days";
@@ -63,8 +65,18 @@ export default function HomePage() {
   const [scope, setScope] = React.useState<Scope>("for-you");
   const [panel, setPanel] = React.useState<Panel>("chat");
   const [panelOpen, setPanelOpen] = React.useState(true);
+  const [when, setWhen] = React.useState<DateWindow>(ANY_TIME);
 
-  const { data, isLoading } = useGetMeetingsQuery({ page: 0, size: 50 });
+  // The window goes to the server rather than filtering what came back. This
+  // asks for fifty rows; narrowing those to July would answer "meetings in
+  // July" with whichever of the fifty most recent happened to be in July, and
+  // would look right until somebody had more than fifty meetings.
+  const { data, isLoading } = useGetMeetingsQuery({
+    page: 0,
+    size: 50,
+    from: when.from ?? undefined,
+    to: when.to ?? undefined,
+  });
   // Derived from `data` rather than from a `?? []` above it: the fallback array
   // is a new value on every render, which would make the grouping below rerun
   // — and `new Date()` inside it produce different day boundaries — on renders
@@ -77,20 +89,25 @@ export default function HomePage() {
       <section className="min-w-0 flex-1 overflow-y-auto px-4 py-4 lg:px-6">
         <div className="mx-auto max-w-3xl">
           <div className="mb-4 flex items-center justify-between gap-3">
-            <ScopePicker value={scope} onChange={setScope} />
-            <Button
-              variant="ghost"
-              size="icon"
-              className="lg:hidden"
-              onClick={() => setPanelOpen((v) => !v)}
-              aria-label={panelOpen ? "Hide the side panel" : "Show the side panel"}
-            >
-              {panelOpen ? (
-                <PanelRightClose className="h-4 w-4" />
-              ) : (
-                <PanelRightOpen className="h-4 w-4" />
-              )}
-            </Button>
+            {/* When on the left, whose on the right — the two questions the
+                list itself cannot answer, in the order people ask them. */}
+            <DateFilter value={when} onChange={setWhen} />
+            <div className="flex items-center gap-3">
+              <ScopePicker value={scope} onChange={setScope} />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="lg:hidden"
+                onClick={() => setPanelOpen((v) => !v)}
+                aria-label={panelOpen ? "Hide the side panel" : "Show the side panel"}
+              >
+                {panelOpen ? (
+                  <PanelRightClose className="h-4 w-4" />
+                ) : (
+                  <PanelRightOpen className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
           </div>
 
           {isLoading ? (
@@ -100,7 +117,7 @@ export default function HomePage() {
               ))}
             </div>
           ) : shown.length === 0 ? (
-            <EmptyState scope={scope} />
+            <EmptyState scope={scope} when={when} onClearDate={() => setWhen(ANY_TIME)} />
           ) : (
             groups.map((group) => (
               <div key={group.key} className="mb-6">
@@ -286,8 +303,46 @@ function ConversationRow({ meeting }: { meeting: MeetingResponse }) {
   );
 }
 
-function EmptyState({ scope }: { scope: Scope }) {
+/**
+ * Nothing to show, and why.
+ *
+ * <p>A date filter that empties the list has to say so. Without it the page
+ * offers Record and Import to somebody with a hundred meetings, which reads as
+ * an archive that lost them rather than as a filter doing its job — and the way
+ * out is a control they have to remember they touched.
+ */
+function EmptyState({
+  scope,
+  when,
+  onClearDate,
+}: {
+  scope: Scope;
+  when: DateWindow;
+  onClearDate: () => void;
+}) {
   const { userId } = useAuth();
+  const filtered = when.from !== null || when.to !== null;
+
+  if (filtered) {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center">
+        <CalendarDays className="h-8 w-8 text-muted-foreground" />
+        {/* "from" rather than "in", and the label verbatim: it reads correctly
+            for all three shapes the window can take — "from Today", "from Last
+            7 days", "from Thu, 13 Aug" — where lower-casing turns a date into
+            "thu, 13 aug". */}
+        <p className="mt-3 font-medium">Nothing from {when.label}</p>
+        <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+          There are no conversations in this stretch of time. Your other meetings
+          are still here.
+        </p>
+        <Button variant="outline" className="mt-4" onClick={onClearDate}>
+          Show any time
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center">
       <FileAudio className="h-8 w-8 text-muted-foreground" />

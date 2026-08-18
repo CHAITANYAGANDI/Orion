@@ -132,7 +132,7 @@ function MomentRow({
             {moment.speaker && <span>{moment.speaker}</span>}
             {orphaned && (
               <span
-                className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-500"
+                className="inline-flex items-center gap-1 text-amber-500"
                 title="The transcript line this was attached to has been edited, so it is no longer shown inline."
               >
                 <Unlink className="h-3 w-3" /> line edited

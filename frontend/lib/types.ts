@@ -1182,6 +1182,16 @@ export interface MeetingListQuery {
   search?: string;
   tag?: string;
   status?: MeetingStatus;
+  /**
+   * ISO instants bounding `createdAt`. Half-open: `from` inclusive, `to`
+   * exclusive, so asking for one day is midnight to midnight and a meeting
+   * recorded on the stroke of one cannot appear under two days.
+   *
+   * Absolute instants rather than a preset name, because only the browser knows
+   * which midnight "today" meant.
+   */
+  from?: string;
+  to?: string;
 }
 
 export interface ActionItemListQuery {

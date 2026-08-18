@@ -139,6 +139,8 @@ export const api = createApi({
         if (query.search) params.set("search", query.search);
         if (query.tag) params.set("tag", query.tag);
         if (query.status) params.set("status", query.status);
+        if (query.from) params.set("from", query.from);
+        if (query.to) params.set("to", query.to);
         return `/meetings?${params.toString()}`;
       },
       providesTags: (result) =>

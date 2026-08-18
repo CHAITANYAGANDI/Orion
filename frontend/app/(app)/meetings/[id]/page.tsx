@@ -1216,7 +1216,7 @@ function SummaryPanel({
             {summary?.stale && !translated && (
               <div className="no-print flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
                 <span className="flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" />
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
                   The transcript changed after this summary was written.
                 </span>
                 <Button
@@ -2627,9 +2627,9 @@ const SpokenWords = React.memo(function SpokenWords({
               // is momentary anyway: a search tint lasts as long as the find
               // box has text in it.
               marked &&
-                "rounded-none border-b-2 border-amber-500 bg-amber-300/40 dark:bg-amber-400/25",
+                "rounded-none border-b-2 border-amber-500 bg-amber-400/25",
               match && w.text.toLowerCase().includes(match) &&
-                "bg-amber-400/40 text-foreground dark:bg-amber-400/30",
+                "bg-amber-400/30 text-foreground",
               at >= w.start && at < w.end && "bg-primary/40 text-foreground"
             )}
           >

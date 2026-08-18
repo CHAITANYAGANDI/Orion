@@ -2,12 +2,17 @@
 
 import * as React from "react";
 import { Provider as ReduxProvider } from "react-redux";
-import { ThemeProvider as NextThemesProvider } from "next-themes";
 import { makeStore, type AppStore } from "@/lib/store";
 import { AuthProvider } from "@/lib/auth";
 import { Toaster } from "@/components/ui/sonner";
 
-/** App-wide client providers: Redux store, auth, theme, and toasts. */
+/**
+ * App-wide client providers: Redux store, auth and toasts.
+ *
+ * No theme provider. Recallix has one palette, set on `:root` in globals.css,
+ * so there is nothing to switch and nothing to restore from storage — which
+ * also removes the flash of the wrong theme that any of this would reintroduce.
+ */
 export function Providers({ children }: { children: React.ReactNode }) {
   const storeRef = React.useRef<AppStore | null>(null);
   if (!storeRef.current) {
@@ -16,12 +21,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <ReduxProvider store={storeRef.current}>
-      <NextThemesProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-        <AuthProvider>
-          {children}
-          <Toaster position="top-right" richColors />
-        </AuthProvider>
-      </NextThemesProvider>
+      <AuthProvider>
+        {children}
+        <Toaster position="top-right" richColors />
+      </AuthProvider>
     </ReduxProvider>
   );
 }

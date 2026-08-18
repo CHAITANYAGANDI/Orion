@@ -91,9 +91,15 @@ public interface MeetingRepository extends JpaRepository<Meeting, String> {
 
     /**
      * Owner-scoped search. Optional case-insensitive title match, status filter
-     * (as text), and tag containment against the jsonb `tags` array. Native so
-     * the jsonb `?` containment operator is available; params are nullable to
-     * make each filter optional. Written as `:param IS NULL OR ...`.
+     * (as text), tag containment against the jsonb `tags` array, and a
+     * created-at window. Native so the jsonb `?` containment operator is
+     * available; params are nullable to make each filter optional. Written as
+     * `:param IS NULL OR ...`.
+     *
+     * <p>The window is half-open — {@code from} inclusive, {@code to}
+     * exclusive — so a caller asking for one day passes midnight to midnight
+     * and gets that day, rather than that day plus whatever landed exactly on
+     * the following midnight.
      */
     @Query(value = """
             SELECT * FROM meetings m
@@ -101,6 +107,8 @@ public interface MeetingRepository extends JpaRepository<Meeting, String> {
               AND (:search IS NULL OR m.title ILIKE '%' || :search || '%')
               AND (:status IS NULL OR m.status = :status)
               AND (:tag IS NULL OR m.tags @> CAST(('["' || :tag || '"]') AS jsonb))
+              AND (CAST(:from AS timestamptz) IS NULL OR m.created_at >= CAST(:from AS timestamptz))
+              AND (CAST(:to   AS timestamptz) IS NULL OR m.created_at <  CAST(:to   AS timestamptz))
             ORDER BY m.created_at DESC
             """,
             countQuery = """
@@ -109,11 +117,15 @@ public interface MeetingRepository extends JpaRepository<Meeting, String> {
               AND (:search IS NULL OR m.title ILIKE '%' || :search || '%')
               AND (:status IS NULL OR m.status = :status)
               AND (:tag IS NULL OR m.tags @> CAST(('["' || :tag || '"]') AS jsonb))
+              AND (CAST(:from AS timestamptz) IS NULL OR m.created_at >= CAST(:from AS timestamptz))
+              AND (CAST(:to   AS timestamptz) IS NULL OR m.created_at <  CAST(:to   AS timestamptz))
             """,
             nativeQuery = true)
     Page<Meeting> search(@Param("userId") String userId,
                          @Param("search") String search,
                          @Param("status") String status,
                          @Param("tag") String tag,
+                         @Param("from") Instant from,
+                         @Param("to") Instant to,
                          Pageable pageable);
 }

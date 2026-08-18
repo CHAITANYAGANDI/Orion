@@ -25,7 +25,6 @@ import { RecordingProvider, useRecording } from "@/lib/recording-context";
 import { useRecordingStartedMutation } from "@/lib/api";
 import { stopwatch } from "@/lib/format";
 import { Button } from "@/components/ui/button";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { NotificationBell } from "@/components/notification-bell";
 import { SearchCommand } from "@/components/search-command";
 import { ImportDialog } from "@/components/import-dialog";
@@ -194,7 +193,6 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
               </Button>
               <RecordButton />
               <NotificationBell />
-              <ThemeToggle />
             </div>
           </header>
 
@@ -287,7 +285,7 @@ function RecordingIndicator() {
       className={cn(
         "flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
         unsaved
-          ? "border-amber-500/40 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 dark:text-amber-400"
+          ? "border-amber-500/40 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20"
           : "border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/20",
       )}
       title={

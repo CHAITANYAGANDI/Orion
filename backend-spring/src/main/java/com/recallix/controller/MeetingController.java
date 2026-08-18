@@ -19,6 +19,7 @@ import com.recallix.security.SecurityUtils;
 import com.recallix.service.ErasureService;
 import com.recallix.service.MeetingService;
 import jakarta.validation.Valid;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -58,13 +59,28 @@ public class MeetingController {
         return meetings.createMeeting(SecurityUtils.currentUserId(), req);
     }
 
+    /**
+     * The meeting list, optionally narrowed.
+     *
+     * <p>{@code from} and {@code to} are ISO-8601 instants and the window is
+     * half-open: {@code from} inclusive, {@code to} exclusive. The client sends
+     * absolute instants rather than a preset name because only the client knows
+     * which midnight the user meant — "today" in Auckland is a different pair of
+     * instants from "today" in Lisbon, and a server that guessed would show
+     * somebody an empty list for the day they are living in.
+     */
     @GetMapping
     public PageResponse<MeetingResponse> list(@RequestParam(defaultValue = "0") int page,
                                               @RequestParam(defaultValue = "20") int size,
                                               @RequestParam(required = false) String search,
                                               @RequestParam(required = false) String tag,
-                                              @RequestParam(required = false) MeetingStatus status) {
-        return meetings.list(SecurityUtils.currentUserId(), page, Math.min(size, 100), search, tag, status);
+                                              @RequestParam(required = false) MeetingStatus status,
+                                              @RequestParam(required = false)
+                                              @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
+                                              @RequestParam(required = false)
+                                              @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to) {
+        return meetings.list(SecurityUtils.currentUserId(), page, Math.min(size, 100),
+                search, tag, status, from, to);
     }
 
     @GetMapping("/{id}")

@@ -107,7 +107,7 @@ export function TranslationBar({
       )}
 
       {translation?.stale && !busy && (
-        <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-500">
+        <span className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-500">
           The meeting changed after this was translated.
         </span>
       )}
