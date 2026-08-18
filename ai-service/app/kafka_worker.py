@@ -17,7 +17,6 @@ import logging
 
 from app.callback import SpringCallbackClient
 from app.config import Settings
-from app.ingest import extract_pdf_text, fetch_youtube
 from app.pipeline import TOPIC_TRANSCRIPTION_STARTED, Pipeline
 from app.schemas import (
     MeetingUploadedEvent,
@@ -194,14 +193,13 @@ class KafkaWorker:
             logger.warning("Failed to emit to %s: %s", topic, exc)
 
     async def _process_source(self, event, progress_hook, transcript_hook):
-        """Resolve the event's source, then run the matching pipeline.
+        """Fetch the recording and run it through the pipeline.
 
-        Three sources converge here. AUDIO and YOUTUBE both end up as bytes and
-        transcribe; DOCUMENT is already text, so it enters the pipeline after
-        transcription rather than before it.
+        One source. YouTube links and PDFs used to converge here too — the first
+        downloaded to audio and transcribed, the second skipped transcription
+        because it was already text — and both are gone: Recallix transcribes
+        recordings, and a document was never a meeting anybody attended.
         """
-        meeting_id = event.meeting_id
-        template_slug = event.summary_template
         # None rather than [] so adapters can distinguish "no hints" from an
         # empty list without each of them re-checking for falsiness.
         vocabulary = event.vocabulary or None
@@ -209,50 +207,24 @@ class KafkaWorker:
         # what the adapters read as detect-the-language.
         language = (event.language or "").strip() or None
 
-        if event.source_type == "YOUTUBE":
-            await progress_hook(
-                TOPIC_TRANSCRIPTION_STARTED,
-                StatusEvent(
-                    meeting_id=meeting_id, status="TRANSCRIBING", progress=5,
-                    message="Downloading audio from YouTube...",
-                ),
-            )
-            source = await fetch_youtube(event.source_url or "", self._settings)
-            result = await self._pipeline.process(
-                meeting_id, source.audio or b"", source.filename, progress_hook,
-                transcript_hook, template_slug, vocabulary, language,
-            )
-            # Spring created this meeting before anything was known about the
-            # video; hand back the real title and length so it can replace them.
-            result.title = source.title
-            result.duration_seconds = source.duration_seconds
-            return result
-
-        if event.source_type == "DOCUMENT":
-            await progress_hook(
-                TOPIC_TRANSCRIPTION_STARTED,
-                StatusEvent(
-                    meeting_id=meeting_id, status="TRANSCRIBING", progress=10,
-                    message="Reading document...",
-                ),
-            )
-            data, filename = await fetch_audio(
-                self._settings, audio_url=event.audio_url, object_key=event.object_key
-            )
-            source = extract_pdf_text(data, self._settings, filename)
-            # No title backfill here: Spring already derived one from the
-            # uploaded filename, and the user may have edited it since.
-            return await self._pipeline.process_document(
-                meeting_id, source.text or "", progress_hook, transcript_hook,
-                template_slug=template_slug,
+        # Meetings imported before those sources were withdrawn are still in
+        # the database and still open and read fine. Reprocessing one cannot
+        # work — a YOUTUBE row has no stored object to fetch and a DOCUMENT row
+        # has no audio to transcribe — so it is refused in as many words rather
+        # than failing later inside the fetch with something unreadable.
+        if event.source_type not in ("", None, "AUDIO"):
+            raise ValueError(
+                f"{event.source_type} meetings can no longer be processed. "
+                "Recallix transcribes audio and video recordings only; this "
+                "meeting was imported before that changed and can still be read."
             )
 
         audio, filename = await fetch_audio(
             self._settings, audio_url=event.audio_url, object_key=event.object_key
         )
         return await self._pipeline.process(
-            meeting_id, audio, filename, progress_hook, transcript_hook,
-            template_slug, vocabulary, language,
+            event.meeting_id, audio, filename, progress_hook, transcript_hook,
+            event.summary_template, vocabulary, language,
         )
 
     async def _handle(self, event: MeetingUploadedEvent) -> None:

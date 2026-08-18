@@ -27,7 +27,9 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -107,13 +109,25 @@ class MediaContentTypeTest {
     }
 
     @Test
-    @DisplayName("a PDF stores its type and is still a DOCUMENT")
-    void pdfKeepsItsSourceType() {
-        service.createUploadUrl(USER, new UploadUrlRequest("notes.pdf", "application/pdf", 100_000));
+    @DisplayName("a PDF is refused, because a document is not a meeting")
+    void pdfIsRefused() {
+        // Accepted once, as a DOCUMENT source that skipped transcription. Every
+        // feature downstream — speakers, timestamps, playback, moments — had to
+        // special-case it into meaninglessness, and nobody attended a PDF.
+        assertThatThrownBy(() -> service.createUploadUrl(USER,
+                new UploadUrlRequest("notes.pdf", "application/pdf", 100_000)))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("audio and video");
 
-        Meeting saved = captureSaved();
-        assertThat(saved.getContentType()).isEqualTo("application/pdf");
-        assertThat(saved.getSourceType()).isEqualTo(SourceType.DOCUMENT);
+        verify(meetings, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("an uploaded recording is an AUDIO source, the only kind there is")
+    void uploadsAreAudioSources() {
+        service.createUploadUrl(USER, new UploadUrlRequest("call.m4a", "audio/mp4", 2_000_000));
+
+        assertThat(captureSaved().getSourceType()).isEqualTo(SourceType.AUDIO);
     }
 
     @Test

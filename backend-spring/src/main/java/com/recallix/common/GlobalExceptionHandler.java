@@ -61,6 +61,26 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.NOT_FOUND, "NOT_FOUND", "Not found", request);
     }
 
+    /**
+     * The right path, the wrong verb.
+     *
+     * <p>Unhandled, this fell to {@link #handleUnexpected} and came back a 500 —
+     * a server fault for what is plainly a bad request, logged at ERROR with a
+     * stack trace every time. It surfaces most often on a route that has been
+     * withdrawn while a path variable still matches the URL: {@code POST
+     * /meetings/import} now resolves against {@code GET /meetings/&#123;id&#125;},
+     * and a client that had not noticed deserves to be told which of the two
+     * things it got wrong.
+     */
+    @ExceptionHandler(org.springframework.web.HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ErrorResponse> handleMethodNotAllowed(
+            org.springframework.web.HttpRequestMethodNotSupportedException ex,
+            HttpServletRequest request) {
+        log.debug("{} not supported for {}", request.getMethod(), request.getRequestURI());
+        return build(HttpStatus.METHOD_NOT_ALLOWED, "METHOD_NOT_ALLOWED",
+                request.getMethod() + " is not supported here", request);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleUnexpected(Exception ex, HttpServletRequest request) {
         log.error("Unhandled exception [correlationId={}]", CorrelationIdFilter.current(), ex);

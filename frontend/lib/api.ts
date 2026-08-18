@@ -24,7 +24,6 @@ import type {
   Insight,
   MeetingCreateRequest,
   MeetingUpdateRequest,
-  MeetingImportRequest,
   PreferencesResponse,
   PreferencesUpdateRequest,
   MeetingListQuery,
@@ -247,15 +246,6 @@ export const api = createApi({
     updatePreferences: builder.mutation<PreferencesResponse, PreferencesUpdateRequest>({
       query: (body) => ({ url: "/preferences", method: "PATCH", body }),
       invalidatesTags: [{ type: "Preferences", id: "ME" }],
-    }),
-
-    /** Import from a URL (YouTube) — no upload step; the worker fetches it. */
-    importMeeting: builder.mutation<MeetingResponse, MeetingImportRequest>({
-      query: (body) => ({ url: "/meetings/import", method: "POST", body }),
-      invalidatesTags: [
-        { type: "Meetings", id: "LIST" },
-        { type: "Usage", id: "ME" },
-      ],
     }),
 
     getTranscript: builder.query<TranscriptResponse, string>({
@@ -1159,7 +1149,6 @@ export const {
   useAddInsightMutation,
   useUpdateInsightMutation,
   useDeleteInsightMutation,
-  useImportMeetingMutation,
   useGetPreferencesQuery,
   useUpdatePreferencesMutation,
   useGetTranscriptQuery,

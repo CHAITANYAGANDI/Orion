@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { NotificationBell } from "@/components/notification-bell";
 import { SearchCommand } from "@/components/search-command";
+import { ImportDialog } from "@/components/import-dialog";
 import { AccountMenu } from "@/components/account-menu";
 import { FolderTree } from "@/components/folder-tree";
 
@@ -59,6 +60,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [searching, setSearching] = React.useState(false);
+  const [importing, setImporting] = React.useState(false);
   const fullBleed = pathname === "/home" || pathname === "/ask";
 
   // Ctrl/Cmd-K from anywhere. Bound on the shell rather than on the input so it
@@ -149,11 +151,18 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
 
             <div className="flex flex-1 items-center justify-end gap-2">
               <RecordingIndicator />
-              <Button variant="outline" size="sm" className="gap-2" asChild>
-                <Link href="/upload">
-                  <Upload className="h-4 w-4" />
-                  <span className="hidden sm:inline">Import</span>
-                </Link>
+              {/* A dialog rather than a route: a file arrives more often than
+                  anything else creates a meeting, and it should not cost
+                  leaving whatever is on screen. /upload still exists for the
+                  fuller form — project, YouTube link — and for direct links. */}
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => setImporting(true)}
+              >
+                <Upload className="h-4 w-4" />
+                <span className="hidden sm:inline">Import</span>
               </Button>
               <Button size="sm" className="gap-2" asChild>
                 <Link href="/record">
@@ -180,6 +189,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
       </div>
 
       <SearchCommand open={searching} onOpenChange={setSearching} />
+      <ImportDialog open={importing} onOpenChange={setImporting} />
     </div>
   );
 }

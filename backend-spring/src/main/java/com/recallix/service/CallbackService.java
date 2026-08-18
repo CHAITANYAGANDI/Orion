@@ -134,14 +134,11 @@ public class CallbackService {
             meeting.setLanguage(result.language().trim());
         }
 
-        // A URL import starts with a placeholder title and no duration, because
-        // neither is known until the worker has fetched the video. Only the
-        // placeholder is overwritten — a title the user chose survives both the
-        // first run and any later reprocess.
-        if (result.title() != null && !result.title().isBlank()
-                && MeetingService.IMPORT_PLACEHOLDER_TITLE.equals(meeting.getTitle())) {
-            meeting.setTitle(result.title().trim());
-        }
+        // The worker no longer names anything. It used to, for URL imports,
+        // whose title was a placeholder until the video had been fetched — and
+        // URL imports are gone. Every meeting now arrives as a file, and a file
+        // has a name before it is uploaded, so overwriting it here could only
+        // ever replace something the user already chose.
         if (result.durationSeconds() != null && result.durationSeconds() > 0
                 && meeting.getDurationSeconds() == null) {
             meeting.setDurationSeconds(result.durationSeconds());

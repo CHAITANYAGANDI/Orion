@@ -6,7 +6,6 @@ import com.recallix.config.KafkaTopicsConfig;
 import com.recallix.domain.MeetingStatus;
 import com.recallix.domain.SourceType;
 import com.recallix.dto.MeetingCreateRequest;
-import com.recallix.dto.MeetingImportRequest;
 import com.recallix.dto.MeetingResponse;
 import com.recallix.dto.MeetingUpdateRequest;
 import com.recallix.dto.PageResponse;
@@ -52,23 +51,6 @@ public class MeetingService {
     private static final Logger log = LoggerFactory.getLogger(MeetingService.class);
 
     private static final List<String> ALLOWED_PREFIXES = List.of("audio/", "video/");
-    private static final String PDF = "application/pdf";
-
-    /**
-     * Stand-in title for a URL import, replaced by {@link CallbackService} once
-     * the worker reports the video's real title. Only this exact value is
-     * overwritten, so a title the user supplied is never lost.
-     */
-    public static final String IMPORT_PLACEHOLDER_TITLE = "YouTube import";
-
-    /**
-     * Hosts we accept for URL imports. The worker hands this straight to
-     * yt-dlp, which supports a thousand-odd sites; narrowing it here keeps a
-     * user-supplied URL from becoming a server-side request forgery primitive.
-     */
-    private static final List<String> YOUTUBE_HOSTS = List.of(
-            "youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com",
-            "youtu.be", "www.youtu.be");
 
     private final MeetingRepository meetings;
     private final MeetingTranscriptRepository transcripts;
@@ -147,8 +129,7 @@ public class MeetingService {
         // Validated just above, so what is stored is always one of the types we
         // allow — the player reads this to decide between <video> and <audio>.
         meeting.setContentType(req.contentType());
-        // A PDF has no audio track, so the worker must skip transcription.
-        meeting.setSourceType(PDF.equals(req.contentType()) ? SourceType.DOCUMENT : SourceType.AUDIO);
+        meeting.setSourceType(SourceType.AUDIO);
         meetings.save(meeting);
 
         String uploadUrl = storage.presignUpload(objectKey, req.contentType());
@@ -224,59 +205,6 @@ public class MeetingService {
 
         audit.record(userId, "MEETING_UPDATED", "meeting", meetingId);
         return toResponse(meeting);
-    }
-
-    /**
-     * Import a meeting from a URL. No upload, no presign — the worker fetches
-     * the audio itself, so the meeting goes straight to QUEUED.
-     */
-    @Transactional
-    public MeetingResponse importFromUrl(String userId, MeetingImportRequest req) {
-        String url = req.trimmedUrl();
-        validateYouTubeUrl(url);
-
-        // The DB has a partial unique index on (user_id, source_url); checking
-        // first turns a constraint violation into a useful message.
-        meetings.findByUserIdAndSourceUrl(userId, url).ifPresent(existing -> {
-            throw ApiException.badRequest("You already imported that video: " + existing.getTitle());
-        });
-
-        usage.incrementMeetingsOrThrow(userId);
-
-        Meeting meeting = new Meeting();
-        meeting.setId(IdGenerator.meeting());
-        meeting.setUserId(userId);
-        // Placeholder until the worker reports the video's real title.
-        meeting.setTitle(req.title() == null || req.title().isBlank()
-                ? IMPORT_PLACEHOLDER_TITLE : req.title().trim());
-        meeting.setStatus(MeetingStatus.QUEUED);
-        meeting.setSourceType(SourceType.YOUTUBE);
-        meeting.setSourceUrl(url);
-        meeting.setTags(req.tagsOrEmpty());
-        meeting.setSummaryTemplate(templates.requireKnown(req.summaryTemplate()));
-        meetings.save(meeting);
-
-        enqueueProcessing(meeting);
-        audit.record(userId, "MEETING_IMPORTED", "meeting", meeting.getId());
-        notifications.processingStarted(meeting, "imported");
-        return toResponse(meeting);
-    }
-
-    private void validateYouTubeUrl(String url) {
-        java.net.URI uri;
-        try {
-            uri = java.net.URI.create(url);
-        } catch (IllegalArgumentException e) {
-            throw ApiException.badRequest("That doesn't look like a valid URL");
-        }
-        String scheme = uri.getScheme();
-        if (scheme == null || !(scheme.equals("http") || scheme.equals("https"))) {
-            throw ApiException.badRequest("That doesn't look like a valid URL");
-        }
-        String host = uri.getHost();
-        if (host == null || YOUTUBE_HOSTS.stream().noneMatch(host.toLowerCase()::equals)) {
-            throw ApiException.badRequest("Only YouTube links can be imported right now");
-        }
     }
 
     private void enqueueProcessing(Meeting meeting) {
@@ -756,13 +684,17 @@ public class MeetingService {
                 m.getAudioDeletedAt(), m.getTranscriptDeletedAt(), m.getConsentConfirmedAt());
     }
 
+    /**
+     * Refuse anything that is not a recording.
+     *
+     * <p>PDFs used to be accepted and turned into a DOCUMENT meeting whose text
+     * skipped transcription. They are not any more: a document nobody spoke is
+     * not a meeting, and every feature downstream — speakers, timestamps,
+     * playback, moments — had to special-case it into meaninglessness.
+     */
     private void validateContentType(String contentType) {
-        if (contentType == null) {
-            throw ApiException.badRequest("Only audio, video or PDF uploads are supported");
-        }
-        boolean media = ALLOWED_PREFIXES.stream().anyMatch(contentType::startsWith);
-        if (!media && !PDF.equals(contentType)) {
-            throw ApiException.badRequest("Only audio, video or PDF uploads are supported");
+        if (contentType == null || ALLOWED_PREFIXES.stream().noneMatch(contentType::startsWith)) {
+            throw ApiException.badRequest("Only audio and video uploads are supported");
         }
     }
 

@@ -208,12 +208,6 @@ export interface PreferencesUpdateRequest {
   mutedNotifications?: string[];
 }
 
-export interface MeetingImportRequest {
-  url: string;
-  title?: string;
-  tags?: string[];
-}
-
 /** One spoken word with its own timing, in seconds. */
 export interface SpokenWord {
   text: string;
