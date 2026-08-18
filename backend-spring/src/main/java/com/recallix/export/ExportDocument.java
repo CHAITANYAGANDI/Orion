@@ -88,5 +88,26 @@ public record ExportDocument(
     }
 
     public record Utterance(String timecode, String speaker, String text) {
+
+        /**
+         * The line above the words: "[00:12] Speaker 1", or whichever half of
+         * that survived the export options, or nothing at all.
+         *
+         * <p>Here rather than in each renderer because all four had the same
+         * "[time] speaker" concatenation hard-coded, and making timestamps and
+         * names optional would otherwise have meant writing the same three-way
+         * conditional four times and keeping them in step.
+         */
+        public String label() {
+            boolean hasTime = timecode != null && !timecode.isBlank();
+            boolean hasSpeaker = speaker != null && !speaker.isBlank();
+            if (hasTime && hasSpeaker) {
+                return "[" + timecode + "] " + speaker;
+            }
+            if (hasTime) {
+                return "[" + timecode + "]";
+            }
+            return hasSpeaker ? speaker : "";
+        }
     }
 }

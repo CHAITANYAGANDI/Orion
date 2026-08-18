@@ -96,7 +96,7 @@ class TranslationServiceTest {
                 new SummarySection("outline", "Walkthrough", "outline", "",
                         List.of(),
                         List.of(new SummarySection.OutlineGroup("Billing",
-                                List.of("Stripe won on fees"))))));
+                                List.of("Stripe won on fees"), 42.0)))));
         when(summaries.findFirstByMeetingIdOrderByCreatedAtDesc(MEETING))
                 .thenReturn(Optional.of(summary));
 

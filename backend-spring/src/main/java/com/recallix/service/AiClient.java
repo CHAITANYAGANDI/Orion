@@ -297,7 +297,13 @@ public class AiClient {
                         gb.add(b.asText());
                     }
                 }
-                groups.add(new SummarySection.OutlineGroup(text(g, "heading"), gb));
+                // Absent whenever the ai-service could not place the topic
+                // in the transcript, which is a normal outcome rather than a
+                // fault — see SummarySection.OutlineGroup.
+                Double startSeconds = g.hasNonNull("startSeconds")
+                        ? g.get("startSeconds").asDouble()
+                        : null;
+                groups.add(new SummarySection.OutlineGroup(text(g, "heading"), gb, startSeconds));
             }
         }
         return new SummarySection(

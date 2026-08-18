@@ -18,16 +18,18 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Home, Sparkles, Plug, Menu, Mic, Search, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RecordingProvider, useRecording } from "@/lib/recording-context";
-import { formatDuration } from "@/lib/format";
+import { useRecordingStartedMutation } from "@/lib/api";
+import { stopwatch } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { NotificationBell } from "@/components/notification-bell";
 import { SearchCommand } from "@/components/search-command";
 import { ImportDialog } from "@/components/import-dialog";
+import { RecordingBar } from "@/components/recording-bar";
 import { AccountMenu } from "@/components/account-menu";
 import { FolderTree } from "@/components/folder-tree";
 
@@ -58,10 +60,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
 function AppShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const recorder = useRecording();
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [searching, setSearching] = React.useState(false);
   const [importing, setImporting] = React.useState(false);
   const fullBleed = pathname === "/home" || pathname === "/ask";
+  /*
+   * How far every page has to end above the docked control bar.
+   *
+   * Measured rather than guessed. The bar is not one height: the waveform
+   * appears when recording starts, the no-audio warning stacks on top of it,
+   * and a progress bar opens underneath while saving. A fixed `pb-44` was right
+   * for one of those and cut the last line of the transcript off in the others,
+   * which is the one line somebody is reading. `--recording-bar` is published
+   * by the bar itself; the extra 3rem is so the newest words clear it rather
+   * than touch it.
+   */
+  const barShowing = recorder.state !== "idle";
+  const clearance = barShowing ? "calc(var(--recording-bar, 0px) + 3rem)" : undefined;
 
   // Ctrl/Cmd-K from anywhere. Bound on the shell rather than on the input so it
   // works while the focus is in a transcript, a chat box or nothing at all.
@@ -79,9 +95,20 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-background">
       <div className="flex">
+        {/*
+         * Sticky, not static.
+         *
+         * As a static flex item the rail scrolled away with the page, so on any
+         * long document — a transcript, most of all — navigating meant
+         * scrolling back to the top first. `self-start` is the part that is
+         * easy to miss: a flex item stretches to the height of the row by
+         * default, and an element already as tall as its container has nothing
+         * to stick to, so `sticky` silently does nothing without it.
+         */}
         <aside
           className={cn(
-            "fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r bg-card transition-transform lg:translate-x-0 lg:static lg:z-auto",
+            "fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r bg-card transition-transform",
+            "lg:sticky lg:top-0 lg:z-auto lg:h-screen lg:translate-x-0 lg:self-start lg:overflow-y-auto",
             mobileOpen ? "translate-x-0" : "-translate-x-full",
           )}
         >
@@ -154,7 +181,8 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
               {/* A dialog rather than a route: a file arrives more often than
                   anything else creates a meeting, and it should not cost
                   leaving whatever is on screen. /upload still exists for the
-                  fuller form — project, YouTube link — and for direct links. */}
+                  fuller form — filing straight into a project — and for direct
+                  links. */}
               <Button
                 variant="outline"
                 size="sm"
@@ -164,12 +192,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
                 <Upload className="h-4 w-4" />
                 <span className="hidden sm:inline">Import</span>
               </Button>
-              <Button size="sm" className="gap-2" asChild>
-                <Link href="/record">
-                  <Mic className="h-4 w-4" />
-                  <span className="hidden sm:inline">Record</span>
-                </Link>
-              </Button>
+              <RecordButton />
               <NotificationBell />
               <ThemeToggle />
             </div>
@@ -179,9 +202,11 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
               the viewport unpadded. Everything else is a document and reads
               better in a measured column. */}
           {fullBleed ? (
-            <main className="flex-1">{children}</main>
+            <main className="flex-1" style={{ paddingBottom: clearance }}>
+              {children}
+            </main>
           ) : (
-            <main className="flex-1 p-4 lg:p-8">
+            <main className="flex-1 p-4 lg:p-8" style={{ paddingBottom: clearance }}>
               <div className="mx-auto w-full max-w-6xl">{children}</div>
             </main>
           )}
@@ -190,7 +215,52 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
 
       <SearchCommand open={searching} onOpenChange={setSearching} />
       <ImportDialog open={importing} onOpenChange={setImporting} />
+      {/* Rendered by the shell, not the record page, for the same reason the
+          recorder is: it has to survive the navigation it is telling you is
+          safe to make. Renders nothing when there is no recording. */}
+      <RecordingBar />
     </div>
+  );
+}
+
+/**
+ * Record, meaning record.
+ *
+ * This was a link to a page that asked two questions before opening a
+ * microphone. Both are gone: the capture mode had one answer left, and the
+ * consent tick — a legal requirement in two-party-consent jurisdictions and
+ * under GDPR — was removed on request. The button now does the thing it is
+ * named after, which is the only defensible reading of a button called Record.
+ *
+ * One consequence is carried through rather than papered over: nothing is
+ * asserted about consent any more, so nothing is claimed about it. See where
+ * the meeting is created in components/recording-bar.tsx.
+ *
+ * The route is pushed before the microphone is asked for, so the page is on
+ * screen behind the browser's permission prompt and it is obvious what is
+ * being asked for and by whom.
+ */
+function RecordButton() {
+  const recorder = useRecording();
+  const router = useRouter();
+  const [announceRecording] = useRecordingStartedMutation();
+
+  function onRecord() {
+    router.push("/record");
+    if (recorder.state !== "idle") return;
+    void recorder.start().then(() => {
+      // The server cannot observe a microphone, and the point of telling it is
+      // the account's other devices. Fired and forgotten: a notification that
+      // could not be written must never be why a recording did not start.
+      void announceRecording();
+    });
+  }
+
+  return (
+    <Button size="sm" className="gap-2" onClick={onRecord}>
+      <Mic className="h-4 w-4" />
+      <span className="hidden sm:inline">Record</span>
+    </Button>
   );
 }
 
@@ -242,7 +312,7 @@ function RecordingIndicator() {
       ) : (
         <>
           <span className="hidden sm:inline">{paused ? "Paused" : "Recording"}</span>
-          <span className="font-mono tabular-nums">{formatDuration(recorder.elapsed)}</span>
+          <span className="font-mono tabular-nums">{stopwatch(recorder.elapsed)}</span>
         </>
       )}
     </Link>

@@ -3,64 +3,51 @@
 /**
  * Record a live meeting from the browser.
  *
- * Two kinds of meeting, two capture modes. An online meeting mixes the meeting
- * tab's audio (the other participants) with your microphone; an in-person one
- * is the microphone alone, since everybody is already in the room. Either way
- * the result goes down the same presigned-upload → create-meeting path the
- * upload page uses, so processing is identical from there on.
+ * One source: the microphone. There was a second mode that also captured the
+ * audio of another tab, for meetings happening inside the browser, and it is
+ * gone — see lib/use-recorder.ts for why. What is left needs no choosing, which
+ * is most of the reason the page in front of it got shorter.
  *
- * The recorder itself lives in the app shell rather than here, so navigating
- * away mid-meeting no longer destroys the recording. This page is a view onto
- * it: mount, unmount, come back, and a running recording is still running.
+ * The result goes down the same presigned-upload → create-meeting path the
+ * import dialog uses, so processing is identical from there on.
+ *
+ * Nothing is asked before the microphone opens. There were two questions —
+ * which of two capture modes, and whether the room had been told — and both
+ * have been removed: the first had one answer left, the second on request. What
+ * remains before a recording is a single button, and Record in the header skips
+ * even that by starting on the way here.
+ *
+ * The consent tick going means Recallix no longer has anything to say about
+ * consent for a recording, and says nothing rather than something convenient.
+ * See where the meeting is created in components/recording-bar.tsx.
+ *
+ * The recorder itself lives in the shell too, so navigating away mid-meeting no
+ * longer destroys the recording. This page is a view onto it: mount, unmount,
+ * come back, and a running recording is still running.
  */
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { toast } from "sonner";
 import {
   Mic,
-  Square,
-  Pause,
-  Play,
   Loader2,
-  UploadCloud,
   AlertTriangle,
-  ShieldCheck,
-  RotateCcw,
-  Volume2,
-  MonitorSpeaker,
-  Users,
-  Copy,
-  Check,
+  CalendarDays,
+  User,
+  FileText,
 } from "lucide-react";
-import {
-  useCreateUploadUrlMutation,
-  useCreateMeetingMutation,
-  useRecordingStartedMutation,
-} from "@/lib/api";
-import { useRecording } from "@/lib/recording-context";
-import { RECORDING_ANNOUNCEMENT } from "@/lib/privacy";
-import type { CaptureMode } from "@/lib/use-recorder";
+import { useRecordingStartedMutation, useGetPreferencesQuery } from "@/lib/api";
+import { useRecording, useRecordingSession } from "@/lib/recording-context";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { formatDuration } from "@/lib/format";
+import { defaultRecordingTitle } from "@/components/recording-bar";
+import { stopwatch } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-type Phase = "idle" | "uploading" | "creating";
-
 export default function RecordPage() {
-  const router = useRouter();
   const recorder = useRecording();
-  const [createUploadUrl] = useCreateUploadUrlMutation();
-  const [createMeeting] = useCreateMeetingMutation();
   const [announceRecording] = useRecordingStartedMutation();
 
-  const [consented, setConsented] = React.useState(false);
-  const [mode, setMode] = React.useState<CaptureMode>("online");
-  const [phase, setPhase] = React.useState<Phase>("idle");
-  const [progress, setProgress] = React.useState(0);
+  const started = recorder.state !== "idle";
 
   /**
    * Begin, and tell the server we did.
@@ -71,83 +58,16 @@ export default function RecordPage() {
    * could not be written must never be the reason a recording did not start.
    */
   async function onStart() {
-    await recorder.start(mode);
+    await recorder.start();
     void announceRecording();
   }
 
-  const busy = phase !== "idle";
-  const live = recorder.state === "recording" || recorder.state === "paused";
-
-  /**
-   * Whether the room was told.
-   *
-   * Recording cannot start without the tick, so a recording that exists is
-   * proof one was given — which matters because this page unmounts when you
-   * navigate away and comes back with `consented` reset to false. Without this
-   * the meeting would be filed as "not asserted" purely because somebody looked
-   * something up mid-call.
-   */
-  const consentGiven = consented || live || recorder.state === "stopped";
-  // Once a recording exists, the mode it was actually captured in is the truth.
-  // The local picker only governs the *next* one — which matters when you come
-  // back to this page mid-recording and local state has reset to its default.
-  const effectiveMode: CaptureMode =
-    live || recorder.state === "stopped" ? recorder.mode : mode;
-
-  async function handleSave() {
-    if (!recorder.result) return;
-    const { file, durationSeconds } = recorder.result;
-    try {
-      setPhase("uploading");
-      setProgress(5);
-      const presign = await createUploadUrl({
-        filename: file.name,
-        contentType: file.type,
-        sizeBytes: file.size,
-      }).unwrap();
-
-      await putWithProgress(presign.uploadUrl, file, (pct) => setProgress(Math.max(5, pct)));
-
-      setPhase("creating");
-      // A title is sent here — unlike upload — because the recorder's filename
-      // is `recording-1755084000000.webm`, which is not a name for anything.
-      const meeting = await createMeeting({
-        objectKey: presign.objectKey,
-        title: defaultTitle(),
-        contentType: file.type,
-        durationSeconds: durationSeconds || undefined,
-        // Kept with the meeting rather than forgotten the moment it enabled the
-        // button. It is the only record that anybody was asked, and the only
-        // thing the privacy page can honestly say about how this was captured.
-        consentConfirmed: consentGiven,
-        // Says which of the two clients this was, and nothing more. It is what
-        // lets "email me my meeting summaries" mean recordings without also
-        // meaning every file somebody imports. Unconditional, unlike consent
-        // above: a recording made without ticking that box is still a recording.
-        recorded: true,
-      }).unwrap();
-
-      toast.success("Recording saved — processing started.");
-      router.push(`/meetings/${meeting.id}`);
-    } catch (err) {
-      setPhase("idle");
-      setProgress(0);
-      toast.error(errorMessage(err));
-    }
-  }
-
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <div>
-        <h1 className="flex items-center gap-2 text-2xl font-semibold">
-          <Mic className="h-6 w-6 text-primary" /> Record a meeting
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Recording keeps running while you move around Recallix — the timer in
-          the header follows you. Keep this browser tab open, though: closing or
-          reloading it loses the audio.
-        </p>
-      </div>
+    // Clearance for the docked control bar is added by the shell, which knows
+    // whether one is showing; adding it again here would leave a gap under the
+    // setup, where there is no bar.
+    <div className="mx-auto max-w-3xl space-y-6">
+      <NoteHeading startedAt={recorder.startedAt} started={started} />
 
       {!recorder.supported && (
         <Notice tone="error" icon={AlertTriangle}>
@@ -159,237 +79,274 @@ export default function RecordPage() {
         </Notice>
       )}
 
-      {/* Only the online path needs tab audio, which Safari and Firefox do not
-          provide. In-person recording is plain getUserMedia and works
-          everywhere, so this warning is scoped to the mode that suffers. */}
-      {recorder.supported && effectiveMode === "online" && !live && (
-        <p className="text-xs text-muted-foreground">
-          Capturing tab audio needs Chrome or Edge — Safari and Firefox can only
-          record your microphone. In-person recording works in any browser.
+      {recorder.error && (
+        <Notice tone="error" icon={AlertTriangle}>
+          {recorder.error}
+        </Notice>
+      )}
+
+      {started ? (
+        <InProgress state={recorder.state} />
+      ) : (
+        <Idle supported={recorder.supported} onStart={() => void onStart()} />
+      )}
+    </div>
+  );
+}
+
+/* --------------------------------- pieces -------------------------------- */
+
+/**
+ * What this is going to be called, when it happened, and whose it is.
+ *
+ * The title is the one Recallix will actually save under, shown rather than
+ * asked for. A recording has no name until somebody has heard it, and a text
+ * field here would be a question asked at the only moment nobody can answer it
+ * — the meeting has not happened yet.
+ */
+function NoteHeading({ startedAt, started }: { startedAt: Date | null; started: boolean }) {
+  const prefs = useGetPreferencesQuery();
+  const { title, setTitle } = useRecordingSession();
+  const owner = prefs.data?.displayName?.trim();
+
+  // Fixed at the point the recording began, so the heading does not tick over
+  // while the meeting runs. Before that there is nothing to date.
+  const when = startedAt;
+
+  return (
+    <div className="space-y-2 border-b pb-4">
+      {/*
+       * Optional, and empty rather than pre-filled.
+       *
+       * The old heading printed the name the recording would be saved under,
+       * which was honest and useless: the one thing worth writing down at the
+       * start of a meeting is what the meeting is, and that was the one thing
+       * there was nowhere to put. Left blank it falls back to the date, so
+       * nobody is made to name a call before it has happened — but somebody who
+       * knows it is the Tuesday design review can say so while it is still
+       * true, instead of hunting for the meeting afterwards to rename it.
+       */}
+      <label className="sr-only" htmlFor="recording-title">
+        Name this recording
+      </label>
+      <input
+        id="recording-title"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        placeholder={started ? defaultRecordingTitle(when ?? new Date()) : "New recording"}
+        className={cn(
+          "w-full rounded-lg border-2 border-transparent bg-transparent px-3 py-2",
+          "text-2xl font-semibold tracking-tight outline-none transition-colors",
+          "placeholder:font-normal placeholder:text-muted-foreground",
+          "hover:border-input focus:border-primary focus:bg-background",
+        )}
+      />
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-muted-foreground">
+        <span className="flex items-center gap-1.5">
+          <CalendarDays className="h-4 w-4" />
+          {when ? when.toLocaleString() : "Not started"}
+        </span>
+        {/* Only shown once it is known. "Owner: —" is worse than no line: it
+            reads as a missing value rather than a name nobody has set. */}
+        {owner && (
+          <span className="flex items-center gap-1.5">
+            <User className="h-4 w-4" />
+            Owner: {owner}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The body of a meeting that is being recorded.
+ *
+ * It says the transcript is not coming yet, because it is not. Recallix
+ * transcribes after Stop — the audio is captured in the browser, uploaded, and
+ * sent through the pipeline as one file. An empty pane that looked like it was
+ * waiting for words would be a promise of live captions the product does not
+ * make, and the person watching it would conclude their microphone was broken.
+ */
+function InProgress({ state }: { state: string }) {
+  const { transcript } = useRecordingSession();
+  const hasWords = transcript.phrases.length > 0 || transcript.interim !== "";
+
+  // Kept, and only this one, because the browser's permission prompt is modal
+  // and a page with nothing on it behind that prompt gives no clue what is
+  // being asked for or why.
+  if (state === "requesting") {
+    return (
+      <Empty>
+        <Loader2 className="mx-auto h-7 w-7 animate-spin text-muted-foreground" />
+        <p className="mt-3 font-medium">Waiting for permission…</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Allow the microphone to start recording.
+        </p>
+      </Empty>
+    );
+  }
+
+  if (state === "stopped") {
+    return (
+      <div className="space-y-4">
+        {/* The words stay up after Stop. They are the only reminder of what was
+            just said, and they are about to be thrown away — clearing the pane
+            at the moment somebody is deciding whether to save or discard takes
+            away the thing that decision is about. */}
+        {hasWords && <Phrases />}
+        <Empty>
+          <FileText className="mx-auto h-7 w-7 text-muted-foreground" />
+          <p className="mt-3 font-medium">Recording finished</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Save it below to transcribe it. Nothing has left this browser yet, so
+            closing the tab now would lose the audio.
+          </p>
+        </Empty>
+      </div>
+    );
+  }
+
+  /*
+   * Recording, and nothing to say about it.
+   *
+   * There was a panel here announcing "Recording" over a pulsing microphone,
+   * and under it either an explanation that the transcript comes later or an
+   * invitation to switch live text on. It is gone. Every word of it was already
+   * on screen — the timer is running in the bar, the waveform is moving, the
+   * Stop button is red, and the live text toggle is right there — so the panel
+   * restated what the controls were already saying, in the space the words are
+   * about to occupy. Empty until there is something to put here is the point:
+   * this is a page for a meeting, and the meeting has not said anything yet.
+   */
+  return (
+    <div className="space-y-4">
+      {hasWords && <Phrases />}
+
+      {state === "paused" && hasWords && (
+        <p className="text-center text-sm text-muted-foreground">
+          Paused — nothing is being recorded or transcribed.
         </p>
       )}
 
-      {/* Consent is a legal requirement in two-party-consent jurisdictions and
-          under GDPR — not a nicety, so recording is gated on it. */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <ShieldCheck className="h-4 w-4 text-primary" /> Before you record
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            Many places require everyone on a call to know it&apos;s being recorded,
-            and some require their explicit agreement. Tell your participants
-            before you start.
-          </p>
+      {/* A line, not a panel: live text failing says nothing about the
+          recording, and dressing it up as a status board implies otherwise. */}
+      {transcript.error && (
+        <p className="text-center text-xs text-muted-foreground">{transcript.error}</p>
+      )}
+    </div>
+  );
+}
 
-          {/* Recallix has no bot to announce itself in a participant list, so
-              the announcement has to come from the person recording. Handing
-              them the sentence is the difference between a policy and a thing
-              that actually gets said. */}
-          <Announcement />
+/**
+ * The live text.
+ *
+ * Grouped into phrases with a timestamp apiece, which is what the finished
+ * transcript looks like — so this reads as an early draft of a thing the user
+ * will see again rather than as a different feature. The in-progress phrase is
+ * dimmed because it is going to change, sometimes completely, and presenting a
+ * guess in the same weight as a settled line is how somebody comes to believe
+ * the transcript got a name wrong when it has not been written yet.
+ */
+function Phrases() {
+  const { transcript } = useRecordingSession();
+  const endRef = React.useRef<HTMLDivElement>(null);
 
-          <label className="flex cursor-pointer items-start gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={consentGiven}
-              disabled={live}
-              onChange={(e) => setConsented(e.target.checked)}
-              className="mt-0.5 h-4 w-4 shrink-0 accent-[hsl(var(--primary))]"
-            />
-            <span>
-              I have informed everyone in this meeting that it is being recorded,
-              and have their consent where required.
-            </span>
-          </label>
-          <p className="text-xs text-muted-foreground">
-            Ticking this is kept with the meeting, so months later there is a
-            record that you asked. It is your statement — Recallix cannot check
-            it.
-          </p>
-        </CardContent>
-      </Card>
+  React.useEffect(() => {
+    endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+  }, [transcript.phrases.length, transcript.interim]);
 
-      {/* Capture mode. Locked once recording starts: the audio graph is built
-          at start, so switching mid-recording would mean discarding what has
-          been captured — which is never what someone reaching for this wants. */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Where is everyone?</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-2">
-          <ModeOption
-            icon={MonitorSpeaker}
-            label="Online meeting"
-            hint="Zoom, Meet or Teams in another tab. Records their audio and your mic."
-            selected={effectiveMode === "online"}
-            disabled={live || recorder.state === "requesting"}
-            onSelect={() => setMode("online")}
-          />
-          <ModeOption
-            icon={Users}
-            label="In person"
-            hint="Everyone's in the room. Records the microphone only — no screen sharing."
-            selected={effectiveMode === "in-person"}
-            disabled={live || recorder.state === "requesting"}
-            onSelect={() => setMode("in-person")}
-          />
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="space-y-5 py-6">
-          {/* Recorder */}
-          <div className="flex flex-col items-center gap-4 rounded-lg border bg-muted/30 py-8">
-            <LevelRing level={recorder.level} active={recorder.state === "recording"} />
-
-            <div className="text-center">
-              <p className="font-mono text-3xl tabular-nums">
-                {formatDuration(recorder.elapsed)}
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {recorder.state === "requesting"
-                  ? "Waiting for permissions…"
-                  : recorder.state === "recording"
-                    ? "Recording"
-                    : recorder.state === "paused"
-                      ? "Paused"
-                      : recorder.state === "stopped"
-                        ? "Ready to save"
-                        : "Not recording"}
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              {recorder.state === "idle" && (
-                <Button
-                  onClick={() => void onStart()}
-                  disabled={!consentGiven || !recorder.supported}
-                  className="gap-2"
-                >
-                  <Mic className="h-4 w-4" />
-                  {mode === "in-person" ? "Start recording the room" : "Start recording"}
-                </Button>
-              )}
-              {recorder.state === "recording" && (
-                <>
-                  <Button variant="outline" onClick={recorder.pause} className="gap-2">
-                    <Pause className="h-4 w-4" /> Pause
-                  </Button>
-                  <Button variant="destructive" onClick={recorder.stop} className="gap-2">
-                    <Square className="h-4 w-4" /> Stop
-                  </Button>
-                </>
-              )}
-              {recorder.state === "paused" && (
-                <>
-                  <Button variant="outline" onClick={recorder.resume} className="gap-2">
-                    <Play className="h-4 w-4" /> Resume
-                  </Button>
-                  <Button variant="destructive" onClick={recorder.stop} className="gap-2">
-                    <Square className="h-4 w-4" /> Stop
-                  </Button>
-                </>
-              )}
-              {recorder.state === "stopped" && !busy && (
-                <Button variant="outline" onClick={recorder.reset} className="gap-2">
-                  <RotateCcw className="h-4 w-4" /> Discard & re-record
-                </Button>
-              )}
-              {recorder.state === "requesting" && (
-                <Button disabled className="gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" /> Requesting…
-                </Button>
-              )}
-            </div>
-
-            {!consentGiven && recorder.state === "idle" && (
-              <p className="text-xs text-muted-foreground">
-                Confirm the notice above to enable recording.
-              </p>
-            )}
+  return (
+    <div className="space-y-5">
+      {transcript.phrases.map((phrase) => (
+        <div key={phrase.id} className="flex gap-3">
+          {/* One generic speaker. Who said what is decided by diarisation, on
+              the server, after the upload — inventing speaker labels here would
+              mean contradicting the real transcript later. */}
+          <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted">
+            <User className="h-3.5 w-3.5 text-muted-foreground" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <span className="text-xs text-muted-foreground">{stopwatch(phrase.at)}</span>
+            <p className="mt-0.5 text-[15px] leading-relaxed">{phrase.text}</p>
           </div>
+        </div>
+      ))}
 
-          {recorder.error && (
-            <Notice tone="error" icon={AlertTriangle}>
-              {recorder.error}
-            </Notice>
-          )}
+      {transcript.interim && (
+        <div className="flex gap-3">
+          <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted">
+            <User className="h-3.5 w-3.5 text-muted-foreground" />
+          </span>
+          <p className="mt-5 min-w-0 flex-1 text-[15px] leading-relaxed text-muted-foreground">
+            {transcript.interim}
+          </p>
+        </div>
+      )}
 
-          {/* The single most common failure of the online path: user shared a
-              window, or declined the share, so only their own voice was
-              captured. In person that is the whole point, so warning about it
-              would be telling someone their deliberate choice went wrong. */}
-          {live && effectiveMode === "online" && !recorder.hasTabAudio && (
-            <Notice tone="warn" icon={Volume2}>
-              <strong>Microphone only.</strong> No tab audio is being captured, so
-              other participants won&apos;t be recorded. Stop, start again, choose
-              the <em>tab</em> running your meeting, and tick “Also share tab
-              audio”. If everyone is in the room with you, switch to{" "}
-              <strong>In person</strong> instead.
-            </Notice>
-          )}
+      <p className="border-t pt-3 text-xs text-muted-foreground">
+        A rough preview from your browser&apos;s speech service, not saved.
+        Recallix writes the real transcript — punctuated, with speakers
+        separated — after you stop.
+      </p>
 
-          {recorder.state === "stopped" &&
-            recorder.result &&
-            recorder.result.mode === "online" &&
-            !recorder.result.hadTabAudio && (
-              <Notice tone="warn" icon={Volume2}>
-                This recording contains your microphone only — other participants
-                were not captured.
-              </Notice>
-            )}
+      {/*
+       * The scroll target, and the reason it carries a margin.
+       *
+       * `scrollIntoView` aligns to the viewport, which has no idea its bottom
+       * edge is under a fixed control bar — so the newest line, the one this
+       * exists to reveal, was scrolled to exactly where the bar covers it.
+       * `scroll-margin-bottom` is the one property that says otherwise, and it
+       * spends the same measured bar height the page padding does.
+       */}
+      <div
+        ref={endRef}
+        style={{ scrollMarginBottom: "calc(var(--recording-bar, 0px) + 3rem)" }}
+      />
+    </div>
+  );
+}
 
-          {/* Details, shown once there's something to save */}
-          {recorder.state === "stopped" && recorder.result && (
-            <div className="space-y-4">
-              <div className="rounded-md border p-3 text-sm">
-                <span className="font-medium">
-                  {(recorder.result.file.size / 1024 / 1024).toFixed(1)} MB
-                </span>{" "}
-                <span className="text-muted-foreground">
-                  · {formatDuration(recorder.result.durationSeconds)}
-                  {recorder.result.mode === "in-person"
-                    ? " · in-person (mic)"
-                    : recorder.result.hadTabAudio
-                      ? " · tab audio + mic"
-                      : " · mic only"}
-                </span>
-              </div>
+function Empty({ children }: { children: React.ReactNode }) {
+  return <div className="rounded-lg border border-dashed p-8 text-center">{children}</div>;
+}
 
-              {/* Saved as "Recording — <date>"; renamed on the meeting page,
-                  where you can see what it turned out to be. Asking for a title
-                  here means asking before the recording has been listened to. */}
-              <p className="text-sm text-muted-foreground">
-                Saves as <span className="text-foreground">{defaultTitle()}</span> — you
-                can rename it on the meeting page.
-              </p>
+/**
+ * What is left before a recording: a button.
+ *
+ * Reached by opening /record directly — the Record button in the header starts
+ * on its way here, so most people never see this. It stays because a bare page
+ * offering no way to begin would be a dead end for anyone who bookmarked the
+ * route.
+ */
+function Idle({ supported, onStart }: { supported: boolean; onStart: () => void }) {
+  return (
+    <div className="space-y-4">
+      {/* Two facts, not a form. Neither asks for anything, and between them
+          they cover what somebody would otherwise find out too late: what a
+          microphone can hear, and who else hears it. */}
+      <p className="text-sm text-muted-foreground">
+        Records this device&apos;s microphone — everything it can pick up in the
+        room. Anyone joining through headphones or an earpiece won&apos;t be on
+        the recording.
+      </p>
+      <p className="text-sm text-muted-foreground">
+        Your browser transcribes as you speak so you can follow along. That
+        preview comes from the browser&apos;s own speech service — in Chrome the
+        audio goes to Google — and is not saved. Your transcript is written
+        afterwards by the provider named on the{" "}
+        <Link
+          href="/settings/security"
+          className="underline underline-offset-2 hover:text-foreground"
+        >
+          Security tab
+        </Link>
+        .
+      </p>
 
-              {busy && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">
-                      {phase === "uploading" ? "Uploading…" : "Starting processing…"}
-                    </span>
-                    <span>{progress}%</span>
-                  </div>
-                  <Progress value={phase === "creating" ? 100 : progress} />
-                </div>
-              )}
-
-              <Button onClick={handleSave} disabled={busy} className="w-full gap-2">
-                {busy ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <UploadCloud className="h-4 w-4" />
-                )}
-                {busy ? "Working…" : "Save & process"}
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <Button size="lg" className="w-full gap-2" disabled={!supported} onClick={onStart}>
+        <Mic className="h-4 w-4" /> Start recording
+      </Button>
 
       <p className="text-center text-xs text-muted-foreground">
         Already have a file?{" "}
@@ -397,92 +354,6 @@ export default function RecordPage() {
           Upload a recording instead
         </Link>
       </p>
-    </div>
-  );
-}
-
-/* --------------------------------- pieces -------------------------------- */
-
-/** The sentence to say out loud, and a button that puts it on the clipboard. */
-function Announcement() {
-  const [copied, setCopied] = React.useState(false);
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(RECORDING_ANNOUNCEMENT);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      toast.error("Couldn't copy — select the text instead.");
-    }
-  }
-
-  return (
-    <div className="rounded-md border bg-muted/40 p-3">
-      <p className="text-sm italic">&ldquo;{RECORDING_ANNOUNCEMENT}&rdquo;</p>
-      <Button variant="ghost" size="sm" className="mt-2 gap-2" onClick={() => void copy()}>
-        {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-        {copied ? "Copied" : "Copy to paste in the chat"}
-      </Button>
-    </div>
-  );
-}
-
-function ModeOption({
-  icon: Icon,
-  label,
-  hint,
-  selected,
-  disabled,
-  onSelect,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  hint: string;
-  selected: boolean;
-  disabled: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      disabled={disabled}
-      aria-pressed={selected}
-      className={cn(
-        "flex items-start gap-3 rounded-lg border p-3 text-left transition-colors",
-        selected ? "border-primary bg-primary/5" : "hover:bg-accent",
-        disabled && "cursor-not-allowed opacity-60 hover:bg-transparent"
-      )}
-    >
-      <Icon className={cn("mt-0.5 h-4 w-4 shrink-0", selected && "text-primary")} />
-      <span>
-        <span className="block text-sm font-medium">{label}</span>
-        <span className="mt-0.5 block text-xs text-muted-foreground">{hint}</span>
-      </span>
-    </button>
-  );
-}
-
-function LevelRing({ level, active }: { level: number; active: boolean }) {
-  const scale = 1 + (active ? level * 0.35 : 0);
-  return (
-    <div className="relative flex h-24 w-24 items-center justify-center">
-      <div
-        className={cn(
-          "absolute inset-0 rounded-full transition-colors",
-          active ? "bg-destructive/15" : "bg-muted"
-        )}
-        style={{ transform: `scale(${scale})`, transition: "transform 80ms linear" }}
-      />
-      <div
-        className={cn(
-          "relative flex h-16 w-16 items-center justify-center rounded-full",
-          active ? "bg-destructive text-destructive-foreground" : "bg-muted-foreground/20"
-        )}
-      >
-        <Mic className="h-6 w-6" />
-      </div>
     </div>
   );
 }
@@ -502,47 +373,11 @@ function Notice({
         "flex items-start gap-2 rounded-md border p-3 text-sm",
         tone === "error"
           ? "border-destructive/40 bg-destructive/10 text-destructive"
-          : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+          : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400",
       )}
     >
       <Icon className="mt-0.5 h-4 w-4 shrink-0" />
       <div>{children}</div>
     </div>
   );
-}
-
-/* --------------------------------- helpers ------------------------------- */
-
-function defaultTitle(): string {
-  return `Recording — ${new Date().toLocaleString()}`;
-}
-
-function putWithProgress(
-  url: string,
-  file: File,
-  onProgress: (pct: number) => void
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("PUT", url);
-    xhr.setRequestHeader("Content-Type", file.type);
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
-    };
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) resolve();
-      else reject(new Error(`Upload failed (${xhr.status})`));
-    };
-    xhr.onerror = () => reject(new Error("Upload failed — network or CORS error"));
-    xhr.send(file);
-  });
-}
-
-function errorMessage(err: unknown): string {
-  if (typeof err === "object" && err && "data" in err) {
-    const data = (err as { data?: { message?: string } }).data;
-    if (data?.message) return data.message;
-  }
-  if (err instanceof Error) return err.message;
-  return "Something went wrong";
 }

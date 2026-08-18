@@ -181,9 +181,9 @@ export default function UploadPage() {
               className="h-9 text-sm"
             />
 
-            {/* Live capture lives on its own page: it records the meeting tab as
-                well as the microphone, which is the difference between capturing
-                a meeting and capturing only your own half of it. */}
+            {/* Live capture lives on its own page, which has the consent
+                notice and the announcement to read out — neither of which
+                belongs on a form for a file that has already been recorded. */}
             <div className="flex items-center gap-2 rounded-md border bg-muted/30 p-3 text-sm">
               <Mic className="h-4 w-4 shrink-0 text-primary" />
               <span className="text-muted-foreground">
@@ -191,7 +191,7 @@ export default function UploadPage() {
                 <Link href="/record" className="font-medium text-foreground underline underline-offset-2">
                   Record it live
                 </Link>{" "}
-                — captures the meeting tab plus your mic.
+                — records this device&apos;s microphone.
               </span>
             </div>
 

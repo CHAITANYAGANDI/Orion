@@ -356,7 +356,10 @@ public class TranslationService {
                 for (String bullet : group.bulletsOrEmpty()) {
                     groupBullets.add(batch.add(bullet));
                 }
-                groups.add(new GroupSlots(batch.add(group.heading()), groupBullets));
+                // Carried through the slot rather than translated: it is a
+                // position in the recording, not prose.
+                groups.add(new GroupSlots(
+                        batch.add(group.heading()), groupBullets, group.startSeconds()));
             }
             return new SectionSlots(section, title, text, bullets, groups);
         }
@@ -371,13 +374,18 @@ public class TranslationService {
                     batch.get(text),
                     batch.getAll(bullets),
                     groups.stream()
+                            // The timestamp survives translation untouched: it
+                            // is a position in the recording, and the recording
+                            // is in one language whatever the brief is read in.
                             .map(g -> new SummarySection.OutlineGroup(
-                                    batch.get(g.heading()), batch.getAll(g.bullets())))
+                                    batch.get(g.heading()),
+                                    batch.getAll(g.bullets()),
+                                    g.startSeconds()))
                             .toList());
         }
     }
 
-    private record GroupSlots(int heading, List<Integer> bullets) {
+    private record GroupSlots(int heading, List<Integer> bullets, Double startSeconds) {
     }
 
     /** Titles and spoken deadlines are translated; a person's name is not. */

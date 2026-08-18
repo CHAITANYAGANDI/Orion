@@ -1,4 +1,10 @@
-"""Verify the model's quotations against the transcript, and timestamp them.
+"""Match what the model claims was said back against the transcript.
+
+Two callers, one idea. `verify_quotes` checks quotations; `locate` finds where
+an outline topic began. Both exist because a model asked about a transcript will
+answer confidently either way, and only one of those answers can be checked.
+
+Quotations first.
 
 A quotation is the one part of a summary that claims to be *exact*. Everything
 else in a brief is understood to be a paraphrase, and a reader forgives a loose
@@ -14,6 +20,15 @@ normalised (case, whitespace, the punctuation models routinely change) but not
 fuzzy: a paraphrase must fail, or the check is theatre. What survives gets its
 speaker and timestamp from the segment it was found in — never from the model —
 so the quote is clickable to the moment it was said.
+
+The outline works the same way for the same reason. Clicking a heading jumps to
+that topic in the recording, which means the heading needs a timestamp, and the
+transcript the model is given carries no times at all — so a number it returned
+would be invented, and would send the reader to the wrong minute with total
+confidence. Instead it returns a short verbatim line marking where the topic
+started, `locate` finds that line, and the *segment's* timestamp is used. A
+heading whose line cannot be found gets no timestamp and is rendered as plain
+text, which is the honest failure: no link beats a wrong one.
 """
 
 from __future__ import annotations
@@ -130,6 +145,52 @@ def verify_quotes(candidates: list[str], segments: list) -> list[dict]:
 
     verified.sort(key=lambda q: q["start"])
     return verified
+
+
+def locate(candidate: str, segments: list) -> float | None:
+    """The start of the segment containing `candidate`, or None.
+
+    Same normalisation and the same minimum length as `verify_quotes`, for the
+    same reason: "Yes, exactly" appears in every meeting and would anchor a
+    heading to whichever minute happened to contain it first.
+    """
+    if not candidate or not segments:
+        return None
+    needle = normalise(_clean_candidate(candidate))
+    if not needle or len(needle.split()) < _MIN_WORDS:
+        return None
+
+    for segment in segments:
+        text = normalise(getattr(segment, "text", "") or "")
+        if text and needle in text:
+            return float(getattr(segment, "start", 0.0) or 0.0)
+    return None
+
+
+def anchor_outline(sections: list, segments: list) -> None:
+    """Resolve each outline group's `start_quote` into `start_seconds`.
+
+    Mutates in place, and clears the quote afterwards: it was scaffolding for
+    finding the timestamp, and shipping it onward would put an unverified claim
+    about the transcript into the API for nobody's benefit.
+    """
+    found = total = 0
+    for section in sections:
+        for group in getattr(section, "groups", []) or []:
+            quote = getattr(group, "start_quote", "") or ""
+            if not quote:
+                continue
+            total += 1
+            at = locate(quote, segments)
+            if at is not None:
+                group.start_seconds = at
+                found += 1
+            group.start_quote = ""
+
+    if total and found < total:
+        logger.info(
+            "Anchored %d of %d outline headings to the transcript.", found, total
+        )
 
 
 def _extract_span(segment_text: str, candidate: str) -> str:

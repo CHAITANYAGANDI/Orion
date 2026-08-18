@@ -22,13 +22,80 @@
 
 import * as React from "react";
 import { useRecorder, type UseRecorder } from "@/lib/use-recorder";
+import { useLiveTranscript, type UseLiveTranscript } from "@/lib/use-live-transcript";
+import { useGetPreferencesQuery } from "@/lib/api";
 
 const RecordingContext = React.createContext<UseRecorder | null>(null);
 
+/**
+ * What is being recorded, as opposed to the machinery recording it.
+ *
+ * The name somebody is typing and the words appearing under it belong to the
+ * meeting, not to the `MediaRecorder`, but they need the same thing the
+ * recorder needed: to outlive the page. A title typed on /record and lost by
+ * glancing at Home is worse than no title field, because the work disappears
+ * without anything having gone wrong.
+ */
+export interface RecordingSession {
+  /** What the user has typed, or empty for the date-stamped default. */
+  title: string;
+  setTitle: (t: string) => void;
+  transcript: UseLiveTranscript;
+}
+
+const SessionContext = React.createContext<RecordingSession | null>(null);
+
 export function RecordingProvider({ children }: { children: React.ReactNode }) {
   const recorder = useRecorder();
+  const [title, setTitle] = React.useState("");
+  // The account's transcript language, which is also what the picker in the
+  // control bar writes to — so changing it there moves the live text too.
+  // Recallix stores ISO-639-1 ("es") where the browser wants BCP-47 ("es-ES");
+  // Chrome resolves the short form to a default region, which is closer than
+  // leaving it on the page language.
+  const prefs = useGetPreferencesQuery();
+  const transcript = useLiveTranscript({
+    // Paused means paused. A recogniser still listening through a pause would
+    // put words into a meeting during the exact stretch the user stopped it
+    // from being recorded.
+    active: recorder.state === "recording",
+    elapsed: recorder.elapsed,
+    lang: prefs.data?.defaultLanguage ?? null,
+  });
+
+  // A finished session leaves nothing behind for the next one.
+  //
+  // On the *transition* back to idle, not on being idle: a title can be typed
+  // before pressing Start, and clearing whenever the recorder happens to be
+  // idle would delete it a character at a time as it was typed.
+  const idle = recorder.state === "idle";
+  const wasIdle = React.useRef(idle);
+  const clearTranscript = transcript.clear;
+  React.useEffect(() => {
+    if (idle && !wasIdle.current) {
+      setTitle("");
+      clearTranscript();
+    }
+    wasIdle.current = idle;
+  }, [idle, clearTranscript]);
+
   useUnloadGuard(recorder);
-  return <RecordingContext.Provider value={recorder}>{children}</RecordingContext.Provider>;
+  return (
+    <RecordingContext.Provider value={recorder}>
+      <SessionContext.Provider value={{ title, setTitle, transcript }}>
+        {children}
+      </SessionContext.Provider>
+    </RecordingContext.Provider>
+  );
+}
+
+/** The title and the live text for the recording in progress. */
+export function useRecordingSession(): RecordingSession {
+  const ctx = React.useContext(SessionContext);
+  if (!ctx) {
+    throw new Error("useRecordingSession must be used inside <RecordingProvider>");
+  }
+  return ctx;
 }
 
 /**

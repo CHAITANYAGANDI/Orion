@@ -303,6 +303,14 @@ export interface KnownSpeaker {
 export interface OutlineGroup {
   heading: string;
   bullets: string[];
+  /**
+   * Where this topic starts in the recording, so the heading can be clicked to
+   * hear it. Often absent, and absent is a real state rather than an error:
+   * the ai-service finds it by locating the line that opened the topic in the
+   * transcript, and a heading it cannot place gets nothing rather than a guess.
+   * Summaries written before this existed are null throughout.
+   */
+  startSeconds?: number | null;
 }
 
 /**

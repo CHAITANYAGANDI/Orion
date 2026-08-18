@@ -27,6 +27,7 @@ import {
   ChevronDown,
   ChevronRight,
   ShieldCheck,
+  ClipboardCopy,
 } from "lucide-react";
 import {
   useGetMeetingQuery,
@@ -96,6 +97,7 @@ import { AudioPlayer, useAudioController } from "@/components/audio-player";
 import { ShareDialog } from "@/components/share-dialog";
 import { MeetingTitle, MeetingTags } from "@/components/meeting-title";
 import { ProjectPicker } from "@/components/project-picker";
+import { OutlineNav } from "@/components/outline-nav";
 import { InsightsPanel } from "@/components/insights-panel";
 import { ExportDialog } from "@/components/export-dialog";
 import { copyMinutes, copySummary } from "@/lib/minutes";
@@ -169,8 +171,10 @@ export default function MeetingDetailPage() {
     nonce: number;
   } | null>(null);
 
+  // No tab switch any more: the chat lives in the rail beside the transcript,
+  // so asking about a passage no longer costs the passage. That was the whole
+  // reason this had to move the reader somewhere else.
   const askAbout = React.useCallback((text: string, send: boolean) => {
-    setTab("ask");
     setComposed({ text, send, nonce: Date.now() });
   }, []);
 
@@ -453,6 +457,24 @@ export default function MeetingDetailPage() {
               </>
             )}
             <MeetingTags id={id} tags={m.tags ?? []} />
+            {/* In the spec line, beside the facts, rather than only inside the
+                Export menu. Copying the summary is the single commonest thing
+                anybody does with one — it goes into a reply or a doc — and it
+                was two clicks behind a menu named after downloading files,
+                which is the rarer thing. It stays in the menu too, for whoever
+                already knows where it is. */}
+            {ready && (
+              <>
+                <span className="text-border" aria-hidden>/</span>
+                <button
+                  type="button"
+                  onClick={() => void onCopySummary()}
+                  className="no-print inline-flex items-center gap-1.5 uppercase tracking-wide hover:text-foreground"
+                >
+                  <ClipboardCopy className="h-3.5 w-3.5" /> Copy summary
+                </button>
+              </>
+            )}
           </div>
           {/* Filing, in the spec line rather than behind a menu: it is a fact
               about the meeting like its date, and the moment somebody realises
@@ -526,6 +548,12 @@ export default function MeetingDetailPage() {
                 open={exporting}
                 onOpenChange={setExporting}
                 meetingId={id}
+                // Handed the data the page already has, so the preview costs no
+                // request and updates the moment a tickbox moves.
+                summary={showing ? undefined : summary.data}
+                actionItems={actions.data ?? []}
+                segments={transcript.data?.segments ?? []}
+                audioContentType={m.contentType}
                 transcriptLines={transcript.data?.segments?.length ?? 0}
                 // The file is written in whatever the page is being read in, so
                 // exporting a translation you are looking at needs no second
@@ -613,21 +641,35 @@ export default function MeetingDetailPage() {
       )}
 
       {ready && (
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList variant="underline" className="flex w-full flex-wrap gap-x-6">
-            <TabsTrigger value="summary">Summary</TabsTrigger>
-            <TabsTrigger value="ask"><Sparkles className="mr-1.5 h-3.5 w-3.5" /> Ask</TabsTrigger>
-            <TabsTrigger value="actions">
-              Action items
-              {actions.data ? (
-                <span className="tabular ml-1.5 font-mono text-xs text-muted-foreground">{openActions}</span>
-              ) : null}
-            </TabsTrigger>
-            <TabsTrigger value="transcript">Transcript</TabsTrigger>
-          </TabsList>
+        /*
+         * Two columns and two tabs, where there were four tabs and one column.
+         *
+         * Ask and Action items are not places, and making them tabs meant the
+         * two things you do *while* reading — question it, and see what you
+         * agreed to — were both somewhere the reading was not. The chat is now
+         * a rail that stays put, and the action items sit under the summary
+         * they were extracted from.
+         */
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+        <Tabs value={tab} onValueChange={setTab} className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b">
+            <TabsList variant="underline" className="flex gap-x-6 border-b-0">
+              <TabsTrigger value="summary">Summary</TabsTrigger>
+              <TabsTrigger value="transcript">Transcript</TabsTrigger>
+            </TabsList>
+
+            {/* On the tab row rather than inside the summary card, because it
+                governs the whole document below it rather than any one section
+                of it. Only on Summary: it rewrites the brief, and offering it
+                over a transcript it cannot change would be a control that does
+                nothing to what is on screen. */}
+            {tab === "summary" && (
+              <TemplatePicker meetingId={id} current={summary.data?.templateSlug ?? "general"} />
+            )}
+          </div>
 
           {/* Summary + translation */}
-          <TabsContent value="summary" className="space-y-4">
+          <TabsContent value="summary" className="space-y-4 pt-4">
             <SummaryPanel
               meetingId={id}
               loading={summary.isLoading}
@@ -639,19 +681,10 @@ export default function MeetingDetailPage() {
                 putting the derived rows first would suggest they were the
                 source rather than the reading. */}
             <InsightsPanel meetingId={id} />
-          </TabsContent>
 
-          {/* Ask-the-meeting RAG chat */}
-          <TabsContent value="ask">
-            <ChatPanel
-              meetingId={id}
-              onCite={(s) => audio.seekTo(s)}
-              suggestions={summary.data?.suggestions}
-              composed={composed}
-            />
-          </TabsContent>
-
-          <TabsContent value="actions">
+            {/* Under the summary they were read out of, rather than behind a
+                tab. What somebody agreed to is the part of a meeting with
+                consequences, and a tab is a place people forget to visit. */}
             <Card>
               <CardContent className="space-y-3 pt-6">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -694,7 +727,7 @@ export default function MeetingDetailPage() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="transcript">
+          <TabsContent value="transcript" className="pt-4">
             {showing ? (
               showing.hasTranscript ? (
                 <Card>
@@ -756,7 +789,134 @@ export default function MeetingDetailPage() {
             )}
           </TabsContent>
         </Tabs>
+
+        {/* The rail. Sticky, because its whole purpose is to stay beside the
+            thing being read — a chat that scrolls away with the transcript is
+            the tab it replaced. */}
+        <aside className="w-full shrink-0 lg:sticky lg:top-20 lg:w-[22rem] xl:w-[26rem] no-print">
+          <MeetingRail
+            meetingId={id}
+            showOutline={tab === "transcript"}
+            sections={showing?.sections ?? summary.data?.sections ?? []}
+            suggestions={summary.data?.suggestions}
+            composed={composed}
+            onSeek={audio.seekTo}
+          />
+        </aside>
+        </div>
       )}
+    </div>
+  );
+}
+
+/* -------------------------------- The rail ------------------------------- */
+
+/**
+ * What sits beside the document: the chat, and — over the transcript — a way
+ * around it.
+ *
+ * The Outline tab is only offered against the transcript, and that is the point
+ * of it. Over the summary the outline is already on screen, in full, a few
+ * inches to the left; repeating it in a narrower column would be the same list
+ * twice. Over the transcript it is the only thing that makes an hour of speech
+ * navigable, because a transcript has no headings of its own.
+ */
+function MeetingRail({
+  meetingId,
+  showOutline,
+  sections,
+  suggestions,
+  composed,
+  onSeek,
+}: {
+  meetingId: string;
+  showOutline: boolean;
+  sections: SummarySection[];
+  suggestions?: string[];
+  composed: { text: string; send: boolean; nonce: number } | null;
+  onSeek: (seconds: number) => void;
+}) {
+  const [pane, setPane] = React.useState("chat");
+
+  // Falling back rather than stranding the reader on an empty tab: leaving the
+  // transcript takes the outline with it, and a rail showing nothing would look
+  // broken rather than finished.
+  React.useEffect(() => {
+    if (!showOutline && pane === "outline") setPane("chat");
+  }, [showOutline, pane]);
+
+  return (
+    <Tabs value={pane} onValueChange={setPane}>
+      <TabsList variant="underline" className="flex gap-x-6">
+        <TabsTrigger value="chat">
+          <Sparkles className="mr-1.5 h-3.5 w-3.5" /> AI Chat
+        </TabsTrigger>
+        {showOutline && <TabsTrigger value="outline">Outline</TabsTrigger>}
+      </TabsList>
+
+      <TabsContent value="chat" className="pt-4">
+        <ChatPanel
+          meetingId={meetingId}
+          onCite={onSeek}
+          suggestions={suggestions}
+          composed={composed}
+        />
+      </TabsContent>
+
+      {showOutline && (
+        <TabsContent value="outline" className="pt-4">
+          <OutlineNav sections={sections} onSeek={onSeek} />
+        </TabsContent>
+      )}
+    </Tabs>
+  );
+}
+
+/**
+ * Which template wrote the summary, and a way to have it rewritten.
+ *
+ * Its own component with its own mutation, rather than a prop drilled through
+ * the summary card, because it now sits on the tab row — outside the card
+ * entirely — and the card still has a second use for the same call in its
+ * "the transcript changed" banner.
+ */
+function TemplatePicker({ meetingId, current }: { meetingId: string; current: string }) {
+  const { data: templates } = useGetSummaryTemplatesQuery();
+  const [resummarize, { isLoading: rewriting }] = useResummarizeMutation();
+
+  if (!templates || templates.length === 0) return null;
+
+  async function onChange(slug: string) {
+    try {
+      await resummarize({ id: meetingId, template: slug }).unwrap();
+      toast.success("Summary rewritten.");
+    } catch {
+      toast.error("Could not rewrite the summary.");
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2 pb-2 no-print">
+      <span className="text-sm text-muted-foreground">Template:</span>
+      <Select value={current} onValueChange={onChange} disabled={rewriting}>
+        <SelectTrigger className="h-8 w-[170px]">
+          {rewriting ? (
+            <span className="flex items-center gap-2 text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Rewriting...
+            </span>
+          ) : (
+            <SelectValue />
+          )}
+        </SelectTrigger>
+        <SelectContent>
+          {templates.map((t) => (
+            <SelectItem key={t.slug} value={t.slug}>
+              {t.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }
@@ -771,7 +931,13 @@ export default function MeetingDetailPage() {
  * nothing under it tells the reader budget never came up, which is a finding.
  * Inferring the shape from the data would silently hide it.
  */
-function SummarySectionView({ section }: { section: SummarySection }) {
+function SummarySectionView({
+  section,
+  onSeek,
+}: {
+  section: SummarySection;
+  onSeek: (seconds: number) => void;
+}) {
   const empty =
     !section.text?.trim() &&
     section.bullets.length === 0 &&
@@ -800,7 +966,32 @@ function SummarySectionView({ section }: { section: SummarySection }) {
         <div className="space-y-4">
           {section.groups.map((g, i) => (
             <div key={i}>
-              <h4 className="mb-1.5 text-sm font-medium">{g.heading}</h4>
+              {/*
+               * A heading is a link to the moment its topic began — but only
+               * when the ai-service could actually find that moment. The rest
+               * stay plain text.
+               *
+               * The alternative, making every heading clickable and sending the
+               * unanchored ones to 0:00 or to a guess, is worse than it looks:
+               * a link that lands on the wrong minute is indistinguishable from
+               * a transcript that disagrees with its own summary, and the
+               * reader has no way to tell which of the two is broken.
+               */}
+              {g.startSeconds != null ? (
+                <button
+                  type="button"
+                  onClick={() => onSeek(g.startSeconds as number)}
+                  title={`Play from ${timecode(g.startSeconds)}`}
+                  className="group mb-1.5 flex items-baseline gap-2 text-left"
+                >
+                  <span className="text-sm font-medium group-hover:underline">{g.heading}</span>
+                  <span className="tabular font-mono text-xs text-muted-foreground">
+                    {timecode(g.startSeconds)}
+                  </span>
+                </button>
+              ) : (
+                <h4 className="mb-1.5 text-sm font-medium">{g.heading}</h4>
+              )}
               <ul className="space-y-1.5 text-sm text-muted-foreground">
                 {g.bullets.map((b, j) => (
                   <li key={j} className="flex gap-2">
@@ -832,7 +1023,9 @@ function SummaryPanel({
   /** Plays from a quotation's moment. Shared with the transcript and chat. */
   onSeek: (seconds: number) => void;
 }) {
-  const { data: templates } = useGetSummaryTemplatesQuery();
+  // The picker itself lives on the tab row now (see TemplatePicker). This call
+  // stays because the "the transcript changed" banner below rewrites with the
+  // template already in use, which is the same request without the choosing.
   const [resummarize, { isLoading: rewriting }] = useResummarizeMutation();
   const translated = translation;
 
@@ -922,32 +1115,6 @@ function SummaryPanel({
               </div>
             )}
 
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-2">
-                {templates && templates.length > 0 && (
-                  <Select value={current} onValueChange={onTemplateChange} disabled={rewriting}>
-                    <SelectTrigger className="h-8 w-[190px]">
-                      {rewriting ? (
-                        <span className="flex items-center gap-2 text-muted-foreground">
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          Rewriting...
-                        </span>
-                      ) : (
-                        <SelectValue />
-                      )}
-                    </SelectTrigger>
-                    <SelectContent>
-                      {templates.map((t) => (
-                        <SelectItem key={t.slug} value={t.slug}>
-                          {t.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              </div>
-            </div>
-
             {sections.length > 0 ? (
               <div className="space-y-6">
                 {/* What was covered, at a glance.
@@ -976,7 +1143,7 @@ function SummaryPanel({
                   </div>
                 )}
                 {sections.map((s) => (
-                  <SummarySectionView key={s.key} section={s} />
+                  <SummarySectionView key={s.key} section={s} onSeek={onSeek} />
                 ))}
                 {/* Rendered from its own field rather than as a section: these
                     carry a speaker and a timestamp, which the section shapes

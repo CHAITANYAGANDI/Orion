@@ -37,8 +37,19 @@ public record SummarySection(
         return groups == null ? List.of() : groups;
     }
 
-    /** A heading with its bullets — the repeating unit of an {@code outline}. */
-    public record OutlineGroup(String heading, List<String> bullets) {
+    /**
+     * A heading with its bullets — the repeating unit of an {@code outline}.
+     *
+     * <p>{@code startSeconds} is where the topic begins in the recording, so a
+     * reader can click the heading and hear it. Nullable, and often null: the
+     * ai-service establishes it by finding the line the model says opened the
+     * topic in the transcript, and a heading whose line cannot be found gets
+     * nothing rather than a guess. Summaries written before this existed have
+     * it null throughout, which is the same case and needs no special handling
+     * — including in the JSON already stored, where an absent field decodes to
+     * null without a migration.
+     */
+    public record OutlineGroup(String heading, List<String> bullets, Double startSeconds) {
         public List<String> bulletsOrEmpty() {
             return bullets == null ? List.of() : bullets;
         }

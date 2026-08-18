@@ -23,6 +23,25 @@ export function formatDateTime(iso?: string | null): string {
   });
 }
 
+/**
+ * A running clock: `0:09`, `12:34`, `1:02:03`.
+ *
+ * Distinct from {@link formatDuration}, which describes a length after the
+ * fact — "1m 30s" reads well in a list of finished meetings and badly on a
+ * timer, where the digits should sit still and only the last one move. More to
+ * the point, `formatDuration(0)` is "—", so a stopwatch built on it would open
+ * on a dash and stay there for a second: the one second in which somebody is
+ * looking to see whether pressing Record did anything.
+ */
+export function stopwatch(seconds: number): string {
+  const safe = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(safe / 3600);
+  const m = Math.floor((safe % 3600) / 60);
+  const s = safe % 60;
+  const mm = h > 0 ? String(m).padStart(2, "0") : String(m);
+  return `${h > 0 ? `${h}:` : ""}${mm}:${String(s).padStart(2, "0")}`;
+}
+
 export function formatDuration(seconds?: number | null): string {
   if (seconds == null || seconds <= 0) return "—";
   const m = Math.floor(seconds / 60);

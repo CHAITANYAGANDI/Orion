@@ -62,7 +62,12 @@ _OUTLINE = TemplateSection(
         "3-5 bullets. Here — and only here — name the speakers, because this "
         "section is used to find a moment in the recording: 'Speaker 1 asks "
         "about the time frame, and Speaker 2 explains it mirrors the GitLab 14 "
-        "launch'. Cover the whole meeting, including the closing."
+        "launch'. Cover the whole meeting, including the closing.\n"
+        "Give each heading a `startQuote`: the first sentence spoken when that "
+        "topic came up, copied word for word from the transcript. It is used "
+        "to find the moment in the recording, so it must be an exact copy of a "
+        "line that is really there — at least a few words long, and never "
+        "tidied up or reconstructed."
     ),
 )
 

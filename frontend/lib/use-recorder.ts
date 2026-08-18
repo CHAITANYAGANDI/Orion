@@ -1,82 +1,99 @@
 "use client";
 
 /**
- * In-browser meeting capture, for the two kinds of meeting people actually have.
+ * In-browser meeting capture: the microphone, and nothing else.
  *
- * **Online** (`"online"`): the participants are in another tab, so their voices
- * only exist inside the browser. Two sources are grabbed and mixed:
+ * There was a second mode that also captured the audio of another tab, for
+ * meetings happening in Meet, Zoom or Teams. It is gone. What made it untenable
+ * was not the capture — that part worked in Chromium — but everything around
+ * it: it existed only in Chrome and Edge, it required the person recording to
+ * pick the right tab out of a screen-picker and find a checkbox inside it, and
+ * the commonest outcome of getting either wrong was a recording of one half of
+ * a conversation that looked exactly like a recording of all of it. A capture
+ * mode whose failure is silent and whose success depends on a dialog the app
+ * cannot see is not a mode, it is a coin toss.
  *
- *   1. **Tab audio** via `getDisplayMedia`, which is what carries the remote
- *      participants out of Meet/Zoom/Teams running in another tab.
- *   2. **Your microphone** via `getUserMedia`.
- *
- * **In person** (`"in-person"`): everyone is in the room, so the microphone is
- * the whole meeting and there is no tab worth sharing. Asking for one anyway
- * would put a screen-picker in front of someone whose only correct answer is
- * "cancel", and then warn them about the mic-only recording they deliberately
- * chose. So this mode never calls `getDisplayMedia` at all, and tunes the mic
- * for a room rather than for a headset (see `micConstraints`).
- *
- * Sources are routed through a single `AudioContext` into one
- * `MediaStreamAudioDestinationNode`, so `MediaRecorder` sees one mixed track
- * and the output needs no post-processing before it hits the normal upload path.
- *
- * Browser reality the online path has to cope with:
- *  - `getDisplayMedia` only offers audio when the user picks a **tab** and ticks
- *    "share tab audio". Picking a window or screen yields video only.
- *  - Chromium requires `video: true` to offer the audio checkbox at all, so the
- *    video track is requested and then immediately stopped.
- *  - Firefox and Safari do not provide display audio. Capture degrades to
- *    mic-only rather than failing, and `hasTabAudio` reports what actually
- *    happened so the UI can tell the truth.
+ * So one source, through a single `AudioContext` into one
+ * `MediaStreamAudioDestinationNode`. The indirection earns its keep even with
+ * one input: `MediaRecorder` is bound to the destination rather than to the
+ * microphone, which is what lets the microphone be swapped mid-recording
+ * without splitting the meeting into two files.
  */
 
 import * as React from "react";
 
 export type RecorderState = "idle" | "requesting" | "recording" | "paused" | "stopped";
 
-/** Where the other voices are: in another tab, or in the room with you. */
-export type CaptureMode = "online" | "in-person";
-
 export interface RecorderResult {
   file: File;
   durationSeconds: number;
-  /** False when only the microphone was captured. */
-  hadTabAudio: boolean;
-  /** Which mode produced this recording — mic-only is expected for in-person. */
-  mode: CaptureMode;
 }
 
 /**
- * Microphone constraints per mode.
+ * Microphone constraints, tuned for a room rather than for a headset.
  *
- * The browser defaults assume one person at a desk wearing a headset. In a room
- * that assumption actively removes meeting content: noise suppression is
- * trained on a near-field voice and treats the quieter person across the table
- * as noise, and echo cancellation attenuates whatever it decides is a room
- * reflection — which, with several people at varying distances, includes some
- * of them. Auto gain is the one that helps, lifting the far end of the table.
+ * The browser defaults assume one person at a desk wearing one. In a room that
+ * assumption actively removes meeting content: noise suppression is trained on
+ * a near-field voice and treats the quieter person across the table as noise,
+ * and echo cancellation attenuates whatever it decides is a room reflection —
+ * which, with several people at varying distances, includes some of them. Auto
+ * gain is the one that helps, lifting the far end of the table.
+ *
+ * Chosen for everybody now that the microphone is the whole recording. The two
+ * failures are not symmetrical: the desk assumption deletes the second person
+ * from the transcript, while the room assumption costs a solo speaker some
+ * extra room tone that transcription handles perfectly well.
  */
-function micConstraints(mode: CaptureMode): MediaTrackConstraints {
-  return mode === "in-person"
-    ? { echoCancellation: false, noiseSuppression: false, autoGainControl: true }
-    : { echoCancellation: true, noiseSuppression: true };
+function micConstraints(deviceId?: string | null): MediaTrackConstraints {
+  const tuning: MediaTrackConstraints = {
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: true,
+  };
+  // `exact`, not a preference. A soft constraint that quietly falls back to the
+  // system default is how somebody records a laptop lid for an hour while the
+  // picker on screen says "headset" — the failure is invisible until playback.
+  return deviceId ? { ...tuning, deviceId: { exact: deviceId } } : tuning;
 }
+
+/**
+ * Below this, nothing is arriving.
+ *
+ * `level` is an RMS of the mixed input scaled by 3, so ordinary room tone sits
+ * well above this and a muted microphone or a hardware switch sits at zero.
+ * Deliberately not zero itself: a live-but-silent input still carries a hair of
+ * noise, and a threshold of 0 would call that "audio" and never warn anybody.
+ */
+export const SILENCE_LEVEL = 0.02;
 
 export interface UseRecorder {
   state: RecorderState;
-  /** Which mode the current or last recording used. */
-  mode: CaptureMode;
   /** Whole seconds of audio actually recorded (excludes paused time). */
   elapsed: number;
+  /**
+   * When this recording began, for the heading that says what the meeting is.
+   * Wall-clock rather than derived from `elapsed`, which excludes paused time
+   * and would slide the start of the meeting later every time somebody paused.
+   */
+  startedAt: Date | null;
   /** 0–1 input level, for the meter. */
   level: number;
+  /**
+   * How long the input has been silent, in whole seconds. Zero unless a
+   * recording is running — a paused recorder is silent by definition and
+   * warning about it would be reporting the user's own choice as a fault.
+   */
+  silentSeconds: number;
   error: string | null;
-  hasTabAudio: boolean;
   result: RecorderResult | null;
   supported: boolean;
-  /** Mode is fixed for the duration of a recording; change it by re-starting. */
-  start: (mode?: CaptureMode) => Promise<void>;
+  /** Microphones this browser will admit to. Labels are blank until permission. */
+  devices: MediaDeviceInfo[];
+  /** The chosen microphone, or null for whatever the system considers default. */
+  deviceId: string | null;
+  /** Switches the live microphone if there is one, otherwise arms the next. */
+  setDeviceId: (id: string | null) => void;
+  start: () => Promise<void>;
   pause: () => void;
   resume: () => void;
   stop: () => void;
@@ -107,11 +124,13 @@ export function extensionFor(mimeType: string): string {
 
 export function useRecorder(): UseRecorder {
   const [state, setState] = React.useState<RecorderState>("idle");
-  const [mode, setMode] = React.useState<CaptureMode>("online");
   const [elapsed, setElapsed] = React.useState(0);
+  const [startedAt, setStartedAt] = React.useState<Date | null>(null);
   const [level, setLevel] = React.useState(0);
+  const [silentSeconds, setSilentSeconds] = React.useState(0);
   const [error, setError] = React.useState<string | null>(null);
-  const [hasTabAudio, setHasTabAudio] = React.useState(false);
+  const [devices, setDevices] = React.useState<MediaDeviceInfo[]>([]);
+  const [deviceId, setDeviceIdState] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<RecorderResult | null>(null);
 
   const recorderRef = React.useRef<MediaRecorder | null>(null);
@@ -119,15 +138,21 @@ export function useRecorder(): UseRecorder {
   const streamsRef = React.useRef<MediaStream[]>([]);
   const audioCtxRef = React.useRef<AudioContext | null>(null);
   const analyserRef = React.useRef<AnalyserNode | null>(null);
+  // The mixing point and the node currently feeding it from the microphone.
+  // Held so the microphone can be replaced mid-recording: MediaRecorder is
+  // bound to the destination, not to any particular input.
+  const destinationRef = React.useRef<MediaStreamAudioDestinationNode | null>(null);
+  const micSourceRef = React.useRef<MediaStreamAudioSourceNode | null>(null);
+  const micStreamRef = React.useRef<MediaStream | null>(null);
+  const deviceIdRef = React.useRef<string | null>(null);
+  // When the input first went quiet, or null while it is not. A timestamp
+  // rather than a counter so the answer does not depend on the frame rate.
+  const silenceSinceRef = React.useRef<number | null>(null);
   const rafRef = React.useRef<number | null>(null);
   const timerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
-  const hadTabAudioRef = React.useRef(false);
   // Mirrors `elapsed` so `recorder.onstop` reads the final value rather than the
   // stale one captured when the handler was defined.
   const elapsedRef = React.useRef(0);
-  // Same reason as `elapsedRef`: `onstop` must record the mode this recording
-  // actually ran in, not whatever the component last rendered with.
-  const modeRef = React.useRef<CaptureMode>("online");
 
   const supported =
     typeof window !== "undefined" &&
@@ -147,6 +172,11 @@ export function useRecorder(): UseRecorder {
     streamsRef.current.forEach((s) => s.getTracks().forEach((t) => t.stop()));
     streamsRef.current = [];
     analyserRef.current = null;
+    destinationRef.current = null;
+    micSourceRef.current = null;
+    micStreamRef.current = null;
+    silenceSinceRef.current = null;
+    setSilentSeconds(0);
     if (audioCtxRef.current) {
       void audioCtxRef.current.close().catch(() => {
         /* already closed */
@@ -157,6 +187,37 @@ export function useRecorder(): UseRecorder {
   }, []);
 
   React.useEffect(() => teardown, [teardown]);
+
+  /**
+   * Ask the browser which microphones exist.
+   *
+   * Worth calling twice. Before permission is granted a browser returns the
+   * devices with **empty labels** — enough to know how many there are, not
+   * enough to name one, so a picker built from that read "Microphone 1,
+   * Microphone 2". Calling it again after `getUserMedia` succeeds is what turns
+   * those into "Headset (Jabra)". Failure is silent: not being able to list
+   * microphones is not a reason to be unable to record with one.
+   */
+  const refreshDevices = React.useCallback(async () => {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.enumerateDevices) return;
+    try {
+      const all = await navigator.mediaDevices.enumerateDevices();
+      setDevices(all.filter((d) => d.kind === "audioinput"));
+    } catch {
+      /* Enumeration blocked; the default microphone still works. */
+    }
+  }, []);
+
+  // Plugging in a headset mid-meeting is the commonest reason this list changes,
+  // and it is exactly when somebody reaches for the picker.
+  React.useEffect(() => {
+    void refreshDevices();
+    const media = typeof navigator !== "undefined" ? navigator.mediaDevices : undefined;
+    if (!media?.addEventListener) return;
+    const onChange = () => void refreshDevices();
+    media.addEventListener("devicechange", onChange);
+    return () => media.removeEventListener("devicechange", onChange);
+  }, [refreshDevices]);
 
   /**
    * Drive the input meter from the analyser until stopped.
@@ -178,7 +239,18 @@ export function useRecorder(): UseRecorder {
         const centred = (v - 128) / 128;
         sum += centred * centred;
       }
-      setLevel(Math.min(1, Math.sqrt(sum / buffer.length) * 3));
+      const next = Math.min(1, Math.sqrt(sum / buffer.length) * 3);
+      setLevel(next);
+
+      // Whole seconds, so this settles to one value per second and React drops
+      // the other ~59 renders a frame-by-frame counter would cause.
+      if (next < SILENCE_LEVEL) {
+        if (silenceSinceRef.current === null) silenceSinceRef.current = Date.now();
+        setSilentSeconds(Math.floor((Date.now() - silenceSinceRef.current) / 1000));
+      } else {
+        silenceSinceRef.current = null;
+        setSilentSeconds(0);
+      }
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
@@ -190,89 +262,71 @@ export function useRecorder(): UseRecorder {
       rafRef.current = null;
     }
     setLevel(0);
+    // Not silence — a stopped meter. Leaving the count running would put "no
+    // audio is being captured" on screen the moment somebody pressed Pause.
+    silenceSinceRef.current = null;
+    setSilentSeconds(0);
   }, []);
 
-  const start = React.useCallback(async (requested: CaptureMode = "online") => {
+  const start = React.useCallback(async () => {
     if (!supported) {
-      setError("This browser can't record audio. Try Chrome or Edge.");
+      setError("This browser can't record audio.");
       return;
     }
 
     setError(null);
     setResult(null);
     setElapsed(0);
+    setStartedAt(new Date());
     setState("requesting");
-    hadTabAudioRef.current = false;
-    modeRef.current = requested;
-    setMode(requested);
 
-    const sources: MediaStream[] = [];
     let micStream: MediaStream;
 
-    // 1) Microphone first — without it there is nothing worth recording, so a
-    //    denial here is fatal whereas a display-capture denial is not.
+    // 1) The microphone. Without it there is nothing to record, so a denial
+    //    here ends the attempt rather than degrading it.
     try {
       micStream = await navigator.mediaDevices.getUserMedia({
-        audio: micConstraints(requested),
+        audio: micConstraints(deviceIdRef.current),
       });
-      sources.push(micStream);
     } catch {
       setState("idle");
+      // A device that has been unplugged since it was picked fails `exact` and
+      // lands here, which would otherwise read as a permission problem for
+      // somebody who granted permission long ago. Forget it and let the next
+      // attempt use the system default.
+      if (deviceIdRef.current) {
+        deviceIdRef.current = null;
+        setDeviceIdState(null);
+        setError("That microphone is no longer available. Choose another and start again.");
+        return;
+      }
       setError("Microphone access was denied. Recallix needs it to record you.");
       return;
     }
 
-    // 2) Tab audio, for online meetings only. Optional even then: several
-    //    browsers cannot provide it, and the user may share a window (video
-    //    only) or cancel outright. In person there is no tab to share, so the
-    //    picker is skipped entirely rather than shown and then ignored.
-    let displayStream: MediaStream | null = null;
-    if (requested === "online") {
-      try {
-        if (navigator.mediaDevices.getDisplayMedia) {
-          displayStream = await navigator.mediaDevices.getDisplayMedia({
-            // Chromium only offers the "share tab audio" checkbox when video is
-            // requested; the video track is discarded immediately below.
-            video: true,
-            audio: {
-              echoCancellation: false,
-              noiseSuppression: false,
-              autoGainControl: false,
-            },
-          });
-          displayStream.getVideoTracks().forEach((t) => t.stop());
-          if (displayStream.getAudioTracks().length > 0) {
-            hadTabAudioRef.current = true;
-            sources.push(displayStream);
-          }
-        }
-      } catch {
-        // Cancelled or unsupported — carry on with mic only.
-        displayStream = null;
-      }
-    }
+    // Now that permission exists, the browser will name the devices.
+    void refreshDevices();
 
-    streamsRef.current = displayStream ? [micStream, displayStream] : [micStream];
-    setHasTabAudio(hadTabAudioRef.current);
+    streamsRef.current = [micStream];
+    micStreamRef.current = micStream;
 
-    // 3) Mix every source into one track.
+    // 2) Route it through the mixer.
     const AudioCtx: typeof AudioContext =
       window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     const ctx = new AudioCtx();
     audioCtxRef.current = ctx;
     const destination = ctx.createMediaStreamDestination();
+    destinationRef.current = destination;
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 512;
     analyserRef.current = analyser;
 
-    for (const stream of sources) {
-      if (stream.getAudioTracks().length === 0) continue;
-      const source = ctx.createMediaStreamSource(stream);
-      source.connect(destination);
-      source.connect(analyser);
-    }
+    const micSource = ctx.createMediaStreamSource(micStream);
+    micSource.connect(destination);
+    micSource.connect(analyser);
+    micSourceRef.current = micSource;
 
-    // 4) Record the mixed track.
+    // 3) Record what comes out of it.
     const mimeType = pickMimeType();
     const recorder = new MediaRecorder(destination.stream, { mimeType });
     chunksRef.current = [];
@@ -284,26 +338,10 @@ export function useRecorder(): UseRecorder {
       const file = new File([blob], `recording-${Date.now()}.${extensionFor(mimeType)}`, {
         type: mimeType,
       });
-      setResult({
-        file,
-        durationSeconds: elapsedRef.current,
-        hadTabAudio: hadTabAudioRef.current,
-        mode: modeRef.current,
-      });
+      setResult({ file, durationSeconds: elapsedRef.current });
       setState("stopped");
       teardown();
     };
-
-    // Stopping the share from the browser's own bar must end the recording too,
-    // otherwise we would silently keep taping just the microphone.
-    displayStream?.getAudioTracks().forEach((track) => {
-      track.onended = () => {
-        if (recorderRef.current && recorderRef.current.state !== "inactive") {
-          recorderRef.current.stop();
-          recorderRef.current = null;
-        }
-      };
-    });
 
     // 1s timeslices keep memory bounded on long meetings.
     recorder.start(1000);
@@ -318,7 +356,60 @@ export function useRecorder(): UseRecorder {
     }, 1000);
 
     runMeter();
-  }, [supported, teardown, runMeter]);
+  }, [supported, teardown, runMeter, refreshDevices]);
+
+  /**
+   * Change microphone, without stopping.
+   *
+   * The recorder is attached to the mixing destination rather than to any
+   * input, so unplugging one source node and plugging in another is something
+   * `MediaRecorder` never sees: the file keeps growing across the swap, and the
+   * only audible trace is the moment of the change itself. Doing this by
+   * restarting instead would mean two files for one meeting.
+   *
+   * With nothing running it simply arms the next recording, which is why the
+   * picker is usable before pressing Record.
+   */
+  const setDeviceId = React.useCallback((id: string | null) => {
+    const next = id || null;
+    deviceIdRef.current = next;
+    setDeviceIdState(next);
+
+    const ctx = audioCtxRef.current;
+    const destination = destinationRef.current;
+    const previousSource = micSourceRef.current;
+    const previousStream = micStreamRef.current;
+    if (!ctx || !destination || !previousSource || !previousStream) return;
+
+    void (async () => {
+      let replacement: MediaStream;
+      try {
+        replacement = await navigator.mediaDevices.getUserMedia({
+          audio: micConstraints(next),
+        });
+      } catch {
+        // The old microphone is still connected and still recording, so this is
+        // a failed change rather than a broken recording — say so and stop.
+        setError("Couldn't switch microphone. Still recording from the previous one.");
+        return;
+      }
+
+      previousSource.disconnect();
+      previousStream.getTracks().forEach((t) => t.stop());
+
+      const source = ctx.createMediaStreamSource(replacement);
+      source.connect(destination);
+      if (analyserRef.current) source.connect(analyserRef.current);
+
+      micSourceRef.current = source;
+      micStreamRef.current = replacement;
+      streamsRef.current = [
+        replacement,
+        ...streamsRef.current.filter((stream) => stream !== previousStream),
+      ];
+      setError(null);
+    })();
+  }, []);
 
   const pause = React.useCallback(() => {
     const rec = recorderRef.current;
@@ -368,20 +459,25 @@ export function useRecorder(): UseRecorder {
     elapsedRef.current = 0;
     setResult(null);
     setElapsed(0);
+    setStartedAt(null);
     setError(null);
-    setHasTabAudio(false);
+    silenceSinceRef.current = null;
+    setSilentSeconds(0);
     setState("idle");
   }, [teardown]);
 
   return {
     state,
-    mode,
     elapsed,
+    startedAt,
     level,
+    silentSeconds,
     error,
-    hasTabAudio,
     result,
     supported,
+    devices,
+    deviceId,
+    setDeviceId,
     start,
     pause,
     resume,

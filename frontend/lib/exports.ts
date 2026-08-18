@@ -18,9 +18,23 @@ import { buildAuthHeaders } from "@/lib/auth-store";
 
 export type ExportFormat = "pdf" | "docx" | "md" | "txt";
 
+/** How much of the back-and-forth to flatten away. */
+export type CombineMode = "none" | "speaker" | "all";
+
 export interface ExportOptions {
+  /** The brief. Defaults to included, which is what the endpoint does. */
+  summary?: boolean;
+  /** Which summary sections, by key. Omitted or empty means all of them. */
+  sections?: string[];
+  /** What people agreed to do. Defaults to included. */
+  actionItems?: boolean;
   /** The transcript is left out unless asked for; it is most of the file. */
   transcript?: boolean;
+  /** Label each utterance with who said it. Defaults to true. */
+  speakers?: boolean;
+  /** Label each utterance with when it was said. Defaults to true. */
+  timestamps?: boolean;
+  combine?: CombineMode;
   /** A language the meeting has already been translated into. */
   language?: string | null;
 }
@@ -44,7 +58,16 @@ export function exportPath(
   zone: string | null = timeZone(),
 ): string {
   const params = new URLSearchParams({ format });
+  // Only what differs from the endpoint's defaults, so a plain summary export
+  // still produces the short URL it always did — and so a bookmarked one keeps
+  // meaning what it meant.
+  if (options.summary === false) params.set("summary", "false");
+  if (options.sections?.length) params.set("sections", options.sections.join(","));
+  if (options.actionItems === false) params.set("actionItems", "false");
   if (options.transcript) params.set("transcript", "true");
+  if (options.speakers === false) params.set("speakers", "false");
+  if (options.timestamps === false) params.set("timestamps", "false");
+  if (options.combine && options.combine !== "none") params.set("combine", options.combine);
   if (options.language) params.set("language", options.language);
   if (zone) params.set("tz", zone);
   return `/meetings/${meetingId}/export?${params.toString()}`;

@@ -22,7 +22,7 @@ from typing import Awaitable, Callable
 
 from app.insights import derive_insights
 from app.language import annotate_segments
-from app.quotes import verify_quotes
+from app.quotes import anchor_outline, verify_quotes
 from app.suggestions import meeting_material
 from app.providers.ports import LlmPort, TranscriptionPort
 from app.schemas import (
@@ -252,6 +252,11 @@ class Pipeline:
                 continue
             kept_sections.append(section)
         quotes = [Quotation(**q) for q in verify_quotes(raw_quotes, transcript.segments)]
+
+        # The outline headings are what the summary is navigated by, so each one
+        # is anchored to the moment its topic began — by finding the line the
+        # model says opened it, not by trusting a timestamp it never saw.
+        anchor_outline(kept_sections, transcript.segments)
 
         # Decisions and risks are read back out of the sections just written,
         # not asked for again. A second extraction pass would produce a list

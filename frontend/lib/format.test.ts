@@ -3,6 +3,7 @@ import {
   formatDate,
   formatDateTime,
   formatDuration,
+  stopwatch,
   timecode,
   statusProgress,
   statusLabel,
@@ -125,5 +126,35 @@ describe("status helpers", () => {
       expect(statusLabel(s)).not.toBe(s);
       expect(statusLabel(s).length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("stopwatch", () => {
+  it("starts at zero rather than at a dash", () => {
+    // formatDuration says "—" for 0, which on a running timer means the first
+    // second of every recording shows nothing — exactly when somebody is
+    // looking to see whether pressing Record worked.
+    expect(stopwatch(0)).toBe("0:00");
+  });
+
+  it("pads the seconds so the digits do not jump", () => {
+    expect(stopwatch(9)).toBe("0:09");
+    expect(stopwatch(69)).toBe("1:09");
+  });
+
+  it("adds hours only once there are some", () => {
+    expect(stopwatch(3599)).toBe("59:59");
+    expect(stopwatch(3600)).toBe("1:00:00");
+    expect(stopwatch(3661)).toBe("1:01:01");
+  });
+
+  it("does not show a negative clock", () => {
+    // Nothing should produce this, but a clock reading "-1:59" would be a
+    // stranger thing to see than a clock that has not started.
+    expect(stopwatch(-5)).toBe("0:00");
+  });
+
+  it("does not tick a fraction of a second early", () => {
+    expect(stopwatch(9.9)).toBe("0:09");
   });
 });

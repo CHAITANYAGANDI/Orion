@@ -330,7 +330,16 @@ def _assemble(tpl: SummaryTemplate, data: dict[str, Any]) -> SummaryResponse:
                 bullets = bullets if isinstance(bullets, list) else []
                 cleaned = [str(b).strip() for b in bullets if str(b or "").strip()]
                 if heading or cleaned:
-                    section.groups.append(OutlineGroup(heading=heading, bullets=cleaned))
+                    section.groups.append(
+                        OutlineGroup(
+                            heading=heading,
+                            bullets=cleaned,
+                            # Unverified here, and stored as such: the adapter
+                            # has the model's reply but not the segments, so the
+                            # pipeline resolves it. See quotes.anchor_outline.
+                            start_quote=str(group.get("startQuote", "") or "").strip(),
+                        )
+                    )
 
         sections.append(section)
 
@@ -540,7 +549,10 @@ class OpenAiLlmAdapter(LlmPort):
             shape = {
                 "prose": "a single string of plain prose",
                 "bullets": "an array of strings",
-                "outline": 'an array of {"heading": string, "bullets": [string]}',
+                "outline": (
+                    'an array of {"heading": string, "startQuote": string, '
+                    '"bullets": [string]}'
+                ),
             }
             spec = "\n".join(
                 f'- "{sec.key}" ({sec.title}) -> {shape[sec.kind]}. {sec.instruction}'

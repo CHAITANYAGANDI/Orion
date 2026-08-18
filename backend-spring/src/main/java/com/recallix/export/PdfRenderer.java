@@ -124,8 +124,15 @@ public class PdfRenderer implements DocumentRenderer {
                     case ExportDocument.Block.Transcript t -> {
                         for (ExportDocument.Utterance line : t.lines()) {
                             Paragraph p = new Paragraph();
-                            p.add(text(palette, line.timecode() + "   ", 8.5f, false, FAINT));
-                            p.add(text(palette, line.speaker() + "   ", BODY, true, INK));
+                            // Each part only when the export asked for it, so a
+                            // transcript with neither is a clean block of prose
+                            // rather than one indented by two empty runs.
+                            if (line.timecode() != null && !line.timecode().isBlank()) {
+                                p.add(text(palette, line.timecode() + "   ", 8.5f, false, FAINT));
+                            }
+                            if (line.speaker() != null && !line.speaker().isBlank()) {
+                                p.add(text(palette, line.speaker() + "   ", BODY, true, INK));
+                            }
                             p.add(text(palette, line.text(), BODY, false, INK));
                             style(p, doc, 0, 6, 0);
                             pdf.add(p);

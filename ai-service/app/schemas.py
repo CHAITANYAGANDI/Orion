@@ -115,6 +115,16 @@ class SummaryTemplate(CamelModel):
 class OutlineGroup(CamelModel):
     heading: str
     bullets: list[str] = Field(default_factory=list)
+    # Where this topic starts, in seconds, so the heading can be clicked to jump
+    # to it. None whenever it could not be established — the transcript given to
+    # the model carries no timestamps, so this is resolved afterwards by finding
+    # `start_quote` in the segments (see app.quotes.anchor_outline). A heading
+    # without one renders as plain text rather than as a link to a guess.
+    start_seconds: float | None = None
+    # The model's claim about which words open the topic. Scaffolding: it is
+    # matched against the transcript and then cleared, so it never leaves the
+    # service.
+    start_quote: str = ""
 
 
 class SummarySection(CamelModel):

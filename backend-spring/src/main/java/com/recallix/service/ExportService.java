@@ -2,6 +2,7 @@ package com.recallix.service;
 
 import com.recallix.common.ApiException;
 import com.recallix.domain.ExportFormat;
+import com.recallix.domain.ExportOptions;
 import com.recallix.domain.Language;
 import com.recallix.domain.SourceType;
 import com.recallix.domain.SummarySection;
@@ -95,14 +96,24 @@ public class ExportService {
     @Transactional(readOnly = true)
     public ExportFile render(String userId, String meetingId, ExportFormat format,
                              boolean includeTranscript, String rawLanguage, String zone) {
+        return render(userId, meetingId, format,
+                ExportOptions.withTranscript(includeTranscript), rawLanguage, zone);
+    }
+
+    public ExportFile render(String userId, String meetingId, ExportFormat format,
+                             ExportOptions options, String rawLanguage, String zone) {
         Meeting meeting = meetings.findByIdAndUserId(meetingId, userId)
                 .orElseThrow(() -> ApiException.notFound("Meeting not found"));
+
+        if (options.empty()) {
+            throw ApiException.badRequest("Choose at least one thing to export.");
+        }
 
         TranslationResponse translation = rawLanguage == null || rawLanguage.isBlank()
                 ? null
                 : translations.get(userId, meetingId, rawLanguage);
 
-        ExportDocument document = assemble(meeting, translation, includeTranscript, zoneOf(zone));
+        ExportDocument document = assemble(meeting, translation, options, zoneOf(zone));
         DocumentRenderer renderer = renderers.get(format);
         if (renderer == null) {
             throw ApiException.badRequest("No renderer for " + format);
@@ -145,7 +156,7 @@ public class ExportService {
     /* ------------------------------ assembly ------------------------------ */
 
     private ExportDocument assemble(Meeting meeting, TranslationResponse translation,
-                                    boolean includeTranscript, ZoneId zone) {
+                                    ExportOptions options, ZoneId zone) {
         Language language = translation != null
                 ? Language.find(translation.language()).orElse(null)
                 : Language.find(meeting.getLanguage()).orElse(null);
@@ -157,10 +168,14 @@ public class ExportService {
         List<MeetingActionItem> tasks = actionItems.findByMeetingId(meeting.getId());
 
         List<ExportDocument.Block> blocks = new ArrayList<>();
-        blocks.addAll(summaryBlocks(summary, translation, labels));
-        blocks.addAll(taskBlocks(tasks, translation, labels));
-        if (includeTranscript) {
-            blocks.addAll(transcriptBlocks(meeting.getId(), translation, labels));
+        if (options.summary()) {
+            blocks.addAll(summaryBlocks(summary, translation, labels, options));
+        }
+        if (options.actionItems()) {
+            blocks.addAll(taskBlocks(tasks, translation, labels));
+        }
+        if (options.transcript()) {
+            blocks.addAll(transcriptBlocks(meeting.getId(), translation, labels, options));
         }
 
         return new ExportDocument(
@@ -182,7 +197,8 @@ public class ExportService {
      */
     private List<ExportDocument.Block> summaryBlocks(MeetingSummary summary,
                                                      TranslationResponse translation,
-                                                     ExportLabels labels) {
+                                                     ExportLabels labels,
+                                                     ExportOptions options) {
         List<SummarySection> sections = translation != null
                 ? orEmpty(translation.sections())
                 : (summary == null ? List.of() : orEmpty(summary.getSections()));
@@ -190,6 +206,12 @@ public class ExportService {
         List<ExportDocument.Block> blocks = new ArrayList<>();
         if (!sections.isEmpty()) {
             for (SummarySection section : sections) {
+                // Filtered by the caller's choice, but only when they made one:
+                // a request naming no sections wants the whole brief, not an
+                // empty one. See ExportOptions.wants.
+                if (!options.wants(section.key())) {
+                    continue;
+                }
                 blocks.add(new ExportDocument.Block.Heading(1, section.title()));
                 switch (section.kind() == null ? "" : section.kind()) {
                     case "prose" -> blocks.add(section.text() == null || section.text().isBlank()
@@ -288,7 +310,8 @@ public class ExportService {
      */
     private List<ExportDocument.Block> transcriptBlocks(String meetingId,
                                                         TranslationResponse translation,
-                                                        ExportLabels labels) {
+                                                        ExportLabels labels,
+                                                        ExportOptions options) {
         List<TranscriptSegment> lines = segments.findByMeetingIdOrderByStartTimeAsc(meetingId);
         if (lines.isEmpty()) {
             return List.of();
@@ -302,13 +325,70 @@ public class ExportService {
 
         List<ExportDocument.Utterance> utterances = new ArrayList<>(lines.size());
         for (TranscriptSegment line : lines) {
+            String speaker = line.getSpeaker() == null || line.getSpeaker().isBlank()
+                    ? "Speaker" : line.getSpeaker();
+            String text = words.getOrDefault(
+                    line.getId(), line.getText() == null ? "" : line.getText());
             utterances.add(new ExportDocument.Utterance(
-                    timecode(line.getStartTime()),
-                    line.getSpeaker() == null || line.getSpeaker().isBlank() ? "Speaker" : line.getSpeaker(),
-                    words.getOrDefault(line.getId(), line.getText() == null ? "" : line.getText())));
+                    // Suppressed by emptying the field rather than by a flag on
+                    // the block: a renderer that has to ask what to draw ends up
+                    // with four copies of the same decision, one per format.
+                    options.timestamps() ? timecode(line.getStartTime()) : "",
+                    options.speakerNames() ? speaker : "",
+                    text));
         }
+
         return List.of(new ExportDocument.Block.Heading(1, labels.transcript()),
-                new ExportDocument.Block.Transcript(utterances));
+                new ExportDocument.Block.Transcript(combine(utterances, options.combine())));
+    }
+
+    /**
+     * Merge consecutive utterances according to the caller's choice.
+     *
+     * <p>Worth having because diarisation splits a turn at every pause: one
+     * person talking for a minute arrives as a dozen fragments, each with its
+     * own timestamp and name, and a transcript read as a document rather than
+     * scrubbed through is far harder to follow that way than it needs to be.
+     *
+     * <p>A merged block keeps the timestamp and speaker of its <em>first</em>
+     * utterance, which is when that person started talking — the one moment in
+     * the block a reader might want to jump to.
+     */
+    private static List<ExportDocument.Utterance> combine(List<ExportDocument.Utterance> lines,
+                                                          ExportOptions.Combine mode) {
+        if (mode == ExportOptions.Combine.NONE || lines.size() < 2) {
+            return lines;
+        }
+        if (mode == ExportOptions.Combine.ALL) {
+            String all = lines.stream()
+                    .map(ExportDocument.Utterance::text)
+                    .filter(t -> t != null && !t.isBlank())
+                    .collect(Collectors.joining(" "));
+            // No speaker and no time: this is one block of prose by
+            // construction, and labelling it with the first speaker's name
+            // would attribute the whole meeting to whoever opened it.
+            return List.of(new ExportDocument.Utterance("", "", all));
+        }
+
+        List<ExportDocument.Utterance> merged = new ArrayList<>();
+        for (ExportDocument.Utterance line : lines) {
+            ExportDocument.Utterance last = merged.isEmpty() ? null : merged.get(merged.size() - 1);
+            // Compared on the speaker as it will be printed. With names
+            // suppressed every label is blank, so this would fold the entire
+            // transcript into one block — which is the other mode, chosen
+            // deliberately, not something to arrive at by accident.
+            boolean sameSpeaker = last != null
+                    && !last.speaker().isBlank()
+                    && last.speaker().equals(line.speaker());
+            if (sameSpeaker) {
+                merged.set(merged.size() - 1, new ExportDocument.Utterance(
+                        last.timecode(), last.speaker(),
+                        (last.text() + " " + line.text()).strip()));
+            } else {
+                merged.add(line);
+            }
+        }
+        return merged;
     }
 
     /* ------------------------------- details ------------------------------ */

@@ -69,7 +69,8 @@ public class MarkdownRenderer implements DocumentRenderer {
                 }
                 case ExportDocument.Block.Transcript t -> {
                     for (ExportDocument.Utterance line : t.lines()) {
-                        out.add("**[" + line.timecode() + "] " + line.speaker() + ":** " + line.text());
+                        String label = line.label();
+                        out.add(label.isEmpty() ? line.text() : "**" + label + ":** " + line.text());
                         out.add("");
                     }
                 }

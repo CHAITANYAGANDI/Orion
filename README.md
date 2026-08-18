@@ -103,7 +103,7 @@ so it takes a fourth upload to see.
 | AI-drafted follow-up email | ✅ |
 | **Recap emailed automatically when processing finishes** | ✅ |
 | **Non-English meetings — brief written in the spoken language** | ✅ |
-| Live in-browser recording (tab audio + mic) | ✅ |
+| Live in-browser recording (microphone) | ✅ |
 | Search & filters | ✅ |
 | Clerk auth (+ dev bypass) | ✅ |
 | Speaker diarization | ⚪ optional |

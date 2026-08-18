@@ -87,9 +87,15 @@ public class TextRenderer implements DocumentRenderer {
                 case ExportDocument.Block.Transcript t -> {
                     for (ExportDocument.Utterance line : t.lines()) {
                         // Speaker and time on their own line so the words below
-                        // wrap against a straight left margin.
-                        out.add("[" + line.timecode() + "] " + line.speaker());
-                        out.addAll(wrap(line.text(), 4));
+                        // wrap against a straight left margin. Absent when the
+                        // export asked for neither, leaving unindented prose.
+                        String label = line.label();
+                        if (label.isEmpty()) {
+                            out.addAll(wrap(line.text(), 0));
+                        } else {
+                            out.add(label);
+                            out.addAll(wrap(line.text(), 4));
+                        }
                         out.add("");
                     }
                 }

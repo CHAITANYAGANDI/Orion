@@ -122,9 +122,15 @@ public class DocxRenderer implements DocumentRenderer {
                 case ExportDocument.Block.Transcript t -> {
                     for (ExportDocument.Utterance line : t.lines()) {
                         StringBuilder content = new StringBuilder();
-                        content.append(run(doc, "[" + line.timecode() + "]  ",
-                                "<w:color w:val=\"8A8F98\"/>"));
-                        content.append(run(doc, line.speaker() + "  ", "<w:b/>"));
+                        // Each part only when the export asked for it; a bold
+                        // empty run still costs a stray double space.
+                        if (line.timecode() != null && !line.timecode().isBlank()) {
+                            content.append(run(doc, "[" + line.timecode() + "]  ",
+                                    "<w:color w:val=\"8A8F98\"/>"));
+                        }
+                        if (line.speaker() != null && !line.speaker().isBlank()) {
+                            content.append(run(doc, line.speaker() + "  ", "<w:b/>"));
+                        }
                         content.append(runs(doc, line.text(), null));
                         // A hanging indent so a long utterance wraps against the
                         // words rather than back under the speaker's name.
