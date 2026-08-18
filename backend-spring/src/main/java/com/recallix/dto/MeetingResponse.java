@@ -21,6 +21,16 @@ public record MeetingResponse(
         String sourceUrl,
         /** Detected transcription language (ISO-639-1); null until processed. */
         String language,
+        /**
+         * The language the user told us this meeting is in, or null to use the
+         * account default (V42).
+         *
+         * <p>Sent separately from {@link #language} because the picker has to
+         * show what was *asked for* rather than what came back: those differ
+         * exactly when somebody is trying to fix a mis-transcription, which is
+         * the one time the control matters.
+         */
+        String spokenLanguage,
         /** Which summary template this meeting's notes are written in. */
         String summaryTemplate,
         /**
@@ -61,6 +71,7 @@ public record MeetingResponse(
                 m.getSourceType(),
                 m.getSourceUrl(),
                 m.getLanguage(),
+                m.getSpokenLanguage(),
                 m.getSummaryTemplate(),
                 m.getContentType(),
                 m.getProjectId(),

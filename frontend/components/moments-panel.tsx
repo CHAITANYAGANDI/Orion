@@ -16,7 +16,7 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { Bookmark, Highlighter, MessageSquare, Trash2, Unlink, Check, Pencil } from "lucide-react";
+import { Bookmark, Highlighter, MessageSquare, Smile, Trash2, Unlink, Check, Pencil } from "lucide-react";
 import { useDeleteMomentMutation, useUpdateMomentMutation } from "@/lib/api";
 import type { MomentKind, TranscriptMoment } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,7 @@ const ICONS: Record<MomentKind, React.ComponentType<{ className?: string }>> = {
   HIGHLIGHT: Highlighter,
   BOOKMARK: Bookmark,
   NOTE: MessageSquare,
+  REACTION: Smile,
 };
 
 export function MomentsPanel({
@@ -177,15 +178,29 @@ function MomentRow({
               </div>
             </div>
           ) : (
-            moment.body && <p className="whitespace-pre-wrap text-sm">{moment.body}</p>
+            moment.body && (
+              <p
+                className={cn(
+                  "whitespace-pre-wrap text-sm",
+                  // A reaction's body is one glyph, and one glyph set in body
+                  // copy reads as a typo rather than as the mark it is.
+                  moment.kind === "REACTION" && "text-xl leading-none",
+                )}
+              >
+                {moment.body}
+              </p>
+            )
           )}
         </div>
 
         {/* Hidden until hover so a list of marks reads as a list of marks, but
             always reachable by keyboard. */}
         <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-          {/* A highlight has nothing to write in; the other two do. */}
-          {moment.kind !== "HIGHLIGHT" && !editing && (
+          {/* A highlight has nothing to write in, and a reaction is written by
+              picking a different emoji on the transcript rather than by typing
+              one into a box. Notes and bookmark labels are the two with words
+              in them. */}
+          {(moment.kind === "NOTE" || moment.kind === "BOOKMARK") && !editing && (
             <Button
               size="icon"
               variant="ghost"

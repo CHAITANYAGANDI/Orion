@@ -392,4 +392,5 @@ export const KIND_LABEL: Record<MomentKind, string> = {
   HIGHLIGHT: "Highlight",
   BOOKMARK: "Bookmark",
   NOTE: "Note",
+  REACTION: "Reaction",
 };

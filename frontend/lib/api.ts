@@ -392,6 +392,30 @@ export const api = createApi({
       ],
     }),
 
+    /**
+     * Say what language a meeting is in, and transcribe it again.
+     *
+     * Invalidates the transcript and the summary as well as the meeting: this
+     * queues a job that replaces both, and leaving the old ones cached would
+     * show a transcript that is being rewritten as though it were current.
+     */
+    setMeetingLanguage: builder.mutation<
+      ReprocessResponse,
+      { id: string; language: string }
+    >({
+      query: ({ id, language }) => ({
+        url: `/meetings/${id}/language`,
+        method: "POST",
+        body: { language },
+      }),
+      invalidatesTags: (_r, _e, { id }) => [
+        { type: "Meeting", id },
+        { type: "Meetings", id: "LIST" },
+        { type: "Transcript", id },
+        { type: "Summary", id },
+      ],
+    }),
+
     // ---- RAG chat ----
     // `conversationId` is part of the query *argument*, so RTK Query caches each
     // thread separately on its own — without it, switching threads would serve
@@ -1167,6 +1191,7 @@ export const {
   useUpdateMomentMutation,
   useDeleteMomentMutation,
   useReprocessMeetingMutation,
+  useSetMeetingLanguageMutation,
   useDeleteMeetingMutation,
   useGetChatQuery,
   useAskChatMutation,

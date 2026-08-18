@@ -2,6 +2,7 @@ package com.recallix.controller;
 
 import com.recallix.domain.MeetingStatus;
 import com.recallix.dto.MeetingCreateRequest;
+import com.recallix.dto.MeetingLanguageRequest;
 import com.recallix.dto.MeetingResponse;
 import com.recallix.dto.MeetingUpdateRequest;
 import com.recallix.dto.PageResponse;
@@ -142,6 +143,20 @@ public class MeetingController {
     @ResponseStatus(HttpStatus.ACCEPTED)
     public ReprocessResponse reprocess(@PathVariable String id) {
         return meetings.reprocess(SecurityUtils.currentUserId(), id);
+    }
+
+    /**
+     * Correct the language this meeting was held in, and transcribe it again.
+     *
+     * <p>202 rather than 200, and the same shape as {@code /reprocess}, because
+     * that is what it is: the answer is a queued job, and the transcript the
+     * caller is looking at is about to be replaced by a different one.
+     */
+    @PostMapping("/{id}/language")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public ReprocessResponse setLanguage(@PathVariable String id,
+                                         @Valid @RequestBody MeetingLanguageRequest req) {
+        return meetings.setSpokenLanguage(SecurityUtils.currentUserId(), id, req.language());
     }
 
     /**

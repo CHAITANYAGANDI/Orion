@@ -3,6 +3,7 @@ package com.recallix.service;
 import com.recallix.common.ApiException;
 import com.recallix.common.IdGenerator;
 import com.recallix.config.KafkaTopicsConfig;
+import com.recallix.domain.Language;
 import com.recallix.domain.MeetingStatus;
 import com.recallix.domain.SourceType;
 import com.recallix.dto.MeetingCreateRequest;
@@ -233,20 +234,30 @@ public class MeetingService {
                 // worker has no user context to look this up in. Blank means
                 // auto-detect, which is what every account did before the
                 // setting existed.
-                "language", language(meeting.getUserId())
+                "language", language(meeting)
         ));
     }
 
     /**
-     * The language this user says their meetings are in, or blank to detect.
+     * The language to tell the transcriber to expect, or blank to detect.
+     *
+     * <p>This meeting's own answer wins over the account's. The account setting
+     * is the right default and the wrong granularity for one French meeting in
+     * an English workspace — and somebody who has just told us what language
+     * *this* recording is in has said something more specific than a preference
+     * they set months ago.
      *
      * <p>Never fatal. A profile that cannot be read is not a reason to refuse to
      * transcribe a recording somebody has already uploaded — detection is the
      * behaviour they had before the setting existed.
      */
-    private String language(String userId) {
+    private String language(Meeting meeting) {
+        String own = meeting.getSpokenLanguage();
+        if (own != null && !own.isBlank()) {
+            return own;
+        }
         try {
-            String code = users.require(userId).getDefaultLanguage();
+            String code = users.require(meeting.getUserId()).getDefaultLanguage();
             return code == null ? "" : code;
         } catch (RuntimeException e) {
             return "";
@@ -609,6 +620,42 @@ public class MeetingService {
 
     // --- reprocess + delete ------------------------------------------------- //
 
+    /**
+     * Say what language this meeting is in, and transcribe it again.
+     *
+     * <p>Setting the field without re-running would be a control that changes
+     * nothing on screen: the transcript in front of the user is the one the
+     * wrong language produced, and it is the reason they opened this. So the
+     * two are one operation, and the UI says plainly what re-transcribing
+     * costs — every manual correction on this transcript is about to be
+     * replaced by a fresh one.
+     *
+     * <p>Blank clears the override and hands the meeting back to the account
+     * default, which is how somebody undoes a wrong answer without having to
+     * know what their account setting is.
+     */
+    @Transactional
+    public ReprocessResponse setSpokenLanguage(String userId, String meetingId, String raw) {
+        Meeting meeting = require(userId, meetingId);
+        String code = raw == null ? "" : raw.trim();
+        if (code.isEmpty()) {
+            meeting.setSpokenLanguage(null);
+        } else {
+            // Refused rather than passed through. A code the transcriber does
+            // not know is not a language it will fall back from gracefully —
+            // it is an hour of audio transcribed as gibberish, discovered
+            // twenty minutes later.
+            meeting.setSpokenLanguage(Language.find(code)
+                    .orElseThrow(() -> ApiException.badRequest(
+                            "Recallix can only transcribe: "
+                                    + String.join(", ", Language.all().stream()
+                                            .map(Language::englishName).toList())))
+                    .code());
+        }
+        audit.record(userId, "MEETING_LANGUAGE_SET", "meeting", meetingId);
+        return reprocess(userId, meetingId);
+    }
+
     @Transactional
     public ReprocessResponse reprocess(String userId, String meetingId) {
         Meeting meeting = require(userId, meetingId);
@@ -680,6 +727,7 @@ public class MeetingService {
                 m.getTags(), audioUrl,
                 m.getDurationSeconds(), m.getCreatedAt(), m.getErrorMessage(),
                 m.getSourceType(), m.getSourceUrl(), m.getLanguage(),
+                m.getSpokenLanguage(),
                 m.getSummaryTemplate(), m.getContentType(), m.getProjectId(),
                 m.getAudioDeletedAt(), m.getTranscriptDeletedAt(), m.getConsentConfirmedAt());
     }

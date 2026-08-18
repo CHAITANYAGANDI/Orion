@@ -7,7 +7,6 @@ import { toast } from "sonner";
 import {
   ArrowLeft,
   RefreshCw,
-  Trash2,
   Download,
   Loader2,
   AlertTriangle,
@@ -28,6 +27,7 @@ import {
   ChevronRight,
   ShieldCheck,
   ClipboardCopy,
+  MessageSquare,
 } from "lucide-react";
 import {
   useGetMeetingQuery,
@@ -81,13 +81,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
 import { StatusBadge } from "@/components/status-badge";
 import { ActionItemRow } from "@/components/action-item-row";
 import { NewActionItemDialog } from "@/components/new-action-item-dialog";
@@ -98,9 +91,10 @@ import { ShareDialog } from "@/components/share-dialog";
 import { MeetingTitle, MeetingTags } from "@/components/meeting-title";
 import { ProjectPicker } from "@/components/project-picker";
 import { OutlineNav } from "@/components/outline-nav";
+import { MeetingMenu } from "@/components/meeting-menu";
 import { InsightsPanel } from "@/components/insights-panel";
 import { ExportDialog } from "@/components/export-dialog";
-import { copyMinutes, copySummary } from "@/lib/minutes";
+import { copyMinutes, copySummary, copyTranscript } from "@/lib/minutes";
 import { subscribeMeetingStatus } from "@/lib/ws";
 import {
   formatDate,
@@ -112,10 +106,16 @@ import {
   timecode,
 } from "@/lib/format";
 import { languageName } from "@/lib/language";
-// Shared with the player's timeline: the band under the scrubber and the avatar
-// beside the words are the same claim about the same person, and two copies of
-// the palette would eventually disagree.
-import { speakerColor } from "@/lib/speakers";
+// Shared with the transcript editor, so reading and correcting agree about
+// where the paragraphs are and the page does not reflow when you switch modes.
+import { groupIntoTurns, type Turn } from "@/lib/turns";
+import { SpeakerAvatar } from "@/components/speaker-avatar";
+import { TurnActions, TurnReactions } from "@/components/turn-actions";
+import {
+  TranscriptEditor,
+  type TranscriptEditorHandle,
+  type TranscriptEditorStatus,
+} from "@/components/transcript-editor";
 import { ChatSuggestions } from "@/components/chat-suggestions";
 import { ChatHistory } from "@/components/chat-history";
 import { ChatMessageBubble } from "@/components/chat-message";
@@ -137,6 +137,7 @@ import {
 import { cn } from "@/lib/utils";
 import type {
   MeetingStatus,
+  MomentKind,
   StatusEvent,
   TranscriptMoment,
   TranscriptSegment,
@@ -156,6 +157,47 @@ export default function MeetingDetailPage() {
    * invoked from, which an uncontrolled Tabs cannot do.
    */
   const [tab, setTab] = React.useState("summary");
+
+  /**
+   * Correcting the whole transcript, as a mode.
+   *
+   * The state is here rather than in the panel because the control that leaves
+   * the mode sits on the tab row, which is this component's markup. The drafts
+   * stay down in the editor; it publishes what the button needs to draw itself
+   * through `onStatus`, and what the button needs to *do* through the ref.
+   */
+  /**
+   * Bumped by "Rematch speakers" on the menu, and read by the transcript panel
+   * as "open the speaker tools and scroll to them". A counter, so pressing the
+   * item a second time works a second time.
+   */
+  const [speakerTools, setSpeakerTools] = React.useState(0);
+  const [resummarize] = useResummarizeMutation();
+
+  const [editingTranscript, setEditingTranscript] = React.useState(false);
+  const transcriptEditor = React.useRef<TranscriptEditorHandle>(null);
+  const [editStatus, setEditStatus] = React.useState<TranscriptEditorStatus>({
+    dirty: 0,
+    saving: false,
+  });
+  const onEditStatus = React.useCallback((next: TranscriptEditorStatus) => {
+    setEditStatus(next);
+  }, []);
+  const leaveEditing = React.useCallback(() => setEditingTranscript(false), []);
+
+  /**
+   * Switching tabs out of an unsaved correction pass.
+   *
+   * The editor asks before discarding, and refuses to close if the answer is
+   * no — so a tab change that would have thrown the work away is refused with
+   * it, rather than happening anyway behind a dialog the user already declined.
+   */
+  function changeTab(next: string) {
+    if (editingTranscript && next !== "transcript" && !transcriptEditor.current?.cancel()) {
+      return;
+    }
+    setTab(next);
+  }
 
   /**
    * Text pushed into the chat from elsewhere on the page.
@@ -319,11 +361,55 @@ export default function MeetingDetailPage() {
     else toast.error("Couldn't copy.");
   }
 
+  async function onCopyTranscript() {
+    const ok = await copyTranscript(transcript.data?.segments ?? []);
+    if (ok) toast.success("Transcript copied.");
+    else toast.error("Nothing to copy yet.");
+  }
+
+  /**
+   * Write the brief again, under the template it already uses.
+   *
+   * The same call the template picker makes, with the current slug rather than
+   * a new one — which is what "regenerate" means. Worth having separately from
+   * the picker because the commonest reason to want it has nothing to do with
+   * templates: the transcript was corrected, and the summary still asserts what
+   * it used to say.
+   */
+  async function onRegenerateSummary() {
+    try {
+      await resummarize({ id, template: summary.data?.templateSlug ?? "general" }).unwrap();
+      toast.success("Summary rewritten from the current transcript.");
+    } catch {
+      toast.error("Could not rewrite the summary.");
+    }
+  }
+
+  /**
+   * Send the reader to the speaker tools, wherever they were.
+   *
+   * A counter rather than a boolean: pressing the menu item twice has to work
+   * twice, and a flag that is already true is a second press that does nothing.
+   */
+  function onRematchSpeakers() {
+    changeTab("transcript");
+    setSpeakerTools((n) => n + 1);
+  }
+
   async function onReprocess() {
+    if (
+      !window.confirm(
+        "Transcribe this recording again?\n\nThe new transcript replaces the one " +
+          "on screen, including any lines you corrected, and the summary is " +
+          "rewritten from it.",
+      )
+    ) {
+      return;
+    }
     try {
       await reprocess(id).unwrap();
       setLive(null);
-      toast.success("Reprocessing started.");
+      toast.success("Transcribing again.");
     } catch {
       toast.error("Could not reprocess.");
     }
@@ -498,52 +584,13 @@ export default function MeetingDetailPage() {
           {ready && (
             <>
               <ShareDialog meetingId={id} />
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" className="gap-2">
-                    <Download className="h-4 w-4" /> Export
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {/* Copying comes first: it is what people actually do with a
-                      summary — paste it into a reply or a doc — and a download
-                      is the fallback for when a file is genuinely wanted. */}
-                  <DropdownMenuItem onSelect={() => void onCopySummary()}>
-                    Copy summary
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => void onCopyMinutes()}>
-                    Copy formatted minutes
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  {/* One item rather than four: the formats differ in a single
-                      choice, and the transcript — which is most of the file —
-                      is a decision that applies to all of them. */}
-                  <DropdownMenuItem onSelect={() => setExporting(true)}>
-                    Download as PDF, Word, Markdown or text…
-                  </DropdownMenuItem>
-                  {/* Erasure sits under Export on purpose: taking a copy is the
-                      step before deleting the original, and putting them in the
-                      same menu means nobody has to go looking for the first one
-                      after committing to the second. */}
-                  {(canEraseAudio || canEraseTranscript) && <DropdownMenuSeparator />}
-                  {canEraseAudio && (
-                    <DropdownMenuItem
-                      className="text-destructive focus:text-destructive"
-                      onSelect={() => void onEraseAudio()}
-                    >
-                      Delete the recording, keep the notes
-                    </DropdownMenuItem>
-                  )}
-                  {canEraseTranscript && (
-                    <DropdownMenuItem
-                      className="text-destructive focus:text-destructive"
-                      onSelect={() => void onEraseTranscript()}
-                    >
-                      Delete the transcript, keep the summary
-                    </DropdownMenuItem>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
+              {/* A button, not a menu. Everything that used to hang off it —
+                  copying, erasing — moved onto the one menu that holds every
+                  other operation, so a control named Export now does exactly
+                  what it says. */}
+              <Button variant="outline" size="sm" className="gap-2" onClick={() => setExporting(true)}>
+                <Download className="h-4 w-4" /> Export
+              </Button>
               <ExportDialog
                 open={exporting}
                 onOpenChange={setExporting}
@@ -567,13 +614,33 @@ export default function MeetingDetailPage() {
               />
             </>
           )}
-          <Button variant="outline" size="sm" onClick={onReprocess} disabled={reprocessState.isLoading || !terminal}>
-            {reprocessState.isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            Reprocess
-          </Button>
-          <Button variant="ghost" size="icon" onClick={onDelete} disabled={removeState.isLoading} aria-label="Delete">
-            <Trash2 className="h-4 w-4 text-destructive" />
-          </Button>
+          {/* Everything else, in one place and ordered by what it costs to be
+              wrong. Rendered whatever the status, because deleting a meeting
+              that failed to process is the commonest thing to want to do with
+              one. */}
+          <MeetingMenu
+            meetingId={id}
+            projectId={m.projectId}
+            spokenLanguage={m.spokenLanguage}
+            detectedLanguage={m.language}
+            canExport={ready}
+            hasTranscript={(transcript.data?.segments?.length ?? 0) > 0}
+            hasSummary={ready && Boolean(summary.data)}
+            canReprocess={terminal && (!!m.audioUrl || !!m.sourceUrl)}
+            canEraseAudio={canEraseAudio}
+            canEraseTranscript={canEraseTranscript}
+            busy={reprocessState.isLoading || removeState.isLoading}
+            onExport={() => setExporting(true)}
+            onCopySummary={() => void onCopySummary()}
+            onCopyMinutes={() => void onCopyMinutes()}
+            onCopyTranscript={() => void onCopyTranscript()}
+            onRegenerateSummary={() => void onRegenerateSummary()}
+            onRematchSpeakers={onRematchSpeakers}
+            onReprocess={() => void onReprocess()}
+            onEraseAudio={() => void onEraseAudio()}
+            onEraseTranscript={() => void onEraseTranscript()}
+            onDelete={() => void onDelete()}
+          />
         </div>
       </div>
 
@@ -651,7 +718,7 @@ export default function MeetingDetailPage() {
          * they were extracted from.
          */
         <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-        <Tabs value={tab} onValueChange={setTab} className="min-w-0 flex-1">
+        <Tabs value={tab} onValueChange={changeTab} className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b">
             <TabsList variant="underline" className="flex gap-x-6 border-b-0">
               <TabsTrigger value="summary">Summary</TabsTrigger>
@@ -665,6 +732,46 @@ export default function MeetingDetailPage() {
                 nothing to what is on screen. */}
             {tab === "summary" && (
               <TemplatePicker meetingId={id} current={summary.data?.templateSlug ?? "general"} />
+            )}
+
+            {/* The transcript's counterpart to the template picker, in the same
+                place for the same reason: it is a mode over the whole document
+                below, not a control on any one line of it.
+
+                Only over the original. A translated transcript is derived
+                text — correcting it would edit a copy nothing else reads,
+                leave the words it was translated from untouched, and be
+                overwritten the next time the translation was refreshed. */}
+            {tab === "transcript" && !showing && (transcript.data?.segments?.length ?? 0) > 0 && (
+              editingTranscript ? (
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={editStatus.saving}
+                    onClick={() => transcriptEditor.current?.cancel()}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    disabled={editStatus.saving}
+                    onClick={() => void transcriptEditor.current?.save()}
+                  >
+                    {editStatus.saving ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Check className="h-4 w-4" />
+                    )}
+                    Done
+                    {editStatus.dirty > 0 ? ` (${editStatus.dirty})` : ""}
+                  </Button>
+                </div>
+              ) : (
+                <Button variant="ghost" size="sm" onClick={() => setEditingTranscript(true)}>
+                  <Pencil className="h-4 w-4" /> Edit Transcript
+                </Button>
+              )
             )}
           </div>
 
@@ -771,6 +878,14 @@ export default function MeetingDetailPage() {
                   </CardContent>
                 </Card>
               )
+            ) : editingTranscript ? (
+              <TranscriptEditor
+                ref={transcriptEditor}
+                meetingId={id}
+                segments={transcript.data?.segments ?? []}
+                onStatus={onEditStatus}
+                onClose={leaveEditing}
+              />
             ) : (
             <TranscriptPanel
               meetingId={id}
@@ -785,6 +900,7 @@ export default function MeetingDetailPage() {
               // keeps inactive utterances from re-rendering every frame.
               onSeek={audio.seekTo}
               onAskAbout={askAbout}
+              openSpeakers={speakerTools}
             />
             )}
           </TabsContent>
@@ -1423,6 +1539,7 @@ function TranscriptPanel({
   currentTime,
   onSeek,
   onAskAbout,
+  openSpeakers,
 }: {
   meetingId: string;
   loading: boolean;
@@ -1438,7 +1555,17 @@ function TranscriptPanel({
   onSeek: (s: number) => void;
   /** Hands a selected passage to the chat on the Ask tab. */
   onAskAbout: (text: string, send: boolean) => void;
+  /**
+   * Bumped by "Rematch speakers" on the meeting menu.
+   *
+   * The tools were already here and findable only by scrolling to the talk-time
+   * block and noticing a ghost button — which is to say, not findable. A
+   * counter rather than a boolean because the item has to work on the second
+   * press as well as the first.
+   */
+  openSpeakers: number;
 }) {
+  const speakerTools = React.useRef<HTMLDivElement | null>(null);
   const [renameSpeakers, { isLoading: renaming }] = useRenameSpeakersMutation();
   const [rematchSpeaker, { isLoading: merging }] = useRematchSpeakerMutation();
   const [editing, setEditing] = React.useState(false);
@@ -1481,6 +1608,15 @@ function TranscriptPanel({
       toast.error("Could not save that correction.");
     }
   }
+
+  // Skips the first render: the panel mounts with a nonce of zero, and opening
+  // the speaker tools for somebody who merely opened the Transcript tab would
+  // put an editing form over what they came to read.
+  React.useEffect(() => {
+    if (openSpeakers === 0) return;
+    setEditing(true);
+    speakerTools.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [openSpeakers]);
 
   const speakers = React.useMemo(() => {
     const set = new Set<string>();
@@ -1658,6 +1794,80 @@ function TranscriptPanel({
     );
   }
 
+  /**
+   * The marks anchored to a turn rather than to a passage inside it.
+   *
+   * Matched on the exact start, which is how a bookmark has always been found:
+   * two turns never share one, and a tolerance wide enough to be forgiving is
+   * wide enough to attach a reaction to the wrong sentence.
+   */
+  function turnMarks(kind: MomentKind, seconds: number): TranscriptMoment[] {
+    return marks.filter(
+      (m) =>
+        m.kind === kind &&
+        m.ranges.length === 0 &&
+        Math.abs(m.startSeconds - seconds) < 0.01,
+    );
+  }
+
+  /** Every word of a turn, as one string — what Copy puts on the clipboard. */
+  function turnText(turn: Turn): string {
+    return turn.segments.map((s) => s.text).join(" ").trim();
+  }
+
+  /**
+   * What a turn-level mark is about.
+   *
+   * No ranges, deliberately. A note on a whole turn is about what somebody
+   * said, not about a span of characters — and giving it ranges covering every
+   * word would paint the entire paragraph in highlighter, which is the styling
+   * that means "I marked these exact words".
+   */
+  function turnPassage(turn: Turn): Passage {
+    const last = turn.segments[turn.segments.length - 1];
+    return {
+      ranges: [],
+      quote: turnText(turn),
+      speaker: turn.speaker,
+      startSeconds: turn.start,
+      endSeconds: last ? last.end : turn.start,
+    };
+  }
+
+  /**
+   * Add the emoji, or take it off if it is already there.
+   *
+   * A toggle rather than an add, because the gesture that costs one click has
+   * to cost one click to undo. The server treats a repeat as a no-op, so a
+   * double click that races itself cannot leave two of the same reaction on one
+   * turn.
+   */
+  async function toggleReaction(turn: Turn, emoji: string) {
+    const existing = turnMarks("REACTION", turn.start).find((m) => m.body === emoji);
+    try {
+      if (existing) {
+        await deleteMoment({ id: existing.id, meetingId }).unwrap();
+        return;
+      }
+      await createMoment({
+        meetingId,
+        body: {
+          kind: "REACTION",
+          ranges: [],
+          // Context for the marks list, which shows reactions beside notes and
+          // bookmarks and would otherwise list an emoji against nothing.
+          quote: turnText(turn).slice(0, 200),
+          body: emoji,
+          speaker: turn.speaker,
+          startSeconds: turn.start,
+          endSeconds: turn.start,
+        },
+      }).unwrap();
+    } catch {
+      toast.error("Could not save that reaction.");
+    }
+  }
+
   async function toggleBookmark(turn: Turn) {
     const existing = bookmarkAt(turn.start);
     try {
@@ -1722,8 +1932,16 @@ function TranscriptPanel({
     return map;
   }, [segments, marks]);
 
-  const bookmarkTimes = React.useMemo(
-    () => marks.filter((m) => m.kind === "BOOKMARK").map((m) => m.startSeconds),
+  /**
+   * Marks that point at a time rather than at words: bookmarks, reactions, and
+   * notes made on a whole turn.
+   *
+   * They have no ranges, so `marksBySegment` never sees them — which would make
+   * "show only marked" hide the turn somebody just reacted to. Matched by start
+   * time, the way the marks themselves are anchored.
+   */
+  const anchorTimes = React.useMemo(
+    () => marks.filter((m) => m.ranges.length === 0).map((m) => m.startSeconds),
     [marks],
   );
 
@@ -1740,13 +1958,11 @@ function TranscriptPanel({
       visible = visible.filter(
         (t) =>
           t.segments.some((s) => s.id && marksBySegment.has(s.id)) ||
-          // A bookmark has no text anchor, so it is matched on the turn it
-          // points into rather than on a segment.
-          bookmarkTimes.some((at) => Math.abs(at - t.start) < 0.01),
+          anchorTimes.some((at) => Math.abs(at - t.start) < 0.01),
       );
     }
     return visible;
-  }, [allTurns, needle, onlyMarked, marksBySegment, bookmarkTimes]);
+  }, [allTurns, needle, onlyMarked, marksBySegment, anchorTimes]);
 
   // Counted over utterances rather than turns: a turn is a display grouping, so
   // counting those would report a number that changes with how text happens to
@@ -1851,7 +2067,7 @@ function TranscriptPanel({
             )}
             <p className="text-xs text-muted-foreground">
               Select any part of the transcript to highlight, quote, note or act
-              on it.
+              on it. Point at a turn for reactions, notes, copying and links.
             </p>
           </div>
         )}
@@ -1871,7 +2087,7 @@ function TranscriptPanel({
 
         {/* Talk-time */}
         {speakers.length > 0 && talk.total > 0 && (
-          <div className="space-y-2">
+          <div className="space-y-2 scroll-mt-24" ref={speakerTools}>
             <div className="flex items-center justify-between">
               <h3 className="flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
                 <Users className="h-4 w-4" /> Talk time
@@ -1996,8 +2212,38 @@ function TranscriptPanel({
           <div className="space-y-5" ref={bodyRef}>
             {turns.map((turn, i) => {
               const bookmarked = bookmarkAt(turn.start);
+              const reactions = turnMarks("REACTION", turn.start);
+              const notes = turnMarks("NOTE", turn.start);
               return (
-              <div key={i} className="group flex gap-3">
+              <div key={i} className="group relative flex gap-3">
+                {/* Floating over the top-right of the turn, out of the reading
+                    column entirely: five icons inline would push the speaker's
+                    name and timestamp around every time the pointer moved. */}
+                <TurnActions
+                  context={`${turn.speaker} at ${timecode(turn.start)}`}
+                  reactions={reactions.map((m) => m.body)}
+                  bookmarked={Boolean(bookmarked)}
+                  busy={marking}
+                  onReact={(emoji) => void toggleReaction(turn, emoji)}
+                  onBookmark={() => void toggleBookmark(turn)}
+                  onComment={() => setNoteFor(turnPassage(turn))}
+                  onCopy={() =>
+                    void copyToClipboard(
+                      attributedQuote({
+                        speaker: turn.speaker,
+                        startSeconds: turn.start,
+                        quote: turnText(turn),
+                      }),
+                      "Copied with attribution.",
+                    )
+                  }
+                  onShare={() =>
+                    void copyToClipboard(
+                      `${window.location.origin}/meetings/${meetingId}?t=${Math.floor(turn.start)}`,
+                      "Link copied — it opens at this moment.",
+                    )
+                  }
+                />
                 <SpeakerAvatar name={turn.speaker} />
                 <div className="min-w-0 flex-1 space-y-1">
                   <div className="flex items-baseline gap-2">
@@ -2009,27 +2255,22 @@ function TranscriptPanel({
                     >
                       {timecode(turn.start)}
                     </button>
-                    {/* Marking a moment rather than a passage — "come back to
-                        this bit" — which is a different gesture from selecting
-                        words, and the one you want while listening. Stays
-                        visible once set, so a bookmarked turn is findable by
-                        scrolling and not only by hovering. */}
-                    <button
-                      onClick={() => void toggleBookmark(turn)}
-                      aria-label={bookmarked ? "Remove bookmark" : "Bookmark this moment"}
-                      aria-pressed={Boolean(bookmarked)}
-                      title={bookmarked ? "Remove bookmark" : "Bookmark this moment"}
-                      className={cn(
-                        "rounded p-0.5 transition-opacity hover:text-foreground focus:opacity-100",
-                        bookmarked
-                          ? "text-primary opacity-100"
-                          : "text-muted-foreground opacity-0 group-hover:opacity-100",
-                      )}
-                    >
-                      <Bookmark
-                        className={cn("h-3.5 w-3.5", bookmarked && "fill-current")}
-                      />
-                    </button>
+                    {/* Setting a bookmark is a toolbar action now, but a
+                        bookmark that was only visible on hover would be
+                        findable by scrolling only if you scrolled with the
+                        pointer over every turn. So a set one stays on the row,
+                        and clicking it takes it off. */}
+                    {bookmarked && (
+                      <button
+                        onClick={() => void toggleBookmark(turn)}
+                        aria-label="Remove bookmark"
+                        aria-pressed
+                        title="Remove bookmark"
+                        className="rounded p-0.5 text-primary hover:text-foreground"
+                      >
+                        <Bookmark className="h-3.5 w-3.5 fill-current" />
+                      </button>
+                    )}
                     {/* Per-turn reassignment, for the handovers where two people
                         overlap and the whole turn landed on the wrong one. A
                         label-wide rename cannot express this: it would move
@@ -2037,7 +2278,11 @@ function TranscriptPanel({
                         not compete with reading. */}
                     {speakers.length > 1 && turn.segments.some((s) => s.id) && (
                       <select
-                        className="ml-auto h-6 rounded border bg-background px-1 text-xs text-muted-foreground opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100"
+                        // Left-aligned, right beside the name it is about.
+                        // The right edge of this row belongs to the floating
+                        // toolbar, which would otherwise cover it on hover —
+                        // the one moment it is meant to be reachable.
+                        className="h-6 rounded border bg-background px-1 text-xs text-muted-foreground opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100"
                         value=""
                         disabled={merging}
                         aria-label={`Reassign this turn from ${turn.speaker}`}
@@ -2157,6 +2402,38 @@ function TranscriptPanel({
                       );
                     })}
                   </p>
+
+                  {/* Under the words they are about. Clicking one removes it,
+                      which is the whole undo path — a gesture that costs one
+                      click should not cost three to take back. */}
+                  <TurnReactions
+                    reactions={reactions.map((m) => m.body)}
+                    onToggle={(emoji) => void toggleReaction(turn, emoji)}
+                    busy={marking}
+                  />
+
+                  {/* Turn-level notes, in place. They have no ranges, so
+                      nothing paints them over the transcript the way a note on
+                      a selection is painted — without this they would exist
+                      only in the collapsed marks list, which is a poor place to
+                      keep a remark about the sentence above it. */}
+                  {notes.map((note) => (
+                    <div
+                      key={note.id}
+                      className="mt-1 flex items-start gap-2 rounded-md border-l-2 border-primary/50 bg-muted/50 px-2 py-1.5"
+                    >
+                      <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <p className="min-w-0 flex-1 whitespace-pre-wrap text-sm">{note.body}</p>
+                      <button
+                        onClick={() => void deleteMoment({ id: note.id, meetingId })}
+                        aria-label="Delete this note"
+                        title="Delete this note"
+                        className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus:opacity-100 group-hover:opacity-100"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
                 </div>
               </div>
               );
@@ -2363,38 +2640,6 @@ const SpokenWords = React.memo(function SpokenWords({
     </>
   );
 });
-
-type Turn = { speaker: string; start: number; segments: TranscriptSegment[] };
-
-/** Merge consecutive utterances by the same speaker into one turn. */
-function groupIntoTurns(segments: TranscriptSegment[]): Turn[] {
-  const turns: Turn[] = [];
-  for (const s of segments) {
-    const last = turns[turns.length - 1];
-    if (last && last.speaker === s.speaker) {
-      last.segments.push(s);
-    } else {
-      turns.push({ speaker: s.speaker, start: s.start, segments: [s] });
-    }
-  }
-  return turns;
-}
-
-/** Initial of the speaker's name — "Speaker 3" gives S, "Marcus" gives M. */
-function SpeakerAvatar({ name }: { name: string }) {
-  const initial = (name.trim()[0] || "?").toUpperCase();
-  return (
-    <div
-      className={cn(
-        "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white",
-        speakerColor(name)
-      )}
-      aria-hidden
-    >
-      {initial}
-    </div>
-  );
-}
 
 function ProcessingCard({ status, progress, message }: { status: MeetingStatus; progress: number; message?: string }) {
   return (

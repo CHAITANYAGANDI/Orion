@@ -208,6 +208,87 @@ class MomentServiceTest {
         }
 
         @Test
+        @DisplayName("a reaction anchors to a time and carries its emoji")
+        void reactionsMarkATimeWithAnEmoji() {
+            service.add(USER, MEETING, new MomentRequest(
+                    "REACTION", List.of(), "We should ship on Thursday", "\uD83D\uDD25",
+                    "Priya", 90.0, 90.0));
+
+            TranscriptMoment m = saved();
+            assertThat(m.getKind()).isEqualTo("REACTION");
+            assertThat(m.getBody()).isEqualTo("\uD83D\uDD25");
+            // No ranges: it is about what somebody said, not about a span of
+            // characters inside it. Ranges would paint the whole paragraph in
+            // highlighter, which is the styling that means something else.
+            assertThat(m.getRanges()).isEmpty();
+            assertThat(m.getStartSeconds()).isEqualTo(90.0);
+        }
+
+        @Test
+        @DisplayName("a reaction with no emoji is refused")
+        void reactionNeedsAnEmoji() {
+            assertThatThrownBy(() -> service.add(USER, MEETING, new MomentRequest(
+                    "REACTION", List.of(), "words", "  ", "", 1.0, 1.0)))
+                    .isInstanceOf(ApiException.class)
+                    .hasMessageContaining("needs an emoji");
+            verify(moments, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("a reaction long enough to be a sentence is refused")
+        void reactionIsNotASecondNote() {
+            assertThatThrownBy(() -> service.add(USER, MEETING, new MomentRequest(
+                    "REACTION", List.of(), "words", "this is a whole opinion", "", 1.0, 1.0)))
+                    .isInstanceOf(ApiException.class)
+                    .hasMessageContaining("single emoji");
+        }
+
+        @Test
+        @DisplayName("a multi-code-point emoji is still one emoji")
+        void reactionCountsCodePointsNotChars() {
+            // A thumbs-up is a surrogate pair and a skin-toned one is two more
+            // code points again. Counting chars would reject the characters
+            // this field exists for.
+            service.add(USER, MEETING, new MomentRequest(
+                    "REACTION", List.of(), "words", "\uD83D\uDC4D\uD83C\uDFFD", "", 1.0, 1.0));
+
+            assertThat(saved().getKind()).isEqualTo("REACTION");
+        }
+
+        @Test
+        @DisplayName("reacting twice with the same emoji is a no-op, not a duplicate")
+        void reactingTwiceIsIdempotent() {
+            TranscriptMoment already = new TranscriptMoment();
+            already.setId("mom_9");
+            already.setMeetingId(MEETING);
+            already.setUserId(USER);
+            already.setKind("REACTION");
+            already.setBody("\uD83D\uDC4D");
+            already.setStartSeconds(90.0);
+            when(moments.findFirstByMeetingIdAndUserIdAndKindAndStartSecondsAndBody(
+                    MEETING, USER, "REACTION", 90.0, "\uD83D\uDC4D"))
+                    .thenReturn(Optional.of(already));
+
+            MomentResponse out = service.add(USER, MEETING, new MomentRequest(
+                    "REACTION", List.of(), "words", "\uD83D\uDC4D", "Priya", 90.0, 90.0));
+
+            // The UI toggles, so this only happens when two clicks race or two
+            // tabs are open on one meeting. Either way the second row renders
+            // exactly on top of the first, and the pair reads as two people.
+            assertThat(out.id()).isEqualTo("mom_9");
+            verify(moments, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("a different emoji on the same turn is a new reaction")
+        void differentEmojiIsNotADuplicate() {
+            service.add(USER, MEETING, new MomentRequest(
+                    "REACTION", List.of(), "words", "\uD83D\uDD25", "Priya", 90.0, 90.0));
+
+            assertThat(saved().getBody()).isEqualTo("\uD83D\uDD25");
+        }
+
+        @Test
         @DisplayName("a meeting already at the cap refuses more")
         void capsPerMeeting() {
             when(moments.countByMeetingId(MEETING)).thenReturn((long) MomentService.MAX_PER_MEETING);
@@ -247,6 +328,19 @@ class MomentServiceTest {
             assertThatThrownBy(() -> service.updateBody(USER, "mom_1",
                     new MomentRequest(null, List.of(), "", "   ", "", 0.0, 0.0)))
                     .isInstanceOf(ApiException.class);
+        }
+
+        @Test
+        @DisplayName("emptying a reaction is refused")
+        void cannotEmptyAReaction() {
+            existing("REACTION");
+
+            // A reaction *is* its body. Swapping one emoji for another is fine;
+            // leaving the mark with nothing to draw is not.
+            assertThatThrownBy(() -> service.updateBody(USER, "mom_1",
+                    new MomentRequest(null, List.of(), "", "   ", "", 0.0, 0.0)))
+                    .isInstanceOf(ApiException.class)
+                    .hasMessageContaining("needs an emoji");
         }
 
         @Test

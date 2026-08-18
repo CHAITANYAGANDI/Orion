@@ -15,7 +15,7 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * Highlights, bookmarks and notes on a transcript.
+ * Highlights, bookmarks, notes and reactions on a transcript.
  *
  * <p>Everything here is user-authored, so unlike the derived stores there is no
  * regeneration path and no {@code edited} flag: nothing else ever writes these
@@ -40,6 +40,17 @@ public class MomentService {
      * not a passage somebody meant to mark; it is a select-all.
      */
     private static final int MAX_RANGES = 200;
+
+    /**
+     * Code points in a reaction's body.
+     *
+     * <p>Generous on purpose. One emoji is one grapheme to a reader and
+     * anywhere from one to about ten code points to a computer — a flag is
+     * two, a skin-toned gesture is three, and "family with two children" is
+     * seven joined by zero-width joiners. This is loose enough for all of
+     * those and tight enough that the field cannot become a second note.
+     */
+    private static final int MAX_REACTION_CODEPOINTS = 16;
 
     private final TranscriptMomentRepository moments;
     private final MeetingRepository meetings;
@@ -74,13 +85,37 @@ public class MomentService {
         String quote = trimmed(req.quote());
         String body = trimmed(req.body());
 
-        // The two shapes that cannot be drawn or read. Checked here rather than
+        // The shapes that cannot be drawn or read. Checked here rather than
         // left to the CHECK constraints so the client gets a message it can show.
         if ("HIGHLIGHT".equals(kind) && quote.isEmpty()) {
             throw ApiException.badRequest("A highlight needs some selected text.");
         }
         if ("NOTE".equals(kind) && body.isEmpty()) {
             throw ApiException.badRequest("A note needs something written in it.");
+        }
+        if ("REACTION".equals(kind)) {
+            if (body.isEmpty()) {
+                throw ApiException.badRequest("A reaction needs an emoji.");
+            }
+            if (body.codePointCount(0, body.length()) > MAX_REACTION_CODEPOINTS) {
+                // Counted in code points, not in chars: a single emoji is
+                // routinely two (a surrogate pair) and a flag or a skin-toned
+                // one is more, so a char limit would reject the very
+                // characters this is for.
+                throw ApiException.badRequest("A reaction is a single emoji.");
+            }
+            // Reacting is a toggle in the UI, so arriving here twice with the
+            // same emoji on the same turn means two clicks raced, or two tabs
+            // are open. Returning what is already there makes the second one a
+            // no-op rather than a unique-constraint failure the user reads as
+            // "reacting is broken". Only reactions: two notes on one sentence
+            // are two notes.
+            double at = req.startSeconds() == null ? 0 : Math.max(0, req.startSeconds());
+            var existing = moments.findFirstByMeetingIdAndUserIdAndKindAndStartSecondsAndBody(
+                    meetingId, userId, kind, at, body);
+            if (existing.isPresent()) {
+                return MomentResponse.from(existing.get());
+            }
         }
 
         TranscriptMoment m = new TranscriptMoment();
@@ -105,7 +140,7 @@ public class MomentService {
     }
 
     /**
-     * Edit the body — a note's text, or a bookmark's label.
+     * Edit the body — a note's text, a bookmark's label, or a reaction's emoji.
      *
      * <p>The anchor is deliberately not editable. Re-pointing a note at a
      * different passage is a new note; allowing it in place would leave a
@@ -117,6 +152,12 @@ public class MomentService {
         String body = trimmed(req.body());
         if ("NOTE".equals(m.getKind()) && body.isEmpty()) {
             throw ApiException.badRequest("A note needs something written in it.");
+        }
+        // A reaction *is* its body, so emptying it would leave a mark with
+        // nothing to draw. Changing one emoji for another is allowed: it is the
+        // same gesture on the same passage, reconsidered.
+        if ("REACTION".equals(m.getKind()) && body.isEmpty()) {
+            throw ApiException.badRequest("A reaction needs an emoji.");
         }
         m.setBody(body);
         m.setUpdatedAt(Instant.now());

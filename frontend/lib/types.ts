@@ -113,6 +113,15 @@ export interface MeetingResponse {
   /** Detected transcription language (ISO-639-1); absent until processed. */
   language?: string | null;
   /**
+   * The language the user told us this meeting is in, or null for "use my
+   * account default" (V42).
+   *
+   * An input where `language` is an output. The picker shows this rather than
+   * `language`, because the two differ exactly when somebody is fixing a
+   * mis-transcription — which is the only time the control matters.
+   */
+  spokenLanguage?: string | null;
+  /**
    * MIME type of the stored media. Drives the choice between a video and an
    * audio player. Absent for meetings created before it was persisted, and for
    * YouTube imports — both render as audio.
@@ -948,7 +957,13 @@ export interface Insight {
 
 // ---- Transcript moments ----
 
-export type MomentKind = "HIGHLIGHT" | "BOOKMARK" | "NOTE";
+/**
+ * `REACTION` is a one-click tag on a turn — the emoji lives in `body`, and the
+ * mark anchors to a time rather than to a passage, exactly as a bookmark does.
+ * It is nobody's notification: Recallix has one account per workspace, so there
+ * is no second person for it to reach. See V41.
+ */
+export type MomentKind = "HIGHLIGHT" | "BOOKMARK" | "NOTE" | "REACTION";
 
 /**
  * One transcript segment's share of a marked passage.
@@ -978,7 +993,7 @@ export interface TranscriptMoment {
   ranges: MomentRange[];
   /** The selected words, joined. */
   quote: string;
-  /** The user's own words: a note's text, or a bookmark's label. */
+  /** The user's own words: a note's text, a bookmark's label, or a reaction's emoji. */
   body: string;
   /** Denormalised — the segment it came from may not survive a reprocess. */
   speaker: string;

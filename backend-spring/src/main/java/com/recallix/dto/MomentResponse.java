@@ -6,7 +6,7 @@ import com.recallix.entity.TranscriptMoment;
 import java.time.Instant;
 import java.util.List;
 
-/** A highlight, bookmark or note as the transcript view draws it. */
+/** A highlight, bookmark, note or reaction as the transcript view draws it. */
 public record MomentResponse(
         String id,
         String meetingId,

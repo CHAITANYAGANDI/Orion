@@ -34,6 +34,7 @@ public record MomentRequest(
         return switch (k) {
             case "BOOKMARK" -> "BOOKMARK";
             case "NOTE" -> "NOTE";
+            case "REACTION" -> "REACTION";
             default -> "HIGHLIGHT";
         };
     }

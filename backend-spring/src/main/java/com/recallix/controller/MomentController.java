@@ -20,9 +20,9 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * Highlights, bookmarks and notes on a transcript.
+ * Highlights, bookmarks, notes and reactions on a transcript.
  *
- * <p>All three kinds share one path for the same reason decisions and risks do
+ * <p>All four kinds share one path for the same reason decisions and risks do
  * (see {@link InsightController}): the list is rendered as one stream over one
  * transcript, and splitting it into three requests would let a page draw
  * highlights from one moment and notes from another.
@@ -49,7 +49,7 @@ public class MomentController {
         return moments.add(SecurityUtils.currentUserId(), meetingId, req);
     }
 
-    /** Edits the body only — a note's text, or a bookmark's label. */
+    /** Edits the body only — a note's text, a bookmark's label, or a reaction's emoji. */
     @PatchMapping("/moments/{id}")
     public MomentResponse update(@PathVariable String id,
                                  @Valid @RequestBody MomentRequest req) {

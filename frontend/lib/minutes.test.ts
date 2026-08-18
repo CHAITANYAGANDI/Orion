@@ -5,10 +5,17 @@ import {
   minutesHtml,
   minutesText,
   summaryText,
+  transcriptText,
   writeRich,
   type MinutesInput,
 } from "@/lib/minutes";
-import type { ActionItemResponse, Insight, MeetingResponse, SummaryResponse } from "@/lib/types";
+import type {
+  ActionItemResponse,
+  Insight,
+  MeetingResponse,
+  SummaryResponse,
+  TranscriptSegment,
+} from "@/lib/types";
 
 /**
  * What ends up on the clipboard.
@@ -226,5 +233,52 @@ describe("writing to the clipboard", () => {
   it("refuses to copy a summary that does not exist yet", async () => {
     expect(await copySummary(input({ summary: null }))).toBe(false);
     expect(writeText).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The transcript on the clipboard.
+ *
+ * Grouped and labelled the same way the page and the export are, because a
+ * transcript pasted into a ticket with different punctuation from the one in
+ * the downloaded file is two documents claiming to be the same record.
+ */
+describe("transcriptText", () => {
+  function seg(over: Partial<TranscriptSegment>): TranscriptSegment {
+    return { start: 0, end: 4, speaker: "Priya", text: "Hello.", ...over };
+  }
+
+  it("labels each turn with its time and speaker", () => {
+    const out = transcriptText([seg({ start: 12, text: "We should ship on Thursday." })]);
+    expect(out).toBe("[00:12] Priya: We should ship on Thursday.");
+  });
+
+  it("merges what one person said without a pause between the fragments", () => {
+    // Diarization splits on pauses, so a single sentence routinely arrives as
+    // two segments. Pasted one per line that reads as an interruption.
+    const out = transcriptText([
+      seg({ start: 0, text: "We should ship" }),
+      seg({ start: 2, text: "on Thursday." }),
+    ]);
+    expect(out).toBe("[00:00] Priya: We should ship on Thursday.");
+  });
+
+  it("keeps a change of speaker as a change of paragraph", () => {
+    const out = transcriptText([
+      seg({ start: 0, text: "Ready?" }),
+      seg({ start: 4, speaker: "Marcus", text: "Ready." }),
+    ]);
+    expect(out.split("\n\n")).toEqual(["[00:00] Priya: Ready?", "[00:04] Marcus: Ready."]);
+  });
+
+  it("does not invent a speaker for text that never had one", () => {
+    // A document has no speakers. Labelling every paragraph "Unknown speaker"
+    // adds a column of noise to a transcript that never had one.
+    const out = transcriptText([seg({ speaker: "", start: 0, text: "Typed-up minutes." })]);
+    expect(out).toBe("[00:00] Typed-up minutes.");
+  });
+
+  it("has nothing to say about an empty transcript", () => {
+    expect(transcriptText([])).toBe("");
   });
 });

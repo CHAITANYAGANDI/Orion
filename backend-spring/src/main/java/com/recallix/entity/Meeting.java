@@ -101,6 +101,16 @@ public class Meeting {
     private String language;
 
     /**
+     * The language the user says this meeting is in, or null to use the
+     * account default (V42).
+     *
+     * <p>An input where {@link #language} is an output. Read at every enqueue,
+     * so it survives a reprocess rather than being consumed by one.
+     */
+    @Column(name = "spoken_language")
+    private String spokenLanguage;
+
+    /**
      * Which summary shape this meeting is written in. Held on the meeting, not
      * the summary, so the choice survives a reprocess and so the meeting can be
      * re-summarized under a different template without re-transcribing it.
@@ -192,6 +202,9 @@ public class Meeting {
 
     public String getLanguage() { return language; }
     public void setLanguage(String language) { this.language = language; }
+
+    public String getSpokenLanguage() { return spokenLanguage; }
+    public void setSpokenLanguage(String spokenLanguage) { this.spokenLanguage = spokenLanguage; }
 
     public String getSummaryTemplate() { return summaryTemplate; }
     public void setSummaryTemplate(String summaryTemplate) { this.summaryTemplate = summaryTemplate; }

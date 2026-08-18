@@ -4,6 +4,7 @@ import com.recallix.entity.TranscriptMoment;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface TranscriptMomentRepository extends JpaRepository<TranscriptMoment, String> {
 
@@ -19,6 +20,23 @@ public interface TranscriptMomentRepository extends JpaRepository<TranscriptMome
     List<TranscriptMoment> findByMeetingIdOrderByStartSecondsAscCreatedAtAsc(String meetingId);
 
     long countByMeetingId(String meetingId);
+
+    /**
+     * The reaction this click would duplicate, if there is one.
+     *
+     * <p>Reacting is a toggle in the UI, so the second click on the same emoji
+     * deletes rather than adds. This covers the cases the UI cannot see: a
+     * double-click that raced itself, and a second tab open on the same
+     * meeting. Without it the insert hits {@code uq_transcript_moments_reaction}
+     * and a user who tapped twice gets a 500 for a gesture that should be a
+     * no-op.
+     *
+     * <p>Matched on the exact start time rather than a window, matching the
+     * unique index: a reaction anchors to a turn, and two turns never share a
+     * start.
+     */
+    Optional<TranscriptMoment> findFirstByMeetingIdAndUserIdAndKindAndStartSecondsAndBody(
+            String meetingId, String userId, String kind, double startSeconds, String body);
 
     long countByUserId(String userId);
 

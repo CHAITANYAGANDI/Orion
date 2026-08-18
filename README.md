@@ -3,10 +3,9 @@
 > Turn meeting audio into accurate transcripts, concise summaries, decisions, risks, and trackable action items.
 
 Recallix AI is a production-style, multi-service SaaS. Bring a meeting in —
-upload audio or video, record a tab live, paste a YouTube link, or drop in a PDF
-of typed-up minutes — and it transcribes, summarizes, and extracts decisions /
-action items / risks, streams live progress over WebSockets, and tracks
-commitments and decision drift *across* meetings.
+import audio or video, or record one from your microphone — and it transcribes,
+summarizes, and extracts decisions / action items / risks, streams live progress
+over WebSockets, and tracks commitments and decision drift *across* meetings.
 
 ## Architecture
 

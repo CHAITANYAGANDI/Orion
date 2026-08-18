@@ -4,7 +4,10 @@ import type {
   MeetingResponse,
   SummaryResponse,
   SummarySection,
+  TranscriptSegment,
 } from "@/lib/types";
+import { groupIntoTurns } from "@/lib/turns";
+import { timecode } from "@/lib/format";
 
 /**
  * Putting a meeting on the clipboard.
@@ -256,6 +259,46 @@ export async function writeRich(html: string, text: string): Promise<boolean> {
       return true;
     }
     await clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Every word of a transcript, as plain text.
+ *
+ * <p>Grouped into turns and labelled `[00:12] Priya:`, which is the same shape
+ * the page reads in and the same shape the export writes — a transcript pasted
+ * into a ticket with different punctuation from the one in the file is two
+ * documents claiming to be one.
+ *
+ * <p>Plain text only, unlike the minutes. A transcript is not a document
+ * somebody formats; it is a body of words that goes into a search box, a
+ * message, or another tool. Styling it would only give the paste target
+ * something to strip.
+ */
+export function transcriptText(segments: TranscriptSegment[]): string {
+  return groupIntoTurns(segments)
+    .map((turn) => {
+      const words = turn.segments.map((s) => s.text.trim()).filter(Boolean).join(" ");
+      if (!words) return "";
+      const who = turn.speaker?.trim();
+      // A document has no speakers, so labelling every paragraph "Unknown
+      // speaker" would add a column of noise to a transcript that never had
+      // one. The timestamp is always true and always useful.
+      const label = who ? `[${timecode(turn.start)}] ${who}:` : `[${timecode(turn.start)}]`;
+      return `${label} ${words}`;
+    })
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+export async function copyTranscript(segments: TranscriptSegment[]): Promise<boolean> {
+  const text = transcriptText(segments);
+  if (!text) return false;
+  try {
+    await navigator.clipboard.writeText(text);
     return true;
   } catch {
     return false;
