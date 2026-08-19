@@ -227,6 +227,59 @@ describe("RecordPage before recording", () => {
   });
 });
 
+describe("RecordPage note heading", () => {
+  const startedAt = new Date("2026-08-19T06:05:00");
+
+  it("names the note, dates it and says whose it is", () => {
+    renderPage({ state: "recording", startedAt });
+
+    expect(screen.getByLabelText("Name this note")).toBeInTheDocument();
+    expect(screen.getByText(/Aug 19, 2026/)).toBeInTheDocument();
+    expect(screen.getByText(/Owner: Sam Okafor/)).toBeInTheDocument();
+  });
+
+  it("offers the name as a placeholder, not as content", () => {
+    renderPage({ state: "recording", startedAt });
+
+    // A value would have to be cleared before anything could be typed — a name
+    // nobody chose, defended by the delete key.
+    const field = screen.getByLabelText("Name this note");
+    expect(field).toHaveValue("");
+    expect(field).toHaveAttribute("placeholder", "Note");
+  });
+
+  it("keeps what was typed, since the session outlives this page", () => {
+    renderPage({ state: "recording", startedAt }, { title: "Tuesday design review" });
+
+    expect(screen.getByLabelText("Name this note")).toHaveValue("Tuesday design review");
+  });
+
+  it("takes a name without demanding one", async () => {
+    renderPage({ state: "recording", startedAt });
+
+    await userEvent.type(screen.getByLabelText("Name this note"), "S");
+
+    expect(setTitle).toHaveBeenCalled();
+  });
+
+  it("dates the note from when recording began, not from the clock", () => {
+    renderPage({ state: "recording", startedAt, elapsed: 90 });
+
+    // Read from the clock it would tick over while the meeting ran, and the
+    // heading would disagree with the recording underneath it.
+    expect(screen.getByText(/6:05/)).toBeInTheDocument();
+  });
+
+  it("says nothing about a note that does not exist yet", () => {
+    renderPage({ state: "idle" });
+
+    // Before Start there is no note. A name field over an empty page asks
+    // somebody to title a meeting that has not happened.
+    expect(screen.queryByLabelText("Name this note")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Owner:/)).not.toBeInTheDocument();
+  });
+});
+
 describe("RecordPage processing", () => {
   it("does not draw the pipeline, which happens after this page is left", () => {
     // Saving navigates to Home and the wait is carried by the docked bar there,

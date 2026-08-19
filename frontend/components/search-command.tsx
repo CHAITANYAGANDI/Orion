@@ -20,8 +20,14 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Search, CornerDownLeft, X } from "lucide-react";
+import { Search, CornerDownLeft, X, Clock } from "lucide-react";
 import { useGetSearchFacetsQuery, useGetProjectsQuery } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import {
+  clearRecentSearches,
+  readRecentSearches,
+  rememberSearch,
+} from "@/lib/recent-searches";
 import {
   applySuggestion,
   describeTokens,
@@ -47,6 +53,8 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
   const [cursor, setCursor] = React.useState(initial.length);
   const [highlighted, setHighlighted] = React.useState(0);
   const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const { userId } = useAuth();
+  const [recent, setRecent] = React.useState<string[]>([]);
 
   // Only fetched while the box is open. The facets are a workspace-wide
   // aggregate and there is no reason for every page in the app to pay for one.
@@ -58,10 +66,14 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
       setText(initial);
       setCursor(initial.length);
       setHighlighted(0);
+      // Read on open rather than on mount: this component is mounted by the
+      // shell for the life of the tab, so a value read once would be the list
+      // as it stood before every search made since.
+      setRecent(readRecentSearches(userId));
       // A frame later: the input does not exist until this render commits.
       requestAnimationFrame(() => inputRef.current?.focus());
     }
-  }, [open, initial]);
+  }, [open, initial, userId]);
 
   const catalog = React.useMemo(() => ({ facets, projects }), [facets, projects]);
   const { word } = React.useMemo(() => wordAt(text, cursor), [text, cursor]);
@@ -85,11 +97,14 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
     });
   }
 
-  function run() {
-    const parsed = parseQuery(text);
+  function run(query: string = text) {
+    const parsed = parseQuery(query);
     // Resolved here rather than on the results page so a value that matches
     // nothing is dropped now, while the box that produced it is still open.
     const state = toSearchState(parsed, catalog);
+    // Recorded as typed, filters and all, so `from:priya budget` comes back as
+    // the search it was rather than as the word "budget".
+    setRecent(rememberSearch(userId, query));
     onOpenChange(false);
     router.push(`/search${encodeState(state)}`);
   }
@@ -182,7 +197,48 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
             </div>
           )}
 
-          {suggestions.length > 0 ? (
+          {/* What was searched before, until there is something to complete.
+              The four worked examples that used to sit here were a help page in
+              a box somebody opened in order to type. This is the opposite: it
+              is only ever the user's own words, it is empty until they have
+              typed some, and the commonest reason to open a search box is to
+              run something close to the last one. */}
+          {suggestions.length === 0 && text.trim() === "" && recent.length > 0 && (
+            <div className="py-2">
+              <div className="flex items-center justify-between px-4 py-1">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Recent searches
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearRecentSearches(userId);
+                    setRecent([]);
+                    inputRef.current?.focus();
+                  }}
+                  className="text-xs text-muted-foreground hover:text-foreground"
+                >
+                  Clear
+                </button>
+              </div>
+              <ul className="max-h-72 overflow-y-auto">
+                {recent.map((q) => (
+                  <li key={q}>
+                    <button
+                      type="button"
+                      onClick={() => run(q)}
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm hover:bg-accent/60"
+                    >
+                      <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <span className="truncate">{q}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {suggestions.length > 0 && (
             <ul role="listbox" aria-label="Search suggestions" className="max-h-72 overflow-y-auto py-1">
               {suggestions.map((s, i) => (
                 <li key={`${s.kind}-${s.insert}`}>
@@ -203,20 +259,12 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
                 </li>
               ))}
             </ul>
-          ) : (
-            <Hints />
           )}
 
-          <div className="flex items-center justify-between border-t px-4 py-2 text-xs text-muted-foreground">
-            <span>
-              Try <code className="rounded bg-muted px-1">from:</code>{" "}
-              <code className="rounded bg-muted px-1">in:</code>{" "}
-              <code className="rounded bg-muted px-1">when:</code>{" "}
-              <code className="rounded bg-muted px-1">tag:</code>
-            </span>
+          <div className="flex items-center justify-end border-t px-4 py-2 text-xs text-muted-foreground">
             <button
               type="button"
-              onClick={run}
+              onClick={() => run()}
               className="flex items-center gap-1.5 font-medium text-foreground hover:text-primary"
             >
               Search <CornerDownLeft className="h-3.5 w-3.5" />
@@ -224,40 +272,6 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-/**
- * What the box can do, shown when there is nothing to complete.
- *
- * A search overlay that opens empty and silent teaches nobody the grammar it
- * depends on. Four examples cost a moment to read and replace a help page.
- */
-function Hints() {
-  return (
-    <div className="px-4 py-4 text-sm">
-      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        Search everything at once
-      </p>
-      <ul className="space-y-1.5 text-muted-foreground">
-        <li>
-          <code className="rounded bg-muted px-1 text-foreground">stripe</code> — meetings,
-          decisions, commitments and every sentence anyone said
-        </li>
-        <li>
-          <code className="rounded bg-muted px-1 text-foreground">from:priya budget</code> —
-          what one person said about something
-        </li>
-        <li>
-          <code className="rounded bg-muted px-1 text-foreground">in:&quot;Q4 planning&quot;</code> —
-          inside one folder
-        </li>
-        <li>
-          <code className="rounded bg-muted px-1 text-foreground">when:week decided:yes</code> —
-          what got settled recently
-        </li>
-      </ul>
     </div>
   );
 }

@@ -24,6 +24,11 @@ function isChatPath(pathname: string): boolean {
   return pathname === "/ask" || pathname.startsWith("/ask/");
 }
 
+/** The page that exists to record. A prefix, so `/record/:id` cannot fall out. */
+function isRecordPath(pathname: string): boolean {
+  return pathname === "/record" || pathname.startsWith("/record/");
+}
+
 /** The folder list itself, not a folder. */
 function isFolderListPath(pathname: string): boolean {
   return pathname === "/projects" || pathname === "/projects/";
@@ -70,19 +75,33 @@ function folderIdFrom(pathname: string): string | null {
  * on screen. Inside a folder they come back — filing a meeting into the folder
  * you are looking at is exactly the moment to record one.
  *
- * <p>The live recording indicator is not part of this and is never hidden. It
- * is not a button; it is the only evidence that a microphone is open, and an
- * invisible live recording is worse than one that stopped.
+ * <p><strong>Nothing to create while one is being made.</strong> On /record,
+ * and on every other page for as long as the recorder is running or holding
+ * audio nobody has saved, Import and Record both go. Record would be offering
+ * to start a recording that is already running, and Import would be offering a
+ * second way to make a meeting while the first one is still open and still
+ * losable — a file picker over a live microphone is a way to lose the call you
+ * are on. New folder is untouched: filing something is not making a second
+ * recording, and the folder list is the one page whose own action it is.
+ *
+ * <p>This is also where the live-recording pill went. The docked bar along the
+ * bottom is on every page, survives the same navigations, and carries the
+ * waveform, the clock, and the two buttons that end the recording — so the
+ * header had a smaller copy of a thing already on screen, and clearing it out
+ * leaves the recording with one place to be. See components/recording-bar.tsx.
+ *
+ * @param recording whether the recorder is holding anything — mid-recording,
+ *   paused, or stopped with audio not yet saved.
  */
-export function headerChrome(pathname: string): HeaderChrome {
+export function headerChrome(pathname: string, recording = false): HeaderChrome {
+  const capturing = recording || isRecordPath(pathname);
   return {
     search: !isSettingsPath(pathname),
-    create:
-      isChatPath(pathname) || isSettingsPath(pathname)
+    create: isFolderListPath(pathname)
+      ? "folder"
+      : isChatPath(pathname) || isSettingsPath(pathname) || capturing
         ? "none"
-        : isFolderListPath(pathname)
-          ? "folder"
-          : "meeting",
+        : "meeting",
     folderId: folderIdFrom(pathname),
   };
 }

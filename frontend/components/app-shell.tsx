@@ -13,12 +13,13 @@
  * <p>The bell moved into the rail. It is a list of things that happened, which
  * makes it a place rather than an action, and the top bar was where it was most
  * likely to be crowded out — on a narrow window that row already carries a menu
- * button, a live recording indicator, Import and Record.
+ * button, Import and Record.
  *
  * <p>The top bar is not the same on every page. Search leaves it on Account
- * Settings; Import and Record leave it on the chat. Both rules live in
- * lib/chrome.ts with their reasons, rather than as pathname compares buried in
- * the JSX three regions from the thing they govern.
+ * Settings; Import and Record leave it on the chat, and leave again for as long
+ * as a recording is in hand. Every rule lives in lib/chrome.ts with its reason,
+ * rather than as pathname compares buried in the JSX three regions from the
+ * thing they govern.
  *
  * What is deliberately absent: the desktop-app card and the plan upsell that
  * used to sit at the bottom of the rail. A sidebar is navigation; an
@@ -34,7 +35,6 @@ import { cn } from "@/lib/utils";
 import { headerChrome } from "@/lib/chrome";
 import { RecordingProvider, useRecording } from "@/lib/recording-context";
 import { useRecordingStartedMutation } from "@/lib/api";
-import { stopwatch } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { NotificationBell } from "@/components/notification-bell";
 import { SearchCommand } from "@/components/search-command";
@@ -78,7 +78,12 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
   const [importing, setImporting] = React.useState(false);
   const [newFolder, setNewFolder] = React.useState(false);
   const fullBleed = pathname === "/home" || pathname === "/ask";
-  const chrome = headerChrome(pathname);
+  // Anything other than idle means the recorder is holding something: asking
+  // for the microphone, running, paused, or stopped with audio not yet saved.
+  // The header and the docked bar both key off it, so they can never disagree
+  // about whether a recording is happening.
+  const capturing = recorder.state !== "idle";
+  const chrome = headerChrome(pathname, capturing);
   /*
    * How far every page has to end above the docked control bar.
    *
@@ -90,8 +95,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
    * by the bar itself; the extra 3rem is so the newest words clear it rather
    * than touch it.
    */
-  const barShowing = recorder.state !== "idle";
-  const clearance = barShowing ? "calc(var(--recording-bar, 0px) + 3rem)" : undefined;
+  const clearance = capturing ? "calc(var(--recording-bar, 0px) + 3rem)" : undefined;
 
   // Ctrl/Cmd-K from anywhere. Bound on the shell rather than on the input so it
   // works while the focus is in a transcript, a chat box or nothing at all.
@@ -159,9 +163,9 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
             {/* In the rail rather than the top bar. It is a list of things that
                 happened, which makes it somewhere you go — and the header was
                 the wrong home for it in a more practical sense too: on a narrow
-                window that bar already carries a menu button, a recording
-                indicator, Import and Record, and the bell was the first thing
-                to be squeezed. Here it keeps a label. */}
+                window that bar already carries a menu button, Import and
+                Record, and the bell was the first thing to be squeezed. Here it
+                keeps a label. */}
             <NotificationBell onNavigate={() => setMobileOpen(false)} />
           </nav>
 
@@ -205,11 +209,13 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
             )}
 
             <div className="flex flex-1 items-center justify-end gap-2">
-              {/* Outside the pair below, and never hidden. It is not a button —
-                  it is the only evidence that a microphone is open, and it has
-                  to survive on whichever page somebody wandered onto. */}
-              <RecordingIndicator />
-              {/* What this page is for creating; see lib/chrome.ts.
+              {/* No live-recording pill here any more. It said what the
+                  docked bar at the bottom of the screen already says, on the
+                  same pages, through the same navigations — and the bar says it
+                  with a waveform, a clock and the two buttons that end the
+                  recording. See components/recording-bar.tsx.
+
+                  What this page is for creating; see lib/chrome.ts.
 
                   Import is a dialog rather than a route: a file arrives more
                   often than anything else creates a meeting, and it should not
@@ -309,60 +315,5 @@ function RecordButton() {
       <Mic className="h-4 w-4" />
       <span className="hidden sm:inline">Record</span>
     </Button>
-  );
-}
-
-/**
- * Live recording state, visible from every page.
- *
- * Recording survives navigation, which is only an improvement if you can tell it
- * is still happening — an invisible live microphone is worse than one that
- * stops. Also covers the state after stopping: audio captured but not yet saved
- * is the easiest thing in the app to lose.
- */
-function RecordingIndicator() {
-  const recorder = useRecording();
-  const live = recorder.state === "recording" || recorder.state === "paused";
-  const unsaved = recorder.state === "stopped" && recorder.result !== null;
-
-  if (!live && !unsaved) return null;
-
-  const paused = recorder.state === "paused";
-
-  return (
-    <Link
-      href="/record"
-      className={cn(
-        "flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-        unsaved
-          ? "border-amber-500/40 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20"
-          : "border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/20",
-      )}
-      title={
-        unsaved
-          ? "You have a recording that hasn't been saved yet"
-          : paused
-            ? "Recording paused — click to return"
-            : "Recording in progress — click to return"
-      }
-    >
-      <span
-        className={cn(
-          "h-2 w-2 shrink-0 rounded-full",
-          unsaved ? "bg-amber-500" : "bg-destructive",
-          // Only a running recording pulses; a paused or finished one is still,
-          // so the dot never implies capture that is not happening.
-          recorder.state === "recording" && "animate-pulse",
-        )}
-      />
-      {unsaved ? (
-        <span>Unsaved recording</span>
-      ) : (
-        <>
-          <span className="hidden sm:inline">{paused ? "Paused" : "Recording"}</span>
-          <span className="font-mono tabular-nums">{stopwatch(recorder.elapsed)}</span>
-        </>
-      )}
-    </Link>
   );
 }

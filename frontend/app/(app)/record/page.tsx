@@ -28,8 +28,8 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Mic, Loader2, AlertTriangle, User, FileText } from "lucide-react";
-import { useRecordingStartedMutation } from "@/lib/api";
+import { Mic, Loader2, AlertTriangle, User, FileText, CalendarDays } from "lucide-react";
+import { useRecordingStartedMutation, useGetPreferencesQuery } from "@/lib/api";
 import { useRecording, useRecordingSession } from "@/lib/recording-context";
 import { Button } from "@/components/ui/button";
 import { ProcessingSteps } from "@/components/processing-steps";
@@ -79,6 +79,8 @@ export default function RecordPage() {
       {/* No pipeline branch. Saving leaves for Home and the wait happens in the
           docked bar there, so by the time there is anything to watch this page
           is behind you. */}
+      {started && <NoteHeading startedAt={recorder.startedAt} />}
+
       {started ? (
         <InProgress state={recorder.state} />
       ) : (
@@ -240,6 +242,76 @@ function Phrases() {
 
 function Empty({ children }: { children: React.ReactNode }) {
   return <div className="rounded-lg border border-dashed p-8 text-center">{children}</div>;
+}
+
+/**
+ * What this note is, while it is being taken.
+ *
+ * <p>Only once recording has started. Before that there is no note: a name
+ * field over an empty page would be asking somebody to title a meeting that has
+ * not happened, at the one moment nobody can answer.
+ *
+ * <p>The name is optional and empty rather than pre-filled. A placeholder can
+ * be ignored; a value has to be deleted before anything can be typed, which is
+ * how a date-stamped name nobody chose ends up defended by the delete key.
+ * Left blank it falls back to the date on save — but somebody who knows this is
+ * the Tuesday design review can say so while it is still true, instead of
+ * hunting for the meeting afterwards to rename it.
+ *
+ * <p>The date is fixed at the moment recording began rather than read from the
+ * clock, so the heading does not tick over while the meeting runs.
+ */
+function NoteHeading({ startedAt }: { startedAt: Date | null }) {
+  const prefs = useGetPreferencesQuery();
+  const { title, setTitle } = useRecordingSession();
+  const owner = prefs.data?.displayName?.trim();
+  const when = startedAt ?? new Date();
+
+  return (
+    <div className="space-y-2 border-b pb-4">
+      <label className="sr-only" htmlFor="recording-title">
+        Name this note
+      </label>
+      <input
+        id="recording-title"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        placeholder="Note"
+        className={cn(
+          "w-full rounded-lg border-2 border-transparent bg-transparent px-3 py-2",
+          "text-3xl font-semibold tracking-tight outline-none transition-colors",
+          "placeholder:font-normal placeholder:italic placeholder:text-muted-foreground/60",
+          "hover:border-input focus:border-primary focus:bg-background",
+        )}
+      />
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 px-3 text-sm text-muted-foreground">
+        <span className="flex items-center gap-1.5">
+          <CalendarDays className="h-4 w-4 shrink-0" />
+          {noteDate(when)}
+        </span>
+        {/* Only once it is known. "Owner: —" is worse than no line: it reads as
+            a missing value rather than as a name nobody has set. */}
+        {owner && (
+          <span className="flex items-center gap-1.5">
+            <User className="h-4 w-4 shrink-0" />
+            Owner: {owner}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** "Wed, Aug 19, 2026 · 6:05 AM" — the day named, because a meeting has one. */
+function noteDate(when: Date): string {
+  const day = when.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  const time = when.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${day} · ${time}`;
 }
 
 /**

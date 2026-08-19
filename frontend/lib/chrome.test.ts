@@ -15,8 +15,7 @@ import { SETTINGS_TABS, LEGACY_PATHS, pathForTab } from "@/lib/settings-tabs";
  * <p>The last group pins which pages end up with a stripped header at all.
  * Account Settings is the one that ends up with nothing, and an empty bar reads
  * as a rendering failure rather than a decision — so it is written down here
- * before somebody tries to fix it. The live recording indicator is never part
- * of this decision on any page.
+ * before somebody tries to fix it.
  */
 
 /** Pages that are neither settings nor the chat, so nothing is hidden. */
@@ -26,9 +25,11 @@ const WORKING_PAGES = [
   "/projects/prj_1",
   "/action-items",
   "/search",
-  "/record",
   "/upload",
 ];
+
+/** Pages and states where the two buttons that make a meeting are withheld. */
+const CAPTURING_PAGES = ["/record", "/record/live"];
 
 describe("search in the header", () => {
   it("is gone on Account Settings, under every URL it answers to", () => {
@@ -102,6 +103,44 @@ describe("what the header offers to create", () => {
   });
 });
 
+describe("while a recording is in hand", () => {
+  it("offers nothing to create on the page that exists to record", () => {
+    // Record here would be offering to start what is already running.
+    for (const path of CAPTURING_PAGES) {
+      expect(headerChrome(path).create).toBe("none");
+    }
+  });
+
+  it("offers nothing to create on any other page either, while recording", () => {
+    // The point of the rule: the recorder survives navigation, so wandering
+    // onto Home must not put Import and Record back over a live microphone.
+    for (const path of WORKING_PAGES) {
+      expect(headerChrome(path, true).create).toBe("none");
+    }
+  });
+
+  it("still offers a folder on the folder list", () => {
+    // Filing something is not making a second recording, and the folder list
+    // has no other action of its own.
+    expect(headerChrome("/projects", true).create).toBe("folder");
+  });
+
+  it("leaves search alone, since finding a meeting does not make one", () => {
+    expect(headerChrome("/record").search).toBe(true);
+    expect(headerChrome("/home", true).search).toBe(true);
+  });
+
+  it("puts them back the moment the recorder is empty", () => {
+    // Held audio is the condition, not having ever recorded. After a save or a
+    // discard the header has to come back on its own.
+    expect(headerChrome("/home", false).create).toBe("meeting");
+  });
+
+  it("treats a path that merely starts the same as an ordinary page", () => {
+    expect(headerChrome("/records").create).toBe("meeting");
+  });
+});
+
 describe("the folder whose actions belong in the header", () => {
   it("is the one being looked at", () => {
     expect(headerChrome("/projects/prj_1").folderId).toBe("prj_1");
@@ -122,7 +161,7 @@ describe("the folder whose actions belong in the header", () => {
 
   it("is nothing anywhere else", () => {
     const notAFolder = WORKING_PAGES.filter((p) => p !== "/projects/prj_1");
-    for (const path of [...notAFolder, "/ask", "/settings", "/billing"]) {
+    for (const path of [...notAFolder, ...CAPTURING_PAGES, "/ask", "/settings", "/billing"]) {
       expect(headerChrome(path).folderId).toBeNull();
     }
   });
