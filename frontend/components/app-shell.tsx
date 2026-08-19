@@ -15,8 +15,10 @@
  * likely to be crowded out — on a narrow window that row already carries a menu
  * button, a live recording indicator, Import and Record.
  *
- * <p>Search leaves the header entirely on Account Settings, under every URL
- * that page answers to. See {@link isSettingsPath}.
+ * <p>The top bar is not the same on every page. Search leaves it on Account
+ * Settings; Import and Record leave it on the chat. Both rules live in
+ * lib/chrome.ts with their reasons, rather than as pathname compares buried in
+ * the JSX three regions from the thing they govern.
  *
  * What is deliberately absent: the desktop-app card and the plan upsell that
  * used to sit at the bottom of the rail. A sidebar is navigation; an
@@ -29,7 +31,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Home, Sparkles, Plug, Menu, Mic, Search, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { isSettingsPath } from "@/lib/settings-tabs";
+import { headerChrome } from "@/lib/chrome";
 import { RecordingProvider, useRecording } from "@/lib/recording-context";
 import { useRecordingStartedMutation } from "@/lib/api";
 import { stopwatch } from "@/lib/format";
@@ -73,7 +75,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
   const [searching, setSearching] = React.useState(false);
   const [importing, setImporting] = React.useState(false);
   const fullBleed = pathname === "/home" || pathname === "/ask";
-  const settingsPage = isSettingsPath(pathname);
+  const chrome = headerChrome(pathname);
   /*
    * How far every page has to end above the docked control bar.
    *
@@ -181,13 +183,11 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
                 that grew a dropdown on focus would have to fight the header for
                 room and would lose on a laptop.
 
-                Absent on Account Settings, under every URL that page answers
-                to. Search finds meetings, and nothing on those pages is one, so
-                the widest control in the header would be the one thing that
-                cannot act on what is underneath it. Ctrl-K still works there:
-                the shortcut is bound on the shell, and taking it away would
-                break the habit without freeing anything on screen. */}
-            {!settingsPage && (
+                Not on every page — see lib/chrome.ts for where and why. Ctrl-K
+                works everywhere regardless: the shortcut is bound on the shell,
+                and taking it away would break the habit without freeing
+                anything on screen. */}
+            {chrome.search && (
               <button
                 type="button"
                 onClick={() => setSearching(true)}
@@ -202,22 +202,32 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
             )}
 
             <div className="flex flex-1 items-center justify-end gap-2">
+              {/* Outside the pair below, and never hidden. It is not a button —
+                  it is the only evidence that a microphone is open, and it has
+                  to survive on whichever page somebody wandered onto. */}
               <RecordingIndicator />
-              {/* A dialog rather than a route: a file arrives more often than
-                  anything else creates a meeting, and it should not cost
-                  leaving whatever is on screen. /upload still exists for the
-                  fuller form — filing straight into a project — and for direct
-                  links. */}
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-2"
-                onClick={() => setImporting(true)}
-              >
-                <Upload className="h-4 w-4" />
-                <span className="hidden sm:inline">Import</span>
-              </Button>
-              <RecordButton />
+              {/* The two that make a meeting, and therefore the two that leave
+                  the page. Absent on the chat; see lib/chrome.ts.
+
+                  Import is a dialog rather than a route: a file arrives more
+                  often than anything else creates a meeting, and it should not
+                  cost leaving whatever is on screen. /upload still exists for
+                  the fuller form — filing straight into a project — and for
+                  direct links. */}
+              {chrome.create && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => setImporting(true)}
+                  >
+                    <Upload className="h-4 w-4" />
+                    <span className="hidden sm:inline">Import</span>
+                  </Button>
+                  <RecordButton />
+                </>
+              )}
             </div>
           </header>
 
