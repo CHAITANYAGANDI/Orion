@@ -58,7 +58,6 @@ import {
   useRenameConversationMutation,
   useDeleteConversationMutation,
   useDeleteChatExchangeMutation,
-  useAssignProjectMutation,
 } from "@/lib/api";
 import type {
   SpeakerStats,
@@ -89,7 +88,6 @@ import { TranslatedTranscript } from "@/components/translated-transcript";
 import { AudioPlayer, useAudioController } from "@/components/audio-player";
 import { ShareDialog } from "@/components/share-dialog";
 import { MeetingTitle, MeetingTags } from "@/components/meeting-title";
-import { ProjectPicker } from "@/components/project-picker";
 import { OutlineNav } from "@/components/outline-nav";
 import { MeetingMenu } from "@/components/meeting-menu";
 import { InsightsPanel } from "@/components/insights-panel";
@@ -313,7 +311,6 @@ export default function MeetingDetailPage() {
 
   const [reprocess, reprocessState] = useReprocessMeetingMutation();
   const [remove, removeState] = useDeleteMeetingMutation();
-  const [assignProject, { isLoading: filing }] = useAssignProjectMutation();
   const [eraseAudio] = useEraseAudioMutation();
   const [eraseTranscript] = useEraseTranscriptMutation();
 
@@ -562,23 +559,6 @@ export default function MeetingDetailPage() {
               </>
             )}
           </div>
-          {/* Filing, in the spec line rather than behind a menu: it is a fact
-              about the meeting like its date, and the moment somebody realises
-              which project a meeting belongs to is while they are reading it. */}
-          <div className="mt-2 no-print">
-            <ProjectPicker
-              value={m.projectId}
-              disabled={filing}
-              onChange={async (projectId) => {
-                try {
-                  await assignProject({ meetingId: id, projectId }).unwrap();
-                  toast.success(projectId ? "Filed." : "Moved to Unfiled.");
-                } catch {
-                  toast.error("Couldn't file that meeting.");
-                }
-              }}
-            />
-          </div>
         </div>
         <div className="flex items-center gap-2 no-print">
           {ready && (
@@ -617,7 +597,15 @@ export default function MeetingDetailPage() {
           {/* Everything else, in one place and ordered by what it costs to be
               wrong. Rendered whatever the status, because deleting a meeting
               that failed to process is the commonest thing to want to do with
-              one. */}
+              one.
+
+              Filing is in here too, as Move. It used to sit in the spec line
+              above as a folder picker, which meant every meeting carried a
+              visible "Unfiled" — a label reading as a problem to fix on the
+              overwhelming majority of meetings, in the one place somebody came
+              to read rather than to tidy. Which folder a meeting is in is a
+              thing you go and change, not a fact about the meeting worth
+              stating beside its date. */}
           <MeetingMenu
             meetingId={id}
             projectId={m.projectId}
