@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 /**
@@ -9,7 +9,6 @@ import userEvent from "@testing-library/user-event";
  */
 const mocks = vi.hoisted(() => ({
   assign: vi.fn(),
-  setLanguage: vi.fn(),
   unwrap: vi.fn(() => Promise.resolve({}) as Promise<unknown>),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
@@ -31,13 +30,6 @@ vi.mock("@/lib/api", () => ({
     },
     { isLoading: false },
   ],
-  useSetMeetingLanguageMutation: () => [
-    (a: unknown) => {
-      mocks.setLanguage(a);
-      return { unwrap: mocks.unwrap };
-    },
-    { isLoading: false },
-  ],
 }));
 
 vi.mock("sonner", () => ({
@@ -51,34 +43,34 @@ import { MeetingMenu } from "@/components/meeting-menu";
  *
  * <p>The things worth protecting are about what a click *costs*. "Copy link"
  * must never mint a public share URL — that publishes a meeting nobody asked to
- * publish, and it is one word away from the thing that does. "Change language"
- * must say, before the button, that it destroys every hand-typed correction on
- * the transcript; discovering that from a toast afterwards is discovering it too
- * late. And an operation with nothing to act on must not be offered at all: a
- * "Copy transcript" on a meeting whose transcript was erased is a menu item
- * that can only disappoint.
+ * publish, and it is one word away from the thing that does. And an operation
+ * with nothing to act on must not be offered at all: a "Copy transcript" on a
+ * meeting whose transcript was erased is a menu item that can only disappoint.
+ *
+ * <p>Several items were taken off this menu, and each is asserted absent rather
+ * than simply deleted from the list above — a menu is exactly the place where a
+ * removed item reappears, because adding one back is a single line and reads
+ * like a fix.
+ *
+ * <p>The last test is about something that used to be here. "Change language…"
+ * re-transcribed the audio and threw away every hand-typed correction, and it
+ * sat beside a translation picker doing something else entirely. Both said
+ * "language". It is asserted absent so it cannot come back by accident.
  */
 function menu(over: Partial<React.ComponentProps<typeof MeetingMenu>> = {}) {
   const props = {
     meetingId: "mtg_1",
     projectId: null,
-    spokenLanguage: null,
-    detectedLanguage: "en",
-    canExport: true,
     hasTranscript: true,
     hasSummary: true,
+    canTranslate: true,
     canReprocess: true,
-    canEraseAudio: true,
-    canEraseTranscript: true,
-    onExport: vi.fn(),
     onCopySummary: vi.fn(),
-    onCopyMinutes: vi.fn(),
     onCopyTranscript: vi.fn(),
     onRegenerateSummary: vi.fn(),
+    onTranslate: vi.fn(),
     onRematchSpeakers: vi.fn(),
     onReprocess: vi.fn(),
-    onEraseAudio: vi.fn(),
-    onEraseTranscript: vi.fn(),
     onDelete: vi.fn(),
     ...over,
   };
@@ -103,15 +95,13 @@ describe("MeetingMenu", () => {
     await open(user);
 
     for (const label of [
-      "Export audio & text",
       "Move…",
       "Copy link",
       "Copy summary",
-      "Copy formatted minutes",
       "Regenerate summary",
       "Copy transcript",
       "Rematch speakers",
-      "Change language…",
+      "Read in another language…",
       "Transcribe again",
       "Delete this meeting",
     ]) {
@@ -130,6 +120,31 @@ describe("MeetingMenu", () => {
     await open(user);
     await user.click(screen.getByRole("menuitem", { name: "Rematch speakers" }));
     expect(props.onRematchSpeakers).toHaveBeenCalled();
+
+    await open(user);
+    await user.click(screen.getByRole("menuitem", { name: "Read in another language…" }));
+    expect(props.onTranslate).toHaveBeenCalled();
+  });
+
+  it("does not offer a reading language for a meeting with nothing written yet", async () => {
+    const user = userEvent.setup();
+    menu({ canTranslate: false });
+    await open(user);
+
+    expect(
+      screen.queryByRole("menuitem", { name: "Read in another language…" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("no longer offers to re-transcribe in a different language", async () => {
+    const user = userEvent.setup();
+    menu();
+    await open(user);
+
+    // Two items saying "language", one of which silently destroyed corrections.
+    // Transcribing again is still here; it just cannot change the language.
+    expect(screen.queryByRole("menuitem", { name: /Change language/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Transcribe again" })).toBeInTheDocument();
   });
 
   it("offers nothing to copy from a meeting with nothing in it", async () => {
@@ -144,27 +159,44 @@ describe("MeetingMenu", () => {
     expect(screen.getByRole("menuitem", { name: "Delete this meeting" })).toBeInTheDocument();
   });
 
-  it("does not offer an export dialog that is not on the page yet", async () => {
+  it("keeps deleting the meeting whole, and offers no smaller grain", async () => {
     const user = userEvent.setup();
-    menu({ canExport: false });
+    menu();
     await open(user);
 
-    // A click that opens nothing looks exactly like one that failed.
-    expect(
-      screen.queryByRole("menuitem", { name: "Export audio & text" }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("does not offer to erase what is already erased", async () => {
-    const user = userEvent.setup();
-    menu({ canEraseAudio: false, canEraseTranscript: false });
-    await open(user);
-
+    // Erasing just the audio or just the transcript was two red items above
+    // this one, and the three read as a graded scale of the same act. Only the
+    // whole meeting can be deleted from here now.
     expect(
       screen.queryByRole("menuitem", { name: /Delete the recording/ }),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("menuitem", { name: /Delete the transcript/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Delete this meeting" })).toBeInTheDocument();
+  });
+
+  it("does not offer an export the header is already offering", async () => {
+    const user = userEvent.setup();
+    menu();
+    await open(user);
+
+    // There is an Export button beside Share, opening this same dialog. Two
+    // controls for one dialog is the kind of thing that gets one of them
+    // quietly wired to something else.
+    expect(
+      screen.queryByRole("menuitem", { name: /Export audio/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers one way to copy the summary rather than two", async () => {
+    const user = userEvent.setup();
+    menu();
+    await open(user);
+
+    expect(screen.getByRole("menuitem", { name: "Copy summary" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", { name: /formatted minutes/ }),
     ).not.toBeInTheDocument();
   });
 
@@ -218,66 +250,6 @@ describe("MeetingMenu", () => {
       await user.click(screen.getByRole("button", { name: /Unfiled/ }));
 
       expect(mocks.assign).toHaveBeenCalledWith({ meetingId: "mtg_1", projectId: null });
-    });
-  });
-
-  describe("Change language", () => {
-    async function openLanguage(user: ReturnType<typeof userEvent.setup>) {
-      await open(user);
-      await user.click(screen.getByRole("menuitem", { name: "Change language…" }));
-      return screen.getByRole("dialog");
-    }
-
-    it("says what it costs before the button that spends it", async () => {
-      const user = userEvent.setup();
-      menu();
-      const dialog = await openLanguage(user);
-
-      // Somebody who thought they were relabelling a field would otherwise find
-      // out from a toast, after their corrections were gone.
-      expect(within(dialog).getByText(/including any lines you corrected/)).toBeInTheDocument();
-    });
-
-    it("names what the transcriber thought it heard", async () => {
-      const user = userEvent.setup();
-      menu({ detectedLanguage: "en" });
-      const dialog = await openLanguage(user);
-      expect(within(dialog).getByText(/heard English/)).toBeInTheDocument();
-    });
-
-    it("sends the chosen language and re-transcribes", async () => {
-      const user = userEvent.setup();
-      menu();
-      const dialog = await openLanguage(user);
-
-      await user.click(within(dialog).getByRole("button", { name: /French/ }));
-      await user.click(within(dialog).getByRole("button", { name: "Transcribe again" }));
-
-      expect(mocks.setLanguage).toHaveBeenCalledWith({ id: "mtg_1", language: "fr" });
-    });
-
-    it("offers a way back to the account default", async () => {
-      const user = userEvent.setup();
-      menu({ spokenLanguage: "fr" });
-      const dialog = await openLanguage(user);
-
-      await user.click(within(dialog).getByRole("button", { name: /Use my account default/ }));
-      await user.click(within(dialog).getByRole("button", { name: "Transcribe again" }));
-
-      // Blank clears the override, so undoing a wrong answer does not require
-      // knowing what the account setting says.
-      expect(mocks.setLanguage).toHaveBeenCalledWith({ id: "mtg_1", language: "" });
-    });
-
-    it("opens on what was chosen last time, not on what was abandoned", async () => {
-      const user = userEvent.setup();
-      menu({ spokenLanguage: "fr" });
-      const dialog = await openLanguage(user);
-
-      expect(within(dialog).getByRole("button", { name: /French/ })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
     });
   });
 });

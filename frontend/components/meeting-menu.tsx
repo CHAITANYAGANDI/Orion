@@ -13,14 +13,29 @@
  *
  * <p>Ordered by what it costs to be wrong. Copying is free and reversible,
  * filing is one click to undo, regenerating spends a model call and rewrites
- * the brief, re-transcribing throws away every correction anybody made, and the
- * bottom group deletes things. The separators are where the cost changes, and
- * the destructive group is last so nothing lands there by momentum.
+ * the brief, re-transcribing throws away every correction anybody made, and
+ * deleting the meeting is last so nothing lands there by momentum. The
+ * separators are where the cost changes.
  *
- * <p>Two of the operations open dialogs and own their own state here, because
- * both are self-contained given a meeting id: choosing a project, and saying
- * what language the room was speaking. The rest are callbacks — their data
- * (the summary, the segments, the erasure timestamps) lives on the page.
+ * <p>Deleting the recording and deleting the transcript used to sit above it,
+ * as their own grains. They are gone from the menu; only the whole meeting can
+ * be deleted here now. The endpoints behind them are untouched and the nightly
+ * retention pass still calls them, so a meeting can still arrive on the page
+ * with its audio already erased — which is why the page keeps the line saying
+ * when that happened.
+ *
+ * <p>One operation opens a dialog and owns its own state here, because it is
+ * self-contained given a meeting id: choosing a project. The rest are callbacks
+ * — their data (the summary, the segments, the erasure timestamps, the language
+ * being read in) lives on the page.
+ *
+ * <p>What is deliberately not here: telling the transcriber it heard the wrong
+ * language. That was "Change language…", it re-transcribed from the audio, and
+ * it sat one menu away from a picker that translated — two controls saying
+ * "language", one of which quietly destroyed hand corrections. It was removed
+ * rather than renamed. POST /meetings/:id/language still works and nothing in
+ * the app calls it; "Transcribe again" below re-runs the pipeline with the
+ * language the meeting already has.
  */
 
 import * as React from "react";
@@ -28,7 +43,6 @@ import Link from "next/link";
 import { toast } from "sonner";
 import {
   Check,
-  Download,
   FolderInput,
   Languages,
   Link2,
@@ -43,7 +57,6 @@ import {
   useAssignProjectMutation,
   useGetLanguagesQuery,
   useGetProjectsQuery,
-  useSetMeetingLanguageMutation,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
@@ -66,37 +79,27 @@ export interface MeetingMenuProps {
   meetingId: string;
   /** Where it is filed now, so Move can show the current answer as chosen. */
   projectId?: string | null;
-  /** What the user last told us this meeting is in, or null for the account default. */
-  spokenLanguage?: string | null;
-  /** What the transcriber reported hearing. Shown when it disagrees with the above. */
-  detectedLanguage?: string | null;
-
-  /**
-   * The export dialog exists on the page.
-   *
-   * It is only mounted for a processed meeting, so offering the item before
-   * then would be a click that opens nothing — the worst kind of dead control,
-   * because it looks exactly like one that failed.
-   */
-  canExport: boolean;
   /** There is a transcript to copy, and speakers in it worth rematching. */
   hasTranscript: boolean;
   /** There is a summary to copy or rewrite. */
   hasSummary: boolean;
+  /**
+   * There is something worth reading in another language.
+   *
+   * The dialog lives on the page, like the export one and for the same reason:
+   * the language being read in decides what the whole page renders, so the page
+   * has to own it.
+   */
+  canTranslate: boolean;
   /** There is a source to run the pipeline over again. */
   canReprocess: boolean;
-  canEraseAudio: boolean;
-  canEraseTranscript: boolean;
 
-  onExport: () => void;
   onCopySummary: () => void;
-  onCopyMinutes: () => void;
   onCopyTranscript: () => void;
   onRegenerateSummary: () => void;
+  onTranslate: () => void;
   onRematchSpeakers: () => void;
   onReprocess: () => void;
-  onEraseAudio: () => void;
-  onEraseTranscript: () => void;
   onDelete: () => void;
 
   /** Greys the whole menu while something it started is in flight. */
@@ -105,7 +108,6 @@ export interface MeetingMenuProps {
 
 export function MeetingMenu(props: MeetingMenuProps) {
   const [moving, setMoving] = React.useState(false);
-  const [changingLanguage, setChangingLanguage] = React.useState(false);
 
   async function copyLink() {
     // The in-app URL, not a share link. Minting a public capability URL from a
@@ -128,26 +130,23 @@ export function MeetingMenu(props: MeetingMenuProps) {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-64">
-          {props.canExport && (
-            <DropdownMenuItem onSelect={props.onExport}>
-              <Download /> Export audio &amp; text
-            </DropdownMenuItem>
-          )}
           <DropdownMenuItem onSelect={() => setMoving(true)}>
             <FolderInput /> Move…
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => void copyLink()}>
             <Link2 /> Copy link
           </DropdownMenuItem>
+          {props.canTranslate && (
+            <DropdownMenuItem onSelect={props.onTranslate}>
+              <Languages /> Read in another language…
+            </DropdownMenuItem>
+          )}
 
           <DropdownMenuSeparator />
 
           {props.hasSummary && (
             <>
               <DropdownMenuItem onSelect={props.onCopySummary}>Copy summary</DropdownMenuItem>
-              <DropdownMenuItem onSelect={props.onCopyMinutes}>
-                Copy formatted minutes
-              </DropdownMenuItem>
               <DropdownMenuItem onSelect={props.onRegenerateSummary}>
                 <Sparkles /> Regenerate summary
               </DropdownMenuItem>
@@ -165,34 +164,13 @@ export function MeetingMenu(props: MeetingMenuProps) {
             </DropdownMenuItem>
           )}
           {props.canReprocess && (
-            <>
-              <DropdownMenuItem onSelect={() => setChangingLanguage(true)}>
-                <Languages /> Change language…
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={props.onReprocess}>
-                <RefreshCw /> Transcribe again
-              </DropdownMenuItem>
-            </>
+            <DropdownMenuItem onSelect={props.onReprocess}>
+              <RefreshCw /> Transcribe again
+            </DropdownMenuItem>
           )}
 
           <DropdownMenuSeparator />
 
-          {props.canEraseAudio && (
-            <DropdownMenuItem
-              className="text-destructive focus:text-destructive"
-              onSelect={props.onEraseAudio}
-            >
-              Delete the recording, keep the notes
-            </DropdownMenuItem>
-          )}
-          {props.canEraseTranscript && (
-            <DropdownMenuItem
-              className="text-destructive focus:text-destructive"
-              onSelect={props.onEraseTranscript}
-            >
-              Delete the transcript, keep the summary
-            </DropdownMenuItem>
-          )}
           <DropdownMenuItem
             className="text-destructive focus:text-destructive"
             onSelect={props.onDelete}
@@ -207,13 +185,6 @@ export function MeetingMenu(props: MeetingMenuProps) {
         onOpenChange={setMoving}
         meetingId={props.meetingId}
         projectId={props.projectId}
-      />
-      <ChangeLanguageDialog
-        open={changingLanguage}
-        onOpenChange={setChangingLanguage}
-        meetingId={props.meetingId}
-        current={props.spokenLanguage}
-        detected={props.detectedLanguage}
       />
     </>
   );
@@ -339,115 +310,5 @@ function Row({
         {hint && <span className="shrink-0 text-xs text-muted-foreground">{hint}</span>}
       </button>
     </li>
-  );
-}
-
-/* --------------------------- Change language ---------------------------- */
-
-/**
- * Telling the transcriber what language the room was speaking.
- *
- * <p>The reason this is a dialog and not a picker is the sentence in the
- * middle. Changing the language is not a setting, it is a re-transcription: it
- * replaces every word of the current transcript, and with it every correction
- * anybody typed. Somebody who thought they were relabelling a field would find
- * that out afterwards.
- *
- * <p>Only the languages Recallix can actually transcribe are offered. The
- * translation picker looks similar and means something else entirely — that one
- * reads an English meeting in French, this one says the meeting *was* in French.
- */
-function ChangeLanguageDialog({
-  open,
-  onOpenChange,
-  meetingId,
-  current,
-  detected,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  meetingId: string;
-  current?: string | null;
-  detected?: string | null;
-}) {
-  const { data: languages } = useGetLanguagesQuery();
-  const [setLanguage, { isLoading }] = useSetMeetingLanguageMutation();
-  const [picked, setPicked] = React.useState<string>(current ?? "");
-
-  // Re-seeded per opening, so a language considered and abandoned last time is
-  // not sitting there pre-selected the next.
-  React.useEffect(() => {
-    if (open) setPicked(current ?? "");
-  }, [open, current]);
-
-  const detectedName = languages?.find((l) => l.code === detected)?.name;
-
-  async function apply() {
-    try {
-      await setLanguage({ id: meetingId, language: picked }).unwrap();
-      toast.success("Transcribing again. This takes about as long as it did the first time.");
-      onOpenChange(false);
-    } catch (e) {
-      const message =
-        typeof e === "object" && e && "data" in e
-          ? (e as { data?: { message?: string } }).data?.message
-          : undefined;
-      toast.error(message || "Couldn't change the language.");
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>What language is this meeting in?</DialogTitle>
-          <DialogDescription>
-            {detectedName
-              ? `The transcriber heard ${detectedName}. If that is wrong, say so here and it will listen again.`
-              : "Tell the transcriber what to expect, and it will listen again."}
-          </DialogDescription>
-        </DialogHeader>
-
-        <ul className="max-h-64 space-y-1 overflow-y-auto py-1">
-          <Row
-            label="Use my account default"
-            hint="Detects, unless you set one"
-            selected={picked === ""}
-            disabled={isLoading}
-            onSelect={() => setPicked("")}
-          />
-          {(languages ?? []).map((l) => (
-            <Row
-              key={l.code}
-              label={l.name}
-              hint={l.nativeName === l.name ? undefined : l.nativeName}
-              selected={picked === l.code}
-              disabled={isLoading}
-              onSelect={() => setPicked(l.code)}
-            />
-          ))}
-        </ul>
-
-        {/* The cost, stated before the button rather than in a toast after it.
-            This is the one item on the menu that destroys work somebody did by
-            hand. */}
-        <p className="rounded-md border border-dashed bg-muted/40 p-3 text-sm text-muted-foreground">
-          This transcribes the recording again from the start. The new transcript
-          replaces the one on screen, including any lines you corrected, and the
-          summary is rewritten from it. Highlights and notes keep their
-          timestamps.
-        </p>
-
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={isLoading}>
-            Cancel
-          </Button>
-          <Button onClick={() => void apply()} disabled={isLoading}>
-            {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-            Transcribe again
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
   );
 }

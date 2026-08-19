@@ -98,7 +98,7 @@ so it takes a fourth upload to see.
 | **Speaker diarization** (AssemblyAI / Deepgram) | ✅ |
 | Speaker renaming, remembered across meetings | ✅ |
 | **Custom vocabulary — names and jargon the model keeps mishearing** | ✅ |
-| **Per-meeting spoken language, overriding the account default** | ✅ |
+| **Per-meeting spoken language, overriding the account default** | ✅ (no UI) |
 
 ### Reading one meeting
 
@@ -112,7 +112,9 @@ so it takes a fourth upload to see.
 | **Highlights, bookmarks, notes and reactions on any turn** | ✅ |
 | **Navigable outline of the meeting, beside the transcript** | ✅ |
 | Summary translation, and a translated transcript | ✅ |
+| **Read a whole meeting in another language, from the ⋯ menu** | ✅ |
 | **Export as PDF · Word · Markdown · plain text, plus the audio** | ✅ |
+| Copy the summary to the clipboard | ✅ |
 | **One ⋯ menu for everything you do to a meeting** | ✅ |
 
 ### Across meetings
@@ -197,11 +199,25 @@ and did not.
   tests, but they cover response *mapping* — millisecond-to-second conversion,
   speaker-label normalisation — against recorded payloads. No test makes a real
   call to any provider, including OpenAI.
-- **Three capabilities have no interface.** The retention policy runs nightly
+- **Five capabilities have no interface.** The retention policy runs nightly
   against whatever is stored, the account export and close-account endpoints
   work, and the notification mute switches work — all with nothing in the app
   able to reach them. See the file headers in `security-tab.tsx` and
   `emails-tab.tsx`.
+- **Erasure has one grain in the UI, and three on the server.** `DELETE` of a
+  meeting's audio and of its transcript both work, and the retention job calls
+  them; the ⋯ menu offers only "Delete this meeting". A meeting can still turn
+  up with its recording already erased, so the page keeps the line saying when
+  that happened.
+- **A meeting's spoken language cannot be corrected after the fact.**
+  `POST /meetings/:id/language` re-transcribes the audio under a language you
+  name, and nothing calls it. It was a ⋯ menu item sitting beside the
+  translation picker; two controls both saying "language", one of which
+  silently destroyed hand-typed transcript corrections. Removed rather than
+  renamed. The import dialog's language picker sets the *account* default, not
+  a per-meeting one, so today the language is chosen before a meeting is
+  enqueued or not at all. "Transcribe again" still re-runs the pipeline, with
+  whatever language the meeting already has.
 - **A folder's chat is unreachable, not deleted.** `POST /projects/:id/chat` and
   the whole `PRJ-` scope still work; the UI for them was removed, so existing
   history is stranded rather than erased.

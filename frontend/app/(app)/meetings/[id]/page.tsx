@@ -36,8 +36,6 @@ import {
   useGetMeetingActionItemsQuery,
   useReprocessMeetingMutation,
   useDeleteMeetingMutation,
-  useEraseAudioMutation,
-  useEraseTranscriptMutation,
   useGetChatQuery,
   useAskChatMutation,
   useTranslateMeetingMutation,
@@ -83,7 +81,7 @@ import {
 import { StatusBadge } from "@/components/status-badge";
 import { ActionItemRow } from "@/components/action-item-row";
 import { NewActionItemDialog } from "@/components/new-action-item-dialog";
-import { TranslationBar, ORIGINAL } from "@/components/translation-bar";
+import { TranslationDialog, ReadingIn, ORIGINAL } from "@/components/translation-dialog";
 import { TranslatedTranscript } from "@/components/translated-transcript";
 import { AudioPlayer, useAudioController } from "@/components/audio-player";
 import { ShareDialog } from "@/components/share-dialog";
@@ -92,7 +90,7 @@ import { OutlineNav } from "@/components/outline-nav";
 import { MeetingMenu } from "@/components/meeting-menu";
 import { InsightsPanel } from "@/components/insights-panel";
 import { ExportDialog } from "@/components/export-dialog";
-import { copyMinutes, copySummary, copyTranscript } from "@/lib/minutes";
+import { copySummary, copyTranscript } from "@/lib/minutes";
 import { subscribeMeetingStatus } from "@/lib/ws";
 import {
   formatDate,
@@ -311,8 +309,6 @@ export default function MeetingDetailPage() {
 
   const [reprocess, reprocessState] = useReprocessMeetingMutation();
   const [remove, removeState] = useDeleteMeetingMutation();
-  const [eraseAudio] = useEraseAudioMutation();
-  const [eraseTranscript] = useEraseTranscriptMutation();
 
   /**
    * The download dialog, opened from the export menu.
@@ -322,6 +318,9 @@ export default function MeetingDetailPage() {
    * same frame it was asked to open.
    */
   const [exporting, setExporting] = React.useState(false);
+
+  /** The reading-language dialog, opened from the same menu. */
+  const [pickingLanguage, setPickingLanguage] = React.useState(false);
 
   /**
    * What goes on the clipboard, in two shapes.
@@ -349,13 +348,6 @@ export default function MeetingDetailPage() {
     const ok = await copySummary(minutesInput());
     if (ok) toast.success("Summary copied.");
     else toast.error("Nothing to copy yet.");
-  }
-
-  async function onCopyMinutes() {
-    if (!meeting.data) return;
-    const ok = await copyMinutes(minutesInput());
-    if (ok) toast.success("Minutes copied — paste into a doc or an email.");
-    else toast.error("Couldn't copy.");
   }
 
   async function onCopyTranscript() {
@@ -423,50 +415,6 @@ export default function MeetingDetailPage() {
     }
   }
 
-  /**
-   * Erasing part of a meeting rather than all of it.
-   *
-   * The recording is the sensitive artefact — somebody's voice, the largest
-   * object, the thing a participant might ask about afterwards — and the notes
-   * drawn from it are usually what the meeting was for. So each can go on its
-   * own. Both prompts name what survives, because "delete the audio" reads to
-   * most people like "delete the meeting".
-   */
-  async function onEraseAudio() {
-    if (
-      !window.confirm(
-        "Delete the recording?\n\nThe transcript, summary and action items stay. " +
-          "The audio itself is removed from storage and cannot be recovered.",
-      )
-    ) {
-      return;
-    }
-    try {
-      await eraseAudio(id).unwrap();
-      toast.success("Recording deleted. The notes are still here.");
-    } catch {
-      toast.error("Could not delete the recording.");
-    }
-  }
-
-  async function onEraseTranscript() {
-    if (
-      !window.confirm(
-        "Delete the transcript?\n\nThe summary and action items stay. Every " +
-          "line of the transcript, its highlights and notes, its translations " +
-          "and everything Ask Recallix reads go with it, and cannot be recovered.",
-      )
-    ) {
-      return;
-    }
-    try {
-      await eraseTranscript(id).unwrap();
-      toast.success("Transcript deleted. The summary and tasks are still here.");
-    } catch {
-      toast.error("Could not delete the transcript.");
-    }
-  }
-
   if (meeting.isLoading) return <Skeleton className="h-64 w-full" />;
   if (meeting.isError || !meeting.data) {
     return (
@@ -484,8 +432,6 @@ export default function MeetingDetailPage() {
   const isDocument = m.sourceType === "DOCUMENT";
   // Only offered when there is something to erase. A YouTube import holds no
   // recording of ours, and offering to delete one would imply we had it.
-  const canEraseAudio = !isDocument && !!m.audioUrl && !m.audioDeletedAt;
-  const canEraseTranscript = !m.transcriptDeletedAt && (transcript.data?.segments?.length ?? 0) > 0;
 
   return (
     <div className="space-y-6">
@@ -558,6 +504,18 @@ export default function MeetingDetailPage() {
                 </button>
               </>
             )}
+            {/* Only ever rendered while a translation is on screen. The picker
+                is behind the ⋯ menu now, so this is the one thing telling a
+                reader that the words in front of them are not the ones that
+                were said. */}
+            <ReadingIn
+              sourceLanguage={m.language}
+              language={readingIn}
+              translation={showing}
+              busy={translating}
+              onShowOriginal={() => void onReadIn(ORIGINAL)}
+              onRetranslate={() => void onReadIn(readingIn, !!showing?.hasTranscript)}
+            />
           </div>
         </div>
         <div className="flex items-center gap-2 no-print">
@@ -609,24 +567,17 @@ export default function MeetingDetailPage() {
           <MeetingMenu
             meetingId={id}
             projectId={m.projectId}
-            spokenLanguage={m.spokenLanguage}
-            detectedLanguage={m.language}
-            canExport={ready}
             hasTranscript={(transcript.data?.segments?.length ?? 0) > 0}
             hasSummary={ready && Boolean(summary.data)}
+            canTranslate={ready}
             canReprocess={terminal && (!!m.audioUrl || !!m.sourceUrl)}
-            canEraseAudio={canEraseAudio}
-            canEraseTranscript={canEraseTranscript}
             busy={reprocessState.isLoading || removeState.isLoading}
-            onExport={() => setExporting(true)}
             onCopySummary={() => void onCopySummary()}
-            onCopyMinutes={() => void onCopyMinutes()}
             onCopyTranscript={() => void onCopyTranscript()}
             onRegenerateSummary={() => void onRegenerateSummary()}
+            onTranslate={() => setPickingLanguage(true)}
             onRematchSpeakers={onRematchSpeakers}
             onReprocess={() => void onReprocess()}
-            onEraseAudio={() => void onEraseAudio()}
-            onEraseTranscript={() => void onEraseTranscript()}
             onDelete={() => void onDelete()}
           />
         </div>
@@ -681,18 +632,6 @@ export default function MeetingDetailPage() {
             </div>
           </CardContent>
         </Card>
-      )}
-
-      {ready && (
-        <TranslationBar
-          sourceLanguage={m.language}
-          value={readingIn}
-          onChange={(v) => void onReadIn(v)}
-          translation={showing}
-          available={availableTranslations.data}
-          busy={translating}
-          onRetranslate={() => void onReadIn(readingIn, !!showing?.hasTranscript)}
-        />
       )}
 
       {ready && (
@@ -909,6 +848,19 @@ export default function MeetingDetailPage() {
         </aside>
         </div>
       )}
+
+      {/* Opened from the ⋯ menu, mounted here. A dialog inside a Radix menu is
+          unmounted in the same frame the menu closes, which is the same reason
+          the export one lives on the page. */}
+      <TranslationDialog
+        open={pickingLanguage}
+        onOpenChange={setPickingLanguage}
+        sourceLanguage={m.language}
+        value={readingIn}
+        onChange={(v) => void onReadIn(v)}
+        available={availableTranslations.data}
+        busy={translating}
+      />
     </div>
   );
 }
