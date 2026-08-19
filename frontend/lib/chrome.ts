@@ -1,43 +1,74 @@
 import { isSettingsPath } from "@/lib/settings-tabs";
 
 /**
- * What the top bar carries on a given page.
+ * What the top bar offers to create, if anything.
  *
- * <p>Two independent rules, in one place because they are the same kind of
- * decision and because inlining either as a `pathname === …` in the JSX puts
- * the reason three regions away from the thing it governs.
+ * <p>One value rather than a flag per button, because the choices are exclusive
+ * and always have been: a header showing both "New folder" and "Record" would
+ * be offering two answers to a question nobody asked.
  */
+export type CreateAction = "meeting" | "folder" | "none";
+
+/** What the top bar carries on a given page. */
 export interface HeaderChrome {
   /** The "Ask or search" button. Ctrl-K is bound on the shell and is unaffected. */
   search: boolean;
-  /** Import and Record — the two buttons that make a meeting. */
-  create: boolean;
+  /** Which create control the header offers. */
+  create: CreateAction;
+  /** The folder id whose actions belong in the header, or null. */
+  folderId: string | null;
+}
+
+/** Whether this is the chat. A prefix, so a future `/ask/:id` cannot fall out. */
+function isChatPath(pathname: string): boolean {
+  return pathname === "/ask" || pathname.startsWith("/ask/");
+}
+
+/** The folder list itself, not a folder. */
+function isFolderListPath(pathname: string): boolean {
+  return pathname === "/projects" || pathname === "/projects/";
 }
 
 /**
- * Whether this is the chat.
+ * The folder being looked at, or null.
  *
- * <p>Its own check rather than a string compare at the call site, so a future
- * `/ask/:id` cannot quietly fall out of the rule.
+ * <p>Read from the path rather than passed down, because the header is rendered
+ * by the shell and the shell does not know what page it is wrapping. The query
+ * for the folder is the same one the page underneath already made, so this
+ * costs a cache read rather than a request.
  */
-function isChatPath(pathname: string): boolean {
-  return pathname === "/ask" || pathname.startsWith("/ask/");
+function folderIdFrom(pathname: string): string | null {
+  const parts = pathname.split("/").filter(Boolean);
+  return parts.length === 2 && parts[0] === "projects" ? parts[1] : null;
 }
 
 /**
  * Decide the header for a pathname.
  *
- * <p><strong>No search on Account Settings.</strong> Search finds meetings, and
+ * <p><strong>Account Settings gets nothing.</strong> Search finds meetings, and
  * nothing on those pages is one — so the widest control in the header would be
  * the one thing that cannot act on what is underneath it. On the Integrations
  * tab it would sit directly above a list of connections it does not search,
- * which is the version of the problem somebody actually tries.
+ * which is the version of the problem somebody actually tries. Import and
+ * Record go for the related reason: changing a setting and capturing a call are
+ * different sittings, and the two of them there are an invitation to leave a
+ * half-finished form.
  *
- * <p><strong>No Import or Record on the chat.</strong> That page is a
- * conversation with one input, and the two buttons that make a meeting are the
- * two things that navigate away from it. Search stays: asking a question and
- * looking for the meeting the answer came from are the same activity, so the
- * one control worth keeping is the one that finds things.
+ * <p>That leaves the bar empty on those pages, on a wide window, and it stays
+ * rendered anyway. It is what stops the page shifting up by its own height on
+ * every navigation into and out of settings, and on a narrow one it still
+ * carries the button that opens the rail.
+ *
+ * <p><strong>Nothing to create on the chat.</strong> That page is a conversation
+ * with one input, and the two buttons that make a meeting are the two things
+ * that navigate away from it. Search stays: asking a question and then finding
+ * the meeting the answer came from are the same activity.
+ *
+ * <p><strong>The folder list offers a folder, not a meeting.</strong> A page
+ * that lists folders and nothing else has one obvious next action, and Import
+ * and Record were competing with it while doing something unrelated to what was
+ * on screen. Inside a folder they come back — filing a meeting into the folder
+ * you are looking at is exactly the moment to record one.
  *
  * <p>The live recording indicator is not part of this and is never hidden. It
  * is not a button; it is the only evidence that a microphone is open, and an
@@ -46,6 +77,12 @@ function isChatPath(pathname: string): boolean {
 export function headerChrome(pathname: string): HeaderChrome {
   return {
     search: !isSettingsPath(pathname),
-    create: !isChatPath(pathname),
+    create:
+      isChatPath(pathname) || isSettingsPath(pathname)
+        ? "none"
+        : isFolderListPath(pathname)
+          ? "folder"
+          : "meeting",
+    folderId: folderIdFrom(pathname),
   };
 }

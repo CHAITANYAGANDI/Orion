@@ -12,16 +12,17 @@ import { SETTINGS_TABS, LEGACY_PATHS, pathForTab } from "@/lib/settings-tabs";
  * so the tests below walk every URL each page answers to rather than one
  * representative of each.
  *
- * <p>The third group is the one that matters most. Whatever else is hidden,
- * the header must never be stripped of everything on a page somebody works on,
- * and the live recording indicator is never part of this decision at all.
+ * <p>The last group pins which pages end up with a stripped header at all.
+ * Account Settings is the one that ends up with nothing, and an empty bar reads
+ * as a rendering failure rather than a decision — so it is written down here
+ * before somebody tries to fix it. The live recording indicator is never part
+ * of this decision on any page.
  */
 
 /** Pages that are neither settings nor the chat, so nothing is hidden. */
 const WORKING_PAGES = [
   "/home",
   "/meetings/mtg_1",
-  "/projects",
   "/projects/prj_1",
   "/action-items",
   "/search",
@@ -55,45 +56,100 @@ describe("search in the header", () => {
   });
 });
 
-describe("Import and Record", () => {
-  it("are gone on the chat", () => {
-    expect(headerChrome("/ask").create).toBe(false);
+describe("what the header offers to create", () => {
+  it("offers nothing on the chat", () => {
+    expect(headerChrome("/ask").create).toBe("none");
   });
 
-  it("are gone on a chat with an id, if there is ever one", () => {
+  it("offers nothing on a chat with an id, if there is ever one", () => {
     // A string compare at the call site would drop this rule the day the route
-    // grows a segment, and the button would come back without anyone deciding.
-    expect(headerChrome("/ask/thr_1").create).toBe(false);
+    // grows a segment, and the buttons would come back without anyone deciding.
+    expect(headerChrome("/ask/thr_1").create).toBe("none");
   });
 
-  it("do not disappear on a path that merely starts with the same letters", () => {
-    expect(headerChrome("/asking").create).toBe(true);
+  it("does not treat a path that merely starts the same as the chat", () => {
+    expect(headerChrome("/asking").create).toBe("meeting");
   });
 
-  it("stay on Account Settings", () => {
-    // Nothing about settings makes recording a call the wrong thing to do next.
-    expect(headerChrome("/settings/emails").create).toBe(true);
+  it("offers a folder on the folder list, not a meeting", () => {
+    // The one page whose obvious next action is not recording something.
+    expect(headerChrome("/projects").create).toBe("folder");
+    expect(headerChrome("/projects/").create).toBe("folder");
   });
 
-  it("stay everywhere else", () => {
+  it("offers a meeting again inside a folder", () => {
+    // Filing a call into the folder you are looking at is exactly the moment
+    // to record one.
+    expect(headerChrome("/projects/prj_1").create).toBe("meeting");
+  });
+
+  it("offers nothing on Account Settings, under every URL it answers to", () => {
+    // Changing a setting and capturing a call are different sittings, and the
+    // buttons there were an invitation to walk away from a half-filled form.
+    expect(headerChrome("/settings").create).toBe("none");
+    for (const tab of SETTINGS_TABS) {
+      expect(headerChrome(pathForTab(tab.id)).create).toBe("none");
+    }
+    for (const path of Object.keys(LEGACY_PATHS)) {
+      expect(headerChrome(path).create).toBe("none");
+    }
+  });
+
+  it("offers a meeting everywhere else", () => {
     for (const path of WORKING_PAGES) {
-      expect(headerChrome(path).create).toBe(true);
+      expect(headerChrome(path).create).toBe("meeting");
     }
   });
 });
 
-describe("the header is never empty on a working page", () => {
-  it("keeps at least one control on every page that is not settings or chat", () => {
-    for (const path of WORKING_PAGES) {
-      const chrome = headerChrome(path);
-      expect(chrome.search || chrome.create).toBe(true);
-    }
+describe("the folder whose actions belong in the header", () => {
+  it("is the one being looked at", () => {
+    expect(headerChrome("/projects/prj_1").folderId).toBe("prj_1");
   });
 
-  it("never hides both, on any page", () => {
-    for (const path of ["/settings", "/ask", "/integrations", "/billing", ...WORKING_PAGES]) {
+  it("is nothing on the folder list itself", () => {
+    // Rename and delete need a folder. On the list there are many, and the
+    // per-row menus are where they belong.
+    expect(headerChrome("/projects").folderId).toBeNull();
+  });
+
+  it("is nothing on a deeper path under a folder", () => {
+    // Guards the id being read positionally: a third segment means this is not
+    // the folder page, and taking parts[1] anyway would put a stale folder's
+    // rename and delete in the header.
+    expect(headerChrome("/projects/prj_1/anything").folderId).toBeNull();
+  });
+
+  it("is nothing anywhere else", () => {
+    const notAFolder = WORKING_PAGES.filter((p) => p !== "/projects/prj_1");
+    for (const path of [...notAFolder, "/ask", "/settings", "/billing"]) {
+      expect(headerChrome(path).folderId).toBeNull();
+    }
+  });
+});
+
+describe("the two pages that strip the header", () => {
+  it("leaves Account Settings with nothing in it", () => {
+    // Deliberate, and the only page where both rules fire at once. Asserted
+    // rather than left implicit: an empty bar looks like a rendering failure,
+    // and the next person to see one should find this test before they
+    // "fix" it.
+    const chrome = headerChrome("/settings/emails");
+    expect(chrome.search).toBe(false);
+    expect(chrome.create).toBe("none");
+  });
+
+  it("leaves the chat with search and nothing else", () => {
+    const chrome = headerChrome("/ask");
+    expect(chrome.search).toBe(true);
+    expect(chrome.create).toBe("none");
+  });
+
+  it("strips nothing on any page that is neither", () => {
+    for (const path of [...WORKING_PAGES, "/projects"]) {
       const chrome = headerChrome(path);
-      expect(chrome.search || chrome.create).toBe(true);
+      expect(chrome.search).toBe(true);
+      expect(chrome.create).not.toBe("none");
     }
   });
 });

@@ -52,12 +52,12 @@ export default function FoldersPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-end">
-        <Button onClick={() => setCreating(true)} className="gap-1.5">
-          <Plus className="h-4 w-4" /> New folder
-        </Button>
-      </div>
-
+      {/* No New folder button here. It is in the top bar on this page, where
+          Import and Record sit everywhere else — one obvious next action in the
+          place the eye already goes for one, rather than two buttons a
+          centimetre apart doing the same thing. The empty state below keeps its
+          own, because a button in the middle of an explanation of what folders
+          are for is the one somebody reading that explanation will press. */}
       <div>
         {/* The header is the sort control. Two columns, so a dropdown of two
             choices would be one more click than clicking the column itself. */}

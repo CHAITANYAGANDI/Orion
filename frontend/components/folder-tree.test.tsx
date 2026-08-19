@@ -6,6 +6,11 @@ import type { Project } from "@/lib/types";
 /**
  * The folder list in the rail.
  *
+ * The heading is a link to every folder and the chevron beside it is the
+ * collapse — two controls where there used to be one, because the row that used
+ * to answer "show me all of them" sat at the foot of the list it was meant to
+ * replace.
+ *
  * The plus is hidden until the heading is hovered, which is a decision with a
  * cost: a control that only a mouse can find is one that half the people using
  * the product cannot press. So it stays in the document, focusable and named,
@@ -47,20 +52,43 @@ describe("the list", () => {
     expect(screen.getByRole("link", { name: "Q3 planning" })).toBeInTheDocument();
   });
 
-  it("collapses, so a long list cannot push the nav off the screen", async () => {
+  it("collapses from the chevron, so a long list cannot push the nav off screen", async () => {
     render(<FolderTree onNavigate={() => {}} />);
 
-    await userEvent.click(screen.getByRole("button", { name: /Folders/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Collapse folders" }));
 
     expect(screen.queryByRole("link", { name: "Client ABC" })).not.toBeInTheDocument();
   });
 
-  it("tells the empty case what to do rather than linking it somewhere empty", () => {
+  it("makes the heading itself the way to every folder", () => {
+    render(<FolderTree onNavigate={() => {}} />);
+
+    // It used to only collapse, which left "show me all of them" to a row at
+    // the foot of the list — so seeing every folder meant opening a list of
+    // folders and scrolling past them to a link.
+    expect(screen.getByRole("link", { name: "Folders" })).toHaveAttribute("href", "/projects");
+    expect(screen.queryByRole("link", { name: "All folders" })).not.toBeInTheDocument();
+  });
+
+  it("closes the rail when the heading is followed", async () => {
+    const onNavigate = vi.fn();
+    render(<FolderTree onNavigate={onNavigate} />);
+
+    await userEvent.click(screen.getByRole("link", { name: "Folders" }));
+
+    expect(onNavigate).toHaveBeenCalled();
+  });
+
+  it("shows nothing at all when there are no folders", () => {
     folders = [];
     render(<FolderTree onNavigate={() => {}} />);
 
-    expect(screen.getByRole("button", { name: "Create your first folder" })).toBeInTheDocument();
+    // This section lists what exists. With nothing in it, an instruction is
+    // the only entry — and /projects, which the heading leads to, has the room
+    // to say what a folder is for and a button to make one.
+    expect(screen.queryByRole("button", { name: "Create your first folder" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "All folders" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Folders" })).toBeInTheDocument();
   });
 });
 
@@ -85,13 +113,13 @@ describe("the plus", () => {
 
   it("expands the section it is about to add to", async () => {
     render(<FolderTree onNavigate={() => {}} />);
-    await userEvent.click(screen.getByRole("button", { name: /Folders/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Collapse folders" }));
 
     await userEvent.click(screen.getByRole("button", { name: "Create a folder" }));
 
     // Otherwise the folder is created into a collapsed list and nothing on
     // screen changes.
-    expect(screen.getByRole("button", { name: /Folders/ })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Collapse folders" })).toHaveAttribute(
       "aria-expanded",
       "true",
     );

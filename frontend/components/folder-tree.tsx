@@ -9,6 +9,17 @@
  * often enough to deserve permanent chrome, but it has to be where the folders
  * are rather than three clicks away on another page.
  *
+ * <p>The heading is a link and the chevron is the toggle. They used to be one
+ * control that only collapsed, which left "show me everything" to a row at the
+ * foot of the list called "All folders" — so seeing every folder meant opening
+ * a list of folders and then scrolling past them to a link. The word Folders
+ * now goes to the folder list, which is the obvious thing for it to do.
+ *
+ * <p>The section holds folders and nothing else. It no longer offers to create
+ * one when the list is empty; an empty rail section is a smaller lie than a
+ * section whose only entry is an instruction, and /projects has the room to
+ * explain what a folder is for.
+ *
  * Nothing navigates after a folder is made. The new folder appearing in the rail
  * is the confirmation, and being thrown into an empty page in the middle of
  * whatever you were doing is not an improvement on that.
@@ -35,15 +46,32 @@ export function FolderTree({ onNavigate }: { onNavigate: () => void }) {
           hovering a 14px target to reveal a second one is a game rather than
           an affordance. */}
       <div className="group flex items-center gap-1 pr-1">
+        {/* The chevron and the word are two controls, not one.
+            The heading used to toggle the list, and the way to see every folder
+            at once was a row at the bottom of that list called "All folders" —
+            so the answer to "show me my folders" was to open a list of folders
+            and then click past all of them. The word is the link now, and the
+            chevron keeps the collapse. */}
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
-          className="flex flex-1 items-center gap-1.5 px-1 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground"
+          aria-label={open ? "Collapse folders" : "Expand folders"}
+          className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
         >
           {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-          Folders
         </button>
+
+        <Link
+          href="/projects"
+          onClick={onNavigate}
+          className={cn(
+            "flex-1 py-2 text-xs font-semibold uppercase tracking-wide transition-colors hover:text-foreground",
+            pathname === "/projects" ? "text-foreground" : "text-muted-foreground",
+          )}
+        >
+          Folders
+        </Link>
 
         {/* Invisible until hovered, but always in the DOM and focusable, so it
             is reachable by keyboard and readable by a screen reader — a control
@@ -83,28 +111,12 @@ export function FolderTree({ onNavigate }: { onNavigate: () => void }) {
               </Link>
             );
           })}
-          {/* With nothing filed yet, the plus is invisible until hovered and
-              "All folders" leads to an empty page — so the empty state does the
-              teaching instead. */}
-          {folders.length === 0 ? (
-            <button
-              type="button"
-              onClick={() => setCreating(true)}
-              className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-            >
-              <Plus className="h-3.5 w-3.5 shrink-0" />
-              Create your first folder
-            </button>
-          ) : (
-            <Link
-              href="/projects"
-              onClick={onNavigate}
-              className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-            >
-              <FolderOpen className="h-3.5 w-3.5 shrink-0" />
-              All folders
-            </Link>
-          )}
+          {/* Folders and nothing else.
+              No "All folders" row — the heading above goes there. And no
+              "create your first folder" row when the list is empty: this
+              section is a list of what exists, and teaching belongs on the page
+              that has room for it. /projects carries the empty state and the
+              New folder button, which is where the heading leads. */}
         </div>
       )}
 

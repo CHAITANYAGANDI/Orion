@@ -197,9 +197,22 @@ describe("the row menu", () => {
 });
 
 describe("creating", () => {
-  it("opens the form from the header", async () => {
+  it("does not put a New folder button above the list", () => {
     render(<FoldersPage />);
 
+    // It is in the top bar on this page, where Import and Record sit
+    // everywhere else. Two of them a centimetre apart, doing the same thing,
+    // is the state this asserts against.
+    expect(screen.queryByRole("button", { name: /New folder/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps one in the empty state, where it is being explained", async () => {
+    folders = [];
+    render(<FoldersPage />);
+
+    // The header button is off-screen for this component, and somebody reading
+    // "a folder groups meetings by the work they belong to" is going to press
+    // the thing directly under it.
     await userEvent.click(screen.getByRole("button", { name: /New folder/ }));
 
     expect(await screen.findByRole("heading", { name: "Create a folder" })).toBeInTheDocument();

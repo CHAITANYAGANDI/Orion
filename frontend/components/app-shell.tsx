@@ -29,7 +29,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Home, Sparkles, Plug, Menu, Mic, Search, Upload } from "lucide-react";
+import { Home, Sparkles, Plug, Menu, Mic, Search, Upload, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { headerChrome } from "@/lib/chrome";
 import { RecordingProvider, useRecording } from "@/lib/recording-context";
@@ -42,6 +42,8 @@ import { ImportDialog } from "@/components/import-dialog";
 import { RecordingBar } from "@/components/recording-bar";
 import { AccountMenu } from "@/components/account-menu";
 import { FolderTree } from "@/components/folder-tree";
+import { FolderDialog } from "@/components/folder-dialog";
+import { FolderHeaderActions } from "@/components/folder-header-actions";
 
 /**
  * The places.
@@ -74,6 +76,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [searching, setSearching] = React.useState(false);
   const [importing, setImporting] = React.useState(false);
+  const [newFolder, setNewFolder] = React.useState(false);
   const fullBleed = pathname === "/home" || pathname === "/ask";
   const chrome = headerChrome(pathname);
   /*
@@ -206,15 +209,14 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
                   it is the only evidence that a microphone is open, and it has
                   to survive on whichever page somebody wandered onto. */}
               <RecordingIndicator />
-              {/* The two that make a meeting, and therefore the two that leave
-                  the page. Absent on the chat; see lib/chrome.ts.
+              {/* What this page is for creating; see lib/chrome.ts.
 
                   Import is a dialog rather than a route: a file arrives more
                   often than anything else creates a meeting, and it should not
                   cost leaving whatever is on screen. /upload still exists for
                   the fuller form — filing straight into a project — and for
                   direct links. */}
-              {chrome.create && (
+              {chrome.create === "meeting" && (
                 <>
                   <Button
                     variant="outline"
@@ -228,6 +230,18 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
                   <RecordButton />
                 </>
               )}
+
+              {chrome.create === "folder" && (
+                <Button size="sm" className="gap-2" onClick={() => setNewFolder(true)}>
+                  <Plus className="h-4 w-4" />
+                  <span className="hidden sm:inline">New folder</span>
+                </Button>
+              )}
+
+              {/* Beside Record, and only inside a folder. Rename and delete are
+                  what you do to the folder you are standing in, so they belong
+                  where the other things you do to it already are. */}
+              {chrome.folderId && <FolderHeaderActions folderId={chrome.folderId} />}
             </div>
           </header>
 
@@ -248,6 +262,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
 
       <SearchCommand open={searching} onOpenChange={setSearching} />
       <ImportDialog open={importing} onOpenChange={setImporting} />
+      <FolderDialog open={newFolder} onOpenChange={setNewFolder} />
       {/* Rendered by the shell, not the record page, for the same reason the
           recorder is: it has to survive the navigation it is telling you is
           safe to make. Renders nothing when there is no recording. */}

@@ -4,12 +4,12 @@ import userEvent from "@testing-library/user-event";
 import type { ChatConversation, ChatMessage, MeetingResponse, Project } from "@/lib/types";
 
 /**
- * A folder's page: what is filed here, and an answer drawn only from it.
+ * A folder's page: what is filed here.
  *
- * <p>The list is the shape of the page, because that is what somebody opening a
- * folder came for. But the tests that matter are about the second claim — a
- * folder chat that quietly answers from the whole workspace is worse than no
- * folder chat, since it looks scoped, reads as scoped, and is not.
+ * <p>The list is the whole page now. The folder chat that used to sit under it
+ * was removed on request, and the folder's own actions moved to the top bar, so
+ * two of the groups below assert absence rather than behaviour — an absence
+ * nobody wrote down is indistinguishable from a regression six months later.
  */
 const { askProject, chatQuery, deleteProject, updateProject, assign, push } = vi.hoisted(() => ({
   askProject: vi.fn(),
@@ -128,13 +128,6 @@ describe("ProjectPage", () => {
     expect(within(list).getByText("Discovery Call")).toBeInTheDocument();
   });
 
-  it("keeps the folder chat below the list", () => {
-    render(<ProjectPage />);
-
-    // Not what you open a folder to see, but the reason the grouping exists.
-    expect(screen.getByText(/Ask Recallix about this folder/)).toBeInTheDocument();
-  });
-
   it("marks a meeting whose notes are ready", () => {
     render(<ProjectPage />);
 
@@ -164,72 +157,32 @@ describe("ProjectPage", () => {
     );
   });
 
-  it("says exactly what the answers are grounded in", () => {
+  it("carries no chat any more", () => {
     render(<ProjectPage />);
 
-    expect(screen.getByText(/grounded in these 3 meetings and nothing else/)).toBeInTheDocument();
+    // "Ask Recallix about this folder" was removed on request. The server side
+    // of it is untouched, so this asserts the removal was a decision rather
+    // than something that fell out of a refactor.
+    expect(screen.queryByText(/Ask Recallix/)).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/Ask about Client ABC/)).not.toBeInTheDocument();
   });
 
-  it("asks the project, not the workspace", async () => {
+  it("does not ask the server for a folder chat it no longer shows", () => {
     render(<ProjectPage />);
 
-    await userEvent.type(
-      screen.getByPlaceholderText("Ask about Client ABC…"),
-      "Where does this stand?",
-    );
-    await userEvent.click(screen.getByRole("button", { name: "" }));
-
-    // A chat that looks scoped and is not is worse than no scoped chat.
-    await waitFor(() =>
-      expect(askProject).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "prj_1", question: "Where does this stand?" }),
-      ),
-    );
+    // The hook going unused is the difference between removing a feature and
+    // hiding one that still costs a request on every visit.
+    expect(chatQuery).not.toHaveBeenCalled();
+    expect(askProject).not.toHaveBeenCalled();
   });
 
-  it("offers questions about a body of work, not about one call", async () => {
+  it("keeps rename and delete out of the page body", () => {
     render(<ProjectPage />);
 
-    // "Summarize this meeting" has no meaning here; "where does this stand"
-    // is the question no single meeting can answer.
-    expect(screen.getByText("Where does this project stand?")).toBeInTheDocument();
-  });
-
-  it("promises the meetings survive when the folder is deleted", async () => {
-    render(<ProjectPage />);
-
-    await userEvent.click(screen.getByRole("button", { name: "Folder actions" }));
-    await userEvent.click(screen.getByRole("menuitem", { name: /Delete Folder/ }));
-
-    // The confirm text is the safeguard: a folder is cheap to delete and six
-    // hours of audio is not.
-    expect(vi.mocked(window.confirm).mock.calls[0][0]).toContain("meetings are kept");
-    await waitFor(() => expect(deleteProject).toHaveBeenCalledWith("prj_1"));
-    expect(toast.success).toHaveBeenCalledWith(
-      expect.stringContaining("3 meetings moved to Unfiled"),
-    );
-    expect(push).toHaveBeenCalledWith("/projects");
-  });
-
-  it("keeps the delete when the confirm is dismissed", async () => {
-    vi.mocked(window.confirm).mockReturnValue(false);
-    render(<ProjectPage />);
-
-    await userEvent.click(screen.getByRole("button", { name: "Folder actions" }));
-    await userEvent.click(screen.getByRole("menuitem", { name: /Delete Folder/ }));
-
-    expect(deleteProject).not.toHaveBeenCalled();
-  });
-
-  it("links to a search already narrowed to this folder", async () => {
-    render(<ProjectPage />);
-
-    await userEvent.click(screen.getByRole("button", { name: "Folder actions" }));
-
-    expect(screen.getByRole("menuitem", { name: /Search in folder/ })).toHaveAttribute(
-      "href",
-      "/search?project=prj_1",
-    );
+    // They moved to the top bar beside Record; see
+    // components/folder-header-actions.test.tsx. Two menus for one set of
+    // actions is the state this asserts against.
+    expect(screen.queryByRole("button", { name: "Folder actions" })).not.toBeInTheDocument();
   });
 
   it("says so when the folder is gone", () => {

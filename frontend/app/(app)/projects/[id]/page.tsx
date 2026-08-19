@@ -2,131 +2,64 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { toast } from "sonner";
 import {
-  Sparkles,
   ArrowLeft,
-  Trash2,
-  Pencil,
   Star,
   MoreHorizontal,
   FileText,
   Calendar,
   Clock,
   FolderMinus,
-  Search as SearchIcon,
 } from "lucide-react";
 import {
   useGetProjectQuery,
   useGetProjectMeetingsQuery,
-  useGetProjectChatQuery,
-  useGetProjectConversationsQuery,
-  useAskProjectChatMutation,
-  useCreateProjectConversationMutation,
-  useClearProjectChatMutation,
   useUpdateProjectMutation,
-  useDeleteProjectMutation,
   useAssignProjectMutation,
-  useRenameConversationMutation,
-  useDeleteConversationMutation,
-  useDeleteChatExchangeMutation,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/status-badge";
-import { ScopedChat } from "@/components/scoped-chat";
-import { FolderDialog } from "@/components/folder-dialog";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
-import { PROJECT_PROMPTS } from "@/lib/chat-prompts";
 import { formatDateTime, formatDuration } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { MeetingResponse } from "@/lib/types";
 
 /**
- * One folder: what is in it, and a chat that can only see what is in it.
+ * One folder: what is filed in it.
  *
- * <p>The list comes first and is the shape of the page, because that is what
- * anybody arriving here came for — which conversations are filed under this
- * work. The chat sits below it rather than beside it: it is the reason the
- * grouping exists ("where does the ABC work stand" is a question about a body of
- * work over weeks), but it is not what you open a folder to see.
+ * <p>The list is the whole page now. It is what anybody arriving here came for —
+ * which conversations belong to this work — and it used to sit above a chat
+ * scoped to the folder, headed "Ask Recallix about this folder".
+ *
+ * <p><strong>That chat was removed on request, and only from here.</strong> The
+ * workspace chat at /ask is untouched, and so is the server: POST
+ * /projects/:id/chat, its conversations, and the whole PRJ- scope still exist
+ * and still work. Nothing calls them, so a folder's existing chat history is
+ * now unreachable rather than deleted — which is the recoverable half of that
+ * trade, and worth knowing before anybody wires something new to those routes.
+ *
+ * <p>Rename, delete and search-in-folder moved to the top bar, beside Record.
+ * See components/folder-header-actions.tsx: they are what you do to the folder
+ * you are standing in, and having them here meant one set of actions lived in
+ * two places.
  */
 export default function FolderPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
-  const router = useRouter();
 
   const { data: folder, isLoading } = useGetProjectQuery(id);
   const { data: meetings } = useGetProjectMeetingsQuery(id);
 
-  const [conversationId, setConversationId] = React.useState<string | null>(null);
-  const {
-    data: messages,
-    isLoading: chatLoading,
-    isError: chatError,
-  } = useGetProjectChatQuery(conversationId ? { id, conversationId } : { id });
-  const { data: conversations } = useGetProjectConversationsQuery(id);
-
-  const [ask, { isLoading: asking }] = useAskProjectChatMutation();
-  const [newConversation, { isLoading: starting }] = useCreateProjectConversationMutation();
-  const [clear, { isLoading: clearing }] = useClearProjectChatMutation();
-  const [renameConv] = useRenameConversationMutation();
-  const [removeConversation] = useDeleteConversationMutation();
-  const [deleteExchange, { isLoading: deleting }] = useDeleteChatExchangeMutation();
-  const [remove, { isLoading: removing }] = useDeleteProjectMutation();
   const [update] = useUpdateProjectMutation();
-  const [renaming, setRenaming] = React.useState(false);
-
-  const scope = `PRJ-${id}`;
-
-  // Same two recoveries as the workspace chat: follow the thread the server
-  // filed the turn under, and drop a thread id that no longer resolves.
-  React.useEffect(() => {
-    if (!conversationId && messages && messages.length > 0) {
-      setConversationId(messages[0].conversationId);
-    }
-  }, [messages, conversationId]);
-
-  React.useEffect(() => {
-    if (chatError && conversationId) setConversationId(null);
-  }, [chatError, conversationId]);
-
-  async function send(question: string) {
-    try {
-      const answer = await ask({ id, question, conversationId: conversationId ?? undefined }).unwrap();
-      setConversationId(answer.conversationId);
-    } catch {
-      toast.error("Couldn't get an answer.");
-    }
-  }
-
-  async function onDeleteFolder() {
-    if (
-      !window.confirm(
-        `Delete “${folder?.name}”? Its meetings are kept — they move back to Unfiled.`,
-      )
-    ) {
-      return;
-    }
-    try {
-      const { unfiledMeetings } = await remove(id).unwrap();
-      toast.success(
-        unfiledMeetings > 0
-          ? `Folder deleted. ${unfiledMeetings} meeting${unfiledMeetings === 1 ? "" : "s"} moved to Unfiled.`
-          : "Folder deleted.",
-      );
-      router.push("/projects");
-    } catch {
-      toast.error("Couldn't delete that folder.");
-    }
-  }
 
   if (isLoading) {
     return (
@@ -184,39 +117,6 @@ export default function FolderPage() {
             />
           </button>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                aria-label="Folder actions"
-                className="rounded p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              >
-                <MoreHorizontal className="h-5 w-5" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52">
-              <DropdownMenuItem onSelect={() => setRenaming(true)}>
-                <Pencil className="mr-2 h-4 w-4" /> Rename Folder
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                {/* The folder as a search filter — the same grouping, applied to
-                    decisions, commitments and transcripts rather than meetings. */}
-                <Link href={`/search?project=${folder.id}`}>
-                  <SearchIcon className="mr-2 h-4 w-4" /> Search in folder
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                disabled={removing}
-                onSelect={(e) => {
-                  e.preventDefault();
-                  void onDeleteFolder();
-                }}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2 className="mr-2 h-4 w-4" /> Delete Folder
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
       </div>
 
@@ -241,75 +141,6 @@ export default function FolderPage() {
         )}
       </section>
 
-      <section className="space-y-4 border-t pt-6">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="flex items-center gap-2 text-sm font-semibold">
-              <Sparkles className="h-4 w-4 text-primary" /> Ask Recallix about this folder
-            </h2>
-            <p className="text-xs text-muted-foreground">
-              Answers are grounded in these {folder.meetingCount} meeting
-              {folder.meetingCount === 1 ? "" : "s"} and nothing else.
-            </p>
-          </div>
-          {(conversations?.length ?? 0) > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={clearing}
-              onClick={async () => {
-                if (!window.confirm("Delete every conversation about this folder?")) return;
-                try {
-                  await clear(id).unwrap();
-                  setConversationId(null);
-                } catch {
-                  toast.error("Couldn't clear the conversation.");
-                }
-              }}
-              className="shrink-0 gap-1.5 text-xs text-muted-foreground"
-            >
-              <Trash2 className="h-3.5 w-3.5" /> Clear all
-            </Button>
-          )}
-        </div>
-
-        <ScopedChat
-          messages={messages}
-          conversations={conversations ?? []}
-          conversationId={conversationId}
-          onSelectConversation={setConversationId}
-          loading={chatLoading}
-          asking={asking}
-          deleting={deleting}
-          starting={starting}
-          prompts={PROJECT_PROMPTS}
-          emptyLine={`Ask a question about “${folder.name}”.`}
-          thinkingLine="Reading this folder's meetings…"
-          placeholder={`Ask about ${folder.name}…`}
-          onSend={send}
-          onNewConversation={async () => {
-            try {
-              const created = await newConversation(id).unwrap();
-              setConversationId(created.id);
-            } catch {
-              toast.error("Couldn't start a new chat.");
-            }
-          }}
-          onRename={async (cid, title) => {
-            await renameConv({ conversationId: cid, title, scope }).unwrap();
-          }}
-          onDeleteConversation={async (cid) => {
-            await removeConversation({ conversationId: cid, scope }).unwrap();
-            if (cid === conversationId) setConversationId(null);
-          }}
-          onDeleteExchange={async (messageId) => {
-            const result = await deleteExchange({ messageId, scope }).unwrap();
-            if (result.conversationDeleted) setConversationId(null);
-          }}
-        />
-      </section>
-
-      <FolderDialog open={renaming} onOpenChange={setRenaming} folder={folder} />
     </div>
   );
 }
