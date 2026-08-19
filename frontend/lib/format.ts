@@ -94,7 +94,11 @@ export function statusLabel(status: MeetingStatus): string {
   const map: Record<MeetingStatus, string> = {
     CREATED: "Created",
     UPLOADED: "Uploaded",
-    QUEUED: "Queued",
+    // "Processing", not "Queued". Queued is a fact about our worker pool and
+    // reads as "nothing is happening yet"; from outside, the moment a meeting
+    // is accepted the work has started. The processing card appends its own
+    // ellipsis, so this must not carry one.
+    QUEUED: "Processing",
     TRANSCRIBING: "Transcribing",
     SUMMARIZING: "Summarizing",
     EXTRACTING: "Extracting insights",

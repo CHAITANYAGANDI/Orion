@@ -53,8 +53,6 @@ export function ProcessingSteps({
   progress,
   label,
   onStop,
-  onOpen,
-  onDismiss,
   stopping,
 }: {
   phase: SavePhase;
@@ -64,8 +62,6 @@ export function ProcessingSteps({
   progress: number;
   label: string;
   onStop?: () => void;
-  onOpen?: () => void;
-  onDismiss?: () => void;
   stopping?: boolean;
 }) {
   const states = stepStates(phase, status);
@@ -119,24 +115,15 @@ export function ProcessingSteps({
         <p className="mt-4 text-sm text-destructive">{message}</p>
       )}
 
-      {(onStop || onOpen || onDismiss) && (
-        <div className="mt-5 flex flex-wrap gap-2">
-          {running && onStop && (
-            <Button variant="outline" size="sm" className="gap-2" disabled={stopping} onClick={onStop}>
-              {stopping ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
-              Stop processing
-            </Button>
-          )}
-          {(phase === "done" || phase === "failed") && onOpen && (
-            <Button size="sm" onClick={onOpen}>
-              Open meeting
-            </Button>
-          )}
-          {(phase === "done" || phase === "failed") && onDismiss && (
-            <Button variant="ghost" size="sm" onClick={onDismiss}>
-              Dismiss
-            </Button>
-          )}
+      {/* Stopping is the only thing to offer. Once it is finished the meeting
+          opens on its own, so a button here would be asking whether the thing
+          that already happened was meant. */}
+      {running && onStop && (
+        <div className="mt-5">
+          <Button variant="outline" size="sm" className="gap-2" disabled={stopping} onClick={onStop}>
+            {stopping ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+            Stop processing
+          </Button>
         </div>
       )}
     </div>

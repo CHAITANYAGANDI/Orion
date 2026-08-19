@@ -31,7 +31,20 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 sm:rounded-lg",
+        // `grid-cols-[minmax(0,1fr)]` is load-bearing, not decoration. A grid
+        // item's default `min-width` is `auto`, which means it refuses to
+        // shrink below its min-content width — so one long unbreakable string
+        // (a dropped file called
+        // "product-marketing-meeting-weekly-2021-06-28-320-kbps.mp3", say)
+        // widens the column past `max-w-*`. The dialog's own border stops at
+        // the max width while its children carry on past it, which reads as
+        // the dialog having been drawn twice, slightly offset.
+        //
+        // Naming a column that may shrink to zero restores the floor, and every
+        // `truncate` and `min-w-0` inside a dialog starts working again. Here
+        // rather than in each dialog, because every one of them is one long
+        // filename, URL or meeting title away from the same bug.
+        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg grid-cols-[minmax(0,1fr)] translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 sm:rounded-lg",
         className
       )}
       {...props}

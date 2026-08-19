@@ -122,12 +122,6 @@ export function RecordingBar() {
     if (pathname === "/record") router.push("/home");
   }
 
-  function openMeeting() {
-    const target = job.job ? `/meetings/${job.job.id}` : null;
-    job.dismiss();
-    if (target) router.push(target);
-  }
-
 
   const shell = React.useRef<HTMLDivElement>(null);
   usePublishedHeight(shell, recorder.state !== "idle" || phase !== "idle");
@@ -289,57 +283,33 @@ export function RecordingBar() {
           )}
 
           {phase === "processing" && job && (
-            <div className="flex flex-wrap items-center justify-center gap-3">
-              {/* No status text here: it is the label on the bar below, and
-                  saying it twice in one card reads as two different things
-                  happening. The escape hatch. Named for what it does to the meeting rather
-                  than for what it does to the worker, which cannot be recalled:
-                  "Stop processing" that left a half-finished meeting in the list
-                  would be a button that tidied nothing. */}
+            <div className="flex items-center justify-center gap-3">
+              {/* The one control, as a glyph. The words are on the bar below —
+                  saying them twice in one card reads as two different things
+                  happening — and this is the shape a stop is: a square, in the
+                  same red as the one that ends a recording.
+
+                  Named for what it does to the meeting rather than to the
+                  worker, which cannot be recalled. "Stop processing" that left
+                  a half-finished meeting in the list would tidy nothing. */}
               <Button
-                variant="ghost"
-                size="sm"
-                className="gap-2"
+                variant="destructive"
+                size="icon"
+                className="h-8 w-8 rounded-full"
                 disabled={stopping}
                 onClick={() => void handleStop()}
+                aria-label="Stop processing"
+                title="Stop processing"
               >
-                {stopping ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
-                Stop processing
+                {stopping ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Square className="h-3.5 w-3.5 fill-current" />
+                )}
               </Button>
             </div>
           )}
 
-          {(phase === "done" || phase === "failed") && job && (
-            <div className="flex flex-wrap items-center justify-center gap-3">
-              <span
-                className={cn(
-                  "flex items-center gap-1.5 text-sm",
-                  phase === "failed" ? "text-destructive" : "text-muted-foreground",
-                )}
-              >
-                {phase === "failed" ? (
-                  <>
-                    <AlertTriangle className="h-4 w-4" />
-                    {job.job?.message || "Processing failed."}
-                  </>
-                ) : (
-                  <>
-                    <Check className="h-4 w-4" />
-                    Ready to read.
-                  </>
-                )}
-              </span>
-              {/* Offered, not done to you. Somebody who saved a recording and
-                  carried on reading something else should not have the page
-                  pulled out from under them the moment a worker finishes. */}
-              <Button size="sm" onClick={openMeeting}>
-                Open meeting
-              </Button>
-              <Button variant="ghost" size="sm" onClick={job.dismiss}>
-                Dismiss
-              </Button>
-            </div>
-          )}
         </div>
 
         {/* One bar across both halves of the wait. See UPLOAD_SHARE: an upload

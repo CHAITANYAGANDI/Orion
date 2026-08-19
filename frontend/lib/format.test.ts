@@ -127,6 +127,21 @@ describe("status helpers", () => {
       expect(statusLabel(s).length).toBeGreaterThan(0);
     }
   });
+
+  it("says a queued meeting is being processed", () => {
+    // "Queued" is a fact about our worker pool, and reads as "nothing is
+    // happening yet" to the person who just handed over a recording. From
+    // outside, being accepted is the work starting.
+    expect(statusLabel("QUEUED")).toBe("Processing");
+  });
+
+  it("carries no ellipsis, because the processing card appends one", () => {
+    // `{statusLabel(status)}…` on the meeting page. A label ending in a full
+    // stop's worth of dots would render "Processing……" there.
+    for (const s of ["QUEUED", "TRANSCRIBING", "SUMMARIZING", "EXTRACTING"] as const) {
+      expect(statusLabel(s)).not.toMatch(/[.…]$/);
+    }
+  });
 });
 
 describe("stopwatch", () => {

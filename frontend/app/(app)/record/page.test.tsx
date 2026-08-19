@@ -228,7 +228,9 @@ describe("RecordPage before recording", () => {
 });
 
 describe("RecordPage processing", () => {
-  it("takes over the page while the pipeline runs", () => {
+  it("does not draw the pipeline, which happens after this page is left", () => {
+    // Saving navigates to Home and the wait is carried by the docked bar there,
+    // so by the time there is anything to watch this page is behind you.
     renderPage(
       { state: "idle" },
       {},
@@ -241,57 +243,8 @@ describe("RecordPage processing", () => {
       }),
     );
 
-    expect(screen.getByText("Processing")).toBeInTheDocument();
-    expect(screen.getByText("58%")).toBeInTheDocument();
-    expect(screen.getByText("Generating transcript from audio…")).toBeInTheDocument();
-    // The start button would be an invitation to abandon a running job.
-    expect(screen.queryByRole("button", { name: /Start recording/ })).not.toBeInTheDocument();
-  });
-
-  it("marks the stages behind the current one as done", () => {
-    renderPage(
-      { state: "idle" },
-      {},
-      aJob({
-        phase: "processing",
-        working: true,
-        job: { id: "mtg_9", status: "SUMMARIZING", progress: 70, message: "Writing the brief…" },
-      }),
-    );
-
-    const steps = screen.getAllByRole("listitem");
-    expect(steps[0]).toHaveTextContent("done");
-    expect(steps[1]).toHaveTextContent("done");
-    expect(steps[2]).toHaveTextContent("in progress");
-    expect(steps[3]).toHaveTextContent("not started");
-  });
-
-  it("offers to stop, and says what stopping destroys", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(true);
-    const job = aJob({
-      phase: "processing",
-      working: true,
-      job: { id: "mtg_9", status: "TRANSCRIBING", progress: 40, message: "…" },
-    });
-    renderPage({ state: "idle" }, {}, job);
-
-    await userEvent.click(screen.getByRole("button", { name: /Stop processing/ }));
-
-    expect(vi.mocked(window.confirm).mock.calls[0][0]).toContain("cannot be undone");
-    expect(job.stop).toHaveBeenCalled();
-  });
-
-  it("offers the finished meeting rather than opening it", async () => {
-    const job = aJob({
-      phase: "done",
-      job: { id: "mtg_9", status: "READY", progress: 100, message: "" },
-    });
-    renderPage({ state: "idle" }, {}, job);
-
-    expect(push).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: /Open meeting/ }));
-
-    expect(push).toHaveBeenCalledWith("/meetings/mtg_9");
+    expect(screen.queryByText("Processing")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Stop processing/ })).not.toBeInTheDocument();
   });
 });
 

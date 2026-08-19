@@ -120,6 +120,26 @@ describe("ImportDialog", () => {
     expect(screen.getByRole("button", { name: /Upload & process/ })).toBeEnabled();
   });
 
+  it("keeps a long filename inside the dialog instead of pushing it wider", async () => {
+    render(<ImportDialog open onOpenChange={vi.fn()} />);
+
+    const long = "product-marketing-meeting-weekly-2021-06-28-320-kbps.mp3";
+    await userEvent.upload(screen.getByTestId("import-file-input"), anAudioFile(long));
+
+    // jsdom does no layout, so this pins the three things that together make
+    // the name shrink rather than the dialog grow. A grid item will not go
+    // below its min-content width unless the column says it may, and one
+    // unbreakable filename was enough to carry the file row, the language
+    // select and the button out past the dialog's own border — which looked
+    // like the dialog had been drawn twice, slightly offset.
+    const name = await screen.findByText(long);
+    expect(name).toHaveClass("truncate");
+    expect(name.parentElement).toHaveClass("min-w-0");
+
+    const panel = screen.getByRole("dialog");
+    expect(panel.className).toContain("grid-cols-[minmax(0,1fr)]");
+  });
+
   it("will not start without one", () => {
     render(<ImportDialog open onOpenChange={vi.fn()} />);
 

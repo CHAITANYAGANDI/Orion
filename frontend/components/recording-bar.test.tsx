@@ -532,31 +532,37 @@ describe("RecordingBar saving", () => {
     expect(stopJob).not.toHaveBeenCalled();
   });
 
-  it("opens the meeting when asked, rather than on its own", async () => {
+  it("carries the wait on every page, including the one just left", () => {
+    // Saving navigates to Home, so this is the only place the pipeline is
+    // shown. There is no second copy to defer to any more.
+    pathname.current = "/home";
+    renderBar({ state: "idle", result: null }, {}, aJob({ phase: "processing", working: true }));
+
+    expect(screen.getByRole("region", { name: "Recording controls" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop processing" })).toBeInTheDocument();
+  });
+
+  it("still carries a live recording on the record page", () => {
+    // Pause, the timer and the waveform exist nowhere else.
+    pathname.current = "/record";
+    renderBar({ state: "recording" });
+
+    expect(screen.getByRole("button", { name: /Stop/ })).toBeInTheDocument();
+  });
+
+  it("says nothing about a finished job, because the meeting is already opening", () => {
+    // The result panel that used to sit here — "Ready to read", Open meeting,
+    // Dismiss — was a second copy of what the record page draws, ending in a
+    // button for something that now happens on its own.
     renderBar(
       { state: "idle", result: null },
       {},
       aJob({ phase: "done", job: { id: "mtg_9", status: "READY", progress: 100, message: "" } }),
     );
 
-    expect(push).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: /Open meeting/ }));
-
-    expect(push).toHaveBeenCalledWith("/meetings/mtg_9");
-  });
-
-  it("says what failed rather than sitting at a percentage", () => {
-    renderBar(
-      { state: "idle", result: null },
-      {},
-      aJob({
-        phase: "failed",
-        job: { id: "mtg_9", status: "FAILED", progress: 0, message: "The audio could not be decoded." },
-      }),
-    );
-
-    expect(screen.getByText("The audio could not be decoded.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Stop processing/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Open meeting/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Dismiss/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Ready to read/)).not.toBeInTheDocument();
   });
 });
 

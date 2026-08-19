@@ -29,13 +29,8 @@
 import * as React from "react";
 import Link from "next/link";
 import { Mic, Loader2, AlertTriangle, User, FileText } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useRecordingStartedMutation } from "@/lib/api";
-import {
-  useRecording,
-  useRecordingSession,
-  useRecordingJob,
-} from "@/lib/recording-context";
+import { useRecording, useRecordingSession } from "@/lib/recording-context";
 import { Button } from "@/components/ui/button";
 import { ProcessingSteps } from "@/components/processing-steps";
 import { stopwatch } from "@/lib/format";
@@ -45,13 +40,7 @@ export default function RecordPage() {
   const recorder = useRecording();
   const [announceRecording] = useRecordingStartedMutation();
 
-  const job = useRecordingJob();
-  const router = useRouter();
-
   const started = recorder.state !== "idle";
-  // The pipeline outlives the recorder: the audio is on the server and the
-  // recorder has been let go, but there is still something to watch.
-  const processing = job.phase !== "idle";
 
   /**
    * Begin, and tell the server we did.
@@ -64,25 +53,6 @@ export default function RecordPage() {
   async function onStart() {
     await recorder.start();
     void announceRecording();
-  }
-
-  /**
-   * Stop the pipeline, which means deleting what it is working on.
-   *
-   * The confirmation is here rather than inside {@link ProcessingSteps} because
-   * the sentence is about the meeting, not about the display — and this is a
-   * delete, so it is said in the caller that knows what is being deleted.
-   */
-  async function onStop() {
-    if (
-      !window.confirm(
-        "Stop processing?\n\nThe meeting and its recording are deleted. The audio " +
-          "only exists on the server now, so this cannot be undone.",
-      )
-    ) {
-      return;
-    }
-    await job.stop();
   }
 
   return (
@@ -106,27 +76,10 @@ export default function RecordPage() {
         </Notice>
       )}
 
-      {/* The pipeline wins the page whenever it is running. It is the only
-          thing here with a result somebody is waiting on, and burying it under
-          a start button would mean the wait happened somewhere less visible
-          than the thing that starts a new one. */}
-      {processing ? (
-        <ProcessingSteps
-          phase={job.phase}
-          status={job.job?.status}
-          message={job.job?.message}
-          progress={job.overallProgress}
-          label={job.label}
-          stopping={job.stopping}
-          onStop={() => void onStop()}
-          onOpen={() => {
-            const id = job.job?.id;
-            job.dismiss();
-            if (id) router.push(`/meetings/${id}`);
-          }}
-          onDismiss={job.dismiss}
-        />
-      ) : started ? (
+      {/* No pipeline branch. Saving leaves for Home and the wait happens in the
+          docked bar there, so by the time there is anything to watch this page
+          is behind you. */}
+      {started ? (
         <InProgress state={recorder.state} />
       ) : (
         <Idle supported={recorder.supported} onStart={() => void onStart()} />

@@ -13,19 +13,28 @@
  * bars — or one bar that fills, empties and fills again — reads as the first
  * half having been thrown away, so they share a scale. See {@link UPLOAD_SHARE}.
  *
- * <p>Nothing here navigates. Saving used to end by opening the meeting page,
- * which put the answer to "did that work" on a different screen from the
- * question and took the user off whatever they were reading to do it.
+ * <p>Saving leaves for Home immediately and the wait happens there, in the
+ * docked bar. The recording page has nothing left to say at that point — the
+ * audio is gone from the tab and the microphone is closed — so staying on it
+ * would be sitting on a page about a recording that is over.
+ *
+ * <p>Finishing navigates nowhere. The bar goes and Home is already showing the
+ * meeting in its list, which is where somebody would have gone looking anyway.
+ * Being thrown onto the meeting page instead takes the choice away from anybody
+ * who saved a recording and moved on to something else.
  */
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
+  api,
   useCreateUploadUrlMutation,
   useCreateMeetingMutation,
   useDeleteMeetingMutation,
   useGetMeetingQuery,
 } from "@/lib/api";
+import { useAppDispatch } from "@/lib/hooks";
 import { subscribeMeetingStatus } from "@/lib/ws";
 import { putWithProgress, uploadError } from "@/lib/uploads";
 import { statusProgress } from "@/lib/format";
@@ -101,6 +110,8 @@ export interface UseSaveJob {
 }
 
 export function useSaveJob(recorder: UseRecorder): UseSaveJob {
+  const router = useRouter();
+  const dispatch = useAppDispatch();
   const [createUploadUrl] = useCreateUploadUrlMutation();
   const [createMeeting] = useCreateMeetingMutation();
   const [deleteMeeting] = useDeleteMeetingMutation();
@@ -235,6 +246,9 @@ export function useSaveJob(recorder: UseRecorder): UseSaveJob {
       // The audio is on the server now. A second copy in the tab is one nothing
       // reads, and one the bar would go on offering to save.
       recorder.reset();
+      // Off the recording page and back to the list. Everything left to happen
+      // happens in the docked bar, which is on every page.
+      router.push("/home");
     } catch (err) {
       clearPhase();
       toast.error(uploadError(err));
@@ -264,6 +278,31 @@ export function useSaveJob(recorder: UseRecorder): UseSaveJob {
       return false;
     }
   }
+
+  /**
+   * Clear the bar, and say so once.
+   *
+   * <p>Guarded by id rather than by a boolean, because `settle` clears the very
+   * phase this fires on — without the guard that clearing reads as a new state
+   * and the whole thing runs a second time.
+   *
+   * <p>The cache invalidation is the part that is not cosmetic. The poll above
+   * filled the meeting cache with the last thing it saw, which was
+   * mid-pipeline; Home lists from that same cache, so the meeting would sit
+   * there marked "Transcribing" until something else happened to refetch it.
+   */
+  const settled = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (phase !== "done" && phase !== "failed") return;
+    const id = job?.id;
+    if (!id || settled.current === id) return;
+    settled.current = id;
+    dispatch(api.util.invalidateTags([{ type: "Meeting", id }, "Meetings"]));
+    // Nothing navigates, so this is the only thing that says the wait is over.
+    if (phase === "failed") toast.error(job?.message || "Processing failed.");
+    else toast.success("Your meeting is ready.");
+    dismiss();
+  }, [phase, job?.id, job?.message, dismiss, dispatch]);
 
   /**
    * One number for the whole wait, and it only ever goes up.

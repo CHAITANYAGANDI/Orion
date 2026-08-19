@@ -18,7 +18,18 @@ import type { UseRecorder } from "@/lib/use-recorder";
  * without the WebSocket, which is the difference between a slow finish and a
  * bar that never finishes at all.
  */
-const { createUploadUrl, createMeeting, deleteMeeting, putWithProgress, toastError, toastSuccess, polled } =
+const {
+  createUploadUrl,
+  createMeeting,
+  deleteMeeting,
+  putWithProgress,
+  toastError,
+  toastSuccess,
+  push,
+  dispatch,
+  invalidateTags,
+  polled,
+} =
   vi.hoisted(() => ({
     createUploadUrl: vi.fn(),
     createMeeting: vi.fn(),
@@ -26,11 +37,18 @@ const { createUploadUrl, createMeeting, deleteMeeting, putWithProgress, toastErr
     putWithProgress: vi.fn(),
     toastError: vi.fn(),
     toastSuccess: vi.fn(),
+    push: vi.fn(),
+    dispatch: vi.fn(),
+    invalidateTags: vi.fn((tags: unknown) => ({ type: "invalidate", tags })),
     polled: { current: undefined as unknown },
   }));
 
 let emit: ((e: unknown) => void) | null = null;
 const deactivate = vi.fn();
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
+
+vi.mock("@/lib/hooks", () => ({ useAppDispatch: () => dispatch }));
 
 vi.mock("sonner", () => ({ toast: { error: toastError, success: toastSuccess } }));
 
@@ -50,6 +68,7 @@ vi.mock("@/lib/uploads", async (orig) => ({
 }));
 
 vi.mock("@/lib/api", () => ({
+  api: { util: { invalidateTags } },
   useCreateUploadUrlMutation: () => [
     (arg: unknown) => {
       createUploadUrl(arg);
@@ -124,6 +143,19 @@ describe("saving", () => {
     expect(result.current.job?.id).toBe("mtg_9");
   });
 
+  it("leaves the recording page as soon as there is nothing left on it", async () => {
+    const { result } = setup();
+
+    await act(async () => {
+      await result.current.save(aResult(), "x");
+    });
+
+    // The audio has gone to the server and the microphone is closed. Staying
+    // would be sitting on a page about a recording that is over; the wait
+    // itself happens in the docked bar, which is on every page.
+    expect(push).toHaveBeenCalledWith("/home");
+  });
+
   it("lets go of the audio once the server has it", async () => {
     const { result } = setup();
 
@@ -186,12 +218,10 @@ describe("the percentage", () => {
       await result.current.save(aResult(), "x");
     });
 
-    // The worker reports 100 on its last stage, before the result lands.
+    // The worker reports 100 on its last stage, before the result lands. A bar
+    // at 100% beside "Extracting…" is a finished job that is not.
     await stage("EXTRACTING", 100, "Extracting decisions…");
     expect(result.current.overallProgress).toBe(99);
-
-    await stage("READY", 100, "Ready.");
-    expect(result.current.overallProgress).toBe(100);
   });
 });
 
@@ -223,7 +253,55 @@ describe("following the work", () => {
       rerender({ s: "idle" });
     });
 
-    await waitFor(() => expect(result.current.phase).toBe("done"));
+    await waitFor(() => expect(result.current.job).toBeNull());
+    expect(toastSuccess).toHaveBeenCalled();
+  });
+
+  it("drops the mid-pipeline snapshot before opening the meeting", async () => {
+    const { result } = setup();
+    await act(async () => {
+      await result.current.save(aResult(), "x");
+    });
+
+    await stage("READY", 100, "Ready.");
+
+    // The poll fills the meeting cache with whatever it last saw, and Home
+    // lists from that same cache — so without this the finished meeting sits in
+    // the list marked "Transcribing" until something else happens to refetch.
+    expect(invalidateTags).toHaveBeenCalledWith([{ type: "Meeting", id: "mtg_9" }, "Meetings"]);
+    expect(dispatch).toHaveBeenCalled();
+  });
+
+  it("clears itself when the work is done, and goes nowhere", async () => {
+    const { result } = setup();
+    await act(async () => {
+      await result.current.save(aResult(), "x");
+    });
+    push.mockClear();
+
+    await stage("READY", 100, "Meeting brief ready.");
+
+    // Home is already showing the meeting in its list, which is where somebody
+    // would have gone looking. Being thrown onto the meeting page takes the
+    // choice away from anyone who saved a recording and moved on.
+    expect(push).not.toHaveBeenCalled();
+    expect(result.current.phase).toBe("idle");
+    expect(result.current.job).toBeNull();
+    expect(toastSuccess).toHaveBeenCalledWith("Your meeting is ready.");
+  });
+
+  it("settles once, not again when the state is cleared", async () => {
+    const { result } = setup();
+    await act(async () => {
+      await result.current.save(aResult(), "x");
+    });
+
+    await stage("READY", 100, "Ready.");
+    await act(async () => {});
+
+    // Clearing the phase this fires on looks like a state change. Guarded by
+    // meeting id, or the whole thing runs a second time.
+    expect(toastSuccess).toHaveBeenCalledTimes(1);
   });
 
   it("reports a failure with the reason the server gave", async () => {
@@ -234,8 +312,10 @@ describe("following the work", () => {
 
     await stage("FAILED", 0, "The audio could not be decoded.");
 
-    expect(result.current.phase).toBe("failed");
-    expect(result.current.job?.message).toBe("The audio could not be decoded.");
+    // Nothing navigates, so the toast is the only thing that says so. The
+    // meeting is in the Home list carrying the same failure.
+    expect(toastError).toHaveBeenCalledWith("The audio could not be decoded.");
+    expect(result.current.job).toBeNull();
   });
 });
 
