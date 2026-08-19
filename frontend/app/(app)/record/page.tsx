@@ -11,11 +11,17 @@
  * The result goes down the same presigned-upload → create-meeting path the
  * import dialog uses, so processing is identical from there on.
  *
- * Nothing is asked before the microphone opens. There were two questions —
- * which of two capture modes, and whether the room had been told — and both
- * have been removed: the first had one answer left, the second on request. What
- * remains before a recording is a single button, and Record in the header skips
- * even that by starting on the way here.
+ * Nothing is asked before the microphone opens, and nothing is waited for. The
+ * two questions that used to be here — which of two capture modes, and whether
+ * the room had been told — were removed, the first because it had one answer
+ * left and the second on request. The button that replaced them has gone too:
+ * this route is only ever arrived at by pressing Record, and answering that
+ * press with a second button asking whether you meant it is a step that exists
+ * to be clicked through. Arriving here opens the microphone.
+ *
+ * That the browser still asks its own permission question is the point at which
+ * this is not silent — it is the browser's prompt, it names the site, and it is
+ * the only consent gate Recallix relies on.
  *
  * The consent tick going means Recallix no longer has anything to say about
  * consent for a recording, and says nothing rather than something convenient.
@@ -32,7 +38,6 @@ import { Mic, Loader2, AlertTriangle, User, FileText, CalendarDays } from "lucid
 import { useRecordingStartedMutation, useGetPreferencesQuery } from "@/lib/api";
 import { useRecording, useRecordingSession } from "@/lib/recording-context";
 import { Button } from "@/components/ui/button";
-import { ProcessingSteps } from "@/components/processing-steps";
 import { stopwatch } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -54,6 +59,33 @@ export default function RecordPage() {
     await recorder.start();
     void announceRecording();
   }
+
+  /**
+   * Open the microphone on arrival.
+   *
+   * <p>The header's Record button already starts on its way here, so in the
+   * ordinary case this finds a recording underway and does nothing. It exists
+   * for every other way of reaching the route — a reload, the back button, a
+   * bookmark — where the intent is identical and the old answer was a page
+   * asking for the press a second time.
+   *
+   * <p>Once per mount, guarded by a ref rather than by the recorder's state. A
+   * refusal puts the recorder back to idle and sets an error, so an effect that
+   * keyed on idle would ask for the microphone again the instant it was denied,
+   * and keep asking.
+   */
+  const opened = React.useRef(false);
+  React.useEffect(() => {
+    if (opened.current) return;
+    opened.current = true;
+    if (!recorder.supported) return;
+    // Anything but idle means there is already a recording to show — running,
+    // paused, or stopped and waiting to be saved.
+    if (recorder.state !== "idle") return;
+    void onStart();
+    // Mount only: the whole point is that this does not react to state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     // Clearance for the docked control bar is added by the shell, which knows
@@ -84,7 +116,11 @@ export default function RecordPage() {
       {started ? (
         <InProgress state={recorder.state} />
       ) : (
-        <Idle supported={recorder.supported} onStart={() => void onStart()} />
+        <Opening
+          supported={recorder.supported}
+          refused={recorder.error !== null}
+          onRetry={() => void onStart()}
+        />
       )}
     </div>
   );
@@ -108,17 +144,7 @@ function InProgress({ state }: { state: string }) {
   // Kept, and only this one, because the browser's permission prompt is modal
   // and a page with nothing on it behind that prompt gives no clue what is
   // being asked for or why.
-  if (state === "requesting") {
-    return (
-      <Empty>
-        <Loader2 className="mx-auto h-7 w-7 animate-spin text-muted-foreground" />
-        <p className="mt-3 font-medium">Waiting for permission…</p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Allow the microphone to start recording.
-        </p>
-      </Empty>
-    );
-  }
+  if (state === "requesting") return <WaitingForPermission />;
 
   if (state === "stopped") {
     return (
@@ -245,6 +271,70 @@ function Empty({ children }: { children: React.ReactNode }) {
 }
 
 /**
+ * The moment before the microphone is open.
+ *
+ * <p>Shown both while the browser's prompt is up and in the frame before it
+ * appears, so the page does not flicker through a third state on the way. The
+ * words matter more than they look like they should: the prompt is modal and
+ * renders over whatever is behind it, so a blank page underneath gives no clue
+ * what is being asked for or by whom.
+ */
+function WaitingForPermission() {
+  return (
+    <Empty>
+      <Loader2 className="mx-auto h-7 w-7 animate-spin text-muted-foreground" />
+      <p className="mt-3 font-medium">Waiting for permission…</p>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Allow the microphone to start recording.
+      </p>
+    </Empty>
+  );
+}
+
+/**
+ * Arriving, and what happens when arriving does not work.
+ *
+ * <p>There is no idle state left to draw. What was here — "Ready to record", a
+ * paragraph about what the microphone captures, a Start button and a panel
+ * listing the four stages a recording goes through afterwards — was a page
+ * standing between a press of Record and a recording. Every part of it either
+ * restated the button that had just been pressed or described work that had not
+ * started.
+ *
+ * <p>Two things still need drawing, and only because the microphone can refuse.
+ * A browser that cannot record says so above, with a link to the page that can,
+ * and needs nothing here. A refusal says so above too, and needs a way back:
+ * the recording never began, so without this the route is a dead end with a red
+ * banner on it, and the browser will not re-prompt without being asked.
+ */
+function Opening({
+  supported,
+  refused,
+  onRetry,
+}: {
+  supported: boolean;
+  refused: boolean;
+  onRetry: () => void;
+}) {
+  if (!supported) return null;
+
+  if (refused) {
+    return (
+      <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed p-8 text-center">
+        <p className="text-sm text-muted-foreground">
+          Nothing was recorded. Allow the microphone in your browser, then try again.
+        </p>
+        <Button className="gap-2" onClick={onRetry}>
+          <Mic className="h-4 w-4" /> Try again
+        </Button>
+      </div>
+    );
+  }
+
+  return <WaitingForPermission />;
+}
+
+/**
  * What this note is, while it is being taken.
  *
  * <p>Only once recording has started. Before that there is no note: a name
@@ -312,48 +402,6 @@ function noteDate(when: Date): string {
   });
   const time = when.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   return `${day} · ${time}`;
-}
-
-/**
- * Before anything has been recorded.
- *
- * <p>What was here: a name field, a "Not started" line, two paragraphs of
- * explanation and a footnote link to the upload page. All of it removed on
- * request, and the replacement is not more prose — it is the same panel that
- * draws the wait afterwards, showing the four stages a recording goes through
- * before it is readable.
- *
- * <p>That is the useful version of an empty state: it answers "what is this
- * going to do to my meeting", which is the question somebody standing in front
- * of a Record button actually has, and it means the page looks like itself
- * rather than rearranging the moment work starts.
- *
- * <p>The button stays, alone. Reached directly, a page offering no way to begin
- * is a dead end for anyone who bookmarked the route — the Record control in the
- * header starts on its way here, so most people never see this at all.
- */
-function Idle({ supported, onStart }: { supported: boolean; onStart: () => void }) {
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed px-6 py-10 text-center">
-        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
-          <Mic className="h-5 w-5" />
-        </span>
-        <div>
-          <p className="text-lg font-semibold">Ready to record</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Recallix captures this device&apos;s microphone and writes the notes
-            once you stop.
-          </p>
-        </div>
-        <Button size="lg" className="gap-2" disabled={!supported} onClick={onStart}>
-          <Mic className="h-4 w-4" /> Start recording
-        </Button>
-      </div>
-
-      <ProcessingSteps phase="idle" progress={0} label="" />
-    </div>
-  );
 }
 
 function Notice({

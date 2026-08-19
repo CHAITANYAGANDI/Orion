@@ -23,10 +23,13 @@
  * rather than as pathname compares buried in the JSX three regions from the
  * thing they govern.
  *
- * What is deliberately absent: the desktop-app card and the plan upsell that
- * used to sit at the bottom of the rail. A sidebar is navigation; an
+ * What is deliberately absent from the bottom of the rail: the desktop-app card
+ * and the plan upsell that used to sit there. A sidebar is navigation; an
  * advertisement in it is a permanent piece of chrome that is never the thing
- * anybody is looking for.
+ * anybody is looking for. The account button now holds that corner instead,
+ * which is the opposite case — it is not selling anything, and the bottom-left
+ * is where thirty years of software has taught people to look for who they are
+ * signed in as.
  */
 
 import * as React from "react";
@@ -147,8 +150,6 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
             <NotificationBell onNavigate={() => setMobileOpen(false)} />
           </div>
 
-          <AccountMenu />
-
           <nav className="flex flex-col gap-1 p-3">
             {NAV.map((item) => {
               const active = pathname === item.href || pathname.startsWith(item.href + "/");
@@ -173,6 +174,17 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
           </nav>
 
           <FolderTree onNavigate={() => setMobileOpen(false)} />
+
+          {/* Last, and against the bottom edge. It was under the wordmark,
+              which is the most valuable row in the rail and the one the eye
+              lands on first — spent on a control that is only ever wanted at
+              the end of something: sign out, settings, which account this is.
+              The folder tree above it is `flex-1`, so this is pushed down by
+              the space rather than positioned into it, and a rail with fifty
+              folders in it keeps the same footer as a rail with none. */}
+          <div className="mt-auto border-t pt-3">
+            <AccountMenu />
+          </div>
         </aside>
 
         {mobileOpen && (

@@ -5,12 +5,12 @@ import userEvent from "@testing-library/user-event";
 /**
  * The record page.
  *
- * <p>The page is in two halves and the seam is what these tests are mostly
- * about. Before a recording exists it asks the one thing that cannot be settled
- * afterwards — whether the room has been told — and after one exists it shows
- * the meeting instead. The setup does not linger in a disabled state, because a
- * form greyed out over a live meeting reads as something that failed rather
- * than something already decided.
+ * <p>There is no half before the recording any more, and most of this file is
+ * about keeping it that way. Arriving opens the microphone: the route is only
+ * ever reached by pressing Record, and a page answering that press with a
+ * second button asking whether you meant it is a step that exists to be clicked
+ * through. The two states left are the browser deciding, and the browser having
+ * said no.
  *
  * <p>Several of these are negative, and deliberately so. There used to be a
  * second capture mode that recorded another browser tab, and most of what it
@@ -130,7 +130,34 @@ function renderPage(
 
 beforeEach(() => vi.clearAllMocks());
 
-describe("RecordPage before recording", () => {
+describe("RecordPage on arrival", () => {
+  it("opens the microphone rather than offering to", async () => {
+    renderPage();
+
+    // The whole change: pressing Record starts a recording. A page in between
+    // is a press to get past.
+    await waitFor(() => expect(start).toHaveBeenCalledWith());
+  });
+
+  it("has nothing left to press", () => {
+    renderPage();
+
+    // "Ready to record", the paragraph under it, the Start button and the panel
+    // listing the four stages afterwards: all gone. Each either restated the
+    // button just pressed or described work that had not begun.
+    expect(screen.queryByRole("button", { name: /Start recording/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("Ready to record")).not.toBeInTheDocument();
+    expect(screen.queryByText("What happens after you stop")).not.toBeInTheDocument();
+  });
+
+  it("says what the browser is being asked while it asks", () => {
+    renderPage();
+
+    // The permission prompt is modal and draws over the page. Nothing behind it
+    // gives no clue what is being asked for or by whom.
+    expect(screen.getByText(/Waiting for permission/i)).toBeInTheDocument();
+  });
+
   it("asks nothing that has only one answer", () => {
     renderPage();
 
@@ -139,33 +166,32 @@ describe("RecordPage before recording", () => {
     // asked for the sake of asking.
     expect(screen.queryByRole("button", { name: /Online meeting/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /In person/ })).not.toBeInTheDocument();
-  });
-
-  it("starts on one press, with nothing to agree to first", async () => {
-    renderPage();
-
-    await userEvent.click(screen.getByRole("button", { name: /Start recording/ }));
-
-    await waitFor(() => expect(start).toHaveBeenCalledWith());
-  });
-
-  it("asks nothing before opening the microphone", () => {
-    renderPage();
-
-    // The capture-mode question had one answer left; the consent tick was
-    // removed on request. What a Record button does now is record.
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Start recording/ })).toBeEnabled();
   });
 
   it("tells the server, so the account's other devices know", async () => {
     renderPage();
 
-    await userEvent.click(screen.getByRole("button", { name: /Start recording/ }));
-
     // A laptop recording and a phone in a pocket are the same account, and the
     // microphone is the one thing the server cannot observe for itself.
     await waitFor(() => expect(announceRecording).toHaveBeenCalled());
+  });
+
+  it("does not reopen a microphone that is already open", () => {
+    renderPage({ state: "recording" });
+
+    // Coming back to the page mid-meeting, or pressing Record twice. A second
+    // getUserMedia would restart the recorder and lose what was captured.
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it("does not reopen it over audio that has not been saved", () => {
+    renderPage({
+      state: "stopped",
+      result: { file: new File([""], "take.webm"), durationSeconds: 12 },
+    });
+
+    expect(start).not.toHaveBeenCalled();
   });
 
   it("carries no standing explanation before a recording", () => {
@@ -178,9 +204,6 @@ describe("RecordPage before recording", () => {
     // decision rather than a reflex.
     expect(screen.queryByText(/audio goes to Google/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/pick up in the room/i)).not.toBeInTheDocument();
-    // One control left on the page, and it is the one without which the route
-    // is a dead end for anybody who bookmarked it.
-    expect(screen.getByRole("button", { name: /Start recording/ })).toBeInTheDocument();
   });
 
   it("no longer warns about a browser requirement it does not have", () => {
@@ -197,6 +220,36 @@ describe("RecordPage before recording", () => {
 
     expect(screen.getByText(/can't record audio/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Upload a file instead/ })).toBeInTheDocument();
+    // And does not ask it for a microphone it has already said it has not got.
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it("offers a way back when the microphone is refused", async () => {
+    renderPage({ error: "Microphone access was denied. Recallix needs it to record you." });
+    await waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+
+    // The recording never began, so without this the route is a dead end with a
+    // red banner on it — and the browser will not prompt again unasked.
+    expect(screen.getByText(/denied/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Try again/ }));
+
+    await waitFor(() => expect(start).toHaveBeenCalledTimes(2));
+  });
+
+  it("does not ask again by itself once it has been refused", async () => {
+    // A denial puts the recorder back to idle with an error. Keyed on idle
+    // rather than on mount, this would re-prompt the instant it was denied and
+    // keep re-prompting for as long as the page stayed open.
+    const view = renderPage();
+    await waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+
+    recorder.current = {
+      ...(recorder.current as UseRecorder),
+      error: "Microphone access was denied.",
+    };
+    view.rerender(<RecordPage />);
+
+    expect(start).toHaveBeenCalledTimes(1);
   });
 
   it("carries no heading, name field or date before a recording", () => {
@@ -212,19 +265,6 @@ describe("RecordPage before recording", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("says what will happen to the recording instead of explaining it in prose", () => {
-    renderPage();
-
-    // The empty state is the same panel that draws the wait afterwards, so the
-    // page answers "what is this going to do to my meeting" without
-    // rearranging itself the moment work starts.
-    expect(screen.getByText("What happens after you stop")).toBeInTheDocument();
-    for (const step of ["Upload", "Transcribe", "Summarise", "Extract"]) {
-      expect(screen.getByText(step)).toBeInTheDocument();
-    }
-    // Nothing is running, so nothing claims to be.
-    expect(screen.queryByText(/%$/)).not.toBeInTheDocument();
-  });
 });
 
 describe("RecordPage note heading", () => {
