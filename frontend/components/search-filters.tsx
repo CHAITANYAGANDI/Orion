@@ -11,7 +11,6 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { statusLabel } from "@/lib/format";
 import {
   DATE_PRESETS,
   UNFILED_PROJECT,
@@ -19,18 +18,25 @@ import {
   clearFilters,
 } from "@/lib/search";
 import type { SearchState } from "@/lib/search";
-import type { MeetingStatus, Project, SearchFacets } from "@/lib/types";
+import type { Project, SearchFacets } from "@/lib/types";
 
 /**
  * The filter bar.
  *
- * <p>Every dropdown here is populated from the workspace rather than from a
- * constant: the speakers are the names in your transcripts, the owners are the
- * names on your commitments, the tags are the tags you have used. A filter that
- * offers values you do not have is a filter that returns nothing and looks
- * broken, and one that makes you type a name is a filter you have to spell the
- * way the transcript spells it. A facet with nothing in it is not rendered at
- * all — an empty dropdown is a dead control.
+ * <p>Four, and every one of them is populated from the workspace rather than
+ * from a constant: the tags are the tags you have used, the folders are your
+ * folders, the meeting types are the templates you have. A filter that offers
+ * values you do not have is a filter that returns nothing and looks broken, and
+ * one that makes you type a name is a filter you have to spell the way the
+ * transcript spells it. A facet with nothing in it is not rendered at all — an
+ * empty dropdown is a dead control.
+ *
+ * <p>Speaker, status, action owner and "settled a decision" used to be here.
+ * Owner and decisions narrowed lists the results page no longer shows, so they
+ * had become controls that could not change what was on screen; speaker and
+ * status went with them, because eight dropdowns above two kinds of result is a
+ * filter bar wider than its answer. The four left are the ones people reach
+ * for. See lib/search.ts, which no longer has the state to hold the others.
  */
 
 /** Radix rejects an empty item value, so absence needs a name of its own. */
@@ -75,14 +81,6 @@ export function SearchFilters({
       />
 
       <FacetSelect
-        label="Speaker"
-        value={state.speaker}
-        options={(facets?.speakers ?? []).map((s) => ({ value: s, label: s }))}
-        anyLabel="Anyone"
-        onChange={(v) => set("speaker", v)}
-      />
-
-      <FacetSelect
         label="Meeting type"
         value={state.type}
         options={(facets?.types ?? []).map((t) => ({
@@ -117,42 +115,6 @@ export function SearchFilters({
         anyLabel="Any project"
         onChange={(v) => set("project", v)}
       />
-
-      <FacetSelect
-        label="Status"
-        value={state.status}
-        options={(facets?.statuses ?? []).map((s) => ({
-          value: s,
-          label: statusLabel(s as MeetingStatus),
-        }))}
-        anyLabel="Any status"
-        onChange={(v) => set("status", v)}
-      />
-
-      <FacetSelect
-        label="Action owner"
-        value={state.owner}
-        options={(facets?.owners ?? []).map((o) => ({ value: o, label: o }))}
-        anyLabel="Anyone"
-        onChange={(v) => set("owner", v)}
-      />
-
-      {/* Not "has a decision matching your search" — that is the Decisions
-          group. This narrows to meetings that settled something at all, which
-          is how you find the conversations that went somewhere. */}
-      <button
-        type="button"
-        aria-pressed={state.withDecisions}
-        onClick={() => set("withDecisions", !state.withDecisions)}
-        className={cn(
-          "rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
-          state.withDecisions
-            ? "border-primary bg-primary/10 text-primary"
-            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-        )}
-      >
-        Settled a decision
-      </button>
 
       {active > 0 && (
         <Button

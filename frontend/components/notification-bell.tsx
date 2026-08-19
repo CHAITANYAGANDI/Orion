@@ -157,31 +157,32 @@ export function NotificationBell({ onNavigate }: { onNavigate?: () => void } = {
         if (!next) setFilter("inbox");
       }}
     >
-      {/* A rail row, not a header icon.
-          Shaped to match the links above it — same padding, same icon size,
-          same active colour — because a control that sits in a list of
-          navigation and looks like something else reads as an accident. The
-          count moved from a dot pinned to the corner of an icon to a pill at
-          the end of the row: there is width here, so it can be a number people
-          can actually read. */}
+      {/* An icon in the wordmark row, not a row of its own.
+          There is no width for a written label beside "Recallix", so the name
+          lives in aria-label and in the tooltip and the count goes back to the
+          corner of the icon. That is the cost of the move, and it is paid
+          knowingly: the row it left was below the fold on a short window with a
+          few folders open, and a bell nobody scrolls to is a bell that does not
+          work. The number is kept rather than reduced to a dot — "3" and "9+"
+          are different amounts of reason to stop what you are doing. */}
       <DropdownMenuTrigger asChild>
         <button
           type="button"
           aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}
+          title="Notifications"
           className={cn(
-            "flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-            open || unread > 0
-              ? "text-foreground"
-              : "text-muted-foreground",
+            "relative ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors",
+            open || unread > 0 ? "text-foreground" : "text-muted-foreground",
             "hover:bg-accent hover:text-accent-foreground",
             open && "bg-accent",
           )}
         >
-          <Bell className="h-4 w-4 shrink-0" />
-          <span className="flex-1 text-left">Notifications</span>
+          <Bell className="h-[18px] w-[18px]" />
+          {/* Hidden from the reader: the aria-label above already says the
+              number, and announcing it twice is how a badge becomes noise. */}
           {unread > 0 && (
             <span
-              className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-bold leading-none text-primary-foreground"
+              className="absolute right-0.5 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold leading-none text-primary-foreground"
               aria-hidden
             >
               {unread > BADGE_MAX ? `${BADGE_MAX}+` : unread}
@@ -190,13 +191,15 @@ export function NotificationBell({ onNavigate }: { onNavigate?: () => void } = {
         </button>
       </DropdownMenuTrigger>
 
-      {/* Out to the side. Anchored below a rail row it would open across the
-          folder tree and off the bottom of a short window; the rail is 16rem
-          wide and the panel is 24rem, so there is nowhere else for it to go.
-          Radix portals this to the body, so the rail's own overflow scrolling
-          never clips it. */}
+      {/* Downwards now. Out to the side was for a trigger halfway down the
+          rail, where a panel opening below it ran off the bottom of a short
+          window; from the top row the whole window is underneath. The rail is
+          16rem and the panel is 24rem, so it covers the page either way —
+          `collisionPadding` is what keeps it on screen on a narrow one. Radix
+          portals this to the body, so the rail's own overflow scrolling never
+          clips it. */}
       <DropdownMenuContent
-        side="right"
+        side="bottom"
         align="start"
         sideOffset={8}
         collisionPadding={16}

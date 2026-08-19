@@ -2,17 +2,20 @@
  * One box instead of eight dropdowns.
  *
  * The search page used to put its filters beside the input as a row of
- * selects — date, speaker, type, tag, project, status, owner. That works when
- * you already know which control holds the thing you want, and it is the wrong
- * shape for the way people actually search an archive: you type "priya stripe"
- * and mean "the bits where Priya talked about Stripe", without having decided in
- * advance that "priya" is a speaker filter and "stripe" is a term.
+ * selects. That works when you already know which control holds the thing you
+ * want, and it is the wrong shape for the way people actually search an
+ * archive: you type "q4 stripe" and mean "the Q4 meetings about Stripe",
+ * without having decided in advance that one word is a tag and the other is a
+ * term.
  *
- * So the filters move into the text. `from:priya stripe` is the same search the
+ * So the filters move into the text. `tag:q4 stripe` is the same search the
  * dropdowns expressed, written the way it is thought, and the box can suggest
- * the rest of `from:pri…` from the speakers that actually exist. The state
- * behind it is unchanged — see `lib/search.ts` — which is what keeps the URL,
- * the API call and the results page exactly as they were.
+ * the rest of `tag:q…` from the tags that actually exist.
+ *
+ * The grammar is exactly the four filters the results page can show and clear —
+ * `when:`, `type:`, `tag:` and `in:`. That is not a coincidence to be tidied up
+ * later: a box that can set a fifth would produce a URL the page narrows by
+ * with nothing on screen saying so, and no way to take it off again.
  *
  * Everything here is pure. The grammar is small and every part of it is easy to
  * get subtly wrong in a way that renders perfectly: a quote that swallows the
@@ -24,15 +27,7 @@ import { EMPTY_SEARCH, UNFILED_PROJECT, type DatePreset, type SearchState } from
 import type { Project, SearchFacets } from "@/lib/types";
 
 /** Which part of a search a prefix sets. */
-export type FilterField =
-  | "speaker"
-  | "owner"
-  | "tag"
-  | "type"
-  | "status"
-  | "project"
-  | "date"
-  | "decisions";
+export type FilterField = "tag" | "type" | "project" | "date";
 
 export interface FilterSpec {
   field: FilterField;
@@ -47,20 +42,16 @@ export interface FilterSpec {
 /**
  * The vocabulary.
  *
- * Two spellings for most fields, and the aliases are not decoration: `from:` is
- * what anyone who has used an email client will type for a person, and `in:` is
- * what they will type for a place. Accepting only the internal name would mean
- * the box quietly treating `from:priya` as free text and returning nothing.
+ * Several spellings per field, and the aliases are not decoration: `in:` is
+ * what anybody will type for a place, `folder:` is what the rail calls it, and
+ * `project:` is what the API calls it. Accepting only one of them would mean the
+ * box quietly treating the other two as free text and returning nothing.
  */
 export const FILTERS: FilterSpec[] = [
-  { field: "speaker", keys: ["from", "speaker"], label: "from", hint: "who was speaking" },
-  { field: "owner", keys: ["owner", "assigned"], label: "owner", hint: "whose action item" },
   { field: "project", keys: ["in", "folder", "project"], label: "in", hint: "which folder" },
   { field: "tag", keys: ["tag"], label: "tag", hint: "a tag on the meeting" },
   { field: "type", keys: ["type"], label: "type", hint: "the kind of meeting" },
-  { field: "status", keys: ["status"], label: "status", hint: "how far processing got" },
   { field: "date", keys: ["when", "date"], label: "when", hint: "a time frame" },
-  { field: "decisions", keys: ["decided"], label: "decided", hint: "only meetings that settled something" },
 ];
 
 /** The time frames `when:` accepts, in the order the suggestions offer them. */
@@ -146,7 +137,7 @@ export function parseQuery(input: string): ParsedQuery {
  * Values are matched against what the workspace actually has, case-insensitively
  * and — for projects, whose names are long — by exact name first and prefix
  * second. A value that matches nothing is dropped rather than passed through:
- * sending `speaker=Pryia` to the API returns an empty page that looks like a
+ * sending `tag=billling` to the API returns an empty page that looks like a
  * broken search, whereas dropping it returns the results for everything else and
  * lets the misspelling be obvious.
  */
@@ -155,27 +146,18 @@ export function toSearchState(
   catalog: { facets?: SearchFacets; projects?: Project[] } = {},
   base: SearchState = EMPTY_SEARCH,
 ): SearchState {
-  const state: SearchState = { ...base, ...EMPTY_SEARCH, q: parsed.text, mode: base.mode, group: base.group };
+  const state: SearchState = { ...base, ...EMPTY_SEARCH, q: parsed.text, group: base.group };
 
   for (const token of parsed.tokens) {
     const value = token.value.trim();
     if (!value) continue;
 
     switch (token.field) {
-      case "speaker":
-        state.speaker = matchOne(value, catalog.facets?.speakers) ?? state.speaker;
-        break;
-      case "owner":
-        state.owner = matchOne(value, catalog.facets?.owners) ?? state.owner;
-        break;
       case "tag":
         state.tag = matchOne(value, catalog.facets?.tags) ?? state.tag;
         break;
       case "type":
         state.type = matchOne(value, catalog.facets?.types) ?? state.type;
-        break;
-      case "status":
-        state.status = matchOne(value, catalog.facets?.statuses) ?? state.status;
         break;
       case "project":
         state.project = matchProject(value, catalog.projects) ?? state.project;
@@ -187,12 +169,6 @@ export function toSearchState(
         if (preset) state.date = preset.value;
         break;
       }
-      case "decisions":
-        // Present at all means yes. `decided:no` is a search nobody performs,
-        // and treating it as "meetings that decided nothing" would be a filter
-        // the API has no way to answer.
-        state.withDecisions = !/^(no|false|0)$/i.test(value);
-        break;
     }
   }
   return state;
@@ -212,8 +188,6 @@ export function formatQuery(
 ): string {
   const parts: string[] = [];
   if (state.q.trim()) parts.push(state.q.trim());
-  if (state.speaker) parts.push(`from:${quote(state.speaker)}`);
-  if (state.owner) parts.push(`owner:${quote(state.owner)}`);
   if (state.project) {
     const name =
       state.project === UNFILED_PROJECT
@@ -223,9 +197,7 @@ export function formatQuery(
   }
   if (state.tag) parts.push(`tag:${quote(state.tag)}`);
   if (state.type) parts.push(`type:${quote(state.type)}`);
-  if (state.status) parts.push(`status:${quote(state.status)}`);
   if (state.date !== "any") parts.push(`when:${state.date}`);
-  if (state.withDecisions) parts.push("decided:yes");
   return parts.join(" ");
 }
 
@@ -237,8 +209,8 @@ function quote(value: string): string {
  * Resolve a typed value against what the workspace actually has.
  *
  * Exact match first, prefix second, and only when the prefix is unambiguous. A
- * prefix that matches two speakers is not a search anybody meant — silently
- * picking the first would answer a question about Priya with Priyanka's lines,
+ * prefix that matches two tags is not a search anybody meant — silently picking
+ * the first would answer a question about `billing` with `billing-migration`,
  * and there is nothing on screen that would reveal it.
  */
 function matchOne(typed: string, options?: string[]): string | null {
@@ -322,16 +294,10 @@ function valuesFor(
   catalog: { facets?: SearchFacets; projects?: Project[] },
 ): { label: string; hint: string }[] {
   switch (field) {
-    case "speaker":
-      return (catalog.facets?.speakers ?? []).map((s) => ({ label: s, hint: "speaker" }));
-    case "owner":
-      return (catalog.facets?.owners ?? []).map((o) => ({ label: o, hint: "action owner" }));
     case "tag":
       return (catalog.facets?.tags ?? []).map((t) => ({ label: t, hint: "tag" }));
     case "type":
       return (catalog.facets?.types ?? []).map((t) => ({ label: t, hint: "meeting type" }));
-    case "status":
-      return (catalog.facets?.statuses ?? []).map((s) => ({ label: s, hint: "status" }));
     case "project":
       return [
         ...(catalog.projects ?? []).map((p) => ({ label: p.name, hint: "folder" })),
@@ -339,8 +305,6 @@ function valuesFor(
       ];
     case "date":
       return DATE_VALUES.map((d) => ({ label: d.value, hint: d.label }));
-    case "decisions":
-      return [{ label: "yes", hint: "only meetings that settled something" }];
   }
 }
 

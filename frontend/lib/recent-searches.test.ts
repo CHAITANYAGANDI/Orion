@@ -50,11 +50,11 @@ describe("remembering", () => {
   });
 
   it("keeps the filters, since they are the search", () => {
-    rememberSearch(USER, "from:priya budget");
+    rememberSearch(USER, "tag:q4 budget");
 
     // Stored as typed. Reduced to "budget" it would come back as a different
     // search from the one that was run.
-    expect(readRecentSearches(USER)[0]).toBe("from:priya budget");
+    expect(readRecentSearches(USER)[0]).toBe("tag:q4 budget");
   });
 
   it("stores nothing for an empty search", () => {

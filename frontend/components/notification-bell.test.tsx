@@ -158,22 +158,32 @@ describe("NotificationBell badge", () => {
 });
 
 /**
- * It lives in the left rail now, not the top bar.
+ * It sits beside the wordmark, at the top of the left rail.
  *
- * <p>Which changes two things worth pinning down. It has room for a written
- * label, so the count can be a readable pill at the end of a row rather than a
- * dot pinned to the corner of an icon. And the rail is a slide-over on a narrow
- * window, so following a notification has to close it — otherwise the panel and
- * the rail both stay open on top of the page they just navigated to.
+ * <p>Which pins down two things. There is no room for a written label next to
+ * "Recallix", so everything that names this control has to come from the
+ * accessible name — an icon with no text and no label is the one item on screen
+ * nobody can ask for. And the rail is a slide-over on a narrow window, so
+ * following a notification has to close it; otherwise the panel and the rail
+ * both stay open on top of the page they just navigated to.
  */
-describe("NotificationBell in the rail", () => {
-  it("is a labelled row, not a bare icon", () => {
+describe("NotificationBell beside the wordmark", () => {
+  it("is nameable with no text on screen to name it", () => {
     unread = 0;
     render(<NotificationBell />);
 
-    // Sitting in a list of navigation links, an unlabelled icon is the one
-    // item nobody can name.
-    expect(screen.getByText("Notifications")).toBeInTheDocument();
+    // The label went when the row did. What replaced it has to survive.
+    expect(screen.queryByText("Notifications")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Notifications" })).toBeInTheDocument();
+  });
+
+  it("says the count in the name, not only in the badge", () => {
+    unread = 3;
+    render(<NotificationBell />);
+
+    // The badge is aria-hidden, so a reader that cannot see the corner of an
+    // icon would otherwise be told there is a bell and nothing about it.
+    expect(screen.getByRole("button", { name: "Notifications, 3 unread" })).toBeInTheDocument();
   });
 
   it("closes the rail when a notification is followed", async () => {

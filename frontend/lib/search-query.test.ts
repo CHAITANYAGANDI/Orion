@@ -16,16 +16,20 @@ import type { Project, SearchFacets } from "@/lib/types";
  *
  * Every test here is a way the box can be wrong while looking completely right.
  * A quote that swallows the rest of the line returns nothing and blames the
- * archive. A value resolved by prefix against two speakers answers a question
- * about Priya with Priyanka's lines, with nothing on screen to reveal it. A
+ * archive. A value resolved by prefix against two tags answers a question about
+ * `billing` with `billing-migration`, with nothing on screen to reveal it. A
  * filter that survives being deleted from the text keeps narrowing a search
  * nobody can see it narrowing.
+ *
+ * <p>And the grammar may not outgrow the page. Every filter here has a dropdown
+ * on the results screen that shows it and takes it off again; one that did not
+ * would be a way of typing a search nobody could see or undo.
  */
 
 const facets: SearchFacets = {
   speakers: ["Priya", "Priyanka", "Marcus"],
   owners: ["Marcus", "Priya"],
-  tags: ["q4", "billing"],
+  tags: ["q4", "billing", "billing-migration"],
   types: ["general", "standup"],
   statuses: ["READY", "FAILED"],
 };
@@ -44,10 +48,10 @@ describe("parsing", () => {
   });
 
   it("pulls a filter out of the middle without disturbing the rest", () => {
-    const parsed = parseQuery("what did from:priya say about stripe");
+    const parsed = parseQuery("what did tag:q4 say about stripe");
 
     expect(parsed.tokens).toHaveLength(1);
-    expect(parsed.tokens[0]).toMatchObject({ field: "speaker", value: "priya" });
+    expect(parsed.tokens[0]).toMatchObject({ field: "tag", value: "q4" });
     expect(parsed.text).toBe("what did say about stripe");
   });
 
@@ -67,10 +71,20 @@ describe("parsing", () => {
   });
 
   it("accepts every spelling of a field", () => {
-    expect(parseQuery("from:priya").tokens[0].field).toBe("speaker");
-    expect(parseQuery("speaker:priya").tokens[0].field).toBe("speaker");
     expect(parseQuery("in:sales").tokens[0].field).toBe("project");
     expect(parseQuery("folder:sales").tokens[0].field).toBe("project");
+    expect(parseQuery("project:sales").tokens[0].field).toBe("project");
+    expect(parseQuery("when:week").tokens[0].field).toBe("date");
+    expect(parseQuery("date:week").tokens[0].field).toBe("date");
+  });
+
+  it("no longer answers to the filters the results page dropped", () => {
+    // from:, owner:, status: and decided: went with the speaker, owner, status
+    // and decision controls. Parsing them would set a filter the page has no
+    // dropdown to show and no way to clear.
+    for (const dead of ["from:priya", "speaker:priya", "owner:marcus", "status:ready", "decided:yes"]) {
+      expect(parseQuery(dead).tokens).toHaveLength(0);
+    }
   });
 
   it("leaves an unknown prefix as ordinary text", () => {
@@ -83,25 +97,25 @@ describe("parsing", () => {
 });
 
 describe("resolving against the workspace", () => {
-  it("matches a speaker exactly, whatever the case", () => {
-    expect(toSearchState(parseQuery("from:priya"), catalog).speaker).toBe("Priya");
+  it("matches a tag exactly, whatever the case", () => {
+    expect(toSearchState(parseQuery("tag:Q4"), catalog).tag).toBe("q4");
   });
 
   it("completes an unambiguous prefix", () => {
-    expect(toSearchState(parseQuery("from:marc"), catalog).speaker).toBe("Marcus");
+    expect(toSearchState(parseQuery("type:stand"), catalog).type).toBe("standup");
   });
 
-  it("refuses a prefix that matches two people", () => {
-    // "pri" is both Priya and Priyanka. Picking the first would answer a
-    // question about one with the other's lines, invisibly.
-    expect(toSearchState(parseQuery("from:pri"), catalog).speaker).toBe("");
+  it("refuses a prefix that matches two values", () => {
+    // "bill" is both billing and billing-migration. Picking the first would
+    // answer a question about one with the other's meetings, invisibly.
+    expect(toSearchState(parseQuery("tag:bill"), catalog).tag).toBe("");
   });
 
   it("drops a value the workspace does not have", () => {
     // Passing it through returns an empty page that looks like a broken search;
     // dropping it returns everything else and makes the typo obvious.
-    expect(toSearchState(parseQuery("from:nobody stripe"), catalog).speaker).toBe("");
-    expect(toSearchState(parseQuery("from:nobody stripe"), catalog).q).toBe("stripe");
+    expect(toSearchState(parseQuery("tag:nothing stripe"), catalog).tag).toBe("");
+    expect(toSearchState(parseQuery("tag:nothing stripe"), catalog).q).toBe("stripe");
   });
 
   it("resolves a folder to its id", () => {
@@ -118,44 +132,42 @@ describe("resolving against the workspace", () => {
   });
 
   it("carries several filters at once", () => {
-    const state = toSearchState(parseQuery('from:marcus tag:q4 when:month decided:yes budget'), catalog);
+    const state = toSearchState(parseQuery('in:"Q4 planning" tag:q4 when:month budget'), catalog);
 
     expect(state).toMatchObject({
-      speaker: "Marcus",
+      project: "prj_1",
       tag: "q4",
       date: "month",
-      withDecisions: true,
       q: "budget",
     });
   });
 
   it("starts from a clean state, so a removed filter really goes", () => {
     // The box is re-parsed on every keystroke. If the previous state leaked
-    // through, deleting `from:priya` from the text would leave the search still
-    // narrowed to her with nothing on screen saying so.
-    const previous = { ...EMPTY_SEARCH, speaker: "Priya", tag: "q4" };
+    // through, deleting `tag:q4` from the text would leave the search still
+    // narrowed to it with nothing on screen saying so.
+    const previous = { ...EMPTY_SEARCH, type: "standup", tag: "q4" };
     const state = toSearchState(parseQuery("stripe"), catalog, previous);
 
-    expect(state.speaker).toBe("");
+    expect(state.type).toBe("");
     expect(state.tag).toBe("");
   });
 
-  it("keeps the mode and the open group, which are not filters", () => {
-    const previous = { ...EMPTY_SEARCH, mode: "meaning" as const, group: "mentions" as const };
+  it("keeps the open group, which is not a filter", () => {
+    const previous = { ...EMPTY_SEARCH, group: "mentions" as const };
     const state = toSearchState(parseQuery("stripe"), catalog, previous);
 
-    expect(state.mode).toBe("meaning");
     expect(state.group).toBe("mentions");
   });
 });
 
 describe("writing a search back out", () => {
   it("round-trips through the text and back", () => {
-    const original = toSearchState(parseQuery('from:marcus in:"Q4 planning" when:week stripe'), catalog);
+    const original = toSearchState(parseQuery('tag:q4 in:"Q4 planning" when:week stripe'), catalog);
     const text = formatQuery(original, catalog);
 
     expect(toSearchState(parseQuery(text), catalog)).toMatchObject({
-      speaker: "Marcus",
+      tag: "q4",
       project: "prj_1",
       date: "week",
       q: "stripe",
@@ -163,8 +175,8 @@ describe("writing a search back out", () => {
   });
 
   it("quotes only what needs it", () => {
-    const state = { ...EMPTY_SEARCH, speaker: "Marcus", project: "prj_1" };
-    expect(formatQuery(state, catalog)).toBe('from:Marcus in:"Q4 planning"');
+    const state = { ...EMPTY_SEARCH, tag: "q4", project: "prj_1" };
+    expect(formatQuery(state, catalog)).toBe('in:"Q4 planning" tag:q4');
   });
 
   it("says nothing about a filter that is not set", () => {
@@ -174,13 +186,18 @@ describe("writing a search back out", () => {
 
 describe("suggestions", () => {
   it("offers filters for a partial key", () => {
-    const shown = suggestFor("fr", catalog);
-    expect(shown.map((s) => s.insert)).toContain("from:");
+    const shown = suggestFor("ta", catalog);
+    expect(shown.map((s) => s.insert)).toContain("tag:");
   });
 
   it("offers the workspace's own values after a colon", () => {
-    const shown = suggestFor("from:pri", catalog);
-    expect(shown.map((s) => s.label)).toEqual(["Priya", "Priyanka"]);
+    const shown = suggestFor("tag:bill", catalog);
+    expect(shown.map((s) => s.label)).toEqual(["billing", "billing-migration"]);
+  });
+
+  it("offers nothing for a filter the page no longer has", () => {
+    expect(suggestFor("from:", catalog)).toHaveLength(0);
+    expect(suggestFor("owner:", catalog)).toHaveLength(0);
   });
 
   it("offers folders and unfiled for in:", () => {
@@ -204,8 +221,8 @@ describe("suggestions", () => {
 
 describe("completing what is being typed", () => {
   it("finds the word under the cursor", () => {
-    expect(wordAt("from:pri stripe", 8)).toEqual({ word: "from:pri", start: 0 });
-    expect(wordAt("from:pri stripe", 15).word).toBe("stripe");
+    expect(wordAt("tag:bill stripe", 8)).toEqual({ word: "tag:bill", start: 0 });
+    expect(wordAt("tag:bill stripe", 15).word).toBe("stripe");
   });
 
   it("treats a quoted run as one word", () => {
@@ -213,47 +230,47 @@ describe("completing what is being typed", () => {
   });
 
   it("leaves the cursor inside a filter so the value can be typed", () => {
-    const next = applySuggestion("fr", 2, {
-      insert: "from:",
-      label: "from:",
+    const next = applySuggestion("ta", 2, {
+      insert: "tag:",
+      label: "tag:",
       hint: "",
       kind: "filter",
     });
-    expect(next.text).toBe("from:");
-    expect(next.cursor).toBe(5);
+    expect(next.text).toBe("tag:");
+    expect(next.cursor).toBe(4);
   });
 
   it("moves past a completed value, adding the space", () => {
-    const next = applySuggestion("from:pri", 8, {
-      insert: 'from:"Priya"',
-      label: "Priya",
+    const next = applySuggestion("in:Q4", 5, {
+      insert: 'in:"Q4 planning"',
+      label: "Q4 planning",
       hint: "",
       kind: "value",
     });
-    expect(next.text).toBe('from:"Priya" ');
-    expect(next.cursor).toBe(13);
+    expect(next.text).toBe('in:"Q4 planning" ');
+    expect(next.cursor).toBe(17);
   });
 
   it("replaces only the word under the cursor", () => {
-    const next = applySuggestion("stripe fr budget", 9, {
-      insert: "from:",
-      label: "from:",
+    const next = applySuggestion("stripe ta budget", 9, {
+      insert: "tag:",
+      label: "tag:",
       hint: "",
       kind: "filter",
     });
-    expect(next.text).toBe("stripe from: budget");
+    expect(next.text).toBe("stripe tag: budget");
   });
 });
 
 describe("describing what a query narrows to", () => {
   it("names each filter in the words the box uses", () => {
-    expect(describeTokens(parseQuery('from:priya in:"Q4 planning"'))).toEqual([
-      { label: "from", value: "priya" },
+    expect(describeTokens(parseQuery('tag:q4 in:"Q4 planning"'))).toEqual([
+      { label: "tag", value: "q4" },
       { label: "in", value: "Q4 planning" },
     ]);
   });
 
   it("leaves out a filter that has not been given a value yet", () => {
-    expect(describeTokens(parseQuery("from:"))).toHaveLength(0);
+    expect(describeTokens(parseQuery("tag:"))).toHaveLength(0);
   });
 });

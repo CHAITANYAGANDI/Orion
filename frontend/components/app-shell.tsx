@@ -10,10 +10,12 @@
  * itself — lives behind the account button, because none of it is somewhere you
  * go during work.
  *
- * <p>The bell moved into the rail. It is a list of things that happened, which
- * makes it a place rather than an action, and the top bar was where it was most
- * likely to be crowded out — on a narrow window that row already carries a menu
- * button, Import and Record.
+ * <p>The bell sits in the rail, in the row with the wordmark. It is a list of
+ * things that happened, which makes it a place rather than an action, and the
+ * top bar was where it was most likely to be crowded out — on a narrow window
+ * that row already carries a menu button, Import and Record. The wordmark row
+ * is the one piece of chrome that is on screen on every page in every state,
+ * which is what a thing that has to be noticed needs.
  *
  * <p>The top bar is not the same on every page. Search leaves it on Account
  * Settings; Import and Record leave it on the chat, and leave again for as long
@@ -135,6 +137,14 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
               <Mic className="h-4 w-4" />
             </div>
             <span className="font-semibold">Recallix</span>
+            {/* Beside the name, at the far end of the row rather than touching
+                it: a bell abutting the wordmark reads as part of the logo, and
+                the first thing anybody would try to click on a logo is the
+                logo. It moved up out of the navigation below because it is the
+                one thing here that changes on its own, and something that
+                arrives while you are looking elsewhere has to be somewhere the
+                eye already goes. */}
+            <NotificationBell onNavigate={() => setMobileOpen(false)} />
           </div>
 
           <AccountMenu />
@@ -160,13 +170,6 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
                 </Link>
               );
             })}
-            {/* In the rail rather than the top bar. It is a list of things that
-                happened, which makes it somewhere you go — and the header was
-                the wrong home for it in a more practical sense too: on a narrow
-                window that bar already carries a menu button, Import and
-                Record, and the bell was the first thing to be squeezed. Here it
-                keeps a label. */}
-            <NotificationBell onNavigate={() => setMobileOpen(false)} />
           </nav>
 
           <FolderTree onNavigate={() => setMobileOpen(false)} />

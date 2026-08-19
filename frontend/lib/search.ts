@@ -1,7 +1,9 @@
 import type {
   SearchGroupKey,
+  SearchMentionHit,
   SearchQueryArgs,
   SearchResponse,
+  SemanticSearchHit,
 } from "@/lib/types";
 
 /**
@@ -16,10 +18,19 @@ import type {
  * perfectly and answers the wrong question.
  */
 
-export type SearchMode = "everything" | "meaning";
+/**
+ * The groups this page renders.
+ *
+ * A subset of what the API answers with. People, decisions, commitments and
+ * risks were four more lists on a page whose question is "where was this
+ * discussed" — and the answer to that is a conversation and the sentence inside
+ * it. Each of the other four was the same meeting reached by a longer route.
+ * They are still on the meeting itself, which is the place they mean something.
+ */
+export type ShownGroupKey = Extract<SearchGroupKey, "meetings" | "mentions">;
 
-/** `all` is the overview: every group at once, a few rows each. */
-export type GroupSelection = SearchGroupKey | "all";
+/** `all` is the overview: both groups at once, a few rows each. */
+export type GroupSelection = ShownGroupKey | "all";
 
 export type DatePreset =
   | "any"
@@ -29,33 +40,33 @@ export type DatePreset =
   | "quarter"
   | "year";
 
+/**
+ * A search: a term, and four ways of narrowing it.
+ *
+ * Speaker, status, action owner and "settled a decision" are gone. Owner and
+ * decisions only ever narrowed lists this page no longer draws, and a control
+ * that cannot change what is on screen is worse than no control because it gets
+ * tried. The other two went with them: eight dropdowns over two kinds of result
+ * is a filter bar wider than its answer. What is left is what people reach for
+ * — when it was, what kind of meeting, how it was tagged, which folder.
+ */
 export interface SearchState {
   q: string;
-  mode: SearchMode;
   group: GroupSelection;
   date: DatePreset;
-  status: string;
   type: string;
   tag: string;
   /** A project id, or `none` for meetings filed nowhere. */
   project: string;
-  speaker: string;
-  owner: string;
-  withDecisions: boolean;
 }
 
 export const EMPTY_SEARCH: SearchState = {
   q: "",
-  mode: "everything",
   group: "all",
   date: "any",
-  status: "",
   type: "",
   tag: "",
   project: "",
-  speaker: "",
-  owner: "",
-  withDecisions: false,
 };
 
 /** The project filter value meaning "not filed anywhere". */
@@ -65,18 +76,17 @@ export const UNFILED_PROJECT = "none";
  * The groups, in the order they are shown.
  *
  * Meetings first because it is the coarsest answer — which conversations is
- * this about — and mentions last because it is the longest list and the one you
- * scroll. `hint` is what the count means; "27 results" is ambiguous in a way
- * that "27 utterances" is not.
+ * this about — and mentions second because it is the longest list and the one
+ * you scroll. `hint` is what the count means; "27 results" is ambiguous in a
+ * way that "27 utterances" is not.
  */
-export const GROUPS: { key: SearchGroupKey; label: string; hint: string }[] = [
+export const GROUPS: { key: ShownGroupKey; label: string; hint: string }[] = [
   { key: "meetings", label: "Meetings", hint: "matched by title, tag or what was said" },
-  { key: "people", label: "People", hint: "speakers in your transcripts" },
-  { key: "decisions", label: "Decisions", hint: "what meetings settled" },
-  { key: "commitments", label: "Commitments", hint: "action items and their owners" },
-  { key: "risks", label: "Risks", hint: "risks and blockers raised" },
   { key: "mentions", label: "Transcript mentions", hint: "individual utterances" },
 ];
+
+/** Named on every request, so the API stops answering with what nobody draws. */
+const SHOWN_GROUPS: ShownGroupKey[] = GROUPS.map((g) => g.key);
 
 export const DATE_PRESETS: { value: DatePreset; label: string }[] = [
   { value: "any", label: "Any time" },
@@ -111,13 +121,9 @@ export function presetFrom(preset: DatePreset, now: Date = new Date()): string {
 export function activeFilterCount(s: SearchState): number {
   return [
     s.date !== "any",
-    s.status !== "",
     s.type !== "",
     s.tag !== "",
     s.project !== "",
-    s.speaker !== "",
-    s.owner !== "",
-    s.withDecisions,
   ].filter(Boolean).length;
 }
 
@@ -125,23 +131,20 @@ export function clearFilters(s: SearchState): SearchState {
   return {
     ...s,
     date: "any",
-    status: "",
     type: "",
     tag: "",
     project: "",
-    speaker: "",
-    owner: "",
-    withDecisions: false,
   };
 }
 
 /**
  * The request this state asks for.
  *
- * `group` decides both which groups are fetched and how many rows: the overview
- * wants a preview of each, and one group opened on its own wants a page of it.
- * Sending `groups` for the overview would be redundant — the server reads an
- * absent list as all of them — so it is omitted and the URL stays short.
+ * `group` decides how many rows: the overview wants a preview of each, and one
+ * group opened on its own wants a page of it. The list itself is always sent.
+ * An absent one means every group the server has, and four of those are no
+ * longer drawn — leaving it off would buy four more searches across four more
+ * tables and drop the answers on arrival.
  */
 export function toQueryArgs(
   s: SearchState,
@@ -150,15 +153,12 @@ export function toQueryArgs(
   const one = s.group !== "all";
   return {
     q: s.q,
-    ...(one ? { groups: [s.group as SearchGroupKey], limit: 50 } : { limit: 5 }),
+    groups: one ? [s.group as ShownGroupKey] : SHOWN_GROUPS,
+    limit: one ? 50 : 5,
     from: presetFrom(s.date, now) || undefined,
-    status: (s.status || undefined) as SearchQueryArgs["status"],
     type: s.type || undefined,
     tag: s.tag || undefined,
     project: s.project || undefined,
-    speaker: s.speaker || undefined,
-    owner: s.owner || undefined,
-    withDecisions: s.withDecisions || undefined,
   };
 }
 
@@ -167,23 +167,74 @@ export function isBlank(s: SearchState): boolean {
   return s.q.trim() === "" && activeFilterCount(s) === 0;
 }
 
+/**
+ * How many results there are — counting only what the page draws.
+ *
+ * The server still answers with people, decisions, commitments and risks.
+ * Adding those in would put the page into its "there are results" branch and
+ * then render nothing: an empty screen insisting it found something.
+ */
 export function totalResults(res: SearchResponse | undefined): number {
   if (!res) return 0;
-  return (
-    res.meetings.total +
-    res.people.total +
-    res.decisions.total +
-    res.risks.total +
-    res.commitments.total +
-    res.mentions.total
-  );
+  return res.meetings.total + res.mentions.total;
 }
 
-export function groupTotal(
-  res: SearchResponse | undefined,
-  key: SearchGroupKey,
-): number {
-  return res ? res[key].total : 0;
+/**
+ * How similar a passage has to be before it is worth calling a result.
+ *
+ * <p>Cosine similarity from `text-embedding-3-small`, and the number matters
+ * because nearest-neighbour search has no concept of "no match": ask it for ten
+ * and it returns ten, however little they have to do with the question. Measured
+ * against this workspace, a query of three unrelated nouns tops out at 0.21 and
+ * a real paraphrase of something that was said sits at 0.39 and above, so the
+ * floor goes between them.
+ *
+ * <p>It is a property of the embedding model rather than of the archive, so it
+ * has to be revisited if the model changes — see `openai_embed_model` in the
+ * ai-service config.
+ */
+export const MEANING_FLOOR = 0.35;
+
+/**
+ * The semantic hits actually worth showing under the exact ones.
+ *
+ * <p>Three things are dropped, and the first two are why an unfiltered list
+ * looked broken rather than clever.
+ *
+ * <p><b>Anything the words already found.</b> The exact search ANDs its terms,
+ * so a passage containing all of them is one it matched — and listing it again
+ * under "close in meaning" puts the same sentence on the page twice, which reads
+ * as the page having lost count rather than as two kinds of answer. What belongs
+ * here is only what the word search could not see.
+ *
+ * <p><b>Anything already on screen.</b> The same utterance can arrive as a
+ * transcript mention and as a chunk of the passage around it; matched on the
+ * meeting and the second it starts, because those identify a moment while the
+ * two texts do not.
+ *
+ * <p><b>And anything below the floor.</b> See {@link MEANING_FLOOR}.
+ */
+export function meaningWorthShowing(
+  hits: SemanticSearchHit[],
+  query: string,
+  alreadyShown: SearchMentionHit[] = [],
+): SemanticSearchHit[] {
+  const words = terms(query).map((t) => t.toLowerCase());
+  const seen = new Set(alreadyShown.map((m) => moment(m.meetingId, m.start)));
+
+  return hits.filter((h) => {
+    if (h.score < MEANING_FLOOR) return false;
+    if (seen.has(moment(h.meetingId, h.start))) return false;
+    // Every term, not any: the search itself ANDs them, so one shared common
+    // word does not make a passage something the words would have found.
+    const text = (h.snippet ?? "").toLowerCase();
+    return words.length === 0 || !words.every((w) => text.includes(w));
+  });
+}
+
+/** A moment in a recording, to the second, for comparing two views of it. */
+function moment(meetingId: string, start?: number | null): string {
+  return `${meetingId}@${start == null ? "" : Math.floor(start)}`;
 }
 
 // ---- URL ------------------------------------------------------------------ //
@@ -198,16 +249,11 @@ export function groupTotal(
 export function encodeState(s: SearchState): string {
   const p = new URLSearchParams();
   if (s.q) p.set("q", s.q);
-  if (s.mode !== "everything") p.set("mode", s.mode);
   if (s.group !== "all") p.set("group", s.group);
   if (s.date !== "any") p.set("date", s.date);
-  if (s.status) p.set("status", s.status);
   if (s.type) p.set("type", s.type);
   if (s.tag) p.set("tag", s.tag);
   if (s.project) p.set("project", s.project);
-  if (s.speaker) p.set("speaker", s.speaker);
-  if (s.owner) p.set("owner", s.owner);
-  if (s.withDecisions) p.set("withDecisions", "true");
   const qs = p.toString();
   return qs ? `?${qs}` : "";
 }
@@ -229,16 +275,11 @@ export function decodeState(search: string): SearchState {
   return {
     ...EMPTY_SEARCH,
     q: p.get("q") ?? "",
-    mode: p.get("mode") === "meaning" ? "meaning" : "everything",
-    group: GROUP_KEYS.has(group) ? (group as SearchGroupKey) : "all",
+    group: GROUP_KEYS.has(group) ? (group as ShownGroupKey) : "all",
     date: DATE_KEYS.has(date) ? (date as DatePreset) : "any",
-    status: p.get("status") ?? "",
     type: p.get("type") ?? "",
     tag: p.get("tag") ?? "",
     project: p.get("project") ?? "",
-    speaker: p.get("speaker") ?? "",
-    owner: p.get("owner") ?? "",
-    withDecisions: p.get("withDecisions") === "true",
   };
 }
 
@@ -249,7 +290,13 @@ export interface TextPart {
   match: boolean;
 }
 
-/** Terms, split the way the server splits them: on anything not alphanumeric. */
+/**
+ * Terms, split the way the server splits them: on anything not alphanumeric.
+ *
+ * Used by the highlighter and by {@link meaningWorthShowing}, which both have to
+ * agree with the server about what counts as a word — a highlighter that marks
+ * something the search did not match on is a claim about why a result is there.
+ */
 function terms(query: string): string[] {
   return query
     .split(/[^\p{L}\p{N}]+/u)

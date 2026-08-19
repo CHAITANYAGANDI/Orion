@@ -14,6 +14,11 @@ import type { Project, SearchFacets } from "@/lib/types";
  * looks broken — so a facet with no values is not rendered at all. And a filter
  * has to commit immediately: unlike the search box there is nothing to debounce,
  * and a select that needs a second click to take effect reads as a bug.
+ *
+ * <p>The third is the one this bar was cut down for. There are four controls,
+ * and the removed ones are asserted absent rather than left to drift back: a
+ * dropdown here that the results page has no state to hold would narrow a
+ * search with nothing on screen to say so.
  */
 const FACETS: SearchFacets = {
   speakers: ["Priya", "Marcus"],
@@ -58,19 +63,32 @@ describe("SearchFilters", () => {
   it("offers a filter for everything the workspace has", () => {
     renderBar();
 
-    for (const label of ["Date", "Speaker", "Meeting type", "Tag", "Status", "Action owner"]) {
+    for (const label of ["Date", "Meeting type", "Tag", "Project"]) {
       expect(screen.getByLabelText(label)).toBeInTheDocument();
     }
-    expect(screen.getByRole("button", { name: "Settled a decision" })).toBeInTheDocument();
+  });
+
+  it("no longer offers the four that were taken away", () => {
+    // Speaker and status narrowed a page that now shows two kinds of result;
+    // action owner and "settled a decision" narrowed lists it no longer shows
+    // at all. None of them has state behind it any more — see lib/search.ts.
+    renderBar();
+
+    for (const label of ["Speaker", "Status", "Action owner"]) {
+      expect(screen.queryByLabelText(label)).not.toBeInTheDocument();
+    }
+    expect(screen.queryByRole("button", { name: "Settled a decision" })).not.toBeInTheDocument();
+    // Both dropdowns that read "Anyone" are gone with them.
+    expect(screen.queryByText("Anyone")).not.toBeInTheDocument();
   });
 
   it("hides a filter with nothing to filter by", () => {
-    // Nobody has been assigned a commitment yet. An owner dropdown with one
-    // dead row invites a click that does nothing.
-    renderBar({}, { ...FACETS, owners: [], tags: [] });
+    // Nothing has been tagged yet. A tag dropdown with one dead row invites a
+    // click that does nothing.
+    renderBar({}, { ...FACETS, tags: [], types: [] });
 
-    expect(screen.queryByLabelText("Action owner")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Tag")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Meeting type")).not.toBeInTheDocument();
     // Date needs no data behind it, so it survives an empty workspace.
     expect(screen.getByLabelText("Date")).toBeInTheDocument();
   });
@@ -80,16 +98,16 @@ describe("SearchFilters", () => {
     render(<SearchFilters state={EMPTY_SEARCH} onChange={onChange} />);
 
     expect(screen.getByLabelText("Date")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Speaker")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Tag")).not.toBeInTheDocument();
   });
 
   it("commits a choice on the first click", async () => {
     renderBar();
 
-    await userEvent.click(screen.getByLabelText("Speaker"));
-    await userEvent.click(screen.getByRole("option", { name: "Priya" }));
+    await userEvent.click(screen.getByLabelText("Tag"));
+    await userEvent.click(screen.getByRole("option", { name: "finance" }));
 
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ speaker: "Priya" }));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ tag: "finance" }));
   });
 
   it("names meeting types the way the product does", async () => {
@@ -122,44 +140,23 @@ describe("SearchFilters", () => {
   });
 
   it("lets a filter be taken off again", async () => {
-    renderBar({ speaker: "Priya" });
+    renderBar({ tag: "finance" });
 
-    await userEvent.click(screen.getByLabelText("Speaker"));
-    await userEvent.click(screen.getByRole("option", { name: "Anyone" }));
+    await userEvent.click(screen.getByLabelText("Tag"));
+    await userEvent.click(screen.getByRole("option", { name: "Any tag" }));
 
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ speaker: "" }));
-  });
-
-  it("toggles the decision filter both ways", async () => {
-    const { rerender } = renderBar();
-    const toggle = screen.getByRole("button", { name: "Settled a decision" });
-    expect(toggle).toHaveAttribute("aria-pressed", "false");
-
-    await userEvent.click(toggle);
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ withDecisions: true }));
-
-    rerender(
-      <SearchFilters
-        state={{ ...EMPTY_SEARCH, withDecisions: true }}
-        facets={FACETS}
-        onChange={onChange}
-      />,
-    );
-    expect(screen.getByRole("button", { name: "Settled a decision" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ tag: "" }));
   });
 
   it("shows how many filters are on, and clears them together", async () => {
-    renderBar({ q: "stripe", speaker: "Priya", date: "week", withDecisions: true });
+    renderBar({ q: "stripe", tag: "finance", date: "week", project: "prj_1" });
 
     const clear = screen.getByRole("button", { name: /Clear 3 filters/ });
     await userEvent.click(clear);
 
     // Clearing filters is not clearing the search: the term survives.
     expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({ q: "stripe", speaker: "", date: "any", withDecisions: false }),
+      expect.objectContaining({ q: "stripe", tag: "", date: "any", project: "" }),
     );
   });
 
