@@ -347,8 +347,8 @@ public class ShareService {
                         + where + "\n\n"
                         + "You will not be emailed again about this link today, however many "
                         + "times it is opened.\n\n"
-                        + "—\nSent automatically by Recallix. "
-                        + "Turn this off in Account Settings → Emails.");
+                        + "—\nSent automatically by Recallix because \"Conversation shared\" "
+                        + "is on. Turn it off in Account Settings → Emails.");
         if (sent) {
             // Only on success, so a mail server that was down for a minute does
             // not cost the owner the day's one notice.

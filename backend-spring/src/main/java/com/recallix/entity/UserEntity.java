@@ -107,22 +107,62 @@ public class UserEntity {
     @Column(name = "chat_history_days")
     private Integer chatHistoryDays;
 
-    /** Mail a daily digest of what is overdue or due soon. */
+    /**
+     * Mail every morning about what is overdue or due soon ("Event reminder").
+     *
+     * <p>Every morning, full stop, since V43. It used to carry a cadence — see
+     * {@link #weeklyDigest} for why that stopped being a mode of this switch and
+     * became a switch of its own.
+     */
     @Column(name = "task_reminders", nullable = false)
     private boolean taskReminders = false;
 
     /**
-     * Send that digest on Mondays instead of every morning (V40).
+     * The Monday review of the week (V43).
      *
-     * <p>Read only when {@link #taskReminders} is on; a cadence for a message
-     * nobody receives is not a state worth reasoning about.
+     * <p>Independent of {@link #taskReminders} rather than a cadence for it. The
+     * two are different messages, not two settings of one: a daily reminder is a
+     * prompt to act this morning, a Monday review is a look back. As a mode they
+     * were mutually exclusive, so somebody who wanted both could have neither.
+     *
+     * <p>When both are on and it is a Monday, one message goes out — this one.
+     * See {@code TaskReminderService}.
      */
-    @Column(name = "digest_weekly", nullable = false)
-    private boolean digestWeekly = false;
+    @Column(name = "weekly_digest", nullable = false)
+    private boolean weeklyDigest = false;
 
     /** The last day a digest went out — the guard against sending two. */
     @Column(name = "task_reminder_sent_on")
     private LocalDate taskReminderSentOn;
+
+    /**
+     * Mail when a comment lands on an action item ("Comments", V43).
+     *
+     * <p>At most one a day — see {@link #commentEmailedOn}. Working through a
+     * meeting's tasks produces a burst of notes in one sitting, and a message
+     * per note is how somebody builds a filter rule and stops reading the
+     * sender entirely.
+     */
+    @Column(name = "comment_email", nullable = false)
+    private boolean commentEmail = false;
+
+    /** The day the comment mail last went out; null if never. */
+    @Column(name = "comment_emailed_on")
+    private LocalDate commentEmailedOn;
+
+    /**
+     * Mail when a highlight is added to a transcript ("Highlights", V43).
+     *
+     * <p>At most one a day, for the same reason as {@link #commentEmail}:
+     * reading a transcript through and marking it up is one activity, not
+     * fifteen events.
+     */
+    @Column(name = "highlight_email", nullable = false)
+    private boolean highlightEmail = false;
+
+    /** The day the highlight mail last went out; null if never. */
+    @Column(name = "highlight_emailed_on")
+    private LocalDate highlightEmailedOn;
 
     /**
      * The master switch over automatic email (V40).
@@ -252,8 +292,20 @@ public class UserEntity {
     public boolean isTaskReminders() { return taskReminders; }
     public void setTaskReminders(boolean taskReminders) { this.taskReminders = taskReminders; }
 
-    public boolean isDigestWeekly() { return digestWeekly; }
-    public void setDigestWeekly(boolean digestWeekly) { this.digestWeekly = digestWeekly; }
+    public boolean isWeeklyDigest() { return weeklyDigest; }
+    public void setWeeklyDigest(boolean weeklyDigest) { this.weeklyDigest = weeklyDigest; }
+
+    public boolean isCommentEmail() { return commentEmail; }
+    public void setCommentEmail(boolean commentEmail) { this.commentEmail = commentEmail; }
+
+    public LocalDate getCommentEmailedOn() { return commentEmailedOn; }
+    public void setCommentEmailedOn(LocalDate commentEmailedOn) { this.commentEmailedOn = commentEmailedOn; }
+
+    public boolean isHighlightEmail() { return highlightEmail; }
+    public void setHighlightEmail(boolean highlightEmail) { this.highlightEmail = highlightEmail; }
+
+    public LocalDate getHighlightEmailedOn() { return highlightEmailedOn; }
+    public void setHighlightEmailedOn(LocalDate highlightEmailedOn) { this.highlightEmailedOn = highlightEmailedOn; }
 
     public boolean isEmailsEnabled() { return emailsEnabled; }
     public void setEmailsEnabled(boolean emailsEnabled) { this.emailsEnabled = emailsEnabled; }

@@ -17,10 +17,12 @@ import com.recallix.entity.ActionItemComment;
 import com.recallix.entity.Meeting;
 import com.recallix.entity.MeetingActionItem;
 import com.recallix.entity.UserEntity;
+import com.recallix.event.WorkspaceActivityEvent;
 import com.recallix.repository.ActionItemCommentRepository;
 import com.recallix.repository.MeetingActionItemRepository;
 import com.recallix.repository.MeetingRepository;
 import com.recallix.repository.UserRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -57,15 +59,18 @@ public class ActionItemService {
     private final ActionItemCommentRepository comments;
     private final MeetingRepository meetings;
     private final UserRepository users;
+    private final ApplicationEventPublisher events;
 
     public ActionItemService(MeetingActionItemRepository actionItems,
                              ActionItemCommentRepository comments,
                              MeetingRepository meetings,
-                             UserRepository users) {
+                             UserRepository users,
+                             ApplicationEventPublisher events) {
         this.actionItems = actionItems;
         this.comments = comments;
         this.meetings = meetings;
         this.users = users;
+        this.events = events;
     }
 
     /**
@@ -311,6 +316,12 @@ public class ActionItemService {
         // The log lives on the item and dies with it, so writing one has to be
         // enough to protect the item from the next reprocess.
         item.setEdited(true);
+
+        // The "Comments" email (V43). After commit and off this thread, so the
+        // SMTP round trip is not charged to somebody typing a note.
+        events.publishEvent(new WorkspaceActivityEvent(
+                userId, WorkspaceActivityEvent.Kind.COMMENT_ADDED,
+                actionItemId, comment.getBody()));
 
         return ActionItemCommentResponse.from(comment);
     }

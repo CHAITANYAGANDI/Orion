@@ -113,8 +113,13 @@ public class UserService {
                 user.setTaskReminderSentOn(null);
             }
         }
-        if (patch.digestWeekly() != null) {
-            user.setDigestWeekly(patch.digestWeekly());
+        if (patch.weeklyDigest() != null) {
+            user.setWeeklyDigest(patch.weeklyDigest());
+            // Same reasoning as above: the two switches share one sent-on stamp,
+            // so clearing it is what lets a Monday switch-on send this Monday.
+            if (patch.weeklyDigest()) {
+                user.setTaskReminderSentOn(null);
+            }
         }
         // The master leaves the switches underneath it alone. Turning email off
         // for a fortnight and back on again should return somebody to the
@@ -127,6 +132,17 @@ public class UserService {
         }
         if (patch.shareOpenedEmail() != null) {
             user.setShareOpenedEmail(patch.shareOpenedEmail());
+        }
+        // The daily stamps are not cleared on switch-on, unlike the digest's.
+        // These two mail about something that just happened rather than about a
+        // standing state, so there is nothing owed from earlier today to catch
+        // up on — and clearing the stamp would mail about a comment somebody
+        // wrote before they asked to hear about comments.
+        if (patch.commentEmail() != null) {
+            user.setCommentEmail(patch.commentEmail());
+        }
+        if (patch.highlightEmail() != null) {
+            user.setHighlightEmail(patch.highlightEmail());
         }
         if (patch.mutedNotifications() != null) {
             // Stored as the enum's own spelling and nothing else. An unknown
@@ -184,15 +200,20 @@ public class UserService {
             /** Null leaves the window; {@code chatReadsEverything} clears it. */
             Integer chatHistoryDays,
             Boolean chatReadsEverything,
+            /** "Event reminder": the every-morning deadline mail. */
             Boolean taskReminders,
-            /** Mondays instead of every morning (V40). */
-            Boolean digestWeekly,
+            /** "Weekly digest": the Monday review. Its own switch since V43. */
+            Boolean weeklyDigest,
             /** The master over automatic email. Never rewrites the switches below it. */
             Boolean emailsEnabled,
             /** Recap for imported meetings; {@code autoEmailRecap} covers recorded ones. */
             Boolean recapForImports,
-            /** Email the owner when a published link is opened. */
+            /** "Conversation shared": email the owner when a published link is opened. */
             Boolean shareOpenedEmail,
+            /** "Comments": email when a comment lands on an action item (V43). */
+            Boolean commentEmail,
+            /** "Highlights": email when a highlight is added (V43). */
+            Boolean highlightEmail,
             /** Notification kinds to switch off. Null leaves them; empty turns all on. */
             List<String> mutedNotifications
     ) {

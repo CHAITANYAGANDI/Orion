@@ -8,13 +8,20 @@ import type { PreferencesResponse } from "@/lib/types";
  *
  * This is the only page in Recallix that decides whether somebody is contacted
  * without opening the app, so the tests are weighted the same way the risk is:
- * every switch starts off, the master silences without forgetting, and the two
- * recap switches do not cover each other.
+ * every switch starts off, the master silences without forgetting, and no switch
+ * covers for another.
  *
- * The last group asserts what the page refuses to offer. Comments, highlights
- * and "shared with me" all need a second person, and a single-account product
- * that grew a switch for them would be promising mail that can never arrive —
- * an easy thing to add later by copying a competitor's settings page.
+ * The group that matters most after V43 is the per-row one. Eight rows write
+ * eight boolean fields whose names differ by a word, and the failure they share
+ * is positional: turning on "Highlights" saving `commentEmail` instead. Nothing
+ * on screen would show it — both switches render, both persist, and only the
+ * wrong mail arriving a day later gives it away. So each row is asserted
+ * against the field it is supposed to write, one at a time.
+ *
+ * The last group asserts what the page no longer has. The recap address field
+ * and the bell's switches were removed on request, and both backed capabilities
+ * that still exist server-side with no caller — so the absence is a decision,
+ * and a test is the only place a decision like that survives.
  */
 const { update, toastError } = vi.hoisted(() => ({
   update: vi.fn(),
@@ -32,12 +39,6 @@ vi.mock("@/lib/api", () => ({
     },
     { isLoading: false },
   ],
-  useGetNotificationKindsQuery: () => ({
-    data: [
-      { kind: "SUMMARY_READY", label: "Summary ready", setting: "when the notes are written", mutable: true },
-      { kind: "PROCESSING_FAILED", label: "Processing failed", setting: "when a meeting fails to process", mutable: false },
-    ],
-  }),
 }));
 
 vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
@@ -62,34 +63,67 @@ beforeEach(() => {
     shareExpiryDays: null,
     chatHistoryDays: null,
     taskReminders: false,
-    digestWeekly: false,
+    weeklyDigest: false,
     emailsEnabled: true,
     recapForImports: false,
     shareOpenedEmail: false,
+    commentEmail: false,
+    highlightEmail: false,
     mutedNotifications: [],
   };
 });
+
+/** Every row, in the order the page lists it, and the field it writes. */
+const ROWS: [string, keyof PreferencesResponse][] = [
+  ["Meeting summary", "autoEmailRecap"],
+  ["Imported conversation", "recapForImports"],
+  ["Conversation shared", "shareOpenedEmail"],
+  ["Weekly digest", "weeklyDigest"],
+  ["Event reminder", "taskReminders"],
+  ["Comments", "commentEmail"],
+  ["Highlights", "highlightEmail"],
+];
 
 describe("EmailsTab switches", () => {
   it("offers every message it can actually send", () => {
     render(<EmailsTab />);
 
-    for (const name of [
-      "Meeting summary",
-      "Imported conversation",
-      "Deadline digest",
-      "Shared link opened",
-    ]) {
+    for (const [name] of ROWS) {
       expect(screen.getByRole("checkbox", { name })).toBeInTheDocument();
     }
   });
 
-  it("saves one switch without touching the others", async () => {
+  it.each(ROWS)("%s writes its own field and no other", async (name, field) => {
     render(<EmailsTab />);
 
-    await userEvent.click(screen.getByRole("checkbox", { name: "Shared link opened" }));
+    await userEvent.click(screen.getByRole("checkbox", { name }));
 
-    await waitFor(() => expect(update).toHaveBeenCalledWith({ shareOpenedEmail: true }));
+    // Exact equality, not objectContaining: a patch that sets the right field
+    // and a neighbour would pass the looser assertion and send mail nobody
+    // asked for. `emailsEnabled` rides along on every switch-on, so a ticked
+    // row is never blocked by a gate somebody closed earlier.
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith({ [field]: true, emailsEnabled: true }),
+    );
+  });
+
+  it("shows every switch off until it is turned on", () => {
+    render(<EmailsTab />);
+
+    for (const [name] of ROWS) {
+      expect(screen.getByRole("checkbox", { name })).not.toBeChecked();
+    }
+  });
+
+  it("reads each switch back from its own field", () => {
+    // The mirror of the write test: a crossed wire on the read side shows the
+    // wrong row switched on, which is how somebody turns off the mail they
+    // wanted to keep.
+    prefs = { ...prefs, commentEmail: true };
+    render(<EmailsTab />);
+
+    expect(screen.getByRole("checkbox", { name: "Comments" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Highlights" })).not.toBeChecked();
   });
 
   it("keeps the recap for recordings separate from the recap for imports", async () => {
@@ -99,104 +133,194 @@ describe("EmailsTab switches", () => {
 
     // The whole point of the split: an archive of sixty files must not be able
     // to ride in on the switch somebody turned on for their four weekly calls.
-    await waitFor(() => expect(update).toHaveBeenCalledWith({ recapForImports: true }));
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith({ recapForImports: true, emailsEnabled: true }),
+    );
     expect(update).not.toHaveBeenCalledWith(expect.objectContaining({ autoEmailRecap: true }));
   });
 });
 
-describe("EmailsTab master switch", () => {
-  it("is on by default, because everything under it is already opt-in", () => {
+/** Every row on, which is what the select-all writes. */
+const ALL_ON = Object.fromEntries(ROWS.map(([, field]) => [field, true]));
+const ALL_OFF = Object.fromEntries(ROWS.map(([, field]) => [field, false]));
+
+describe("EmailsTab select-all", () => {
+  const master = () => screen.getByRole("checkbox", { name: "All emails" });
+
+  it("is unticked when nothing below it is on", () => {
     render(<EmailsTab />);
 
-    expect(screen.getByRole("checkbox", { name: "All emails" })).toBeChecked();
+    // It reads the rows rather than its own field. A tickbox above a list of
+    // seven unticked rows has to be unticked, whatever `emailsEnabled` says.
+    expect(master()).not.toBeChecked();
+    expect(master()).not.toBePartiallyChecked();
   });
 
-  it("greys the rest out when it is off, rather than clearing them", () => {
-    prefs = { ...prefs, emailsEnabled: false, autoEmailRecap: true, taskReminders: true };
+  it("is ticked only when every row is on", () => {
+    prefs = { ...prefs, ...ALL_ON };
     render(<EmailsTab />);
 
-    const summary = screen.getByRole("checkbox", { name: "Meeting summary" });
-    // Held, not lost — the switch still reads as on and comes back untouched.
-    expect(summary).toBeChecked();
-    expect(summary).toBeDisabled();
-    expect(screen.getByText(/Your choices below are kept/i)).toBeInTheDocument();
+    expect(master()).toBeChecked();
   });
 
-  it("sends only itself, so the switches underneath survive", async () => {
-    prefs = { ...prefs, autoEmailRecap: true };
+  it("is partially ticked when some are on", () => {
+    prefs = { ...prefs, commentEmail: true };
     render(<EmailsTab />);
 
-    await userEvent.click(screen.getByRole("checkbox", { name: "All emails" }));
-
-    await waitFor(() => expect(update).toHaveBeenCalledWith({ emailsEnabled: false }));
+    // Neither ticked nor blank: blank would say nothing is on while a row
+    // below it is visibly ticked.
+    expect(master()).toBePartiallyChecked();
+    expect(screen.getByText(/1 of 7 are on/i)).toBeInTheDocument();
   });
 
-  it("does not govern the bell", () => {
+  it("turns every row on in one save", async () => {
+    prefs = { ...prefs, commentEmail: true };
+    render(<EmailsTab />);
+
+    await userEvent.click(master());
+
+    // One patch, not seven: seven would each pop a toast, and a failure
+    // halfway would leave the page half on with nothing to explain it.
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith({ ...ALL_ON, emailsEnabled: true }),
+    );
+    expect(update).toHaveBeenCalledTimes(1);
+  });
+
+  it("turns every row off in one save", async () => {
+    prefs = { ...prefs, ...ALL_ON };
+    render(<EmailsTab />);
+
+    await userEvent.click(master());
+
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith({ ...ALL_OFF, emailsEnabled: false }),
+    );
+  });
+
+  it("re-opens the gate when a single row is switched back on", async () => {
+    // Otherwise unticking the master and picking one row back out would tick
+    // the box and send nothing, because every sender checks the gate first.
     prefs = { ...prefs, emailsEnabled: false };
     render(<EmailsTab />);
 
-    // Silencing an inbox must not silence the failed upload waiting in the app.
-    expect(screen.getByRole("checkbox", { name: /Tell me when the notes are written/ })).toBeEnabled();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Comments" }));
+
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith({ commentEmail: true, emailsEnabled: true }),
+    );
+  });
+
+  it("leaves the gate alone when a row is switched off", async () => {
+    prefs = { ...prefs, ...ALL_ON };
+    render(<EmailsTab />);
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Comments" }));
+
+    // Nothing to re-open, and closing the gate here would be a second meaning
+    // for one click.
+    await waitFor(() => expect(update).toHaveBeenCalledWith({ commentEmail: false }));
+  });
+
+  it("never disables a row", () => {
+    prefs = { ...prefs, emailsEnabled: false };
+    render(<EmailsTab />);
+
+    // The rows used to grey out under a master that was off. They cannot now:
+    // the master being unticked means they are off, not held.
+    for (const [name] of ROWS) {
+      expect(screen.getByRole("checkbox", { name })).toBeEnabled();
+    }
   });
 });
 
-describe("EmailsTab digest cadence", () => {
-  it("offers no cadence until the digest is on", () => {
+describe("EmailsTab digests", () => {
+  it("has no cadence dropdown, because the cadence is now two rows", () => {
+    prefs = { ...prefs, taskReminders: true, weeklyDigest: true };
     render(<EmailsTab />);
 
+    // Until V43 these were one switch with "every morning" or "Mondays", which
+    // made them exclusive — so wanting a morning prompt and a Monday review
+    // meant choosing one.
     expect(screen.queryByRole("combobox", { name: "How often" })).not.toBeInTheDocument();
   });
 
-  it("offers daily or Mondays once it is", () => {
-    prefs = { ...prefs, taskReminders: true };
+  it("lets both be on at once", async () => {
+    prefs = { ...prefs, weeklyDigest: true };
     render(<EmailsTab />);
 
-    expect(screen.getByRole("combobox", { name: "How often" })).toHaveValue("daily");
+    await userEvent.click(screen.getByRole("checkbox", { name: "Event reminder" }));
+
+    expect(screen.getByRole("checkbox", { name: "Weekly digest" })).toBeChecked();
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith({ taskReminders: true, emailsEnabled: true }),
+    );
   });
 
-  it("switches to weekly", async () => {
-    prefs = { ...prefs, taskReminders: true };
+  it("says a Monday sends one of them rather than both", () => {
     render(<EmailsTab />);
 
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "How often" }), "weekly");
-
-    await waitFor(() => expect(update).toHaveBeenCalledWith({ digestWeekly: true }));
-  });
-});
-
-describe("EmailsTab destination", () => {
-  it("says where all of it would go", () => {
-    render(<EmailsTab />);
-
-    expect(screen.getByText(/goes to priya@example.com/i)).toBeInTheDocument();
-  });
-
-  it("says plainly when there is nowhere to send it", () => {
-    prefs = { ...prefs, effectiveRecapEmail: null as unknown as string };
-    render(<EmailsTab />);
-
-    // A dev session has no provider address, so every switch on this page is a
-    // switch with no destination — worth saying rather than failing silently.
-    expect(screen.getByText(/nowhere to go/i)).toBeInTheDocument();
+    // Two mails a minute apart from overlapping lists reads as a bug, so the
+    // page has to say which one wins before somebody switches both on.
+    expect(screen.getByText(/you get the digest above instead, not both/i)).toBeInTheDocument();
   });
 });
 
-describe("EmailsTab what it will never send", () => {
-  it("names the rows a reader arrives looking for", () => {
+describe("EmailsTab is switches and nothing else", () => {
+  it("offers no way to change the address, and does not claim to", () => {
     render(<EmailsTab />);
 
-    expect(screen.getByText(/Anything about a live or scheduled meeting/i)).toBeInTheDocument();
-    expect(screen.getByText("Comments and highlights")).toBeInTheDocument();
-    expect(screen.getByText(/A conversation shared with you/i)).toBeInTheDocument();
+    // Removed on request. The field is the only thing that ever wrote
+    // `recapEmail`, so mail now goes to the account email or nowhere. Asserted
+    // rather than left implicit, because putting the field back is a one-line
+    // change and this test is what says the absence was deliberate.
+    expect(screen.queryByLabelText(/Send all of it to/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
   });
 
-  it("offers no switch for a message that could never arrive", () => {
+  it("does not say where the mail goes", () => {
     render(<EmailsTab />);
 
-    // Copying a competitor's settings page is how these get added, and each one
-    // would be a promise nothing in the product can keep.
-    for (const name of [/^Comments$/, /^Highlights$/, /^Event reminder$/, /^Live meeting$/]) {
-      expect(screen.queryByRole("checkbox", { name })).not.toBeInTheDocument();
-    }
+    // The trade this makes: eight opt-in switches with no visible destination
+    // fail silently on an account with no address on file.
+    expect(screen.queryByText(/goes to priya@example.com/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/nowhere to go/i)).not.toBeInTheDocument();
+  });
+
+  it("carries no bell switches", () => {
+    render(<EmailsTab />);
+
+    // `mutedNotifications` and GET /notifications/kinds both still work and now
+    // have no caller, so every notification kind is on permanently.
+    expect(screen.queryByText(/In-app notifications/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: /^Tell me/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("EmailsTab wording", () => {
+  it("describes what Recallix does, not what a calendar would", () => {
+    render(<EmailsTab />);
+
+    // "Event reminder" is a borrowed row name. Recallix reads no calendar, so
+    // the description has to say what will genuinely arrive or the switch is a
+    // promise nothing can keep.
+    expect(screen.getByText(/due today or in the next few days/i)).toBeInTheDocument();
+  });
+
+  it("says which direction sharing goes", () => {
+    render(<EmailsTab />);
+
+    // "Conversation shared" reads as inbound. It is not: nobody can share into
+    // a one-account workspace, and the real event is somebody opening a link
+    // that went out.
+    expect(screen.getByText(/nobody can share into your account/i)).toBeInTheDocument();
+  });
+
+  it("warns that the noisy rows are capped before they are switched on", () => {
+    render(<EmailsTab />);
+
+    // Marking up a transcript is one activity, not fifteen events. Somebody
+    // deciding whether to switch this on is deciding about volume.
+    expect(screen.getAllByText(/at most one a day/i).length).toBeGreaterThan(0);
   });
 });

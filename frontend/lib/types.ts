@@ -174,16 +174,26 @@ export interface PreferencesResponse {
   shareExpiryDays: number | null;
   /** How far back workspace chat reads transcripts; null is every meeting. */
   chatHistoryDays: number | null;
-  /** Digest of what is overdue or due soon. */
+  /** "Event reminder": every morning, what is overdue or due soon. */
   taskReminders: boolean;
-  /** That digest on Mondays instead of every morning. */
-  digestWeekly: boolean;
-  /** The master over automatic email. Off silences everything below it. */
+  /** "Weekly digest": the Monday review. Its own switch since V43. */
+  weeklyDigest: boolean;
+  /**
+   * The server-side gate every sender checks first.
+   *
+   * Not what the "All emails" checkbox reads any more — that is a select-all
+   * derived from the seven rows. This moves with it, and with any single row
+   * being switched on, so a ticked row is never blocked by a closed gate.
+   */
   emailsEnabled: boolean;
   /** Recap for imported meetings; `autoEmailRecap` covers recorded ones. */
   recapForImports: boolean;
-  /** Email when somebody opens a link you published. */
+  /** "Conversation shared": somebody outside opened a link you published. */
   shareOpenedEmail: boolean;
+  /** "Comments": a comment landed on an action item. At most one a day (V43). */
+  commentEmail: boolean;
+  /** "Highlights": a highlight was added to a transcript. At most one a day (V43). */
+  highlightEmail: boolean;
   /** Notification kinds switched off. Everything absent from this is on. */
   mutedNotifications: string[];
 }
@@ -208,11 +218,13 @@ export interface PreferencesUpdateRequest {
   chatHistoryDays?: number;
   chatReadsEverything?: boolean;
   taskReminders?: boolean;
-  digestWeekly?: boolean;
+  weeklyDigest?: boolean;
   /** The master. Never rewrites the switches underneath it. */
   emailsEnabled?: boolean;
   recapForImports?: boolean;
   shareOpenedEmail?: boolean;
+  commentEmail?: boolean;
+  highlightEmail?: boolean;
   /** The whole set, not a delta — the settings page holds every switch at once. */
   mutedNotifications?: string[];
 }

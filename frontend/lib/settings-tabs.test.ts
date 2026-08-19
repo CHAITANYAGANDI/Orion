@@ -5,6 +5,7 @@ import {
   LEGACY_PATHS,
   tabFromPath,
   pathForTab,
+  isSettingsPath,
 } from "@/lib/settings-tabs";
 
 /**
@@ -97,5 +98,54 @@ describe("linking to a tab", () => {
     for (const tab of SETTINGS_TABS) {
       expect(tabFromPath(pathForTab(tab.id))).toBe(tab.id);
     }
+  });
+});
+
+/**
+ * Whether the shell should drop the search bar.
+ *
+ * <p>The failure this guards against is invisible on the page it happens on:
+ * arriving at the Plans tab through `/billing` and seeing a search bar that is
+ * absent when you arrive at the same screen through `/settings/plans`. Nobody
+ * would report it, and it would look like the bar flickering at random.
+ *
+ * <p>The other half is the opposite mistake — a `startsWith("/settings")` that
+ * also swallows a future `/settingsomething`, or an `in` check that says yes to
+ * `/toString`.
+ */
+describe("where the search bar is hidden", () => {
+  it("covers Account Settings and every tab of it", () => {
+    expect(isSettingsPath("/settings")).toBe(true);
+    for (const tab of SETTINGS_TABS) {
+      expect(isSettingsPath(pathForTab(tab.id))).toBe(true);
+    }
+  });
+
+  it("covers the old URLs, which are the same page", () => {
+    for (const path of Object.keys(LEGACY_PATHS)) {
+      expect(isSettingsPath(path)).toBe(true);
+    }
+  });
+
+  it("is not fooled by a trailing slash", () => {
+    expect(isSettingsPath("/settings/")).toBe(true);
+    expect(isSettingsPath("/integrations/")).toBe(true);
+  });
+
+  it("leaves the search bar on every page that has meetings behind it", () => {
+    for (const path of ["/home", "/ask", "/meetings/mtg_1", "/projects", "/search", "/record"]) {
+      expect(isSettingsPath(path)).toBe(false);
+    }
+  });
+
+  it("does not match a path that merely starts with the same letters", () => {
+    expect(isSettingsPath("/settingsomething")).toBe(false);
+  });
+
+  it("does not match an inherited property name", () => {
+    // `"/toString" in LEGACY_PATHS` is false, but `"toString" in` anything is
+    // true — the kind of thing a plain `in` check gets wrong once.
+    expect(isSettingsPath("/toString")).toBe(false);
+    expect(isSettingsPath("/constructor")).toBe(false);
   });
 });

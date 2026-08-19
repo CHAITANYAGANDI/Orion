@@ -107,7 +107,7 @@ export function ago(iso: string, now: number = Date.now()): string {
   return new Date(iso).toLocaleDateString();
 }
 
-export function NotificationBell() {
+export function NotificationBell({ onNavigate }: { onNavigate?: () => void } = {}) {
   const [open, setOpen] = React.useState(false);
   const [filter, setFilter] = React.useState<Filter>("inbox");
   const count = useGetUnreadCountQuery(undefined, { pollingInterval: POLL_MS });
@@ -157,26 +157,51 @@ export function NotificationBell() {
         if (!next) setFilter("inbox");
       }}
     >
+      {/* A rail row, not a header icon.
+          Shaped to match the links above it — same padding, same icon size,
+          same active colour — because a control that sits in a list of
+          navigation and looks like something else reads as an accident. The
+          count moved from a dot pinned to the corner of an icon to a pill at
+          the end of the row: there is width here, so it can be a number people
+          can actually read. */}
       <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="relative"
+        <button
+          type="button"
           aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}
+          className={cn(
+            "flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+            open || unread > 0
+              ? "text-foreground"
+              : "text-muted-foreground",
+            "hover:bg-accent hover:text-accent-foreground",
+            open && "bg-accent",
+          )}
         >
-          <Bell className="h-5 w-5" />
+          <Bell className="h-4 w-4 shrink-0" />
+          <span className="flex-1 text-left">Notifications</span>
           {unread > 0 && (
             <span
-              className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold leading-none text-primary-foreground"
+              className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-bold leading-none text-primary-foreground"
               aria-hidden
             >
               {unread > BADGE_MAX ? `${BADGE_MAX}+` : unread}
             </span>
           )}
-        </Button>
+        </button>
       </DropdownMenuTrigger>
 
-      <DropdownMenuContent align="end" className="w-[min(24rem,calc(100vw-2rem))] p-0">
+      {/* Out to the side. Anchored below a rail row it would open across the
+          folder tree and off the bottom of a short window; the rail is 16rem
+          wide and the panel is 24rem, so there is nowhere else for it to go.
+          Radix portals this to the body, so the rail's own overflow scrolling
+          never clips it. */}
+      <DropdownMenuContent
+        side="right"
+        align="start"
+        sideOffset={8}
+        collisionPadding={16}
+        className="w-[min(24rem,calc(100vw-2rem))] p-0"
+      >
         <div className="flex items-center justify-between gap-2 px-3 pb-1 pt-2.5">
           <span className="text-base font-semibold">Notifications</span>
           {/* Disabled rather than hidden when there is nothing unread. A control
@@ -249,6 +274,11 @@ export function NotificationBell() {
                     onOpen={() => {
                       if (!n.read) void markRead({ id: n.id, read: true });
                       setOpen(false);
+                      // The rail is a slide-over on a narrow window, and the
+                      // panel opens on top of it. Following a link without
+                      // this leaves both covering the page that was just
+                      // navigated to.
+                      onNavigate?.();
                     }}
                     onToggleRead={() => void markRead({ id: n.id, read: !n.read })}
                     onDismiss={() => void remove(n.id)}

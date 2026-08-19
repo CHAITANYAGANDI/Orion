@@ -90,7 +90,7 @@ public class RecapEmailService {
             return false;
         }
 
-        boolean sent = email.send(to, draft.subject(), withFooter(draft.body()));
+        boolean sent = email.send(to, draft.subject(), withFooter(draft.body(), meeting));
         if (sent) {
             // Only stamped on success, so a transient SMTP outage leaves the
             // recap eligible to go out on the next reprocess.
@@ -118,8 +118,17 @@ public class RecapEmailService {
         return meeting.isRecorded() ? user.isAutoEmailRecap() : user.isRecapForImports();
     }
 
-    private static String withFooter(String body) {
-        return body + "\n\n—\nSent automatically by Recallix. "
-                + "Turn this off in Account Settings → Emails.";
+    /**
+     * Names the row on the settings page that sent this, not just the tab.
+     *
+     * <p>Which row depends on how the meeting arrived — the same split that
+     * decided whether to send at all. Eight switches share that tab now, and a
+     * footer saying only "Emails" leaves the reader to guess which of them to
+     * turn off; the wrong guess costs them the recaps they wanted to keep.
+     */
+    private static String withFooter(String body, Meeting meeting) {
+        String row = meeting.isRecorded() ? "Meeting summary" : "Imported conversation";
+        return body + "\n\n—\nSent automatically by Recallix because \"" + row + "\" is on. "
+                + "Turn it off in Account Settings → Emails.";
     }
 }

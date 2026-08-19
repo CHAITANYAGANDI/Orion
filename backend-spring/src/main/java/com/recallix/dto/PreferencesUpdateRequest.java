@@ -55,9 +55,16 @@ public record PreferencesUpdateRequest(
         Integer chatHistoryDays,
         Boolean chatReadsEverything,
 
+        /** "Event reminder": the every-morning deadline mail. */
         Boolean taskReminders,
-        /** Send the deadline digest on Mondays instead of every morning (V40). */
-        Boolean digestWeekly,
+        /**
+         * "Weekly digest": the Monday review (V43).
+         *
+         * <p>Its own switch rather than a cadence for {@code taskReminders}. The
+         * pair used to be exclusive, which meant somebody who wanted a daily
+         * prompt and a weekly look back could have only one of them.
+         */
+        Boolean weeklyDigest,
 
         /**
          * The master switch over automatic email (V40).
@@ -70,8 +77,13 @@ public record PreferencesUpdateRequest(
         Boolean emailsEnabled,
         /** Recap for imported meetings; {@code autoEmailRecap} covers recorded ones. */
         Boolean recapForImports,
-        /** Email the owner when a published link is opened. */
+        /** "Conversation shared": email the owner when a published link is opened. */
         Boolean shareOpenedEmail,
+
+        /** "Comments": email when a comment lands on an action item (V43). */
+        Boolean commentEmail,
+        /** "Highlights": email when a highlight is added to a transcript (V43). */
+        Boolean highlightEmail,
 
         /**
          * Notification kinds to switch off, replacing whatever was muted before.

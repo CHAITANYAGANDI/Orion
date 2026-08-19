@@ -185,11 +185,23 @@ public class AccountExportService {
         account.put("defaultLanguage", user.getDefaultLanguage());
         account.put("plan", user.getPlan());
         account.put("createdAt", user.getCreatedAt());
-        account.put("preferences", Map.of(
-                "autoEmailRecap", user.isAutoEmailRecap(),
-                "recapEmail", user.effectiveRecapEmail() == null ? "" : user.effectiveRecapEmail(),
-                "taskReminders", user.isTaskReminders(),
-                "mutedNotifications", user.getMutedNotifications()));
+        // Every email switch, not a sample of them. This file is the answer to
+        // "what do you hold about me", and a switch that governs whether a
+        // product contacts somebody is exactly the kind of thing it is for —
+        // V43 added five, and listing three of eight would make the export a
+        // partial answer that reads as a complete one.
+        Map<String, Object> preferences = new LinkedHashMap<>();
+        preferences.put("emailsEnabled", user.isEmailsEnabled());
+        preferences.put("recapEmail", user.effectiveRecapEmail() == null ? "" : user.effectiveRecapEmail());
+        preferences.put("autoEmailRecap", user.isAutoEmailRecap());
+        preferences.put("recapForImports", user.isRecapForImports());
+        preferences.put("shareOpenedEmail", user.isShareOpenedEmail());
+        preferences.put("weeklyDigest", user.isWeeklyDigest());
+        preferences.put("taskReminders", user.isTaskReminders());
+        preferences.put("commentEmail", user.isCommentEmail());
+        preferences.put("highlightEmail", user.isHighlightEmail());
+        preferences.put("mutedNotifications", user.getMutedNotifications());
+        account.put("preferences", preferences);
         Map<String, Object> retention = new LinkedHashMap<>();
         retention.put("audioDays", user.getAudioRetentionDays());
         retention.put("meetingDays", user.getMeetingRetentionDays());

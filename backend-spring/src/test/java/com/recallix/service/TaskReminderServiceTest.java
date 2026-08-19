@@ -25,6 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -254,7 +255,7 @@ class TaskReminderServiceTest {
         @Test
         @DisplayName("a weekly digest waits for Monday")
         void weeklyIsSilentMidweek() {
-            user.setDigestWeekly(true);
+            onlyWeekly();
             task("Ship the thing", SUNDAY, "Priya");
 
             assertThat(service.sendDue(SUNDAY)).isZero();
@@ -264,10 +265,77 @@ class TaskReminderServiceTest {
         @Test
         @DisplayName("a weekly digest goes out on Monday")
         void weeklyArrivesOnMonday() {
-            user.setDigestWeekly(true);
+            onlyWeekly();
             task("Ship the thing", MONDAY, "Priya");
 
             assertThat(service.sendDue(MONDAY)).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("both switches on a Monday send one message, not two")
+        void mondayWithBothSendsOnce() {
+            // The failure this guards against is not a missing email, it is two
+            // of them a minute apart drawn from overlapping lists — which reads
+            // as a bug rather than as two features working (V43).
+            user.setWeeklyDigest(true);
+            task("Ship the thing", MONDAY, "Priya");
+
+            assertThat(service.sendDue(MONDAY)).isEqualTo(1);
+            verify(email).send(anyString(), anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("the Monday message says it is the weekly one")
+        void mondayNamesTheRightSwitch() {
+            onlyWeekly();
+            task("Ship the thing", MONDAY, "Priya");
+            service.sendDue(MONDAY);
+
+            // The footer sends people to the switch that sent it. Naming the
+            // other one would send them to turn off the mail they kept.
+            assertThat(bodySent()).contains("\"Weekly digest\"").doesNotContain("\"Event reminder\"");
+        }
+
+        @Test
+        @DisplayName("the daily message says it is the daily one")
+        void dailyNamesTheRightSwitch() {
+            task("Ship the thing", SUNDAY, "Priya");
+            service.sendDue(SUNDAY);
+
+            assertThat(bodySent()).contains("\"Event reminder\"").doesNotContain("\"Weekly digest\"");
+        }
+
+        @Test
+        @DisplayName("the Monday review looks a full week ahead, where the daily one does not")
+        void weeklyReachesFurther() {
+            // Five days out: past the daily horizon of three, inside the week.
+            onlyWeekly();
+            task("Ship the thing", MONDAY.plusDays(5), "Priya");
+
+            assertThat(service.sendDue(MONDAY)).isEqualTo(1);
+
+            // The same item, the same day, on the daily switch: out of range,
+            // so nothing is owed and nothing is sent.
+            reset(email);
+            user.setWeeklyDigest(false);
+            user.setTaskReminders(true);
+            user.setTaskReminderSentOn(null);
+            assertThat(service.sendDue(MONDAY)).isZero();
+        }
+
+        @Test
+        @DisplayName("a week with nothing due is silent, the same as a day with nothing due")
+        void anEmptyWeekSaysNothing() {
+            onlyWeekly();
+
+            assertThat(service.sendDue(MONDAY)).isZero();
+            verify(email, never()).send(anyString(), anyString(), anyString());
+        }
+
+        /** The Monday review alone — the daily switch off, as V43 migrates it. */
+        private void onlyWeekly() {
+            user.setTaskReminders(false);
+            user.setWeeklyDigest(true);
         }
 
         @Test

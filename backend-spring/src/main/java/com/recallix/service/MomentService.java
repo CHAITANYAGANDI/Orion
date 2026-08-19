@@ -6,8 +6,10 @@ import com.recallix.domain.MomentRange;
 import com.recallix.dto.MomentRequest;
 import com.recallix.dto.MomentResponse;
 import com.recallix.entity.TranscriptMoment;
+import com.recallix.event.WorkspaceActivityEvent;
 import com.recallix.repository.MeetingRepository;
 import com.recallix.repository.TranscriptMomentRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -55,13 +57,16 @@ public class MomentService {
     private final TranscriptMomentRepository moments;
     private final MeetingRepository meetings;
     private final AuditService audit;
+    private final ApplicationEventPublisher events;
 
     public MomentService(TranscriptMomentRepository moments,
                          MeetingRepository meetings,
-                         AuditService audit) {
+                         AuditService audit,
+                         ApplicationEventPublisher events) {
         this.moments = moments;
         this.meetings = meetings;
         this.audit = audit;
+        this.events = events;
     }
 
     @Transactional(readOnly = true)
@@ -136,6 +141,16 @@ public class MomentService {
         moments.save(m);
 
         audit.record(userId, "MOMENT_ADDED", "meeting", meetingId);
+
+        // The "Highlights" email (V43). Highlights only: a bookmark has no text
+        // to quote, a note is already its own writing, and a reaction is a
+        // single emoji — mailing "somebody added 👍" would be the clearest
+        // possible case of a product reporting a click back to the person who
+        // made it.
+        if ("HIGHLIGHT".equals(kind)) {
+            events.publishEvent(new WorkspaceActivityEvent(
+                    userId, WorkspaceActivityEvent.Kind.HIGHLIGHT_ADDED, meetingId, quote));
+        }
         return MomentResponse.from(m);
     }
 

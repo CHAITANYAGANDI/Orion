@@ -157,6 +157,48 @@ describe("NotificationBell badge", () => {
   });
 });
 
+/**
+ * It lives in the left rail now, not the top bar.
+ *
+ * <p>Which changes two things worth pinning down. It has room for a written
+ * label, so the count can be a readable pill at the end of a row rather than a
+ * dot pinned to the corner of an icon. And the rail is a slide-over on a narrow
+ * window, so following a notification has to close it — otherwise the panel and
+ * the rail both stay open on top of the page they just navigated to.
+ */
+describe("NotificationBell in the rail", () => {
+  it("is a labelled row, not a bare icon", () => {
+    unread = 0;
+    render(<NotificationBell />);
+
+    // Sitting in a list of navigation links, an unlabelled icon is the one
+    // item nobody can name.
+    expect(screen.getByText("Notifications")).toBeInTheDocument();
+  });
+
+  it("closes the rail when a notification is followed", async () => {
+    const onNavigate = vi.fn();
+    render(<NotificationBell onNavigate={onNavigate} />);
+    await userEvent.click(screen.getByRole("button", { name: /Notifications/ }));
+
+    await userEvent.click(screen.getByRole("link", { name: /Sprint planning/ }));
+
+    expect(onNavigate).toHaveBeenCalled();
+  });
+
+  it("leaves the rail alone when a notification is only dismissed", async () => {
+    const onNavigate = vi.fn();
+    render(<NotificationBell onNavigate={onNavigate} />);
+    await userEvent.click(screen.getByRole("button", { name: /Notifications/ }));
+
+    await userEvent.click(screen.getByRole("button", { name: /Dismiss/ }));
+
+    // Nothing was navigated to, so closing the rail would take the list away
+    // mid-tidy.
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+});
+
 describe("NotificationBell list", () => {
   it("does not fetch the list until it is opened", () => {
     render(<NotificationBell />);

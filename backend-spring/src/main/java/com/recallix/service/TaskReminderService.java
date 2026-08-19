@@ -25,7 +25,18 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * One mail a day about what is late and what is about to be.
+ * Two mails about deadlines, and never both on the same morning.
+ *
+ * <p>"Event reminder" goes out every morning and looks three days ahead: what is
+ * late, and what needs doing now. "Weekly digest" goes out on Mondays and looks
+ * a full week ahead. They were one setting with a cadence dropdown until V43,
+ * which made them exclusive — and they are not two settings of one message, they
+ * are two messages. A morning prompt and a Monday review answer different
+ * questions, and people reasonably want both.
+ *
+ * <p>On a Monday with both switched on, only the review sends. Its window is the
+ * superset, so nothing is lost, and two mails a minute apart drawn from
+ * overlapping lists reads as a bug rather than as two features working.
  *
  * <p>Deliberately a digest and not a notification per task. A tracker fed by
  * every meeting produces bursts — five items land at once when a planning
@@ -47,6 +58,9 @@ public class TaskReminderService {
 
     /** Not a hard limit on the tracker — a limit on how much of it is worth mailing. */
     private static final int MAX_LISTED = 25;
+
+    /** How far ahead the Monday review looks. The rest of the week, and no further. */
+    private static final int WEEK_DAYS = 7;
 
     private final UserRepository users;
     private final MeetingActionItemRepository actionItems;
@@ -89,10 +103,11 @@ public class TaskReminderService {
         List<UserEntity> due = users.findAwaitingTaskReminder(today);
         int sent = 0;
         for (UserEntity user : due) {
-            if (!scheduledToday(user, today)) {
+            Digest digest = owed(user, today);
+            if (digest == Digest.NONE) {
                 continue;
             }
-            if (sendFor(user, today)) {
+            if (sendFor(user, today, digest)) {
                 sent++;
             }
         }
@@ -102,24 +117,44 @@ public class TaskReminderService {
         return sent;
     }
 
+    /** Which of the two messages a user is owed today, if either. */
+    private enum Digest {
+        NONE,
+        /** "Event reminder": overdue and the next few days. Every morning. */
+        DAILY,
+        /** "Weekly digest": overdue and the whole week ahead. Mondays. */
+        WEEKLY
+    }
+
     /**
-     * Whether this user's digest is owed on this date (V40).
+     * Which message this user is owed on this date (V43).
      *
-     * <p>Two gates. The master email switch, checked here rather than in the
-     * query so that turning email off never silently loses the {@code
-     * task_reminder_sent_on} bookkeeping that stops a double send. And the
-     * cadence: a weekly digest goes out on Monday, chosen rather than
-     * configurable because Recallix stores no timezone and therefore cannot
-     * honour "my Monday" any better than it can honour "my morning".
+     * <p>The master email switch is checked here rather than in the query, so
+     * that turning email off never silently loses the {@code
+     * task_reminder_sent_on} bookkeeping that stops a double send.
      *
-     * <p>A weekly reader who has nothing due on a Monday gets nothing, the same
-     * as a daily one — the digest is silent on an empty day either way.
+     * <p><strong>Monday belongs to the review.</strong> Somebody with both
+     * switches on would otherwise get two messages within the same minute,
+     * drawn from overlapping lists, and the pair reads as a bug rather than as
+     * two features working. The weekly one wins because it is the superset: its
+     * window is the whole week ahead, so nothing the daily message would have
+     * said is lost by sending it instead.
+     *
+     * <p>Monday is chosen rather than configurable for the same reason the send
+     * hour is: Recallix stores no timezone, so it cannot honour "my Monday" any
+     * better than it can honour "my morning".
+     *
+     * <p>Either message is silent when nothing is due. An empty week produces
+     * nothing rather than "you have 0 tasks".
      */
-    private static boolean scheduledToday(UserEntity user, LocalDate today) {
+    private static Digest owed(UserEntity user, LocalDate today) {
         if (!user.isEmailsEnabled()) {
-            return false;
+            return Digest.NONE;
         }
-        return !user.isDigestWeekly() || today.getDayOfWeek() == DayOfWeek.MONDAY;
+        if (user.isWeeklyDigest() && today.getDayOfWeek() == DayOfWeek.MONDAY) {
+            return Digest.WEEKLY;
+        }
+        return user.isTaskReminders() ? Digest.DAILY : Digest.NONE;
     }
 
     /**
@@ -158,15 +193,20 @@ public class TaskReminderService {
         return value instanceof Number n ? n.intValue() : 0;
     }
 
-    private boolean sendFor(UserEntity user, LocalDate today) {
+    private boolean sendFor(UserEntity user, LocalDate today, Digest digest) {
         String to = user.effectiveRecapEmail();
         if (to == null || to.isBlank()) {
             log.warn("User {} enabled task reminders but has no address on file.", user.getId());
             return false;
         }
 
+        // The window is what actually separates the two messages. A morning
+        // prompt asks what needs doing now; a Monday review asks what the week
+        // holds, and a three-day horizon on a Monday would leave Thursday out of
+        // "your week" entirely.
+        int horizon = digest == Digest.WEEKLY ? WEEK_DAYS : DueStatus.SOON_DAYS;
         List<MeetingActionItem> items = actionItems.findDueThrough(
-                user.getId(), today.plusDays(DueStatus.SOON_DAYS));
+                user.getId(), today.plusDays(horizon));
         if (items.isEmpty()) {
             // Nothing is due. Silence is the correct message; stamping the day
             // anyway would be a lie about having sent one.
@@ -174,8 +214,8 @@ public class TaskReminderService {
         }
 
         Map<String, String> titles = meetingTitles(items);
-        String body = compose(user, items, titles, today);
-        boolean ok = email.send(to, subject(items, today), body);
+        String body = compose(user, items, titles, today, digest);
+        boolean ok = email.send(to, subject(items, today, digest), body);
         if (ok) {
             user.setTaskReminderSentOn(today);
             audit.record(user.getId(), "TASK_REMINDER_SENT", "user", user.getId());
@@ -190,10 +230,16 @@ public class TaskReminderService {
      * different message from "3 tasks this week" even when the list underneath
      * is identical.
      */
-    private static String subject(List<MeetingActionItem> items, LocalDate today) {
+    private static String subject(List<MeetingActionItem> items, LocalDate today, Digest digest) {
         long overdue = items.stream().filter(a -> a.getDueOn().isBefore(today)).count();
         long todayCount = items.stream().filter(a -> a.getDueOn().isEqual(today)).count();
 
+        // The review says what it is even when nothing is late, because "2
+        // action items due soon" arriving every Monday reads as the daily mail
+        // misfiring rather than as the weekly one working.
+        if (digest == Digest.WEEKLY && overdue == 0) {
+            return "Your week: " + items.size() + (items.size() == 1 ? " action item" : " action items");
+        }
         if (overdue > 0) {
             return overdue == 1
                     ? "1 action item is overdue"
@@ -206,21 +252,26 @@ public class TaskReminderService {
     }
 
     private String compose(UserEntity user, List<MeetingActionItem> items,
-                           Map<String, String> titles, LocalDate today) {
+                           Map<String, String> titles, LocalDate today, Digest digest) {
         Map<String, List<MeetingActionItem>> groups = new LinkedHashMap<>();
         groups.put("Overdue", new ArrayList<>());
         groups.put("Due today", new ArrayList<>());
-        groups.put("Coming up", new ArrayList<>());
+        groups.put(digest == Digest.WEEKLY ? "Later this week" : "Coming up", new ArrayList<>());
+        String ahead = digest == Digest.WEEKLY ? "Later this week" : "Coming up";
         for (MeetingActionItem a : items) {
             LocalDate on = a.getDueOn();
-            String group = on.isBefore(today) ? "Overdue" : on.isEqual(today) ? "Due today" : "Coming up";
+            String group = on.isBefore(today) ? "Overdue" : on.isEqual(today) ? "Due today" : ahead;
             groups.get(group).add(a);
         }
 
         StringBuilder sb = new StringBuilder();
         String name = user.getDisplayName();
-        sb.append(name == null || name.isBlank() ? "Here is where your action items stand.\n"
-                : "Hi " + name.trim() + " — here is where your action items stand.\n");
+        String opening = digest == Digest.WEEKLY
+                ? "here is the week ahead."
+                : "here is where your action items stand.";
+        sb.append(name == null || name.isBlank()
+                ? Character.toUpperCase(opening.charAt(0)) + opening.substring(1) + "\n"
+                : "Hi " + name.trim() + " — " + opening + "\n");
 
         int listed = 0;
         for (Map.Entry<String, List<MeetingActionItem>> group : groups.entrySet()) {
@@ -243,8 +294,13 @@ public class TaskReminderService {
         }
 
         sb.append("\nOpen your action items: ").append(frontendUrl).append("/action-items\n");
-        sb.append("\n—\nSent by Recallix because task reminders are on. "
-                + "Turn them off in Settings → Action items.");
+        // Name the switch that sent it, not a switch that sounds like it. The
+        // two messages come from two rows on the settings page, and a footer
+        // that pointed at the wrong one would send somebody to turn off the
+        // mail they wanted to keep.
+        sb.append("\n—\nSent by Recallix because ")
+                .append(digest == Digest.WEEKLY ? "\"Weekly digest\"" : "\"Event reminder\"")
+                .append(" is on. Turn it off in Account Settings → Emails.");
         return sb.toString();
     }
 

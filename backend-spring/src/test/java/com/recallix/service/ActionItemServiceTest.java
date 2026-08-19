@@ -25,6 +25,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageImpl;
 
 import java.time.Instant;
@@ -69,6 +70,7 @@ class ActionItemServiceTest {
     @Mock private ActionItemCommentRepository comments;
     @Mock private MeetingRepository meetings;
     @Mock private UserRepository users;
+    @Mock private ApplicationEventPublisher events;
 
     private ActionItemService service;
     private final List<MeetingActionItem> stored = new ArrayList<>();
@@ -77,7 +79,7 @@ class ActionItemServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new ActionItemService(actionItems, comments, meetings, users);
+        service = new ActionItemService(actionItems, comments, meetings, users, events);
         stored.clear();
         log.clear();
 

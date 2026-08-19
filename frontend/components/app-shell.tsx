@@ -4,11 +4,19 @@
  * The frame every page sits in.
  *
  * Three regions and a rule about each. The rail on the left is for places —
- * Home, the chat, what you connect to, and the folders you filed things in. The
- * bar across the top is for the two things that create a meeting and the two
- * that find one. Everything else — the plan, the settings, the account itself —
- * lives behind the account button, because none of it is somewhere you go
- * during work.
+ * Home, the chat, what you connect to, your notifications, and the folders you
+ * filed things in. The bar across the top is for the things you do: create a
+ * meeting, or find one. Everything else — the plan, the settings, the account
+ * itself — lives behind the account button, because none of it is somewhere you
+ * go during work.
+ *
+ * <p>The bell moved into the rail. It is a list of things that happened, which
+ * makes it a place rather than an action, and the top bar was where it was most
+ * likely to be crowded out — on a narrow window that row already carries a menu
+ * button, a live recording indicator, Import and Record.
+ *
+ * <p>Search leaves the header entirely on Account Settings, under every URL
+ * that page answers to. See {@link isSettingsPath}.
  *
  * What is deliberately absent: the desktop-app card and the plan upsell that
  * used to sit at the bottom of the rail. A sidebar is navigation; an
@@ -21,6 +29,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Home, Sparkles, Plug, Menu, Mic, Search, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { isSettingsPath } from "@/lib/settings-tabs";
 import { RecordingProvider, useRecording } from "@/lib/recording-context";
 import { useRecordingStartedMutation } from "@/lib/api";
 import { stopwatch } from "@/lib/format";
@@ -64,6 +73,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
   const [searching, setSearching] = React.useState(false);
   const [importing, setImporting] = React.useState(false);
   const fullBleed = pathname === "/home" || pathname === "/ask";
+  const settingsPage = isSettingsPath(pathname);
   /*
    * How far every page has to end above the docked control bar.
    *
@@ -141,6 +151,13 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
                 </Link>
               );
             })}
+            {/* In the rail rather than the top bar. It is a list of things that
+                happened, which makes it somewhere you go — and the header was
+                the wrong home for it in a more practical sense too: on a narrow
+                window that bar already carries a menu button, a recording
+                indicator, Import and Record, and the bell was the first thing
+                to be squeezed. Here it keeps a label. */}
+            <NotificationBell onNavigate={() => setMobileOpen(false)} />
           </nav>
 
           <FolderTree onNavigate={() => setMobileOpen(false)} />
@@ -162,18 +179,27 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
             {/* Not an input. Clicking it opens the real one, which needs the
                 whole width of the screen for its suggestions — an inline box
                 that grew a dropdown on focus would have to fight the header for
-                room and would lose on a laptop. */}
-            <button
-              type="button"
-              onClick={() => setSearching(true)}
-              className="flex h-9 max-w-md flex-1 items-center gap-2 rounded-full border bg-card px-4 text-sm text-muted-foreground transition-colors hover:bg-accent"
-            >
-              <Search className="h-4 w-4 shrink-0" />
-              <span className="flex-1 text-left">Ask or search</span>
-              <kbd className="hidden rounded border px-1.5 text-[10px] font-medium sm:inline">
-                Ctrl K
-              </kbd>
-            </button>
+                room and would lose on a laptop.
+
+                Absent on Account Settings, under every URL that page answers
+                to. Search finds meetings, and nothing on those pages is one, so
+                the widest control in the header would be the one thing that
+                cannot act on what is underneath it. Ctrl-K still works there:
+                the shortcut is bound on the shell, and taking it away would
+                break the habit without freeing anything on screen. */}
+            {!settingsPage && (
+              <button
+                type="button"
+                onClick={() => setSearching(true)}
+                className="flex h-9 max-w-md flex-1 items-center gap-2 rounded-full border bg-card px-4 text-sm text-muted-foreground transition-colors hover:bg-accent"
+              >
+                <Search className="h-4 w-4 shrink-0" />
+                <span className="flex-1 text-left">Ask or search</span>
+                <kbd className="hidden rounded border px-1.5 text-[10px] font-medium sm:inline">
+                  Ctrl K
+                </kbd>
+              </button>
+            )}
 
             <div className="flex flex-1 items-center justify-end gap-2">
               <RecordingIndicator />
@@ -192,7 +218,6 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
                 <span className="hidden sm:inline">Import</span>
               </Button>
               <RecordButton />
-              <NotificationBell />
             </div>
           </header>
 

@@ -76,6 +76,32 @@ export function pathForTab(tab: SettingsTab): string {
   return `/settings/${tab}`;
 }
 
+/**
+ * Whether this URL is the account settings page, under any of its names.
+ *
+ * <p>Exists so the shell can drop the search bar here. Searching is for finding
+ * a meeting; nothing on these pages is a meeting, so the widest control in the
+ * header is one that cannot help — and on the Integrations tab it sits directly
+ * above a list of connections it does not search.
+ *
+ * <p>The legacy URLs count, and that is the whole reason this is a function
+ * rather than a `startsWith` at the call site. `/integrations`, `/billing` and
+ * `/privacy` render exactly the same component as `/settings/integrations` and
+ * friends, so treating them differently would show the bar or hide it depending
+ * on which link somebody happened to follow.
+ *
+ * <p>`hasOwnProperty` rather than `in`: a pathname of `/toString` is reachable
+ * by typing it, and `in` would say yes.
+ */
+export function isSettingsPath(pathname: string): boolean {
+  const path = stripTrailingSlash(pathname);
+  return (
+    path === "/settings" ||
+    path.startsWith("/settings/") ||
+    Object.prototype.hasOwnProperty.call(LEGACY_PATHS, path)
+  );
+}
+
 function stripTrailingSlash(path: string): string {
   return path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
 }

@@ -18,6 +18,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.List;
 import java.util.Optional;
@@ -50,12 +51,13 @@ class MomentServiceTest {
     @Mock private TranscriptMomentRepository moments;
     @Mock private MeetingRepository meetings;
     @Mock private AuditService audit;
+    @Mock private ApplicationEventPublisher events;
 
     private MomentService service;
 
     @BeforeEach
     void setUp() {
-        service = new MomentService(moments, meetings, audit);
+        service = new MomentService(moments, meetings, audit, events);
         Meeting m = new Meeting();
         m.setId(MEETING);
         m.setUserId(USER);

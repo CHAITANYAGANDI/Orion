@@ -3,48 +3,79 @@
 /**
  * Email Settings.
  *
- * One list of the things Recallix will send you without being opened, a master
- * switch over all of it, and then the bell — which is the same question asked of
- * a different channel and belongs beside it rather than a tab away.
+ * Seven messages under one select-all, and nothing else.
  *
- * The list is short because the product is honest about what it can observe.
- * Every competitor's version of this page has rows for comments, highlights and
- * "a conversation was shared with me", and all three need a second person:
- * Recallix has one account per workspace, so the only party who could comment on
- * your notes or highlight your transcript is you, and a product that emails you
- * about your own actions is a product nobody reads the email from. The same goes
- * for anything scheduled — there is no calendar to read and no bot to send, so
- * a reminder that a meeting is "ready to be recorded" could never fire. Those
- * are named at the bottom rather than left out, because their absence is the
- * surprising part.
+ * <p><strong>Every row here sends something.</strong> The list is modelled on
+ * what the category leaders offer, and the temptation with a list like that is
+ * to render all of it and wire half. Recallix does not have a meeting bot or a
+ * calendar, so "a calendar event recording has started" and "a scheduled event
+ * is ready to be recorded" have no counterpart to fire them; and with one
+ * account per workspace there is no second person to share a conversation in,
+ * comment on it or highlight it. Rather than ship dead switches, each row is
+ * wired to the nearest event Recallix genuinely has and described by what it
+ * will actually do:
  *
- * The master leaves the switches underneath it alone. Somebody silencing email
- * for a fortnight expects to find their choices where they left them, and a
- * master that rewrote them would make that a one-way door.
+ * - Conversation shared — outward, not inward. Nobody can share into this
+ *   account, so the genuine other-party event is somebody opening a link you
+ *   published.
+ * - Weekly digest and Event reminder — the Monday review and the morning
+ *   deadline mail. One setting with a cadence dropdown until V43, which made
+ *   them exclusive; they are two messages and people want both.
+ * - Comments and Highlights — your own, at most one message a day each. Not a
+ *   report of a click back to the person who made it, but the evening reminder
+ *   that this morning's transcript has notes in it.
+ *
+ * The descriptions are Recallix's rather than the ones on the screenshot this
+ * list came from, because a row that promises a calendar and delivers a browser
+ * tab is worse than a row that says what it does.
+ *
+ * <p>There was an eighth, "Live meeting", removed in V44 along with its column.
+ * It fired on a recording starting, which is not the same event: the row it was
+ * copied from means a bot joined a calendar invitation without you, and
+ * Recallix records from a tab somebody opened on purpose.
+ *
+ * <p><strong>"All emails" is a select-all, not a gate.</strong> It reads as the
+ * state of the seven rows — ticked when all are on, indeterminate when some
+ * are — and writes all seven when clicked. It used to be a master that silenced
+ * the rows while remembering them, which is a defensible design and not the one
+ * the checkbox looks like: a tickbox above a list, unticked, with three ticked
+ * rows underneath it reads as broken rather than as subtle.
+ *
+ * <p>`emailsEnabled` still exists as the server-side gate every sender checks
+ * first, and it now simply moves with the select-all. Turning any single row on
+ * re-opens it, so no combination reachable from this page can leave a ticked
+ * row that sends nothing.
+ *
+ * <p><strong>Three things this page used to do and no longer does.</strong>
+ * Removed on request; the capability behind each is untouched and still
+ * reachable through the API, so putting a card back is a UI change rather than
+ * a rebuild.
+ *
+ * <p><em>The recap address.</em> `PATCH /preferences` still accepts
+ * `recapEmail`, and `effectiveRecapEmail` still falls back to the address the
+ * sign-in provider gave us. Nothing in the app sets the override now, so mail
+ * goes to the account email or nowhere — and a dev session has no provider and
+ * therefore no address at all, which means every switch above is a switch with
+ * no destination and the page no longer says so.
+ *
+ * <p><em>The bell's switches.</em> `GET /notifications/kinds` and the
+ * `mutedNotifications` field on `PATCH /preferences` both still work and now
+ * have no caller. Every kind is therefore on, permanently, since nothing can
+ * write a mute.
+ *
+ * <p><em>The line that said where mail was going.</em> Worth knowing it is
+ * gone: eight opt-in switches with no visible destination fail silently when
+ * there is no address on file.
  */
 
-import * as React from "react";
 import { toast } from "sonner";
-import { Mail, Bell, Ban } from "lucide-react";
-import {
-  useGetPreferencesQuery,
-  useUpdatePreferencesMutation,
-  useGetNotificationKindsQuery,
-} from "@/lib/api";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Mail } from "lucide-react";
+import { useGetPreferencesQuery, useUpdatePreferencesMutation } from "@/lib/api";
+import type { PreferencesResponse, PreferencesUpdateRequest } from "@/lib/types";
 import { settingsError } from "@/components/settings/shared";
 
 export function EmailsTab() {
-  return (
-    <div className="space-y-10">
-      <EmailSettings />
-      <NeverSent />
-      <NotificationsCard />
-    </div>
-  );
+  return <EmailSettings />;
 }
 
 /**
@@ -58,16 +89,12 @@ function EmailRow({
   title,
   body,
   checked,
-  disabled = false,
   onChange,
-  children,
 }: {
   title: string;
   body: string;
   checked: boolean;
-  disabled?: boolean;
   onChange: (value: boolean) => void;
-  children?: React.ReactNode;
 }) {
   return (
     <div className="border-b py-4 last:border-b-0">
@@ -79,29 +106,79 @@ function EmailRow({
         <input
           type="checkbox"
           checked={checked}
-          disabled={disabled}
           onChange={(e) => onChange(e.target.checked)}
           aria-label={title}
-          className="mt-1 h-4 w-4 shrink-0 accent-[hsl(var(--primary))] disabled:opacity-40"
+          className="mt-1 h-4 w-4 shrink-0 accent-[hsl(var(--primary))]"
         />
       </label>
-      {children}
     </div>
   );
 }
 
+type BooleanKeys<T> = {
+  [K in keyof T]-?: NonNullable<T[K]> extends boolean ? K : never;
+}[keyof T];
+
+/**
+ * A field that is a boolean on both sides of the wire.
+ *
+ * Derived rather than written out, so a mistyped field name below is a
+ * compile error rather than a switch that reads as broken: `checked` would
+ * fall back to false on every render and the save would be silently dropped by
+ * the server, which looks exactly like a switch that will not stay on.
+ */
+type EmailSwitch = BooleanKeys<PreferencesResponse> & BooleanKeys<PreferencesUpdateRequest>;
+
+/**
+ * The rows, in the order they are listed.
+ *
+ * <p>Data rather than eight near-identical blocks of JSX, so the order on
+ * screen, the field each one writes and the sentence describing it are visible
+ * together — which is where a crossed wire would otherwise hide.
+ */
+const ROWS: { field: EmailSwitch; title: string; body: string }[] = [
+  {
+    field: "autoEmailRecap",
+    title: "Meeting summary",
+    body: "A summary and its action items are ready, for a meeting you recorded here.",
+  },
+  {
+    field: "recapForImports",
+    title: "Imported conversation",
+    body: "A file or link you imported has finished processing. Separate from the row above because importing an archive of sixty files should not mean sixty emails.",
+  },
+  {
+    field: "shareOpenedEmail",
+    title: "Conversation shared",
+    body: "Somebody outside opened a conversation you shared. Sharing here goes outward — nobody can share into your account — so this is the arrival, not the invitation. At most one a day per link.",
+  },
+  {
+    field: "weeklyDigest",
+    title: "Weekly digest",
+    body: "Monday morning: your action items for the week ahead, and anything already late. Silent on a Monday with nothing outstanding.",
+  },
+  {
+    field: "taskReminders",
+    title: "Event reminder",
+    body: "Every morning: what is due today or in the next few days. Silent on a day when nothing is. On a Monday you get the digest above instead, not both.",
+  },
+  {
+    field: "commentEmail",
+    title: "Comments",
+    body: "A comment was added to an action item. At most one a day, so working through a meeting's tasks is one message rather than fifteen.",
+  },
+  {
+    field: "highlightEmail",
+    title: "Highlights",
+    body: "A passage was highlighted in a conversation. At most one a day, for the same reason.",
+  },
+];
+
 function EmailSettings() {
   const prefs = useGetPreferencesQuery();
-  const [update, { isLoading }] = useUpdatePreferencesMutation();
-  const [address, setAddress] = React.useState<string | null>(null);
+  const [update] = useUpdatePreferencesMutation();
 
-  // Only seed the input once, so typing is not clobbered by a refetch.
-  const loaded = prefs.data;
-  React.useEffect(() => {
-    if (loaded && address === null) setAddress(loaded.recapEmail ?? "");
-  }, [loaded, address]);
-
-  async function save(patch: Record<string, unknown>) {
+  async function save(patch: PreferencesUpdateRequest) {
     try {
       await update(patch).unwrap();
       toast.success("Saved.");
@@ -111,10 +188,42 @@ function EmailSettings() {
   }
 
   const p = prefs.data;
-  // Everything below the master is greyed while it is off — the switches keep
-  // their values, and the page has to show that they are held rather than lost.
-  const off = p ? !p.emailsEnabled : false;
-  const destination = p?.effectiveRecapEmail;
+  const on = ROWS.filter((row) => p?.[row.field]).length;
+  const allOn = on === ROWS.length;
+  const someOn = on > 0;
+
+  /**
+   * The master, as a select-all.
+   *
+   * <p>One patch carrying every field rather than a loop of one-field patches:
+   * seven requests would each pop their own "Saved." toast, and a failure
+   * halfway through would leave the page showing four rows on and three off
+   * with nothing to say why.
+   *
+   * <p>`emailsEnabled` moves with it. It is the server-side gate every sender
+   * checks first, so leaving it false while switching the rows on would mean a
+   * page full of ticks and no mail.
+   */
+  function setAll(value: boolean) {
+    const patch: PreferencesUpdateRequest = { emailsEnabled: value };
+    for (const row of ROWS) {
+      (patch as Record<string, boolean>)[row.field] = value;
+    }
+    return save(patch);
+  }
+
+  /**
+   * One row.
+   *
+   * <p>Turning any row on re-opens the gate. Without that, unchecking the
+   * master and then picking a single row back out of the list would tick the
+   * box and send nothing — the switch would look broken rather than blocked.
+   */
+  function setOne(field: EmailSwitch, value: boolean) {
+    const patch = { [field]: value } as PreferencesUpdateRequest;
+    if (value) patch.emailsEnabled = true;
+    return save(patch);
+  }
 
   return (
     <section aria-labelledby="emails-heading" className="space-y-1">
@@ -131,212 +240,37 @@ function EmailSettings() {
           <span className="text-base font-semibold">All emails</span>
           <input
             type="checkbox"
-            checked={p?.emailsEnabled ?? true}
-            onChange={(e) => void save({ emailsEnabled: e.target.checked })}
+            checked={allOn}
+            // A callback ref rather than state: `indeterminate` is a DOM
+            // property with no HTML attribute, so React cannot set it from
+            // JSX. This runs on every render, which is exactly when the count
+            // it depends on can have changed.
+            ref={(el) => {
+              if (el) el.indeterminate = someOn && !allOn;
+            }}
+            onChange={(e) => void setAll(e.target.checked)}
             aria-label="All emails"
             className="h-4 w-4 shrink-0 accent-[hsl(var(--primary))]"
           />
         </label>
         <p className="mt-1 text-sm text-muted-foreground">
-          {off
-            ? "Nothing is being emailed. Your choices below are kept and come back exactly as they are."
-            : "The master switch. Turning it off silences everything below without forgetting any of it."}
+          {allOn
+            ? "Everything below is on. Unticking this turns all of them off."
+            : someOn
+              ? `${on} of ${ROWS.length} are on. Ticking this turns on the rest.`
+              : "Nothing is being emailed. Ticking this turns on everything below."}
         </p>
       </div>
 
-      <EmailRow
-        title="Meeting summary"
-        body="A summary and its action items are ready, for a meeting you recorded here."
-        checked={p?.autoEmailRecap ?? false}
-        disabled={off}
-        onChange={(v) => void save({ autoEmailRecap: v })}
-      />
-
-      <EmailRow
-        title="Imported conversation"
-        body="A file or link you imported has finished processing. Separate from the row above because importing an archive of sixty files should not mean sixty emails."
-        checked={p?.recapForImports ?? false}
-        disabled={off}
-        onChange={(v) => void save({ recapForImports: v })}
-      />
-
-      <EmailRow
-        title="Deadline digest"
-        body="One message listing what is overdue or due soon. Silent on a day when nothing is."
-        checked={p?.taskReminders ?? false}
-        disabled={off}
-        onChange={(v) => void save({ taskReminders: v })}
-      >
-        {p?.taskReminders && (
-          <div className="mt-3 flex items-center justify-between gap-4 pl-0">
-            <span className="text-sm text-muted-foreground">How often</span>
-            <select
-              aria-label="How often"
-              disabled={off}
-              value={p.digestWeekly ? "weekly" : "daily"}
-              onChange={(e) => void save({ digestWeekly: e.target.value === "weekly" })}
-              className="h-9 shrink-0 rounded-md border bg-background px-3 text-sm disabled:opacity-40"
-            >
-              <option value="daily">Every morning</option>
-              <option value="weekly">Mondays</option>
-            </select>
-          </div>
-        )}
-      </EmailRow>
-
-      <EmailRow
-        title="Shared link opened"
-        body="Somebody outside opened a link you published. At most one email a day per link, however many times it is opened."
-        checked={p?.shareOpenedEmail ?? false}
-        disabled={off}
-        onChange={(v) => void save({ shareOpenedEmail: v })}
-      />
-
-      <div className="py-4">
-        <Label htmlFor="recap-email">Send all of it to</Label>
-        <div className="mt-2 flex gap-2">
-          <Input
-            id="recap-email"
-            type="email"
-            value={address ?? ""}
-            onChange={(e) => setAddress(e.target.value)}
-            placeholder={p?.effectiveRecapEmail ?? "you@example.com"}
-          />
-          <Button
-            variant="outline"
-            disabled={isLoading}
-            onClick={() => void save({ recapEmail: address ?? "" })}
-            className="shrink-0"
-          >
-            Save
-          </Button>
-        </div>
-        <p className="mt-2 text-xs text-muted-foreground">
-          {destination
-            ? `Everything above goes to ${destination}.`
-            : "No address on file yet — add one above, or these have nowhere to go."}{" "}
-          Leave it blank to use your account email.
-        </p>
-      </div>
+      {ROWS.map((row) => (
+        <EmailRow
+          key={row.field}
+          title={row.title}
+          body={row.body}
+          checked={p?.[row.field] ?? false}
+          onChange={(v) => void setOne(row.field, v)}
+        />
+      ))}
     </section>
-  );
-}
-
-/**
- * The rows a reader expects to find and will not.
- *
- * Named rather than omitted. Somebody who has used Otter arrives looking for
- * "Comments" and "Highlights", and finding neither reads as an unfinished
- * settings page rather than as a product that genuinely has nobody else in it.
- */
-function NeverSent() {
-  const absent: { title: string; body: string }[] = [
-    {
-      title: "Anything about a live or scheduled meeting",
-      body: "Recallix has no meeting bot and does not read your calendar, so there is no event to announce and nothing that could be 'ready to be recorded'.",
-    },
-    {
-      title: "Comments and highlights",
-      body: "Both exist, and both are yours. With one account per workspace the only person who can comment on a note or highlight a transcript is you, and Recallix will not email you about something you just did.",
-    },
-    {
-      title: "A conversation shared with you",
-      body: "Sharing here goes outward — you publish a link. Nobody can share into your account, so the closest real event is somebody opening a link of yours, which is the switch above.",
-    },
-  ];
-
-  return (
-    <section aria-labelledby="never-heading" className="space-y-3">
-      <h2 id="never-heading" className="text-lg font-semibold">
-        What Recallix will never email you
-      </h2>
-      <Card>
-        <CardContent className="space-y-4 pt-6">
-          {absent.map((item) => (
-            <div key={item.title} className="flex items-start gap-3 text-sm">
-              <Ban className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-              <span>
-                <span className="block font-medium">{item.title}</span>
-                <span className="block text-muted-foreground">{item.body}</span>
-              </span>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-    </section>
-  );
-}
-
-/**
- * What the bell is allowed to say.
- *
- * Switches, not a master off — a bell that can only be silenced entirely gets
- * silenced entirely the first time it says something useless, and then the
- * failed upload goes unseen too. The list comes from the server, so adding a
- * kind is a backend change and the wording of the switch cannot drift from the
- * wording of the notification it governs.
- */
-function NotificationsCard() {
-  const kinds = useGetNotificationKindsQuery();
-  const prefs = useGetPreferencesQuery();
-  const [update, { isLoading }] = useUpdatePreferencesMutation();
-
-  const muted = React.useMemo(
-    () => new Set(prefs.data?.mutedNotifications ?? []),
-    [prefs.data?.mutedNotifications],
-  );
-
-  async function toggle(kind: string, on: boolean) {
-    const next = new Set(muted);
-    if (on) next.delete(kind);
-    else next.add(kind);
-    try {
-      // The whole set every time: the page holds every switch on screen, and a
-      // delta from a stale render is how two of them end up disagreeing.
-      await update({ mutedNotifications: Array.from(next) }).unwrap();
-    } catch (err) {
-      toast.error(settingsError(err));
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Bell className="h-4 w-4 text-primary" /> In-app notifications
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <p className="text-sm text-muted-foreground">
-          What shows up in the bell. These are a separate channel and the switch
-          above does not govern them — silencing your inbox should not silence
-          the failed upload waiting in the app.
-        </p>
-        {(kinds.data ?? []).map((k) => (
-          <label
-            key={k.kind}
-            className="flex items-center justify-between gap-3 rounded-md border p-3"
-          >
-            <span className="min-w-0">
-              <span className="block text-sm">Tell me {k.setting}</span>
-              {!k.mutable && (
-                <span className="mt-0.5 block text-xs text-muted-foreground">
-                  Always on — silence here would be indistinguishable from
-                  nothing having happened.
-                </span>
-              )}
-            </span>
-            <input
-              type="checkbox"
-              checked={!muted.has(k.kind)}
-              disabled={!k.mutable || isLoading}
-              onChange={(e) => void toggle(k.kind, e.target.checked)}
-              aria-label={`Tell me ${k.setting}`}
-              className="h-4 w-4 shrink-0 accent-[hsl(var(--primary))] disabled:opacity-50"
-            />
-          </label>
-        ))}
-      </CardContent>
-    </Card>
   );
 }

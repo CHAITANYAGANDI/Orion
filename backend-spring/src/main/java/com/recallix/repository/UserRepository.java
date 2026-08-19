@@ -34,7 +34,7 @@ public interface UserRepository extends JpaRepository<UserEntity, String> {
      */
     @Query("""
             SELECT u FROM UserEntity u
-             WHERE u.taskReminders = true
+             WHERE (u.taskReminders = true OR u.weeklyDigest = true)
                AND (u.taskReminderSentOn IS NULL OR u.taskReminderSentOn < :today)
             """)
     List<UserEntity> findAwaitingTaskReminder(@Param("today") LocalDate today);
