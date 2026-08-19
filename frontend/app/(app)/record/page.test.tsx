@@ -50,13 +50,16 @@ vi.mock("@/lib/api", () => ({
 
 const recorder = vi.hoisted(() => ({ current: null as unknown }));
 const session = vi.hoisted(() => ({ current: null as unknown }));
+const savejob = vi.hoisted(() => ({ current: null as unknown }));
 
 vi.mock("@/lib/recording-context", () => ({
   useRecording: () => recorder.current,
   useRecordingSession: () => session.current,
+  useRecordingJob: () => savejob.current,
 }));
 
 import RecordPage from "@/app/(app)/record/page";
+import type { UseSaveJob } from "@/lib/use-save-job";
 import type { UseRecorder } from "@/lib/use-recorder";
 import type { UseLiveTranscript } from "@/lib/use-live-transcript";
 import type { RecordingSession } from "@/lib/recording-context";
@@ -75,10 +78,28 @@ function aTranscript(overrides: Partial<UseLiveTranscript> = {}): UseLiveTranscr
   };
 }
 
+function aJob(overrides: Partial<UseSaveJob> = {}): UseSaveJob {
+  return {
+    phase: "idle",
+    job: null,
+    busy: false,
+    working: false,
+    stopping: false,
+    overallProgress: 0,
+    label: "",
+    save: vi.fn(),
+    stop: vi.fn(),
+    dismiss: vi.fn(),
+    ...overrides,
+  };
+}
+
 function renderPage(
   overrides: Partial<UseRecorder> = {},
   sessionOverrides: Partial<RecordingSession> = {},
+  jobOverrides: UseSaveJob = aJob(),
 ) {
+  savejob.current = jobOverrides;
   session.current = {
     title: "",
     setTitle,
@@ -120,16 +141,6 @@ describe("RecordPage before recording", () => {
     expect(screen.queryByRole("button", { name: /In person/ })).not.toBeInTheDocument();
   });
 
-  it("says what a microphone can and cannot hear", () => {
-    renderPage();
-
-    // The one thing somebody has to know before starting, and the one they
-    // cannot fix afterwards: a voice arriving through an earpiece is not in the
-    // room, so it is not in the recording.
-    expect(screen.getByText(/headphones or an earpiece won't be on the recording/i))
-      .toBeInTheDocument();
-  });
-
   it("starts on one press, with nothing to agree to first", async () => {
     renderPage();
 
@@ -157,12 +168,19 @@ describe("RecordPage before recording", () => {
     await waitFor(() => expect(announceRecording).toHaveBeenCalled());
   });
 
-  it("still says who hears the meeting", () => {
+  it("carries no standing explanation before a recording", () => {
     renderPage();
 
-    // The disclosure was in the consent card and outlived it. Live text goes to
-    // a third party Recallix would otherwise never have named.
-    expect(screen.getByText(/audio goes to Google/i)).toBeInTheDocument();
+    // Both paragraphs were removed on request: what the microphone can hear,
+    // and where the live preview goes. Asserted rather than merely deleted,
+    // because the second was a disclosure — Chrome sends that preview audio to
+    // Google — and putting it back is the sort of change that should be a
+    // decision rather than a reflex.
+    expect(screen.queryByText(/audio goes to Google/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/pick up in the room/i)).not.toBeInTheDocument();
+    // One control left on the page, and it is the one without which the route
+    // is a dead end for anybody who bookmarked it.
+    expect(screen.getByRole("button", { name: /Start recording/ })).toBeInTheDocument();
   });
 
   it("no longer warns about a browser requirement it does not have", () => {
@@ -181,44 +199,99 @@ describe("RecordPage before recording", () => {
     expect(screen.getByRole("link", { name: /Upload a file instead/ })).toBeInTheDocument();
   });
 
-  it("has no date on a meeting that has not happened", () => {
+  it("carries no heading, name field or date before a recording", () => {
     renderPage();
 
-    expect(screen.getByText("Not started")).toBeInTheDocument();
+    // All removed on request. Recordings are saved under the date now and
+    // renamed on the meeting page, where the meeting has actually happened and
+    // somebody knows what to call it.
+    expect(screen.queryByLabelText("Name this recording")).not.toBeInTheDocument();
+    expect(screen.queryByText("Not started")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /Upload a recording instead/ }),
+    ).not.toBeInTheDocument();
   });
 
-  it("lets the meeting be named before it starts", () => {
+  it("says what will happen to the recording instead of explaining it in prose", () => {
     renderPage();
 
-    // The moment somebody knows what the meeting is, is before it happens.
-    expect(screen.getByLabelText("Name this recording")).toBeInTheDocument();
+    // The empty state is the same panel that draws the wait afterwards, so the
+    // page answers "what is this going to do to my meeting" without
+    // rearranging itself the moment work starts.
+    expect(screen.getByText("What happens after you stop")).toBeInTheDocument();
+    for (const step of ["Upload", "Transcribe", "Summarise", "Extract"]) {
+      expect(screen.getByText(step)).toBeInTheDocument();
+    }
+    // Nothing is running, so nothing claims to be.
+    expect(screen.queryByText(/%$/)).not.toBeInTheDocument();
   });
 });
 
-describe("RecordPage title", () => {
-  it("takes a name without demanding one", async () => {
-    renderPage({ state: "recording" });
+describe("RecordPage processing", () => {
+  it("takes over the page while the pipeline runs", () => {
+    renderPage(
+      { state: "idle" },
+      {},
+      aJob({
+        phase: "processing",
+        working: true,
+        overallProgress: 58,
+        label: "Generating transcript from audio…",
+        job: { id: "mtg_9", status: "TRANSCRIBING", progress: 40, message: "Transcribing…" },
+      }),
+    );
 
-    await userEvent.type(screen.getByLabelText("Name this recording"), "S");
-
-    expect(setTitle).toHaveBeenCalled();
+    expect(screen.getByText("Processing")).toBeInTheDocument();
+    expect(screen.getByText("58%")).toBeInTheDocument();
+    expect(screen.getByText("Generating transcript from audio…")).toBeInTheDocument();
+    // The start button would be an invitation to abandon a running job.
+    expect(screen.queryByRole("button", { name: /Start recording/ })).not.toBeInTheDocument();
   });
 
-  it("shows the fallback name as a placeholder, not as content", () => {
-    const startedAt = new Date("2026-08-16T03:04:00");
-    renderPage({ state: "recording", startedAt });
+  it("marks the stages behind the current one as done", () => {
+    renderPage(
+      { state: "idle" },
+      {},
+      aJob({
+        phase: "processing",
+        working: true,
+        job: { id: "mtg_9", status: "SUMMARIZING", progress: 70, message: "Writing the brief…" },
+      }),
+    );
 
-    // As a value it would have to be cleared before anything could be typed —
-    // a name nobody chose, defended by the delete key.
-    const field = screen.getByLabelText("Name this recording");
-    expect(field).toHaveValue("");
-    expect(field).toHaveAttribute("placeholder", expect.stringMatching(/^Recording — /));
+    const steps = screen.getAllByRole("listitem");
+    expect(steps[0]).toHaveTextContent("done");
+    expect(steps[1]).toHaveTextContent("done");
+    expect(steps[2]).toHaveTextContent("in progress");
+    expect(steps[3]).toHaveTextContent("not started");
   });
 
-  it("keeps what was typed", () => {
-    renderPage({ state: "recording" }, { title: "Tuesday design review" });
+  it("offers to stop, and says what stopping destroys", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const job = aJob({
+      phase: "processing",
+      working: true,
+      job: { id: "mtg_9", status: "TRANSCRIBING", progress: 40, message: "…" },
+    });
+    renderPage({ state: "idle" }, {}, job);
 
-    expect(screen.getByLabelText("Name this recording")).toHaveValue("Tuesday design review");
+    await userEvent.click(screen.getByRole("button", { name: /Stop processing/ }));
+
+    expect(vi.mocked(window.confirm).mock.calls[0][0]).toContain("cannot be undone");
+    expect(job.stop).toHaveBeenCalled();
+  });
+
+  it("offers the finished meeting rather than opening it", async () => {
+    const job = aJob({
+      phase: "done",
+      job: { id: "mtg_9", status: "READY", progress: 100, message: "" },
+    });
+    renderPage({ state: "idle" }, {}, job);
+
+    expect(push).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: /Open meeting/ }));
+
+    expect(push).toHaveBeenCalledWith("/meetings/mtg_9");
   });
 });
 
@@ -345,19 +418,6 @@ describe("RecordPage while recording", () => {
     // words are about to appear in, to say that words were not appearing.
     expect(screen.queryByText(/^Recording$/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Listening/i)).not.toBeInTheDocument();
-  });
-
-  it("dates the note from when recording began", () => {
-    const startedAt = new Date("2026-08-16T03:04:00");
-    renderPage({ state: "recording", startedAt, elapsed: 9 });
-
-    expect(screen.getByText(startedAt.toLocaleString())).toBeInTheDocument();
-  });
-
-  it("names the owner when the account has said who that is", () => {
-    renderPage({ state: "recording" });
-
-    expect(screen.getByText(/Owner: Sam Okafor/)).toBeInTheDocument();
   });
 
   it("does not call microphone-only a problem, now that it is the design", () => {

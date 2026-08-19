@@ -22,6 +22,7 @@
 
 import * as React from "react";
 import { useRecorder, type UseRecorder } from "@/lib/use-recorder";
+import { useSaveJob, type UseSaveJob } from "@/lib/use-save-job";
 import { useLiveTranscript, type UseLiveTranscript } from "@/lib/use-live-transcript";
 import { useGetPreferencesQuery } from "@/lib/api";
 
@@ -44,6 +45,16 @@ export interface RecordingSession {
 }
 
 const SessionContext = React.createContext<RecordingSession | null>(null);
+
+/**
+ * The upload and the pipeline that follows it.
+ *
+ * <p>Held here for the same reason the recorder is: two things show it. The
+ * docked bar carries the controls, the record page draws the stages, and an
+ * upload owned by either of them would be a second upload as soon as the other
+ * rendered.
+ */
+const SaveJobContext = React.createContext<UseSaveJob | null>(null);
 
 export function RecordingProvider({ children }: { children: React.ReactNode }) {
   const recorder = useRecorder();
@@ -79,14 +90,25 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
     wasIdle.current = idle;
   }, [idle, clearTranscript]);
 
+  const job = useSaveJob(recorder);
+
   useUnloadGuard(recorder);
   return (
     <RecordingContext.Provider value={recorder}>
       <SessionContext.Provider value={{ title, setTitle, transcript }}>
-        {children}
+        <SaveJobContext.Provider value={job}>{children}</SaveJobContext.Provider>
       </SessionContext.Provider>
     </RecordingContext.Provider>
   );
+}
+
+/** The upload and pipeline for the recording that was just saved. */
+export function useRecordingJob(): UseSaveJob {
+  const ctx = React.useContext(SaveJobContext);
+  if (!ctx) {
+    throw new Error("useRecordingJob must be used inside <RecordingProvider>");
+  }
+  return ctx;
 }
 
 /** The title and the live text for the recording in progress. */

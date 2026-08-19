@@ -77,13 +77,23 @@ export function putWithProgress(
     xhr.open("PUT", url);
     xhr.setRequestHeader("Content-Type", file.type);
     xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+      // `e.total` is zero for an empty body, and `0 / 0` is NaN — which reaches
+      // the progress bar as "NaN%" and sticks there, because every later frame
+      // computes the same thing.
+      if (e.lengthComputable && e.total > 0) {
+        onProgress(Math.round((e.loaded / e.total) * 100));
+      }
     };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) resolve();
       else reject(new Error(`Upload failed (${xhr.status})`));
     };
     xhr.onerror = () => reject(new Error("Upload failed — network or CORS error"));
+    // Both of these settle a promise that would otherwise be waited on forever.
+    // A caller that sets a phase before awaiting this has no way back from a
+    // promise that never resolves, and the bar it belongs to has no way out.
+    xhr.onabort = () => reject(new Error("Upload cancelled"));
+    xhr.ontimeout = () => reject(new Error("Upload timed out"));
     xhr.send(file);
   });
 }

@@ -28,18 +28,16 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { Mic, Loader2, AlertTriangle, User, FileText } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useRecordingStartedMutation } from "@/lib/api";
 import {
-  Mic,
-  Loader2,
-  AlertTriangle,
-  CalendarDays,
-  User,
-  FileText,
-} from "lucide-react";
-import { useRecordingStartedMutation, useGetPreferencesQuery } from "@/lib/api";
-import { useRecording, useRecordingSession } from "@/lib/recording-context";
+  useRecording,
+  useRecordingSession,
+  useRecordingJob,
+} from "@/lib/recording-context";
 import { Button } from "@/components/ui/button";
-import { defaultRecordingTitle } from "@/components/recording-bar";
+import { ProcessingSteps } from "@/components/processing-steps";
 import { stopwatch } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -47,7 +45,13 @@ export default function RecordPage() {
   const recorder = useRecording();
   const [announceRecording] = useRecordingStartedMutation();
 
+  const job = useRecordingJob();
+  const router = useRouter();
+
   const started = recorder.state !== "idle";
+  // The pipeline outlives the recorder: the audio is on the server and the
+  // recorder has been let go, but there is still something to watch.
+  const processing = job.phase !== "idle";
 
   /**
    * Begin, and tell the server we did.
@@ -62,13 +66,30 @@ export default function RecordPage() {
     void announceRecording();
   }
 
+  /**
+   * Stop the pipeline, which means deleting what it is working on.
+   *
+   * The confirmation is here rather than inside {@link ProcessingSteps} because
+   * the sentence is about the meeting, not about the display — and this is a
+   * delete, so it is said in the caller that knows what is being deleted.
+   */
+  async function onStop() {
+    if (
+      !window.confirm(
+        "Stop processing?\n\nThe meeting and its recording are deleted. The audio " +
+          "only exists on the server now, so this cannot be undone.",
+      )
+    ) {
+      return;
+    }
+    await job.stop();
+  }
+
   return (
     // Clearance for the docked control bar is added by the shell, which knows
     // whether one is showing; adding it again here would leave a gap under the
     // setup, where there is no bar.
     <div className="mx-auto max-w-3xl space-y-6">
-      <NoteHeading startedAt={recorder.startedAt} started={started} />
-
       {!recorder.supported && (
         <Notice tone="error" icon={AlertTriangle}>
           This browser can&apos;t record audio.{" "}
@@ -85,7 +106,27 @@ export default function RecordPage() {
         </Notice>
       )}
 
-      {started ? (
+      {/* The pipeline wins the page whenever it is running. It is the only
+          thing here with a result somebody is waiting on, and burying it under
+          a start button would mean the wait happened somewhere less visible
+          than the thing that starts a new one. */}
+      {processing ? (
+        <ProcessingSteps
+          phase={job.phase}
+          status={job.job?.status}
+          message={job.job?.message}
+          progress={job.overallProgress}
+          label={job.label}
+          stopping={job.stopping}
+          onStop={() => void onStop()}
+          onOpen={() => {
+            const id = job.job?.id;
+            job.dismiss();
+            if (id) router.push(`/meetings/${id}`);
+          }}
+          onDismiss={job.dismiss}
+        />
+      ) : started ? (
         <InProgress state={recorder.state} />
       ) : (
         <Idle supported={recorder.supported} onStart={() => void onStart()} />
@@ -95,69 +136,6 @@ export default function RecordPage() {
 }
 
 /* --------------------------------- pieces -------------------------------- */
-
-/**
- * What this is going to be called, when it happened, and whose it is.
- *
- * The title is the one Recallix will actually save under, shown rather than
- * asked for. A recording has no name until somebody has heard it, and a text
- * field here would be a question asked at the only moment nobody can answer it
- * — the meeting has not happened yet.
- */
-function NoteHeading({ startedAt, started }: { startedAt: Date | null; started: boolean }) {
-  const prefs = useGetPreferencesQuery();
-  const { title, setTitle } = useRecordingSession();
-  const owner = prefs.data?.displayName?.trim();
-
-  // Fixed at the point the recording began, so the heading does not tick over
-  // while the meeting runs. Before that there is nothing to date.
-  const when = startedAt;
-
-  return (
-    <div className="space-y-2 border-b pb-4">
-      {/*
-       * Optional, and empty rather than pre-filled.
-       *
-       * The old heading printed the name the recording would be saved under,
-       * which was honest and useless: the one thing worth writing down at the
-       * start of a meeting is what the meeting is, and that was the one thing
-       * there was nowhere to put. Left blank it falls back to the date, so
-       * nobody is made to name a call before it has happened — but somebody who
-       * knows it is the Tuesday design review can say so while it is still
-       * true, instead of hunting for the meeting afterwards to rename it.
-       */}
-      <label className="sr-only" htmlFor="recording-title">
-        Name this recording
-      </label>
-      <input
-        id="recording-title"
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        placeholder={started ? defaultRecordingTitle(when ?? new Date()) : "New recording"}
-        className={cn(
-          "w-full rounded-lg border-2 border-transparent bg-transparent px-3 py-2",
-          "text-2xl font-semibold tracking-tight outline-none transition-colors",
-          "placeholder:font-normal placeholder:text-muted-foreground",
-          "hover:border-input focus:border-primary focus:bg-background",
-        )}
-      />
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-muted-foreground">
-        <span className="flex items-center gap-1.5">
-          <CalendarDays className="h-4 w-4" />
-          {when ? when.toLocaleString() : "Not started"}
-        </span>
-        {/* Only shown once it is known. "Owner: —" is worse than no line: it
-            reads as a missing value rather than a name nobody has set. */}
-        {owner && (
-          <span className="flex items-center gap-1.5">
-            <User className="h-4 w-4" />
-            Owner: {owner}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
 
 /**
  * The body of a meeting that is being recorded.
@@ -312,48 +290,43 @@ function Empty({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * What is left before a recording: a button.
+ * Before anything has been recorded.
  *
- * Reached by opening /record directly — the Record button in the header starts
- * on its way here, so most people never see this. It stays because a bare page
- * offering no way to begin would be a dead end for anyone who bookmarked the
- * route.
+ * <p>What was here: a name field, a "Not started" line, two paragraphs of
+ * explanation and a footnote link to the upload page. All of it removed on
+ * request, and the replacement is not more prose — it is the same panel that
+ * draws the wait afterwards, showing the four stages a recording goes through
+ * before it is readable.
+ *
+ * <p>That is the useful version of an empty state: it answers "what is this
+ * going to do to my meeting", which is the question somebody standing in front
+ * of a Record button actually has, and it means the page looks like itself
+ * rather than rearranging the moment work starts.
+ *
+ * <p>The button stays, alone. Reached directly, a page offering no way to begin
+ * is a dead end for anyone who bookmarked the route — the Record control in the
+ * header starts on its way here, so most people never see this at all.
  */
 function Idle({ supported, onStart }: { supported: boolean; onStart: () => void }) {
   return (
-    <div className="space-y-4">
-      {/* Two facts, not a form. Neither asks for anything, and between them
-          they cover what somebody would otherwise find out too late: what a
-          microphone can hear, and who else hears it. */}
-      <p className="text-sm text-muted-foreground">
-        Records this device&apos;s microphone — everything it can pick up in the
-        room. Anyone joining through headphones or an earpiece won&apos;t be on
-        the recording.
-      </p>
-      <p className="text-sm text-muted-foreground">
-        Your browser transcribes as you speak so you can follow along. That
-        preview comes from the browser&apos;s own speech service — in Chrome the
-        audio goes to Google — and is not saved. Your transcript is written
-        afterwards by the provider named on the{" "}
-        <Link
-          href="/settings/security"
-          className="underline underline-offset-2 hover:text-foreground"
-        >
-          Security tab
-        </Link>
-        .
-      </p>
+    <div className="space-y-6">
+      <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed px-6 py-10 text-center">
+        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <Mic className="h-5 w-5" />
+        </span>
+        <div>
+          <p className="text-lg font-semibold">Ready to record</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Recallix captures this device&apos;s microphone and writes the notes
+            once you stop.
+          </p>
+        </div>
+        <Button size="lg" className="gap-2" disabled={!supported} onClick={onStart}>
+          <Mic className="h-4 w-4" /> Start recording
+        </Button>
+      </div>
 
-      <Button size="lg" className="w-full gap-2" disabled={!supported} onClick={onStart}>
-        <Mic className="h-4 w-4" /> Start recording
-      </Button>
-
-      <p className="text-center text-xs text-muted-foreground">
-        Already have a file?{" "}
-        <Link href="/upload" className="underline underline-offset-2 hover:text-primary">
-          Upload a recording instead
-        </Link>
-      </p>
+      <ProcessingSteps phase="idle" progress={0} label="" />
     </div>
   );
 }

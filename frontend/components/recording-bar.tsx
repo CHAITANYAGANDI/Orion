@@ -16,31 +16,34 @@
  */
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { toast } from "sonner";
 import {
   Mic,
+  ChevronDown,
   Pause,
   Play,
   Square,
-  Globe,
   Loader2,
   UploadCloud,
   RotateCcw,
   X,
+  Check,
   AlertTriangle,
 } from "lucide-react";
 import {
-  useCreateUploadUrlMutation,
-  useCreateMeetingMutation,
-  useGetLanguagesQuery,
-  useGetPreferencesQuery,
-  useUpdatePreferencesMutation,
-} from "@/lib/api";
-import { useRecording, useRecordingSession } from "@/lib/recording-context";
-import { putWithProgress, uploadError } from "@/lib/uploads";
+  useRecording,
+  useRecordingSession,
+  useRecordingJob,
+} from "@/lib/recording-context";
 import { stopwatch } from "@/lib/format";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 
@@ -59,75 +62,88 @@ export function defaultRecordingTitle(now: Date = new Date()): string {
   return `Recording — ${now.toLocaleString()}`;
 }
 
-type Phase = "idle" | "uploading" | "creating";
-
 export function RecordingBar() {
   const recorder = useRecording();
   const session = useRecordingSession();
   const router = useRouter();
-  const [createUploadUrl] = useCreateUploadUrlMutation();
-  const [createMeeting] = useCreateMeetingMutation();
+  const pathname = usePathname();
 
-  const [phase, setPhase] = React.useState<Phase>("idle");
-  const [progress, setProgress] = React.useState(0);
+  /**
+   * The upload and the pipeline, owned by the provider.
+   *
+   * <p>This component used to own them. It cannot any more: the record page
+   * draws the same pipeline as a set of stages, and two components holding one
+   * upload between them is two uploads the first time both render.
+   */
+  const job = useRecordingJob();
+  const { phase, busy, working, stopping, overallProgress, label } = job;
 
-  const busy = phase !== "idle";
   const live = recorder.state === "recording" || recorder.state === "paused";
   const unsaved = recorder.state === "stopped" && recorder.result !== null;
+  /**
+   * A recording that captured nothing.
+   *
+   * <p>Stopping within the first moment can leave no chunk with any bytes in
+   * it. There is nothing to send, and offering Save anyway spends a presign and
+   * a PUT to be refused by the server with a sentence about object sizes.
+   */
+  const empty = unsaved && recorder.result!.file.size === 0;
+
+  /**
+   * Stop the pipeline, which means deleting what it is working on.
+   *
+   * <p>The worker is mid-flight and cannot be recalled, so this deletes the
+   * meeting instead. Its callbacks already handle one that is no longer there.
+   * The compute is spent either way; what is stopped is the meeting existing.
+   */
+  async function handleStop() {
+    if (
+      !window.confirm(
+        "Stop processing?\n\nThe meeting and its recording are deleted. The audio " +
+          "only exists on the server now, so this cannot be undone.",
+      )
+    ) {
+      return;
+    }
+    await job.stop();
+  }
+
+  /**
+   * Throw the recording away, and leave the page that was about it.
+   *
+   * <p>Only from /record. That page has nothing left to show once the audio is
+   * gone — it falls back to "Ready to record", which reads as an invitation to
+   * do again the thing just abandoned. Everywhere else the bar is incidental to
+   * whatever is being read, and yanking somebody to Home because they tidied up
+   * a recording would be the navigation nobody asked for.
+   */
+  function handleDiscard() {
+    recorder.reset();
+    if (pathname === "/record") router.push("/home");
+  }
+
+  function openMeeting() {
+    const target = job.job ? `/meetings/${job.job.id}` : null;
+    job.dismiss();
+    if (target) router.push(target);
+  }
+
 
   const shell = React.useRef<HTMLDivElement>(null);
-  usePublishedHeight(shell, recorder.state !== "idle");
+  usePublishedHeight(shell, recorder.state !== "idle" || phase !== "idle");
 
   async function handleSave() {
     if (!recorder.result) return;
-    const { file, durationSeconds } = recorder.result;
-    try {
-      setPhase("uploading");
-      setProgress(5);
-      const presign = await createUploadUrl({
-        filename: file.name,
-        contentType: file.type,
-        sizeBytes: file.size,
-      }).unwrap();
-
-      await putWithProgress(presign.uploadUrl, file, (pct) => setProgress(Math.max(5, pct)));
-
-      setPhase("creating");
-      const meeting = await createMeeting({
-        objectKey: presign.objectKey,
-        // What was typed at the top of the page, or the date if nothing was.
-        // The field is offered rather than demanded precisely so that this
-        // fallback exists: a recording arrives as
-        // `recording-1755084000000.webm`, which is not a name for anything.
-        title: session.title.trim() || defaultRecordingTitle(),
-        contentType: file.type,
-        durationSeconds: durationSeconds || undefined,
-        // Not sent, deliberately.
-        //
-        // This used to be `true`, and that was sound while it was: recording
-        // could not start until the box was ticked, so a recording that existed
-        // was proof one had been. The box is gone, so the proof is gone with
-        // it, and sending `true` anyway would write a timestamp into
-        // `consent_confirmed_at` recording a statement nobody made — which the
-        // privacy overview then counts and reports back as fact. Omitting it
-        // leaves the column null, which is what "nobody said" looks like.
-        // Which of the two clients captured this, and nothing more. It is what
-        // lets "email me my meeting summaries" mean recordings without also
-        // meaning every file somebody imports.
-        recorded: true,
-      }).unwrap();
-
-      recorder.reset();
-      toast.success("Recording saved — processing started.");
-      router.push(`/meetings/${meeting.id}`);
-    } catch (err) {
-      setPhase("idle");
-      setProgress(0);
-      toast.error(uploadError(err));
-    }
+    // What was typed at the top of the page, or the date if nothing was. The
+    // field is offered rather than demanded precisely so this fallback exists:
+    // a recording arrives as `recording-1755084000000.webm`, which is not a
+    // name for anything.
+    await job.save(recorder.result, session.title.trim() || defaultRecordingTitle());
   }
 
-  if (recorder.state === "idle") return null;
+  // Not just "is something being recorded" any more: the pipeline runs after
+  // the recorder has been let go, and that is the stretch this bar now covers.
+  if (recorder.state === "idle" && phase === "idle") return null;
 
   return (
     /*
@@ -184,8 +200,17 @@ export function RecordingBar() {
                 beside it waiting to be saved, when all it can do is arm the
                 next one. The language does still reach this recording — that is
                 resolved when the meeting is enqueued, which is on Save. */}
-            {recorder.state !== "stopped" && <MicrophonePicker />}
-            <TranscriptLanguagePicker />
+            {recorder.state === "recording" || recorder.state === "paused" || recorder.state === "requesting" ? (
+              <MicrophonePicker />
+            ) : null}
+            {/* The transcript language used to sit here, beside the
+                microphone, and it is gone. It never configured this recording:
+                it wrote the account default, which is resolved when a meeting
+                is enqueued — so it was an account setting wearing the clothes
+                of a control over the thing in front of you, and it stayed on
+                screen after Stop where there was nothing left for it to
+                affect. It lives in Settings and on the import dialog, both of
+                which are honest about being about the account. */}
           </div>
 
           {recorder.state === "requesting" && (
@@ -222,34 +247,111 @@ export function RecordingBar() {
           {unsaved && recorder.result && (
             <div className="flex flex-wrap items-center justify-center gap-3">
               <span className="text-sm text-muted-foreground">
-                {stopwatch(recorder.result.durationSeconds)} ·{" "}
-                {(recorder.result.file.size / 1024 / 1024).toFixed(1)} MB
+                {empty ? (
+                  <span className="flex items-center gap-1.5 text-destructive">
+                    <AlertTriangle className="h-4 w-4" />
+                    No audio was captured — the recording was stopped too soon.
+                  </span>
+                ) : (
+                  <>
+                    {stopwatch(recorder.result.durationSeconds)} ·{" "}
+                    {(recorder.result.file.size / 1024 / 1024).toFixed(1)} MB
+                  </>
+                )}
               </span>
-              {!busy && (
-                <Button variant="ghost" size="sm" className="gap-2" onClick={recorder.reset}>
-                  <RotateCcw className="h-4 w-4" /> Discard
+              {/* Rendered whether or not something is in flight, and disabled
+                  rather than removed. A control that vanishes while the thing
+                  it would cancel is running leaves somebody looking at a bar
+                  with one disabled button on it and no way out — which is what
+                  a stuck phase used to produce, and what made a bug about
+                  state look like a bug about Discard. */}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-2"
+                disabled={busy}
+                onClick={handleDiscard}
+              >
+                <RotateCcw className="h-4 w-4" /> Discard
+              </Button>
+              {/* Nothing to send, so nothing to offer. */}
+              {!empty && (
+                <Button size="sm" className="gap-2" disabled={busy} onClick={() => void handleSave()}>
+                  {busy ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <UploadCloud className="h-4 w-4" />
+                  )}
+                  {busy ? "Working…" : "Save & process"}
                 </Button>
               )}
-              <Button size="sm" className="gap-2" disabled={busy} onClick={() => void handleSave()}>
-                {busy ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <UploadCloud className="h-4 w-4" />
-                )}
-                {busy ? "Working…" : "Save & process"}
+            </div>
+          )}
+
+          {phase === "processing" && job && (
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              {/* No status text here: it is the label on the bar below, and
+                  saying it twice in one card reads as two different things
+                  happening. The escape hatch. Named for what it does to the meeting rather
+                  than for what it does to the worker, which cannot be recalled:
+                  "Stop processing" that left a half-finished meeting in the list
+                  would be a button that tidied nothing. */}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-2"
+                disabled={stopping}
+                onClick={() => void handleStop()}
+              >
+                {stopping ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+                Stop processing
               </Button>
             </div>
           )}
 
+          {(phase === "done" || phase === "failed") && job && (
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <span
+                className={cn(
+                  "flex items-center gap-1.5 text-sm",
+                  phase === "failed" ? "text-destructive" : "text-muted-foreground",
+                )}
+              >
+                {phase === "failed" ? (
+                  <>
+                    <AlertTriangle className="h-4 w-4" />
+                    {job.job?.message || "Processing failed."}
+                  </>
+                ) : (
+                  <>
+                    <Check className="h-4 w-4" />
+                    Ready to read.
+                  </>
+                )}
+              </span>
+              {/* Offered, not done to you. Somebody who saved a recording and
+                  carried on reading something else should not have the page
+                  pulled out from under them the moment a worker finishes. */}
+              <Button size="sm" onClick={openMeeting}>
+                Open meeting
+              </Button>
+              <Button variant="ghost" size="sm" onClick={job.dismiss}>
+                Dismiss
+              </Button>
+            </div>
+          )}
         </div>
 
-        {busy && (
+        {/* One bar across both halves of the wait. See UPLOAD_SHARE: an upload
+            bar that fills and then a pipeline bar that starts again from zero
+            reads as the first one having been thrown away. */}
+        {(working || phase === "done") && (
           <div className="mt-3 space-y-1.5">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>{phase === "uploading" ? "Uploading…" : "Starting processing…"}</span>
-              <span>{progress}%</span>
+              <span>{label}</span>
+              <span className="tabular-nums">{overallProgress}%</span>
             </div>
-            <Progress value={phase === "creating" ? 100 : progress} />
+            <Progress value={overallProgress} />
           </div>
         )}
 
@@ -298,82 +400,75 @@ function usePublishedHeight(ref: React.RefObject<HTMLElement>, showing: boolean)
 
 /* --------------------------------- pieces -------------------------------- */
 
-/**
- * Which microphone, with a meter beside it.
- *
- * The meter is why the picker belongs here rather than in settings: it is the
- * only thing that turns "I think I chose the headset" into something visible,
- * and it answers the question a picker raises the moment you use it — did that
- * work?
- */
-function MicrophonePicker() {
-  const recorder = useRecording();
-
-  return (
-    <div className="flex items-center gap-2">
-      <Mic className="h-4 w-4 shrink-0 text-muted-foreground" />
-      <InputLevel level={recorder.level} active={recorder.state === "recording"} />
-      <label className="sr-only" htmlFor="recording-microphone">
-        Microphone
-      </label>
-      <select
-        id="recording-microphone"
-        value={recorder.deviceId ?? ""}
-        onChange={(e) => recorder.setDeviceId(e.target.value || null)}
-        className="h-8 max-w-[10rem] rounded-md border bg-background px-2 text-xs"
-      >
-        <option value="">System default</option>
-        {recorder.devices.map((device, index) => (
-          <option key={device.deviceId} value={device.deviceId}>
-            {/* Labels are blank until permission is granted, and a blank option
-                is unpickable in every sense that matters. */}
-            {device.label || `Microphone ${index + 1}`}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
+/** What a microphone is called, given the browser may not have said. */
+function deviceName(device: MediaDeviceInfo, index: number): string {
+  // Labels are blank until permission is granted, and a blank option is
+  // unpickable in every sense that matters.
+  return device.label || `Microphone ${index + 1}`;
 }
 
 /**
- * The language transcription will assume.
+ * Which microphone, hung off the microphone.
  *
- * An account setting, shown where it is needed. Unlike the import dialog's copy
- * of this, it does reach the recording in progress: the language is resolved
- * when the meeting is enqueued, which for a recording is after Stop.
+ * <p>This was a select the width of a device name, sitting beside a mic glyph
+ * that did nothing — two objects saying "microphone" where one would do, and
+ * the wider of them was the one carrying no information most of the time,
+ * because the answer is "System default" for nearly everybody. The glyph is the
+ * control now, and the name is a tooltip on it.
+ *
+ * <p>The four-bar meter that sat beside it is gone too. It answered a real
+ * question — did that change work? — but the waveform spanning this card
+ * answers the same one across the full width, and only while there is something
+ * to answer it about. Two meters for one input is one more than the input has.
  */
-function TranscriptLanguagePicker() {
-  const languages = useGetLanguagesQuery();
-  const prefs = useGetPreferencesQuery();
-  const [update] = useUpdatePreferencesMutation();
-
-  async function save(code: string) {
-    try {
-      await update({ defaultLanguage: code }).unwrap();
-    } catch (err) {
-      toast.error(uploadError(err));
-    }
-  }
+function MicrophonePicker() {
+  const recorder = useRecording();
+  const chosen = recorder.devices.findIndex((d) => d.deviceId === recorder.deviceId);
+  const current =
+    chosen >= 0 ? deviceName(recorder.devices[chosen], chosen) : "System default";
 
   return (
     <div className="flex items-center gap-2">
-      <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
-      <label className="sr-only" htmlFor="recording-language">
-        Transcript language
-      </label>
-      <select
-        id="recording-language"
-        value={prefs.data?.defaultLanguage ?? ""}
-        onChange={(e) => void save(e.target.value)}
-        className="h-8 max-w-[10rem] rounded-md border bg-background px-2 text-xs"
-      >
-        <option value="">Detect automatically</option>
-        {(languages.data ?? []).map((l) => (
-          <option key={l.code} value={l.code}>
-            {l.name}
-          </option>
-        ))}
-      </select>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 shrink-0 gap-1 px-2 text-muted-foreground hover:text-foreground"
+            aria-label="Microphone"
+            // The name is here rather than on screen: it is worth having, and
+            // not worth the width of the bar to say on every recording.
+            title={`Microphone: ${current}`}
+          >
+            <Mic className="h-4 w-4" />
+            {/* The only thing on the glyph that says it opens anything. */}
+            <ChevronDown className="h-3 w-3" />
+          </Button>
+        </DropdownMenuTrigger>
+        {/* Upward, because the bar is docked to the bottom of the window. */}
+        <DropdownMenuContent side="top" align="start" className="w-56">
+          <DropdownMenuItem onSelect={() => recorder.setDeviceId(null)}>
+            <Check
+              className={cn("h-4 w-4", recorder.deviceId ? "opacity-0" : "opacity-100")}
+            />
+            System default
+          </DropdownMenuItem>
+          {recorder.devices.map((device, index) => (
+            <DropdownMenuItem
+              key={device.deviceId}
+              onSelect={() => recorder.setDeviceId(device.deviceId)}
+            >
+              <Check
+                className={cn(
+                  "h-4 w-4",
+                  recorder.deviceId === device.deviceId ? "opacity-100" : "opacity-0",
+                )}
+              />
+              {deviceName(device, index)}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
@@ -424,24 +519,6 @@ function Waveform({ level, active }: { level: number; active: boolean }) {
         />
       ))}
     </div>
-  );
-}
-
-/** Four bars that move with the input, so silence looks like silence. */
-function InputLevel({ level, active }: { level: number; active: boolean }) {
-  return (
-    <span aria-hidden className="flex h-4 items-end gap-0.5">
-      {[0.15, 0.4, 0.65, 0.9].map((threshold) => (
-        <span
-          key={threshold}
-          className={cn(
-            "w-0.5 rounded-full transition-colors duration-75",
-            active && level >= threshold ? "bg-destructive" : "bg-muted-foreground/25",
-          )}
-          style={{ height: `${25 + threshold * 75}%` }}
-        />
-      ))}
-    </span>
   );
 }
 

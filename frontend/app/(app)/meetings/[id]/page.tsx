@@ -27,6 +27,7 @@ import {
   ChevronRight,
   ShieldCheck,
   ClipboardCopy,
+  ListChecks,
   MessageSquare,
 } from "lucide-react";
 import {
@@ -241,6 +242,53 @@ export default function MeetingDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  /**
+   * Play from a moment, wherever the ask came from.
+   *
+   * <p>The player only exists on the transcript now, so every other caller — a
+   * quotation in the brief, an action item's source, a `?t=` deep link — is
+   * asking to hear something while looking at a tab that has nothing to play
+   * it. Each of those used to call `seekTo` straight, and would now silently
+   * do nothing.
+   *
+   * <p>So the moment is parked and the tab is switched. The effect below runs
+   * after the commit that mounts the player, which is the earliest point there
+   * is a media element to seek. Landing on the transcript is the right answer
+   * anyway: somebody who clicked a citation wants to see the words as well as
+   * hear them.
+   */
+  const pendingSeek = React.useRef<number | null>(null);
+
+  const seekWhenReady = React.useCallback(
+    (seconds: number) => {
+      const el = audio.ref.current;
+      if (!el) return;
+      const seek = () => audio.seekTo(seconds);
+      // Seeking before metadata lands is dropped by the browser, which is what
+      // made a deep link into a long recording start from zero.
+      if (el.readyState >= 1) seek();
+      else el.addEventListener("loadedmetadata", seek, { once: true });
+    },
+    [audio],
+  );
+
+  function playFrom(seconds: number) {
+    if (tab === "transcript") {
+      seekWhenReady(seconds);
+      return;
+    }
+    pendingSeek.current = seconds;
+    changeTab("transcript");
+  }
+
+  React.useEffect(() => {
+    if (tab !== "transcript") return;
+    const t = pendingSeek.current;
+    if (t == null) return;
+    pendingSeek.current = null;
+    seekWhenReady(t);
+  }, [tab, seekWhenReady]);
+
   // Deep link from a workspace-chat citation or a semantic search hit:
   // /meetings/{id}?t=132.5 opens the meeting and seeks to that moment.
   // Read from location rather than useSearchParams() so the page stays
@@ -250,12 +298,12 @@ export default function MeetingDetailPage() {
     if (seekedRef.current || !ready) return;
     const t = Number(new URLSearchParams(window.location.search).get("t"));
     if (!Number.isFinite(t) || t <= 0) return;
-    const el = audio.ref.current;
-    if (!el) return;
     seekedRef.current = true;
-    const seek = () => audio.seekTo(t);
-    if (el.readyState >= 1) seek();
-    else el.addEventListener("loadedmetadata", seek, { once: true });
+    pendingSeek.current = t;
+    // Not playFrom(): this runs on the first ready render, when the tab is
+    // still the default, so it has to go through the switch rather than around
+    // it.
+    changeTab("transcript");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
 
@@ -430,11 +478,30 @@ export default function MeetingDetailPage() {
   const m = meeting.data;
   // A PDF was never spoken: no audio, no timeline, nothing to seek to.
   const isDocument = m.sourceType === "DOCUMENT";
+  const isVideoUpload = !!m.contentType && m.contentType.startsWith("video/");
+  /** Whether the last stretch of the page sits under a floating bar. */
+  const docked = ready && !!m.audioUrl && !isDocument && !isVideoUpload && tab === "transcript";
+  const player = (
+    <AudioPlayer
+      src={m.audioUrl ?? ""}
+      controller={audio}
+      contentType={m.contentType}
+      // Skip-silence, the speaker jumps and the coloured timeline are all read
+      // out of the transcript rather than the audio signal — see
+      // lib/playback.ts. Both queries are already in flight for the tabs below,
+      // so RTK Query serves these from the same request.
+      segments={transcript.data?.segments ?? []}
+      moments={moments.data ?? []}
+    />
+  );
   // Only offered when there is something to erase. A YouTube import holds no
   // recording of ours, and offering to delete one would imply we had it.
 
   return (
-    <div className="space-y-6">
+    /* The docked player floats, so the page has to leave it room; without this
+       the last lines of a transcript sit under the bar and can be neither read
+       nor corrected. */
+    <div className={cn("space-y-6", docked && "pb-32")}>
       {/* Masthead. The metadata sits in a monospaced rule under the title
           rather than as a row of loose badges: these are facts about one
           document, and setting them as a spec line keeps the title the only
@@ -583,22 +650,33 @@ export default function MeetingDetailPage() {
         </div>
       </div>
 
-      {/* Media player (synced with transcript). A DOCUMENT's presigned URL
-          points at the source PDF, not audio, so the player must stay away. */}
-      {ready && m.audioUrl && !isDocument && (
-        <div className="no-print">
-          <AudioPlayer
-            src={m.audioUrl}
-            controller={audio}
-            contentType={m.contentType}
-            // Skip-silence, the speaker jumps and the coloured timeline are all
-            // read out of the transcript rather than the audio signal — see
-            // lib/playback.ts. Both queries are already in flight for the tabs
-            // below, so RTK Query serves these from the same request.
-            segments={transcript.data?.segments ?? []}
-            moments={moments.data ?? []}
-          />
-        </div>
+      {/* The player, over the transcript and nowhere else.
+          A DOCUMENT's presigned URL points at the source PDF, not audio, so it
+          stays away from those entirely.
+
+          Only on the transcript because that is the tab it acts on: the
+          scrubber is banded by who is speaking, the jumps are speaker jumps,
+          and the highlighted line follows the clock. Over a summary it drove
+          something not on screen while taking a band of the page on every
+          visit, and most visits to a brief never play anything.
+
+          Docked rather than in the flow so it stays put while the transcript
+          scrolls under it, which is the whole reason to have it there: reading
+          along and correcting are the same sitting. The left offset matches the
+          rail, so "centred" means centred on the transcript rather than on the
+          window. Below the recording bar's z-index — a live microphone is the
+          more urgent of the two. */}
+      {ready && m.audioUrl && !isDocument && tab === "transcript" && (
+        isVideoUpload ? (
+          /* A video is watched, not scrubbed past. The same component renders a
+             frame up to 60vh tall, and floating that over the transcript would
+             cover the thing it is meant to be read alongside. */
+          <div className="no-print">{player}</div>
+        ) : (
+          <div className="no-print pointer-events-none fixed inset-x-0 bottom-0 z-20 p-3 sm:p-4 lg:left-64">
+            <div className="pointer-events-auto mx-auto max-w-3xl">{player}</div>
+          </div>
+        )
       )}
 
       {/* Said out loud rather than left as an absence. "No audio" is also true
@@ -709,18 +787,21 @@ export default function MeetingDetailPage() {
               loading={summary.isLoading}
               summary={summary.data}
               translation={showing}
-              onSeek={audio.seekTo}
+              onSeek={playFrom}
             />
-            {/* Below the summary, not above it: these are read out of it, and
-                putting the derived rows first would suggest they were the
-                source rather than the reading. */}
-            <InsightsPanel meetingId={id} />
+            {/* Directly under the brief, and above Decisions and Risks.
+                What a meeting asks of you is the part with consequences, and
+                it was sitting third — below two cards that are commentary on
+                what happened. Somebody scanning a summary for what they now
+                have to do had to scroll past both to find out.
 
-            {/* Under the summary they were read out of, rather than behind a
-                tab. What somebody agreed to is the part of a meeting with
-                consequences, and a tab is a place people forget to visit. */}
+                Titled, because it is now one section of a document rather than
+                the only card on the page without a name. */}
             <Card>
               <CardContent className="space-y-3 pt-6">
+                <h3 className="flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
+                  <ListChecks className="h-4 w-4" /> Action items
+                </h3>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-sm text-muted-foreground">
                     {openActions === 0
@@ -747,7 +828,7 @@ export default function MeetingDetailPage() {
                         rightToLeft={showing?.rightToLeft}
                         // There is a player on this page, so the sentence plays
                         // here rather than opening the meeting again.
-                        onOpenSource={audio.seekTo}
+                        onOpenSource={playFrom}
                       />
                     ))}
                   </ul>
@@ -759,6 +840,11 @@ export default function MeetingDetailPage() {
                 </Button>
               </CardContent>
             </Card>
+
+            {/* Last, and still below the summary rather than above it: these
+                rows are read out of the brief, and putting them first would
+                suggest they were the source rather than the reading. */}
+            <InsightsPanel meetingId={id} />
           </TabsContent>
 
           <TabsContent value="transcript" className="pt-4">
@@ -843,7 +929,10 @@ export default function MeetingDetailPage() {
             sections={showing?.sections ?? summary.data?.sections ?? []}
             suggestions={summary.data?.suggestions}
             composed={composed}
-            onSeek={audio.seekTo}
+            // Through the switch, not straight to the player: this rail is
+            // beside both tabs, so a chat citation can be clicked while the
+            // brief is on screen and the player does not exist yet.
+            onSeek={playFrom}
           />
         </aside>
         </div>

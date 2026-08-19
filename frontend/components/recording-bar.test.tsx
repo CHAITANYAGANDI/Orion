@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 /**
@@ -27,6 +27,10 @@ const {
   toastError,
   toastSuccess,
   putWithProgress,
+  deleteMeeting,
+  subscribeMeetingStatus,
+  deactivate,
+  polled,
 } = vi.hoisted(() => ({
   createUploadUrl: vi.fn(),
   createMeeting: vi.fn(),
@@ -35,9 +39,30 @@ const {
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
   putWithProgress: vi.fn(),
+  deleteMeeting: vi.fn(),
+  subscribeMeetingStatus: vi.fn(),
+  deactivate: vi.fn(),
+  // What GET /meetings/{id} would say, for the poll that backs up the socket.
+  polled: { current: undefined as unknown },
 }));
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
+/**
+ * The socket, held open so a test can push a stage through it.
+ *
+ * <p>`emit` is whatever handler the bar last registered. Calling it is the only
+ * way to move the pipeline on in a test, because nothing else here is real.
+ */
+let emit: ((e: unknown) => void) | null = null;
+
+vi.mock("@/lib/ws", () => ({
+  subscribeMeetingStatus: (id: string, handlers: { onEvent: (e: unknown) => void }) => {
+    subscribeMeetingStatus(id);
+    emit = handlers.onEvent;
+    return { deactivate };
+  },
+}));
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }), usePathname: () => pathname.current }));
 
 vi.mock("sonner", () => ({ toast: { error: toastError, success: toastSuccess } }));
 
@@ -59,9 +84,16 @@ vi.mock("@/lib/api", () => ({
   useCreateMeetingMutation: () => [
     (arg: unknown) => {
       createMeeting(arg);
-      return { unwrap: () => Promise.resolve({ id: "mtg_9" }) };
+      return { unwrap: () => Promise.resolve({ id: "mtg_9", status: "QUEUED" }) };
     },
   ],
+  useDeleteMeetingMutation: () => [
+    (arg: unknown) => {
+      deleteMeeting(arg);
+      return { unwrap: () => Promise.resolve(undefined) };
+    },
+  ],
+  useGetMeetingQuery: () => ({ data: polled.current }),
   useGetLanguagesQuery: () => ({
     data: [
       { code: "en", name: "English", nativeName: "English", rightToLeft: false },
@@ -79,18 +111,25 @@ vi.mock("@/lib/api", () => ({
 
 const recorder = vi.hoisted(() => ({ current: null as unknown }));
 const session = vi.hoisted(() => ({ current: null as unknown }));
+const savejob = vi.hoisted(() => ({ current: null as unknown }));
+const pathname = vi.hoisted(() => ({ current: "/home" }));
 
 vi.mock("@/lib/recording-context", () => ({
   useRecording: () => recorder.current,
   useRecordingSession: () => session.current,
+  useRecordingJob: () => savejob.current,
 }));
 
 import { RecordingBar } from "@/components/recording-bar";
 import type { UseRecorder } from "@/lib/use-recorder";
 import type { UseLiveTranscript } from "@/lib/use-live-transcript";
 import type { RecordingSession } from "@/lib/recording-context";
+import type { UseSaveJob } from "@/lib/use-save-job";
 
 const pause = vi.fn();
+const saveJob = vi.fn();
+const stopJob = vi.fn();
+const dismissJob = vi.fn();
 const resume = vi.fn();
 const stop = vi.fn();
 const reset = vi.fn();
@@ -130,10 +169,28 @@ function aRecorder(overrides: Partial<UseRecorder> = {}): UseRecorder {
   };
 }
 
+function aJob(overrides: Partial<UseSaveJob> = {}): UseSaveJob {
+  return {
+    phase: "idle",
+    job: null,
+    busy: false,
+    working: false,
+    stopping: false,
+    overallProgress: 0,
+    label: "",
+    save: saveJob,
+    stop: stopJob,
+    dismiss: dismissJob,
+    ...overrides,
+  };
+}
+
 function renderBar(
   overrides: Partial<UseRecorder> = {},
   sessionOverrides: Partial<RecordingSession> = {},
+  jobOverrides: UseSaveJob = aJob(),
 ) {
+  savejob.current = jobOverrides;
   recorder.current = aRecorder(overrides);
   session.current = {
     title: "",
@@ -154,7 +211,25 @@ function aResult(): UseRecorder["result"] {
 beforeEach(() => {
   vi.clearAllMocks();
   putWithProgress.mockResolvedValue(undefined);
+  emit = null;
+  polled.current = undefined;
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  pathname.current = "/home";
 });
+
+/** Save the recording on screen and wait for the pipeline to be watched. */
+async function save() {
+  await userEvent.click(screen.getByRole("button", { name: /Save & process/ }));
+  await waitFor(() => expect(createMeeting).toHaveBeenCalled());
+}
+
+/** Push a pipeline stage down the socket the bar subscribed to. */
+async function stage(status: string, progress: number, message: string) {
+  await waitFor(() => expect(emit).not.toBeNull());
+  await act(async () => {
+    emit!({ meetingId: "mtg_9", status, progress, message });
+  });
+}
 
 describe("RecordingBar", () => {
   it("is not there when nothing is being recorded", () => {
@@ -209,67 +284,91 @@ describe("RecordingBar", () => {
 });
 
 describe("RecordingBar microphone", () => {
-  it("lists the microphones the browser reported", () => {
-    renderBar({
-      devices: [
-        { deviceId: "a", label: "Headset (Jabra)", kind: "audioinput" },
-        { deviceId: "b", label: "Built-in", kind: "audioinput" },
-      ] as MediaDeviceInfo[],
-    });
+  const two = [
+    { deviceId: "a", label: "Headset (Jabra)", kind: "audioinput" },
+    { deviceId: "b", label: "Built-in", kind: "audioinput" },
+  ] as MediaDeviceInfo[];
 
-    expect(screen.getByRole("option", { name: "Headset (Jabra)" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Built-in" })).toBeInTheDocument();
+  async function openMics(overrides: Partial<UseRecorder> = {}) {
+    renderBar({ devices: two, ...overrides });
+    await userEvent.click(screen.getByRole("button", { name: "Microphone" }));
+  }
+
+  it("hangs off the microphone glyph rather than beside it", async () => {
+    renderBar({ devices: two });
+
+    // Two objects saying "microphone" where one will do, and the wider of them
+    // read "System default" for nearly everybody — a device name's worth of bar
+    // spent on no information.
+    const trigger = screen.getByRole("button", { name: "Microphone" });
+    expect(trigger).toHaveAttribute("title", "Microphone: System default");
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
   });
 
-  it("numbers a device the browser would not name", () => {
-    // Before permission is granted every label comes back empty, and an option
+  it("names the chosen device where the list is not open", () => {
+    renderBar({ devices: two, deviceId: "a" });
+
+    // The name is worth having and not worth the width. On the trigger it costs
+    // nothing and is one hover away.
+    expect(screen.getByRole("button", { name: "Microphone" })).toHaveAttribute(
+      "title",
+      "Microphone: Headset (Jabra)",
+    );
+  });
+
+  it("lists the microphones the browser reported", async () => {
+    await openMics();
+
+    expect(screen.getByRole("menuitem", { name: /Headset \(Jabra\)/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /Built-in/ })).toBeInTheDocument();
+  });
+
+  it("numbers a device the browser would not name", async () => {
+    // Before permission is granted every label comes back empty, and an item
     // with no text is one nobody can pick on purpose.
-    renderBar({
+    await openMics({
       devices: [{ deviceId: "a", label: "", kind: "audioinput" }] as MediaDeviceInfo[],
     });
 
-    expect(screen.getByRole("option", { name: "Microphone 1" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /Microphone 1/ })).toBeInTheDocument();
   });
 
   it("switches the microphone through the recorder", async () => {
-    renderBar({
-      devices: [
-        { deviceId: "a", label: "Headset", kind: "audioinput" },
-        { deviceId: "b", label: "Built-in", kind: "audioinput" },
-      ] as MediaDeviceInfo[],
-    });
+    await openMics();
 
-    await userEvent.selectOptions(screen.getByLabelText("Microphone"), "b");
+    await userEvent.click(screen.getByRole("menuitem", { name: /Built-in/ }));
 
     expect(setDeviceId).toHaveBeenCalledWith("b");
   });
 
-  it("treats the empty choice as the system default, not a device called nothing", async () => {
-    renderBar({
-      deviceId: "a",
-      devices: [{ deviceId: "a", label: "Headset", kind: "audioinput" }] as MediaDeviceInfo[],
-    });
+  it("treats the system default as a choice, not as a device called nothing", async () => {
+    await openMics({ deviceId: "a" });
 
-    await userEvent.selectOptions(screen.getByLabelText("Microphone"), "");
+    await userEvent.click(screen.getByRole("menuitem", { name: /System default/ }));
 
     expect(setDeviceId).toHaveBeenCalledWith(null);
   });
 });
 
 describe("RecordingBar language", () => {
-  it("saves the transcript language to the account", async () => {
+  it("carries no transcript language, in either state", () => {
+    // It never configured the recording in front of you: it wrote the account
+    // default, resolved when the meeting is enqueued. An account setting in the
+    // clothes of a live control, still on screen after Stop where there was
+    // nothing left for it to affect. It lives in Settings and the import dialog.
     renderBar({ state: "recording" });
+    expect(screen.queryByLabelText("Transcript language")).not.toBeInTheDocument();
 
-    await userEvent.selectOptions(screen.getByLabelText("Transcript language"), "es");
-
-    await waitFor(() => expect(updatePreferences).toHaveBeenCalledWith({ defaultLanguage: "es" }));
+    renderBar({ state: "stopped", result: aResult() });
+    expect(screen.queryByLabelText("Transcript language")).not.toBeInTheDocument();
   });
 
-  it("offers auto-detect", () => {
+  it("keeps the microphone picker, which does act on this recording", () => {
+    // Switching microphone mid-meeting is something the recorder handles
+    // without splitting the file, so this one belongs beside the waveform.
     renderBar({ state: "recording" });
 
-    expect(screen.getByLabelText("Transcript language")).toHaveValue("");
-    expect(screen.getByRole("option", { name: "Detect automatically" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Microphone")).toBeInTheDocument();
   });
 });
 
@@ -318,120 +417,149 @@ describe("RecordingBar silence warning", () => {
 });
 
 describe("RecordingBar saving", () => {
-  it("uploads, creates the meeting and opens it", async () => {
-    renderBar({ state: "stopped", result: aResult() });
+  it("hands the recording and the typed name to the save", async () => {
+    renderBar({ state: "stopped", result: aResult() }, { title: "  Tuesday design review  " });
 
     await userEvent.click(screen.getByRole("button", { name: /Save & process/ }));
 
-    await waitFor(() => expect(createMeeting).toHaveBeenCalled());
-    expect(createUploadUrl).toHaveBeenCalledWith(
-      expect.objectContaining({ contentType: "audio/webm" }),
-    );
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/meetings/mtg_9"));
-  });
-
-  it("files the meeting as recorded", async () => {
-    renderBar({ state: "stopped", result: aResult() });
-
-    await userEvent.click(screen.getByRole("button", { name: /Save & process/ }));
-
-    // What lets the recap email mean recordings without also meaning every
-    // imported file.
-    await waitFor(() =>
-      expect(createMeeting).toHaveBeenCalledWith(expect.objectContaining({ recorded: true })),
-    );
-  });
-
-  it("claims nothing about consent, now that nobody is asked", async () => {
-    renderBar({ state: "stopped", result: aResult() });
-
-    await userEvent.click(screen.getByRole("button", { name: /Save & process/ }));
-
-    // This was `true` while the tick gated the start of a recording, which made
-    // it a fact. Without the tick, sending it would stamp `consent_confirmed_at`
-    // with a statement nobody made — and the privacy overview counts that
-    // column and reports it back as one.
-    await waitFor(() => expect(createMeeting).toHaveBeenCalled());
-    expect(createMeeting).not.toHaveBeenCalledWith(
-      expect.objectContaining({ consentConfirmed: true }),
+    expect(saveJob).toHaveBeenCalledWith(
+      expect.objectContaining({ durationSeconds: 90 }),
+      "Tuesday design review",
     );
   });
 
   it("names it something, because the file is called recording-1755084000000.webm", async () => {
-    renderBar({ state: "stopped", result: aResult() });
-
-    await userEvent.click(screen.getByRole("button", { name: /Save & process/ }));
-
-    await waitFor(() =>
-      expect(createMeeting).toHaveBeenCalledWith(
-        expect.objectContaining({ title: expect.stringMatching(/^Recording — /) }),
-      ),
-    );
-  });
-
-  it("uses the name that was typed at the top of the page", async () => {
-    renderBar({ state: "stopped", result: aResult() }, { title: "Tuesday design review" });
-
-    await userEvent.click(screen.getByRole("button", { name: /Save & process/ }));
-
-    await waitFor(() =>
-      expect(createMeeting).toHaveBeenCalledWith(
-        expect.objectContaining({ title: "Tuesday design review" }),
-      ),
-    );
-  });
-
-  it("falls back to the date when the name is only whitespace", async () => {
-    // Somebody who tabbed through the field and hit space should not end up
-    // with a meeting called " " that is unfindable by name.
     renderBar({ state: "stopped", result: aResult() }, { title: "   " });
 
     await userEvent.click(screen.getByRole("button", { name: /Save & process/ }));
 
-    await waitFor(() =>
-      expect(createMeeting).toHaveBeenCalledWith(
-        expect.objectContaining({ title: expect.stringMatching(/^Recording — /) }),
-      ),
-    );
+    expect(saveJob.mock.calls[0][1]).toMatch(/^Recording — /);
   });
 
-  it("clears the recorder once the audio is safely on the server", async () => {
-    renderBar({ state: "stopped", result: aResult() });
+  it("does not offer to save a recording that captured nothing", () => {
+    renderBar({
+      state: "stopped",
+      result: {
+        file: new File([], "recording-2.webm", { type: "audio/webm" }),
+        durationSeconds: 0,
+      },
+    });
 
-    await userEvent.click(screen.getByRole("button", { name: /Save & process/ }));
-
-    // Otherwise the bar follows you onto the meeting page still offering to
-    // save audio that has already been saved.
-    await waitFor(() => expect(reset).toHaveBeenCalled());
+    // Stopping in the first moment can leave every chunk empty. Uploading that
+    // spends a presign and a PUT to be refused, and the refusal talks about
+    // object sizes rather than about what happened.
+    expect(screen.queryByRole("button", { name: /Save & process/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/No audio was captured/)).toBeInTheDocument();
+    // The way out is still there, which is the whole point.
+    expect(screen.getByRole("button", { name: /Discard/ })).toBeEnabled();
   });
 
-  it("keeps the audio when the upload fails", async () => {
-    putWithProgress.mockRejectedValue(new Error("Upload failed (500)"));
-    renderBar({ state: "stopped", result: aResult() });
+  it("leaves Discard on screen while a save is running, rather than removing it", () => {
+    // Disabled says "not now". Absent says "gone", and a bar with one greyed
+    // button and no way out is what a stuck phase used to look like.
+    renderBar({ state: "stopped", result: aResult() }, {}, aJob({ phase: "uploading", busy: true }));
 
-    await userEvent.click(screen.getByRole("button", { name: /Save & process/ }));
-
-    await waitFor(() => expect(toastError).toHaveBeenCalled());
-    // The recording only exists in this tab. Clearing it on a failed upload
-    // destroys the meeting to tidy up after an error the user could retry.
-    expect(reset).not.toHaveBeenCalled();
-    expect(push).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /Discard/ })).toBeDisabled();
   });
 
-  it("offers to throw it away, separately from saving it", async () => {
+  it("leaves the record page when the recording is discarded", async () => {
+    pathname.current = "/record";
     renderBar({ state: "stopped", result: aResult() });
 
     await userEvent.click(screen.getByRole("button", { name: /Discard/ }));
 
+    // That page has nothing left to show once the audio is gone — it falls back
+    // to "Ready to record", which reads as an invitation to do again the thing
+    // just abandoned.
     expect(reset).toHaveBeenCalled();
+    expect(push).toHaveBeenCalledWith("/home");
   });
 
-  it("shows how much there is to save", () => {
+  it("stays put when the recording is discarded from anywhere else", async () => {
+    pathname.current = "/meetings/mtg_1";
     renderBar({ state: "stopped", result: aResult() });
 
-    expect(screen.getByText(/1:30/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Discard/ }));
+
+    // The bar is incidental to whatever is being read here. Navigating away
+    // because somebody tidied up a recording is the one nobody asked for.
+    expect(reset).toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("shows the percentage and the stage it belongs to", () => {
+    renderBar(
+      { state: "idle", result: null },
+      {},
+      aJob({
+        phase: "processing",
+        working: true,
+        overallProgress: 58,
+        label: "Generating transcript from audio…",
+        job: { id: "mtg_9", status: "TRANSCRIBING", progress: 40, message: "…" },
+      }),
+    );
+
+    expect(screen.getByText("58%")).toBeInTheDocument();
+    expect(screen.getByText("Generating transcript from audio…")).toBeInTheDocument();
+  });
+
+  it("stays up after the recorder has been let go", () => {
+    // The audio is on the server and the recorder is idle, but there is still
+    // something to watch. The bar used to vanish at exactly this point.
+    renderBar({ state: "idle", result: null }, {}, aJob({ phase: "processing", working: true }));
+
+    expect(screen.getByRole("region", { name: "Recording controls" })).toBeInTheDocument();
+  });
+
+  it("offers to stop, and says what stopping destroys", async () => {
+    renderBar({ state: "idle", result: null }, {}, aJob({ phase: "processing", working: true }));
+
+    await userEvent.click(screen.getByRole("button", { name: /Stop processing/ }));
+
+    // The worker cannot be recalled, so what is stopped is the meeting
+    // existing. Said before the click, not after.
+    expect(vi.mocked(window.confirm).mock.calls[0][0]).toContain("cannot be undone");
+    expect(stopJob).toHaveBeenCalled();
+  });
+
+  it("keeps processing when the confirm is dismissed", async () => {
+    vi.mocked(window.confirm).mockReturnValue(false);
+    renderBar({ state: "idle", result: null }, {}, aJob({ phase: "processing", working: true }));
+
+    await userEvent.click(screen.getByRole("button", { name: /Stop processing/ }));
+
+    expect(stopJob).not.toHaveBeenCalled();
+  });
+
+  it("opens the meeting when asked, rather than on its own", async () => {
+    renderBar(
+      { state: "idle", result: null },
+      {},
+      aJob({ phase: "done", job: { id: "mtg_9", status: "READY", progress: 100, message: "" } }),
+    );
+
+    expect(push).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: /Open meeting/ }));
+
+    expect(push).toHaveBeenCalledWith("/meetings/mtg_9");
+  });
+
+  it("says what failed rather than sitting at a percentage", () => {
+    renderBar(
+      { state: "idle", result: null },
+      {},
+      aJob({
+        phase: "failed",
+        job: { id: "mtg_9", status: "FAILED", progress: 0, message: "The audio could not be decoded." },
+      }),
+    );
+
+    expect(screen.getByText("The audio could not be decoded.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Stop processing/ })).not.toBeInTheDocument();
   });
 });
+
 
 describe("RecordingBar live text", () => {
   it("has no switch to find", () => {
