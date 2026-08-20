@@ -237,7 +237,14 @@ function ScopePicker({
       {open && (
         <div
           role="menu"
-          className="absolute left-0 z-30 mt-1 w-56 overflow-hidden rounded-lg border bg-popover shadow-lg"
+          // Anchored to the button's right edge, not its left. This trigger
+          // sits at the right edge of the content column, so a menu growing
+          // rightward from `left-0` ran ~120px past it — and the scroll
+          // container it lives in cannot clip one axis without clipping the
+          // other, so `overflow-y-auto` quietly became `overflow: auto`. The
+          // hint text was cut off mid-word and the whole list grew a
+          // horizontal scrollbar to reach a menu nobody wanted to scroll to.
+          className="absolute right-0 z-30 mt-1 w-56 overflow-hidden rounded-lg border bg-popover shadow-lg"
         >
           {SCOPES.map((s) => (
             <button
