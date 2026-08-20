@@ -47,7 +47,11 @@ export function HomeChatPanel() {
             size="icon"
             className="h-7 w-7"
             onClick={() => void chat.startNew()}
-            disabled={chat.starting}
+            // Nothing to start when the thread is already blank. Left live it
+            // is a button that appears to do nothing, and each press files
+            // another empty conversation into the history list.
+            disabled={chat.starting || chat.isNew}
+            title={chat.isNew ? "You're already on a new chat" : undefined}
             aria-label="New chat"
           >
             <Plus className="h-4 w-4" />

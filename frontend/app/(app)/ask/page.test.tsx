@@ -148,6 +148,26 @@ describe("AskPage conversation state", () => {
     );
   });
 
+  it("offers no New when the chat on screen is already a new one", async () => {
+    messages = [];
+    render(<AskPage />);
+
+    // Pressing it would file an empty conversation into the history list and
+    // leave the screen exactly as it was.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^new$/i })).toBeDisabled(),
+    );
+  });
+
+  it("offers New once the thread has something in it", async () => {
+    setActiveChat("workspace", "cnv_1");
+    render(<AskPage />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^new$/i })).toBeEnabled(),
+    );
+  });
+
   it("keeps reading the thread once one is chosen", async () => {
     // The other half: starting fresh must not mean the picker stops working.
     setActiveChat("workspace", "cnv_1");

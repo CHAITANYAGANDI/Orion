@@ -122,6 +122,33 @@ describe("ChatHistory", () => {
     expect(props.onNew).toHaveBeenCalled();
   });
 
+  it("will not start a second new chat when the thread is already blank", async () => {
+    // Left live it is a button that appears to do nothing, and each press
+    // files another empty conversation into the history list.
+    const props = picker({ atNewChat: true });
+
+    const button = screen.getByRole("button", { name: /new chat/i });
+    expect(button).toBeDisabled();
+    await userEvent.click(button);
+    expect(props.onNew).not.toHaveBeenCalled();
+  });
+
+  it("says why it is unavailable rather than just going grey", async () => {
+    picker({ atNewChat: true });
+
+    expect(screen.getByRole("button", { name: /new chat/i })).toHaveAttribute(
+      "title",
+      "You're already on a new chat",
+    );
+  });
+
+  it("offers a new chat again once something has been said", async () => {
+    const props = picker({ atNewChat: false });
+
+    await userEvent.click(screen.getByRole("button", { name: /new chat/i }));
+    expect(props.onNew).toHaveBeenCalled();
+  });
+
   it("says so when there is no history", async () => {
     picker({ conversations: [] });
     await userEvent.click(screen.getByRole("button", { name: /previous chat history/i }));

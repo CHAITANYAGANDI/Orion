@@ -135,6 +135,15 @@ export function useWorkspaceChat() {
     messages,
     conversations: conversations ?? [],
     conversationId,
+    /**
+     * Nothing has been said here yet, so "New chat" has nothing to do.
+     *
+     * Covers both ways of arriving at a blank thread — opening the chat, which
+     * now starts fresh, and pressing New on one you had already emptied. Keyed
+     * on the messages rather than on the id because the two differ: New
+     * creates a real conversation up front, so it has an id and no messages.
+     */
+    isNew: !isLoading && (messages?.length ?? 0) === 0,
     setConversationId,
     suggestions: suggestions?.suggestions,
     modes: modes ?? [],

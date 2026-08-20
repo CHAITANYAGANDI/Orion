@@ -74,7 +74,8 @@ export default function AskPage() {
             size="sm"
             className="gap-1.5"
             onClick={() => void chat.startNew()}
-            disabled={chat.starting}
+            disabled={chat.starting || chat.isNew}
+            title={chat.isNew ? "You're already on a new chat" : undefined}
           >
             <Plus className="h-4 w-4" /> New
           </Button>

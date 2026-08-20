@@ -30,6 +30,14 @@ export interface ChatHistoryProps {
   onRename: (conversationId: string, title: string) => Promise<void>;
   onDelete: (conversationId: string) => Promise<void>;
   busy?: boolean;
+  /**
+   * The thread on screen is already an empty one, so New has nothing to do.
+   *
+   * Separate from `busy`, which means "a request is in flight". They both
+   * disable the button and they are not the same thing — one is temporary and
+   * the other is a statement about where you are.
+   */
+  atNewChat?: boolean;
 }
 
 export function ChatHistory({
@@ -40,6 +48,7 @@ export function ChatHistory({
   onRename,
   onDelete,
   busy,
+  atNewChat,
 }: ChatHistoryProps) {
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<string | null>(null);
@@ -99,7 +108,8 @@ export function ChatHistory({
           variant="outline"
           size="sm"
           onClick={onNew}
-          disabled={busy}
+          disabled={busy || atNewChat}
+          title={atNewChat ? "You're already on a new chat" : undefined}
           className="gap-1.5"
         >
           <Plus className="h-4 w-4" /> New chat

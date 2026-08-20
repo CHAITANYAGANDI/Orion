@@ -1547,6 +1547,9 @@ function ChatPanel({
         <ChatHistory
           conversations={conversations ?? []}
           activeId={conversationId}
+          // Same rule as the workspace chat: an empty thread has nothing to
+          // start. See `isNew` in lib/use-workspace-chat.
+          atNewChat={!isLoading && (messages?.length ?? 0) === 0}
           onSelect={setConversationId}
           onNew={onNew}
           busy={starting}
