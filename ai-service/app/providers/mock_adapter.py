@@ -280,6 +280,8 @@ class MockTranscriptionAdapter(TranscriptionPort):
         filename: str,
         vocabulary: list[str] | None = None,
         language: str | None = None,
+        *,
+        request=None,  # noqa: ARG002 - accepted for the port, unused here.
     ) -> TranscriptResponse:
         # Vocabulary and language are accepted and ignored: the scripts are
         # fixed English text, so there is nothing for a boosting hint to change

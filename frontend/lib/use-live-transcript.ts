@@ -3,243 +3,379 @@
 /**
  * Words on screen while somebody is still saying them.
  *
- * This is **not** the transcript. Recallix's transcript is made after Stop, by
- * the speech-to-text provider named on the Security tab, from the audio file
- * the browser uploads — that is the one that gets diarised, summarised, chunked
- * for chat and kept. What this produces is a preview: unpunctuated in places,
- * wrong about names, and thrown away when the recording ends.
+ * This is **not** the transcript. Recallix's canonical transcript is made after
+ * Stop, from the uploaded file, with the whole recording in view — see
+ * `ai-service/app/providers/assemblyai_adapter.py`. What this produces is
+ * provisional and is replaced wholesale when that finishes. The two optimise
+ * different things on purpose: this one buys latency at the cost of context,
+ * and the other has the entire meeting to look at, so it wins.
  *
- * It is worth having anyway, because the alternative is a blank page. A meeting
- * being recorded with nothing moving on screen is indistinguishable from a
- * meeting that is not being recorded, and the way people resolve that doubt is
- * by stopping to check.
+ * ## What this used to be, and why it is not that any more
  *
- * ## It runs whenever a recording does
+ * `window.SpeechRecognition`. It was a preview of a preview:
  *
- * There was a switch, and it was in the way: words that only appear after you
- * find a toggle are words you do not see during the meeting you were trying to
- * follow, which is the only meeting they are any use for.
+ *  - **It opened its own microphone.** A separate `getUserMedia` call, honouring
+ *    the browser's default input and not the device chosen in the control bar.
+ *    So the live text could be listening to the laptop lid while the recording
+ *    was on the headset — and the resulting comparison ("Recallix heard this,
+ *    Otter heard that") was between two different audio signals.
+ *  - **It had no speaker concept at all.** Every line under one avatar, where a
+ *    mature product shows the speaker change.
+ *  - **Its timestamps were invented here.** Recallix's own `elapsed` counter,
+ *    sampled when recognition happened to return. A line spoken at 0:04 and
+ *    recognised six seconds later was labelled 0:10.
+ *  - **Firefox has none of it**, and the audio went to Google or Apple.
  *
- * `SpeechRecognition` is not local, though — Chrome streams the audio to
- * Google, Safari to Apple — and Recallix tells people exactly which third
- * parties hear their meetings. With no switch to hang it on, that disclosure
- * moves to the place somebody reads before starting: the notice above the
- * consent tick, which is already the paragraph about who hears this recording.
+ * Now: AssemblyAI Universal-Streaming, over a websocket, fed from **the same
+ * `MediaStream` the recorder is recording**, with provider diarization and
+ * provider timestamps.
  *
- * ## Browser reality
+ * ## The key never reaches this file
  *
- *  - Firefox does not implement it. `supported` is false and the caller says so
- *    rather than showing a control that does nothing.
- *  - Chrome ends the session after a stretch of silence, whatever `continuous`
- *    claims, so `onend` restarts it. Without that the live text simply stops
- *    partway through a meeting and never explains itself.
- *  - `start()` on an already-started recogniser throws, hence `runningRef`.
- *  - It opens its own microphone stream and ignores the device chosen in the
- *    bar. Nothing can be done about that from here; it affects the preview
- *    only, never the recording, which is on the stream the recorder owns.
+ * The browser holds a token minted by Spring, valid for well under a minute and
+ * good for exactly one streaming session. `ASSEMBLYAI_API_KEY` stays in the
+ * ai-service. See `backend-spring/.../StreamingTokenController.java`.
+ *
+ * ## Pause means paused
+ *
+ * The recorder excludes paused audio from the file. Streaming through a pause
+ * would put words into the transcript for the exact stretch somebody stopped it
+ * from being recorded — so the worklet is muted rather than the socket closed,
+ * which keeps the session (and its speaker model) alive across a short pause.
  */
 
 import * as React from "react";
+import { API_BASE } from "@/lib/api";
+import { buildAuthHeaders } from "@/lib/auth-store";
+import { CanonicalSpeakers } from "@/lib/canonical-speakers";
+import {
+  applySpeakerRevision,
+  applyTurn,
+  finalTurns,
+  pendingTurn,
+  type LiveTurn,
+  type SessionContext,
+} from "@/lib/live-turns";
 
-/** One finished phrase, stamped with where it fell in the recording. */
-export interface LivePhrase {
-  id: number;
-  /** Seconds into the recording, matching the timeline the player will use. */
-  at: number;
-  text: string;
-}
+export type { LiveTurn } from "@/lib/live-turns";
+
+/** Where the live session stands, for the one line of status the UI shows. */
+export type LiveStatus =
+  | "idle"
+  | "connecting"
+  | "listening"
+  | "reconnecting"
+  | "unavailable";
 
 export interface UseLiveTranscript {
-  /** False in browsers with no speech recognition at all — Firefox, notably. */
+  /**
+   * False only where live transcription cannot work at all.
+   *
+   * Unlike the browser API this replaced, that is not a per-browser question —
+   * websockets and AudioWorklet are everywhere — so this is about whether the
+   * deployment has AssemblyAI configured.
+   */
   supported: boolean;
-  phrases: LivePhrase[];
-  /** The phrase currently being spoken, which will change before it settles. */
-  interim: string;
+  status: LiveStatus;
+  /** Settled turns, in the order they were spoken. */
+  turns: LiveTurn[];
+  /** The turn still being spoken, which will change before it settles. */
+  pending: LiveTurn | null;
   error: string | null;
+  /** How many times the socket has had to be reopened. Telemetry, not UI. */
+  reconnects: number;
   clear: () => void;
 }
 
-/* -------------------------------------------------------------------------- */
-/* The parts of the Web Speech API this uses, which lib.dom does not declare.  */
-/* -------------------------------------------------------------------------- */
+const WS_URL = "wss://streaming.assemblyai.com/v3/ws";
 
-interface SpeechAlternative {
-  transcript: string;
-}
-interface SpeechResult {
-  readonly length: number;
-  readonly isFinal: boolean;
-  [index: number]: SpeechAlternative;
-}
-interface SpeechResultList {
-  readonly length: number;
-  [index: number]: SpeechResult;
-}
-interface SpeechResultEvent extends Event {
-  resultIndex: number;
-  results: SpeechResultList;
-}
-interface SpeechErrorEvent extends Event {
-  error: string;
-}
-interface SpeechRecogniser {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  start(): void;
-  stop(): void;
-  abort(): void;
-  onresult: ((e: SpeechResultEvent) => void) | null;
-  onerror: ((e: SpeechErrorEvent) => void) | null;
-  onend: (() => void) | null;
-}
-type RecogniserConstructor = new () => SpeechRecogniser;
+/**
+ * Query parameters, verified against the live service.
+ *
+ * `speaker_labels` is the one that matters and the one the published docs
+ * disagreed with themselves about; the session's `Begin` message echoes the
+ * configuration back, and it confirms diarization is on. `format_turns` is what
+ * puts punctuation and casing on a finalised turn — without it the live text is
+ * the unpunctuated stream people recognise as "a rough preview".
+ *
+ * `speech_model` is deliberately absent: the service's default is already
+ * `universal-3-5-pro` and naming it pins the product to a string that will be
+ * retired while nobody is looking.
+ */
+const SAMPLE_RATE = 16000;
 
-function recogniserConstructor(): RecogniserConstructor | null {
-  if (typeof window === "undefined") return null;
-  const w = window as unknown as {
-    SpeechRecognition?: RecogniserConstructor;
-    webkitSpeechRecognition?: RecogniserConstructor;
-  };
-  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
-}
+/** Backoff between reconnection attempts, in milliseconds. */
+const RETRY_DELAYS = [500, 1000, 2000, 4000, 8000];
 
 export function useLiveTranscript({
   active,
+  paused,
+  /** The recorder's own mixing node. Not a second microphone. */
+  source,
   elapsed,
-  lang,
 }: {
-  /** Recognition runs only while this is true — a paused meeting is not live. */
+  /** A recording exists and audio should be streaming. */
   active: boolean;
-  /** Seconds recorded so far, used to stamp each phrase. */
+  /** Recording exists but is paused: hold the session, send nothing. */
+  paused: boolean;
+  source: LiveAudioSource | null;
+  /** Seconds recorded so far, used only to place a reconnected session. */
   elapsed: number;
-  /** BCP-47-ish tag from the account's transcript language; blank auto-detects. */
-  lang: string | null;
 }): UseLiveTranscript {
-  const [supported, setSupported] = React.useState(false);
-  const [phrases, setPhrases] = React.useState<LivePhrase[]>([]);
-  const [interim, setInterim] = React.useState("");
+  const [status, setStatus] = React.useState<LiveStatus>("idle");
+  const [turns, setTurns] = React.useState<LiveTurn[]>([]);
   const [error, setError] = React.useState<string | null>(null);
+  const [reconnects, setReconnects] = React.useState(0);
+  const [supported, setSupported] = React.useState(true);
 
-  const recogniserRef = React.useRef<SpeechRecogniser | null>(null);
-  const runningRef = React.useRef(false);
-  const wantRunningRef = React.useRef(false);
-  // `onresult` is installed once and would otherwise close over the elapsed
-  // value from the render that installed it, stamping every phrase with 0.
+  const socketRef = React.useRef<WebSocket | null>(null);
+  const nodeRef = React.useRef<AudioWorkletNode | null>(null);
+  const wantOpenRef = React.useRef(false);
+  const attemptRef = React.useRef(0);
+  const retryRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionRef = React.useRef<SessionContext>({ epoch: 0, offsetSeconds: 0 });
+  // Speaker numbering for this meeting, not for this socket. It deliberately
+  // outlives a reconnect: the provider restarts its cluster letters from "A"
+  // on a new session, and renumbering from there would rename everybody on
+  // screen halfway through the meeting.
+  const speakersRef = React.useRef(new CanonicalSpeakers());
+  // Read inside handlers installed once; a value closed over would be the one
+  // from the render that installed them.
   const elapsedRef = React.useRef(0);
-  // When the phrase now being spoken began, so it is timed from its first word
-  // rather than from the moment the recogniser decided it had finished.
-  const phraseStartRef = React.useRef<number | null>(null);
-  const nextIdRef = React.useRef(1);
-
   elapsedRef.current = elapsed;
 
-  // Read once on the client: deciding this during render would differ from the
-  // server, where there is no `window` to ask.
-  React.useEffect(() => {
-    setSupported(recogniserConstructor() !== null);
-  }, []);
-
   const clear = React.useCallback(() => {
-    setPhrases([]);
-    setInterim("");
-    phraseStartRef.current = null;
+    setTurns([]);
+    setError(null);
+    // A new recording is a new meeting: Speaker 1 has to be free again.
+    speakersRef.current = new CanonicalSpeakers();
   }, []);
 
+  /** Stop sending audio without giving up the session. */
   React.useEffect(() => {
-    const Recogniser = recogniserConstructor();
-    if (!Recogniser || !active) {
-      // Falling out of `active` covers Pause and Stop alike: the recogniser is
-      // torn down rather than left listening to a meeting nobody is recording.
-      wantRunningRef.current = false;
-      if (recogniserRef.current && runningRef.current) {
-        recogniserRef.current.onend = null;
-        recogniserRef.current.abort();
-      }
-      recogniserRef.current = null;
-      runningRef.current = false;
-      setInterim("");
+    nodeRef.current?.port.postMessage({ muted: paused });
+  }, [paused]);
+
+  React.useEffect(() => {
+    if (!active || !source) {
+      teardown();
+      setStatus("idle");
       return;
     }
 
-    const recogniser = new Recogniser();
-    recogniser.continuous = true;
-    recogniser.interimResults = true;
-    // Blank means auto-detect for Recallix's own transcript, but the browser
-    // has no such option, so the page language is the closest honest default.
-    if (lang) recogniser.lang = lang;
-
-    recogniser.onresult = (event) => {
-      let pending = "";
-      for (let i = event.resultIndex; i < event.results.length; i += 1) {
-        const result = event.results[i];
-        const text = result[0]?.transcript ?? "";
-        if (result.isFinal) {
-          const trimmed = text.trim();
-          if (trimmed) {
-            const at = phraseStartRef.current ?? elapsedRef.current;
-            setPhrases((prev) => [...prev, { id: nextIdRef.current++, at, text: trimmed }]);
-          }
-          phraseStartRef.current = null;
-        } else {
-          pending += text;
-        }
-      }
-      if (pending && phraseStartRef.current === null) {
-        phraseStartRef.current = elapsedRef.current;
-      }
-      setInterim(pending.trim());
-    };
-
-    recogniser.onerror = (event) => {
-      // Silence and self-inflicted stops are ordinary traffic, not faults.
-      if (event.error === "no-speech" || event.error === "aborted") return;
-      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-        wantRunningRef.current = false;
-        setError("Live text needs microphone access in this browser.");
-        return;
-      }
-      setError("Live text stopped. The recording is not affected.");
-    };
-
-    recogniser.onend = () => {
-      runningRef.current = false;
-      // Chrome ends the session after a pause in the talking whatever
-      // `continuous` says. Restarting is the difference between live text that
-      // works for an hour and live text that works for the first minute.
-      if (!wantRunningRef.current) return;
-      try {
-        recogniser.start();
-        runningRef.current = true;
-      } catch {
-        /* Already restarting, or gone. */
-      }
-    };
-
-    wantRunningRef.current = true;
-    try {
-      recogniser.start();
-      runningRef.current = true;
-      recogniserRef.current = recogniser;
-      setError(null);
-    } catch {
-      setError("Live text couldn't start. The recording is not affected.");
-    }
+    wantOpenRef.current = true;
+    void connect();
 
     return () => {
-      wantRunningRef.current = false;
-      recogniser.onend = null;
-      recogniser.onresult = null;
-      recogniser.onerror = null;
+      teardown();
+    };
+
+    /* ---------------------------------------------------------------- */
+
+    async function connect(): Promise<void> {
+      if (!wantOpenRef.current || !source) return;
+      setStatus(attemptRef.current === 0 ? "connecting" : "reconnecting");
+
+      let token: string;
       try {
-        recogniser.abort();
+        token = await mintToken();
+      } catch (err) {
+        // A deployment with no AssemblyAI key answers this way, and there is
+        // nothing to retry: say so once and stop rather than reconnecting in a
+        // loop against a service that will keep refusing.
+        setSupported(false);
+        setStatus("unavailable");
+        setError(
+          "Live text isn't available. The recording is not affected and will still be transcribed.",
+        );
+        return;
+      }
+
+      // A new socket is a new session: the provider counts turns and
+      // timestamps from zero again, so the epoch scopes the keys and the
+      // offset puts this session's clock on the recording's timeline.
+      sessionRef.current = {
+        epoch: sessionRef.current.epoch + 1,
+        offsetSeconds: elapsedRef.current,
+      };
+
+      const query = new URLSearchParams({
+        token,
+        sample_rate: String(SAMPLE_RATE),
+        encoding: "pcm_s16le",
+        format_turns: "true",
+        speaker_labels: "true",
+      });
+      const socket = new WebSocket(`${WS_URL}?${query.toString()}`);
+      socket.binaryType = "arraybuffer";
+      socketRef.current = socket;
+
+      socket.onopen = () => {
+        attemptRef.current = 0;
+        setStatus("listening");
+        setError(null);
+        void attachWorklet(socket);
+      };
+
+      socket.onmessage = (event) => {
+        if (typeof event.data !== "string") return;
+        let message: Record<string, unknown>;
+        try {
+          message = JSON.parse(event.data);
+        } catch {
+          return;
+        }
+        const session = sessionRef.current;
+        const speakers = speakersRef.current;
+        if (message.type === "Turn") {
+          setTurns((prev) => applyTurn(prev, message, session, speakers));
+        } else if (message.type === "SpeakerRevision") {
+          // Not optional politeness from the provider: a turn it has not yet
+          // clustered arrives labelled PENDING, and this is the message that
+          // eventually says who it was.
+          setTurns((prev) => applySpeakerRevision(prev, message, session, speakers));
+        } else if (message.type === "Error") {
+          // Carried as a status, not as an exception: the recording is fine
+          // and the user does not need to act.
+          setError(liveTextFailed());
+        }
+      };
+
+      socket.onclose = () => {
+        detachWorklet();
+        if (!wantOpenRef.current) return;
+        scheduleRetry();
+      };
+
+      socket.onerror = () => {
+        // `onclose` always follows, and it is the one that retries.
+        setError(liveTextFailed());
+      };
+    }
+
+    function scheduleRetry(): void {
+      const delay = RETRY_DELAYS[Math.min(attemptRef.current, RETRY_DELAYS.length - 1)];
+      attemptRef.current += 1;
+      setReconnects((n) => n + 1);
+      setStatus("reconnecting");
+      retryRef.current = setTimeout(() => void connect(), delay);
+    }
+
+    async function attachWorklet(socket: WebSocket): Promise<void> {
+      if (!source) return;
+      try {
+        const node = await source.createPcmNode();
+        node.port.onmessage = (event: MessageEvent) => {
+          if (socket.readyState !== WebSocket.OPEN) return;
+          socket.send(event.data as ArrayBuffer);
+        };
+        node.port.postMessage({ muted: paused });
+        nodeRef.current = node;
+      } catch {
+        setError(liveTextFailed());
+      }
+    }
+
+    function detachWorklet(): void {
+      const node = nodeRef.current;
+      if (!node) return;
+      node.port.onmessage = null;
+      try {
+        node.disconnect();
+      } catch {
+        /* Context already closed. */
+      }
+      nodeRef.current = null;
+    }
+
+    function teardown(): void {
+      wantOpenRef.current = false;
+      if (retryRef.current) {
+        clearTimeout(retryRef.current);
+        retryRef.current = null;
+      }
+      detachWorklet();
+      const socket = socketRef.current;
+      socketRef.current = null;
+      if (!socket) return;
+      // `Terminate` rather than a bare close: it asks the provider to flush the
+      // last turn, which is otherwise lost — and the last turn is the sentence
+      // somebody was in the middle of when they pressed Stop.
+      try {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: "Terminate" }));
+        }
       } catch {
         /* Already gone. */
       }
-      runningRef.current = false;
-      recogniserRef.current = null;
-    };
-  }, [active, lang]);
+      socket.onclose = null;
+      socket.onerror = null;
+      socket.onmessage = null;
+      try {
+        socket.close();
+      } catch {
+        /* Already gone. */
+      }
+    }
+    // `paused` is handled by its own effect so a pause does not tear the
+    // session down and lose the speaker model built up so far.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, source]);
 
-  return { supported, phrases, interim, error, clear };
+  return {
+    supported,
+    status,
+    turns: finalTurns(turns),
+    pending: pendingTurn(turns),
+    error,
+    reconnects,
+    clear,
+  };
+}
+
+function liveTextFailed(): string {
+  return "Live text stopped. The recording is not affected.";
+}
+
+/**
+ * What the hook needs from the recorder: a PCM tap, and no microphone of its own.
+ *
+ * An interface rather than the `AudioContext` itself so that the recorder stays
+ * the only thing that owns a microphone. The one bug class this removes is the
+ * one that made the old preview untrustworthy — live text listening to a
+ * different input from the recording.
+ */
+export interface LiveAudioSource {
+  createPcmNode: () => Promise<AudioWorkletNode>;
+}
+
+/**
+ * Ask Recallix for a streaming credential.
+ *
+ * <p>Absolute, and authenticated. A relative `/api/v1/...` was wrong twice
+ * over: the API is on a different origin from the app — port 8080 against the
+ * app's 3000, with no rewrite proxy — so the request went to Next.js and
+ * 404ed; and it carried none of the auth headers every other call in the app
+ * gets from `prepareHeaders`, so it would have been rejected even if it had
+ * arrived. Live text simply never started, and said only that it was
+ * unavailable.
+ *
+ * <p>Written by hand rather than as an RTK Query endpoint because the caller
+ * is not a component: this is invoked from inside a websocket lifecycle, once
+ * per connection, and a cached mutation hook would be a token reused past its
+ * expiry.
+ */
+async function mintToken(): Promise<string> {
+  const response = await fetch(`${API_BASE}/api/v1/streaming/token`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(await buildAuthHeaders()),
+    },
+    credentials: "include",
+  });
+  if (!response.ok) throw new Error(`token ${response.status}`);
+  const body = (await response.json()) as { token?: string };
+  if (!body.token) throw new Error("token missing");
+  return body.token;
 }

@@ -23,7 +23,8 @@ from app.schemas import (
     ProcessingFailedEvent,
     StatusEvent,
 )
-from app.storage import fetch_audio
+from app.providers.assemblyai_adapter import AudioUnreachableError, TranscriptionRequest
+from app.storage import fetch_audio, presigned_get_url
 
 logger = logging.getLogger("ai-service.kafka")
 
@@ -219,13 +220,54 @@ class KafkaWorker:
                 "meeting was imported before that changed and can still be read."
             )
 
-        audio, filename = await fetch_audio(
-            self._settings, audio_url=event.audio_url, object_key=event.object_key
-        )
-        return await self._pipeline.process(
-            event.meeting_id, audio, filename, progress_hook, transcript_hook,
-            event.summary_template, vocabulary, language,
-        )
+        # Ask the provider to fetch the file itself where that is possible.
+        # Two whole-file transfers of an hour of audio -- storage to here, here
+        # to the provider -- for bytes this process never looks at.
+        direct = event.audio_url or presigned_get_url(event.object_key or "", self._settings)
+
+        # Still downloaded when there is no URL to hand over. `fetch_audio`
+        # returns empty bytes rather than raising when it has nothing, which is
+        # what keeps the mock provider working with no storage at all.
+        audio, filename = (b"", event.object_key or "audio")
+        if not direct:
+            audio, filename = await fetch_audio(
+                self._settings, audio_url=event.audio_url, object_key=event.object_key
+            )
+
+        def build(url: str | None) -> TranscriptionRequest:
+            return TranscriptionRequest.from_event(
+                language=language,
+                vocabulary=vocabulary,
+                context=event.context,
+                speakers=event.speakers,
+                multichannel=event.multichannel,
+                audio_url=url,
+            )
+
+        try:
+            return await self._pipeline.process(
+                event.meeting_id, audio, filename, progress_hook, transcript_hook,
+                event.summary_template, vocabulary, language, request=build(direct),
+            )
+        except AudioUnreachableError as exc:
+            if not direct:
+                # Nothing to fall back to; the bytes were already what failed.
+                raise
+            # The provider could not reach the URL we handed it. Deployments
+            # get this wrong in ways that are invisible until a meeting comes
+            # back empty -- a bucket that is private to the right people and
+            # unreachable by the provider looks identical to a working one
+            # until a job runs. Send the bytes instead, which always works.
+            logger.warning(
+                "Provider could not fetch the audio (%s); falling back to upload.", exc
+            )
+            audio, filename = await fetch_audio(
+                self._settings, audio_url=event.audio_url, object_key=event.object_key
+            )
+            return await self._pipeline.process(
+                event.meeting_id, audio, filename, progress_hook, transcript_hook,
+                event.summary_template, vocabulary, language, request=build(None),
+            )
 
     async def _handle(self, event: MeetingUploadedEvent) -> None:
         meeting_id = event.meeting_id

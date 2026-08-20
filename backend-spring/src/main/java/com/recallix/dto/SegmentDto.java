@@ -23,7 +23,22 @@ public record SegmentDto(
          * Null for the overwhelmingly common monolingual case, so the UI marks
          * exceptions rather than tagging every line.
          */
-        String language
+        String language,
+        /**
+         * Meeting-local speaker identity ("spk_2"), stable across renames.
+         *
+         * <p>The client colours by this rather than by the display name, so
+         * renaming Speaker 2 to Sarah does not also recolour her. Null for
+         * transcripts recorded before V46, where the client falls back to the
+         * name and behaves exactly as it did.
+         */
+        String speakerKey,
+        /**
+         * {@code attributed} or {@code unknown}. An unknown turn is drawn as
+         * unattributed rather than being given a speaker number it has no
+         * claim to.
+         */
+        String speakerStatus
 ) {
     public static SegmentDto from(TranscriptSegment s) {
         return new SegmentDto(
@@ -33,7 +48,9 @@ public record SegmentDto(
                 s.getSpeaker(),
                 s.getText(),
                 s.getWords() == null ? List.of() : s.getWords(),
-                s.getLanguage()
+                s.getLanguage(),
+                s.getSpeakerKey(),
+                s.getSpeakerStatus()
         );
     }
 }

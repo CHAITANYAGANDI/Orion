@@ -14,10 +14,10 @@ import httpx
 import pytest
 
 from app.config import Settings
+from app.diarization import UNKNOWN_SPEAKER, CanonicalSpeakers
 from app.providers.deepgram_adapter import (
     DeepgramTranscriptionAdapter,
     parse_response,
-    speaker_label,
 )
 
 
@@ -72,18 +72,35 @@ def test_transcript_carries_speaker_attribution():
     assert "Speaker 2: I'll review it." in result.transcript
 
 
-def test_speaker_labels_are_one_based_and_renameable():
-    # Deepgram counts from zero; users do not.
-    assert speaker_label(0) == "Speaker 1"
-    assert speaker_label(3) == "Speaker 4"
+def test_speaker_numbers_follow_the_meeting_not_deepgram_s_cluster_index():
+    """Changed deliberately. This used to assert cluster 3 -> "Speaker 4".
+
+    Deepgram's indices identify clusters, not positions in the room. A
+    two-person call whose voices clustered as 0 and 3 displayed Speaker 1 and
+    Speaker 4. Whoever speaks first is Speaker 1.
+    """
+    speakers = CanonicalSpeakers()
+    assert speakers.resolve(3).label == "Speaker 1"
+    assert speakers.resolve(0).label == "Speaker 2"
+    # Stable for the rest of the meeting.
+    assert speakers.resolve(3).label == "Speaker 1"
 
 
-def test_missing_speaker_falls_back_to_a_single_label():
-    # Diarization off, or an old response shape: everything is one speaker
-    # rather than crashing or emitting "Speaker None".
-    assert speaker_label(None) == "Speaker 1"
-    assert speaker_label("nonsense") == "Speaker 1"
-    assert speaker_label(True) == "Speaker 1"
+@pytest.mark.parametrize("raw", [None, "nonsense-is-a-name", True])
+def test_a_missing_speaker_is_not_filed_under_the_first_one(raw):
+    """Changed deliberately. This used to assert "Speaker 1" for all three.
+
+    Diarization off is not "everybody is Speaker 1" -- it is "nobody was
+    attributed", and saying so is the only honest answer. `True` in particular
+    is a bool masquerading as an int and is not speaker 2.
+    """
+    identity = CanonicalSpeakers().resolve(raw)
+    if raw == "nonsense-is-a-name":
+        # A long string is a name from speaker identification, not a cluster id.
+        assert identity.label == raw
+    else:
+        assert identity.label == UNKNOWN_SPEAKER
+        assert identity.status == "unknown"
 
 
 # --------------------------------------------------------------------------- #

@@ -93,6 +93,32 @@ public class SummaryTemplateService {
      * not be fetched at all we accept any non-blank slug rather than block the
      * request — the ai-service is the authority and will resolve it.
      */
+    /**
+     * The template's human name, for a transcription prompt.
+     *
+     * <p>"Engineering sprint review" tells a speech model what kind of language
+     * to expect; "engineering-sprint-review" tells it about hyphens. Falls back
+     * to a blank string rather than the slug, because a prompt containing a
+     * slug is worse than a prompt containing nothing.
+     */
+    public String displayName(String slug) {
+        if (slug == null || slug.isBlank()) {
+            return "";
+        }
+        try {
+            return list().stream()
+                    .filter(t -> slug.equals(t.slug()))
+                    .map(AiClient.SummaryTemplateSummary::name)
+                    .filter(name -> name != null && !name.isBlank())
+                    .findFirst()
+                    .orElse("");
+        } catch (RuntimeException e) {
+            // The list is fetched from the ai-service. Prompting is an
+            // improvement, not a precondition for transcribing anything.
+            return "";
+        }
+    }
+
     public String requireKnown(String slug) {
         if (slug == null || slug.isBlank()) {
             return DEFAULT_SLUG;

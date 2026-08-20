@@ -244,6 +244,21 @@ function TrainingSection() {
           nothing to switch off — a toggle here would imply a use that does not
           happen.
         </p>
+        {/* Said here because it changed, and because it is the one part of
+            the path that is not "after you press Save". Somebody reading this
+            page is entitled to know that a meeting is being sent somewhere
+            while it is still happening, not only afterwards. */}
+        <p>
+          <strong className="text-foreground">
+            While you are recording, audio is streamed to that same speech-to-text
+            provider as you speak
+          </strong>{" "}
+          — that is what produces the live text on the recording page. It goes
+          from your browser to the provider directly, so the words appear
+          without waiting for the meeting to end. The recording itself is still
+          transcribed in full afterwards, and that fuller transcript is the one
+          that is kept.
+        </p>
         <p>
           <Link href="/settings/security" className="text-primary underline-offset-2 hover:underline">
             See exactly what Recallix holds of yours

@@ -189,6 +189,8 @@ class OpenAiTranscriptionAdapter(TranscriptionPort):
         filename: str,
         vocabulary: list[str] | None = None,
         language: str | None = None,
+        *,
+        request=None,  # noqa: ARG002 - accepted for the port, unused here.
     ) -> TranscriptResponse:
         async def _op() -> TranscriptResponse:
             buffer = io.BytesIO(audio)

@@ -180,7 +180,7 @@ def test_an_empty_archive_produces_nothing():
 
 # --- the pipeline wiring ---------------------------------------------------- #
 class _StubTranscription:
-    async def transcribe(self, audio, filename, vocabulary=None, language=None):
+    async def transcribe(self, audio, filename, vocabulary=None, language=None, **_):
         return TranscriptResponse(transcript="Hello.", language="en", segments=[])
 
 

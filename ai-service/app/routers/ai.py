@@ -40,10 +40,12 @@ from app.schemas import (
     TranslateLinesResponse,
     TranslateRequest,
     TranslateResponse,
+    StreamingTokenResponse,
     WorkspaceChatRequest,
     WorkspaceSuggestionsRequest,
 )
 from app.storage import fetch_audio
+from app.streaming import StreamingTokenError, StreamingTokenService
 from app.suggestions import meeting_material
 from app.templates import BUILT_IN, resolve
 
@@ -60,6 +62,33 @@ def get_pipeline(request: Request) -> Pipeline:
 def get_rag(request: Request) -> RagService:
     """Resolve the app-wide RagService built during startup."""
     return request.app.state.rag
+
+
+@router.post("/streaming-token", response_model=StreamingTokenResponse)
+async def streaming_token(
+    settings: Settings = Depends(get_settings),
+) -> StreamingTokenResponse:
+    """A credential the browser may hold for the length of one meeting start.
+
+    Called by Spring, never by a browser: this service has no user session to
+    authenticate and no rate limiter of its own, and both live one hop up. The
+    thing being protected is `ASSEMBLYAI_API_KEY`, which never leaves this
+    process -- what goes back is a token that can open one streaming session
+    and expires in well under a minute.
+
+    A 503 rather than an empty token when the key is missing. A caller handed a
+    blank string opens a websocket that is refused, and the user is told "live
+    text stopped" with nothing anywhere saying why.
+    """
+    service = StreamingTokenService(settings)
+    try:
+        token, ttl = await service.mint()
+    except StreamingTokenError as exc:
+        logger.warning("Streaming token unavailable: %s", exc)
+        raise HTTPException(
+            status_code=503, detail="Live transcription is not configured."
+        ) from exc
+    return StreamingTokenResponse(token=token, expires_in_seconds=ttl)
 
 
 @router.post("/transcribe", response_model=TranscriptResponse)

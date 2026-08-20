@@ -143,6 +143,20 @@ public class Meeting {
     @Column(name = "consent_confirmed_at")
     private Instant consentConfirmedAt;
 
+    /**
+     * How many voices to tell the transcriber to expect (V45).
+     *
+     * <p>Null on both is automatic, which is what every meeting recorded
+     * before this existed still is. Stored on the meeting rather than on the
+     * account because it is a fact about one recording: a 1:1 and an all-hands
+     * belong to the same person.
+     */
+    @Column(name = "expected_speakers_min")
+    private Integer expectedSpeakersMin;
+
+    @Column(name = "expected_speakers_max")
+    private Integer expectedSpeakersMax;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -205,6 +219,12 @@ public class Meeting {
 
     public String getSpokenLanguage() { return spokenLanguage; }
     public void setSpokenLanguage(String spokenLanguage) { this.spokenLanguage = spokenLanguage; }
+
+    public Integer getExpectedSpeakersMin() { return expectedSpeakersMin; }
+    public void setExpectedSpeakersMin(Integer v) { this.expectedSpeakersMin = v; }
+
+    public Integer getExpectedSpeakersMax() { return expectedSpeakersMax; }
+    public void setExpectedSpeakersMax(Integer v) { this.expectedSpeakersMax = v; }
 
     public String getSummaryTemplate() { return summaryTemplate; }
     public void setSummaryTemplate(String summaryTemplate) { this.summaryTemplate = summaryTemplate; }

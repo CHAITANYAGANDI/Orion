@@ -17,11 +17,22 @@ import type { TranscriptSegment } from "@/lib/types";
 
 export interface Turn {
   speaker: string;
+  /** Canonical identity, for colouring. Absent on pre-canonical transcripts. */
+  speakerKey?: string | null;
   start: number;
   segments: TranscriptSegment[];
 }
 
-/** Merge consecutive utterances by the same speaker into one turn. */
+/**
+ * Merge consecutive utterances by the same speaker into one turn.
+ *
+ * Consecutive is doing real work here: a one-word interjection between two of
+ * someone's utterances is a different speaker, so it breaks the run and the
+ * turn either side of it stays separate. Merging across it would put the
+ * interjection's neighbours back together as one paragraph and lose the fact
+ * that somebody else spoke in the middle — which is the bug this was reported
+ * as, arriving by a different route.
+ */
 export function groupIntoTurns(segments: TranscriptSegment[]): Turn[] {
   const turns: Turn[] = [];
   for (const s of segments) {
@@ -29,7 +40,12 @@ export function groupIntoTurns(segments: TranscriptSegment[]): Turn[] {
     if (last && last.speaker === s.speaker) {
       last.segments.push(s);
     } else {
-      turns.push({ speaker: s.speaker, start: s.start, segments: [s] });
+      turns.push({
+        speaker: s.speaker,
+        speakerKey: s.speakerKey,
+        start: s.start,
+        segments: [s],
+      });
     }
   }
   return turns;

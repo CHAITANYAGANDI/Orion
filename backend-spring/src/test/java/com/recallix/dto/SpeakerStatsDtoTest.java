@@ -104,6 +104,61 @@ class SpeakerStatsDtoTest {
         assertThat(stats.get(0).wordCount()).isEqualTo(3);
     }
 
+    @Test
+    void groups_by_canonical_identity_so_the_chart_matches_the_transcript() {
+        // Before canonical numbering the two could disagree outright: the
+        // transcript said Speaker 1 and Speaker 2 while the chart said
+        // Speaker 1 and Speaker 4, because the provider had clustered the
+        // second voice as "D" and the label was decoded by alphabet position.
+        var stats = SpeakerStatsDto.from(List.of(
+                keyed("Speaker 1", "spk_1", 0.0, 30.0),
+                keyed("Speaker 2", "spk_2", 30.0, 40.0),
+                keyed("Speaker 1", "spk_1", 40.0, 50.0)));
+
+        assertThat(stats).extracting(SpeakerStatsDto::speaker)
+                .containsExactly("Speaker 1", "Speaker 2");
+        assertThat(stats).extracting(SpeakerStatsDto::speakerKey)
+                .containsExactly("spk_1", "spk_2");
+        assertThat(stats.get(0).segmentCount()).isEqualTo(2);
+    }
+
+    @Test
+    void two_labels_renamed_to_one_person_become_one_row() {
+        // Renaming both to the same person is how a user says "these two
+        // labels are one human". Two rows both saying "Sarah" would read as a
+        // bug, and the transcript already merges them.
+        var stats = SpeakerStatsDto.from(List.of(
+                keyed("Sarah", "spk_1", 0.0, 10.0),
+                keyed("Sarah", "spk_2", 10.0, 30.0)));
+
+        assertThat(stats).hasSize(1);
+        assertThat(stats.get(0).speakingSeconds()).isEqualTo(30.0);
+        // Coloured from the first of them, so the chart and the transcript
+        // agree rather than each picking their own.
+        assertThat(stats.get(0).speakerKey()).isEqualTo("spk_1");
+    }
+
+    @Test
+    void a_transcript_recorded_before_canonical_keys_still_groups_by_name() {
+        // Those rows have no key at all, and must go on behaving exactly as
+        // they did rather than collapsing into one unkeyed speaker.
+        var stats = SpeakerStatsDto.from(List.of(
+                segment("Alice", 0.0, 30.0),
+                segment("Bob", 30.0, 40.0)));
+
+        assertThat(stats).extracting(SpeakerStatsDto::speaker)
+                .containsExactly("Alice", "Bob");
+        assertThat(stats).extracting(SpeakerStatsDto::speakerKey)
+                .containsOnlyNulls();
+    }
+
+    private static TranscriptSegment keyed(String speaker, String key, double start, double end) {
+        var segment = segment(speaker, start, end);
+        segment.setId("seg_" + key + start);
+        segment.setSpeakerKey(key);
+        return segment;
+    }
+
     private static TranscriptSegment segment(String speaker, double start, double end) {
         return segment(speaker, start, end, "text here");
     }

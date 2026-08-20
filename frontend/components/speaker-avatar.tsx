@@ -11,13 +11,23 @@ import { cn } from "@/lib/utils";
  * `aria-hidden` because the speaker's name is already written next to it in
  * text; announcing "P" before "Priya" is noise.
  */
-export function SpeakerAvatar({ name }: { name: string }) {
+export function SpeakerAvatar({
+  name,
+  /**
+   * Canonical speaker identity. Colouring by this rather than by `name` is
+   * what keeps a speaker the same colour when they are given a real one.
+   */
+  speakerKey,
+}: {
+  name: string;
+  speakerKey?: string | null;
+}) {
   const initial = (name.trim()[0] || "?").toUpperCase();
   return (
     <div
       className={cn(
         "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white",
-        speakerColor(name),
+        speakerColor(name, speakerKey),
       )}
       aria-hidden
     >

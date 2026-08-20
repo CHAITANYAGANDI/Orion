@@ -71,6 +71,18 @@ export interface MeetingCreateRequest {
    */
   projectId?: string;
   /**
+   * How many voices to expect, when whoever is uploading knows (V45).
+   *
+   * Absent is "auto", and auto is the default and the usual answer. These are
+   * **hard constraints** at the transcription provider: an exact count forces
+   * diarization to find that many speakers whether or not that many spoke, so
+   * a wrong two splits a conversation into four people. Nothing infers them —
+   * a calendar invitation with four attendees is not four speakers, because
+   * two of them were listening.
+   */
+  expectedSpeakersMin?: number;
+  expectedSpeakersMax?: number;
+  /**
    * The recorder confirming they told the room (V35).
    *
    * Only the browser recorder sends this — it is the only client that was
@@ -234,6 +246,15 @@ export interface SpokenWord {
   text: string;
   start: number;
   end: number;
+  /**
+   * Who said this word, canonically ("Speaker 2"). Diarization attributes per
+   * word, not only per utterance, and discarding that was how a one-word
+   * interjection came to be absorbed into the turn around it. Absent on
+   * transcripts recorded before that was kept.
+   */
+  speaker?: string | null;
+  /** The provider's own cluster id behind that label. Diagnostics only. */
+  speakerRaw?: string | null;
 }
 
 export interface TranscriptSegment {
@@ -255,11 +276,27 @@ export interface TranscriptSegment {
    * could not call — so it marks exceptions rather than labelling every line.
    */
   language?: string | null;
+  /**
+   * Meeting-local speaker identity ("spk_2"), stable across renames.
+   *
+   * Colours are picked from this rather than from the display name, so
+   * renaming Speaker 2 to Sarah keeps her the same colour. Absent for
+   * transcripts recorded before canonical numbering, which fall back to the
+   * name and behave exactly as they did.
+   */
+  speakerKey?: string | null;
+  /**
+   * `unknown` where the provider declined to attribute the turn. Drawn as
+   * unattributed rather than being given a speaker number it has no claim to.
+   */
+  speakerStatus?: "attributed" | "unknown" | null;
 }
 
 /** How much of the talking one speaker did. Derived server-side on every read. */
 export interface SpeakerStats {
   speaker: string;
+  /** The canonical identity these totals belong to, for consistent colouring. */
+  speakerKey?: string | null;
   /** Seconds this speaker held the floor, summed across their turns. */
   speakingSeconds: number;
   /** Share of total *speaking* time, 0-100. Not share of wall-clock duration. */

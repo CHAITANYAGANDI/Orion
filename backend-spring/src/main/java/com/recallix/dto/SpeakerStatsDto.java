@@ -17,6 +17,12 @@ import java.util.Map;
  */
 public record SpeakerStatsDto(
         String speaker,
+        /**
+         * The canonical identity these totals belong to ("spk_2"), so the
+         * chart colours a speaker the same as the transcript does. Null for
+         * transcripts recorded before V46.
+         */
+        String speakerKey,
         /** Seconds this speaker was talking, summed across their turns. */
         double speakingSeconds,
         /** Share of total *speaking* time, 0-100, rounded to one decimal. */
@@ -34,12 +40,27 @@ public record SpeakerStatsDto(
      * talking" is the claim being made, and it is the one people check.
      */
     public static List<SpeakerStatsDto> from(List<TranscriptSegment> segments) {
-        Map<String, double[]> totals = new LinkedHashMap<>();  // speaker -> [seconds, segments, words]
+        Map<String, double[]> totals = new LinkedHashMap<>();  // display name -> [seconds, segments, words]
+        Map<String, String> keys = new LinkedHashMap<>();       // display name -> canonical key
 
         for (TranscriptSegment segment : segments) {
             String speaker = segment.getSpeaker();
             if (speaker == null || speaker.isBlank()) {
                 continue;
+            }
+            // Grouped by the displayed name, which is what a rename changes
+            // and therefore what the reader is comparing against: renaming two
+            // labels to the same person is how a user says "these are one
+            // human", and two rows both saying "Sarah" would read as a bug.
+            //
+            // The canonical key rides along for colouring. It comes from the
+            // first segment under that name, so the chart and the transcript
+            // pick the same colour for the same person. The names themselves
+            // are canonical now — before, the transcript could say Speaker 1
+            // and Speaker 2 while this said Speaker 1 and Speaker 4.
+            String name = speaker.trim();
+            if (segment.getSpeakerKey() != null && !segment.getSpeakerKey().isBlank()) {
+                keys.putIfAbsent(name, segment.getSpeakerKey());
             }
             double start = segment.getStartTime() == null ? 0.0 : segment.getStartTime();
             double end = segment.getEndTime() == null ? 0.0 : segment.getEndTime();
@@ -47,7 +68,7 @@ public record SpeakerStatsDto(
             // otherwise subtract from that speaker's total.
             double seconds = Math.max(0.0, end - start);
 
-            double[] running = totals.computeIfAbsent(speaker.trim(), key -> new double[3]);
+            double[] running = totals.computeIfAbsent(name, key -> new double[3]);
             running[0] += seconds;
             running[1] += 1;
             running[2] += wordsIn(segment.getText());
@@ -58,6 +79,7 @@ public record SpeakerStatsDto(
         return totals.entrySet().stream()
                 .map(entry -> new SpeakerStatsDto(
                         entry.getKey(),
+                        keys.get(entry.getKey()),
                         round(entry.getValue()[0]),
                         // Zero rather than a division by zero when every
                         // segment is zero-length, which is what a transcript

@@ -122,7 +122,7 @@ vi.mock("@/lib/recording-context", () => ({
 
 import { RecordingBar } from "@/components/recording-bar";
 import type { UseRecorder } from "@/lib/use-recorder";
-import type { UseLiveTranscript } from "@/lib/use-live-transcript";
+import type { LiveTurn, UseLiveTranscript } from "@/lib/use-live-transcript";
 import type { RecordingSession } from "@/lib/recording-context";
 import type { UseSaveJob } from "@/lib/use-save-job";
 
@@ -139,10 +139,28 @@ const setTitle = vi.fn();
 function aTranscript(overrides: Partial<UseLiveTranscript> = {}): UseLiveTranscript {
   return {
     supported: true,
-    phrases: [],
-    interim: "",
+    status: "listening",
+    turns: [],
+    pending: null,
     error: null,
+    reconnects: 0,
     clear: vi.fn(),
+    ...overrides,
+  };
+}
+
+/** One settled turn, as the streaming provider hands it over. */
+function aTurn(overrides: Partial<LiveTurn> = {}): LiveTurn {
+  return {
+    id: "1:1:0",
+    turnKey: "1:1",
+    at: 0,
+    speaker: "Speaker 1",
+    speakerKey: "spk_1",
+    speakerRaw: "A",
+    speakerStatus: "attributed",
+    text: "Hello.",
+    final: true,
     ...overrides,
   };
 }
@@ -160,6 +178,7 @@ function aRecorder(overrides: Partial<UseRecorder> = {}): UseRecorder {
     devices: [],
     deviceId: null,
     setDeviceId,
+    liveSource: null,
     start: vi.fn(),
     pause,
     resume,
@@ -174,15 +193,25 @@ function aJob(overrides: Partial<UseSaveJob> = {}): UseSaveJob {
     phase: "idle",
     job: null,
     busy: false,
-    working: false,
     stopping: false,
-    overallProgress: 0,
-    label: "",
     save: saveJob,
     stop: stopJob,
     dismiss: dismissJob,
     ...overrides,
   };
+}
+
+/** A save that has reached the pipeline, on meeting mtg_9. */
+function processing(): UseSaveJob {
+  return aJob({
+    phase: "processing",
+    job: { id: "mtg_9", status: "TRANSCRIBING", progress: 40, message: "Generating transcript from audio…" },
+  });
+}
+
+/** A save still sending the bytes. */
+function uploading(): UseSaveJob {
+  return aJob({ phase: "uploading", busy: true });
 }
 
 function renderBar(
@@ -272,6 +301,31 @@ describe("RecordingBar", () => {
     // Recallix has no bot that announces itself in a participant list. The only
     // thing that tells the room is the person holding these controls.
     expect(screen.getByText("Always ask permission before recording")).toBeInTheDocument();
+  });
+
+  it("stands down for the upload, and puts nothing in its place", () => {
+    // Removed on request, twice over: first the percentage docked here, then
+    // the modal that replaced it. Against local storage the upload is over in
+    // milliseconds, so either one was a flash between pressing Save and
+    // arriving at the meeting, which reads as a fault rather than as progress.
+    const { container } = renderBar(
+      { state: "stopped", result: aResult() },
+      {},
+      uploading(),
+    );
+
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("has no in-flight state left to draw", () => {
+    // The audio in hand, and no save running. Save and Discard are plain: an
+    // upload can never be reached from here, because the bar is gone before
+    // one is under way.
+    renderBar({ state: "stopped", result: aResult() });
+
+    expect(screen.getByRole("button", { name: /Save & process/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Discard/ })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /Working/ })).not.toBeInTheDocument();
   });
 
   it("says the recording survives leaving the page, by being on every page", () => {
@@ -454,12 +508,17 @@ describe("RecordingBar saving", () => {
     expect(screen.getByRole("button", { name: /Discard/ })).toBeEnabled();
   });
 
-  it("leaves Discard on screen while a save is running, rather than removing it", () => {
-    // Disabled says "not now". Absent says "gone", and a bar with one greyed
-    // button and no way out is what a stuck phase used to look like.
-    renderBar({ state: "stopped", result: aResult() }, {}, aJob({ phase: "uploading", busy: true }));
+  it("takes Discard away with the rest of it once a save starts", () => {
+    // Discard used to be left disabled rather than removed, so that a stuck
+    // phase could not strand somebody in a bar with no way out. There is no
+    // bar to be stranded in now: the dialog is the whole of that stretch.
+    const { container } = renderBar(
+      { state: "stopped", result: aResult() },
+      {},
+      aJob({ phase: "uploading", busy: true }),
+    );
 
-    expect(screen.getByRole("button", { name: /Discard/ })).toBeDisabled();
+    expect(container).toBeEmptyDOMElement();
   });
 
   it("leaves the record page when the recording is discarded", async () => {
@@ -475,6 +534,28 @@ describe("RecordingBar saving", () => {
     expect(push).toHaveBeenCalledWith("/home");
   });
 
+  it("is gone the moment the audio is on the server, on every page", () => {
+    // Removed on request. It used to follow the reader from page to page for
+    // the length of a pipeline run, with a percentage for work nobody was
+    // watching. The meeting's own page draws that wait now — see
+    // components/processing-card.tsx — and this stops at the upload.
+    for (const path of ["/home", "/ask", "/record", "/meetings/mtg_9", "/meetings/mtg_other"]) {
+      pathname.current = path;
+      const { container, unmount } = renderBar({ state: "idle" }, {}, processing());
+      expect(container).toBeEmptyDOMElement();
+      unmount();
+    }
+  });
+
+  it("is gone while the bytes are going too, on every page", () => {
+    for (const path of ["/home", "/ask", "/record", "/meetings/mtg_9"]) {
+      pathname.current = path;
+      const { container, unmount } = renderBar({ state: "idle" }, {}, uploading());
+      expect(container).toBeEmptyDOMElement();
+      unmount();
+    }
+  });
+
   it("stays put when the recording is discarded from anywhere else", async () => {
     pathname.current = "/meetings/mtg_1";
     renderBar({ state: "stopped", result: aResult() });
@@ -487,59 +568,23 @@ describe("RecordingBar saving", () => {
     expect(push).not.toHaveBeenCalled();
   });
 
-  it("shows the percentage and the stage it belongs to", () => {
-    renderBar(
-      { state: "idle", result: null },
-      {},
-      aJob({
-        phase: "processing",
-        working: true,
-        overallProgress: 58,
-        label: "Generating transcript from audio…",
-        job: { id: "mtg_9", status: "TRANSCRIBING", progress: 40, message: "…" },
-      }),
-    );
+  it("goes as soon as the recorder has been let go and the bytes have landed", () => {
+    // The audio is on the server. Everything after this belongs to the meeting
+    // it became, on that meeting's page.
+    renderBar({ state: "idle", result: null }, {}, processing());
 
-    expect(screen.getByText("58%")).toBeInTheDocument();
-    expect(screen.getByText("Generating transcript from audio…")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: "Recording controls" }),
+    ).not.toBeInTheDocument();
   });
 
-  it("stays up after the recorder has been let go", () => {
-    // The audio is on the server and the recorder is idle, but there is still
-    // something to watch. The bar used to vanish at exactly this point.
-    renderBar({ state: "idle", result: null }, {}, aJob({ phase: "processing", working: true }));
+  it("offers no way to stop a pipeline, because it no longer shows one", () => {
+    // Stop moved onto the meeting page with the progress it belongs to. Left
+    // here it would be a control for something invisible.
+    renderBar({ state: "idle", result: null }, {}, processing());
 
-    expect(screen.getByRole("region", { name: "Recording controls" })).toBeInTheDocument();
-  });
-
-  it("offers to stop, and says what stopping destroys", async () => {
-    renderBar({ state: "idle", result: null }, {}, aJob({ phase: "processing", working: true }));
-
-    await userEvent.click(screen.getByRole("button", { name: /Stop processing/ }));
-
-    // The worker cannot be recalled, so what is stopped is the meeting
-    // existing. Said before the click, not after.
-    expect(vi.mocked(window.confirm).mock.calls[0][0]).toContain("cannot be undone");
-    expect(stopJob).toHaveBeenCalled();
-  });
-
-  it("keeps processing when the confirm is dismissed", async () => {
-    vi.mocked(window.confirm).mockReturnValue(false);
-    renderBar({ state: "idle", result: null }, {}, aJob({ phase: "processing", working: true }));
-
-    await userEvent.click(screen.getByRole("button", { name: /Stop processing/ }));
-
+    expect(screen.queryByRole("button", { name: /Stop processing/ })).not.toBeInTheDocument();
     expect(stopJob).not.toHaveBeenCalled();
-  });
-
-  it("carries the wait on every page, including the one just left", () => {
-    // Saving navigates to Home, so this is the only place the pipeline is
-    // shown. There is no second copy to defer to any more.
-    pathname.current = "/home";
-    renderBar({ state: "idle", result: null }, {}, aJob({ phase: "processing", working: true }));
-
-    expect(screen.getByRole("region", { name: "Recording controls" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Stop processing" })).toBeInTheDocument();
   });
 
   it("still carries a live recording on the record page", () => {

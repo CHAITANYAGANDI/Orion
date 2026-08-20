@@ -24,6 +24,8 @@ export interface Span {
 /** One continuous stretch of one person talking. */
 export interface SpeakerTurn extends Span {
   speaker: string;
+  /** Canonical identity, so the timeline band matches the transcript avatar. */
+  speakerKey?: string | null;
 }
 
 /**
@@ -41,7 +43,12 @@ export function speakerTurns(segments: TranscriptSegment[]): SpeakerTurn[] {
     if (last && last.speaker === s.speaker) {
       last.end = Math.max(last.end, s.end);
     } else {
-      turns.push({ start: s.start, end: s.end, speaker: s.speaker });
+      // The key rides along so the band under the scrubber is coloured from
+      // the same identity as the avatar beside the turn. Merging still keys on
+      // the displayed name: two speakers renamed to the same person are one
+      // person, and drawing a boundary between them would contradict the
+      // transcript.
+      turns.push({ start: s.start, end: s.end, speaker: s.speaker, speakerKey: s.speakerKey });
     }
   }
   return turns;

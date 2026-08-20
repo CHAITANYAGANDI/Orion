@@ -209,6 +209,16 @@ services:
       DEEPGRAM_MODEL: ${DEEPGRAM_MODEL:-nova-3}
       DEEPGRAM_LANGUAGE: ${DEEPGRAM_LANGUAGE:-}
       S3_ENDPOINT: http://minio:9000
+      # Where AssemblyAI fetches a recording from when it fetches one itself,
+      # which saves moving the whole file through this service twice. Distinct
+      # from S3_ENDPOINT, which is reachable only inside this network: a
+      # presigned URL signed against http://minio:9000 is valid and
+      # unreachable, which is the most confusing possible failure.
+      #
+      # Left blank in a local compose because localhost:9000 is not reachable
+      # from AssemblyAI either -- so development keeps the byte-upload path and
+      # a deployment with a real bucket sets this to its public host.
+      S3_PUBLIC_ENDPOINT: ""
       S3_ACCESS_KEY: minioadmin
       S3_SECRET_KEY: minioadmin
       S3_BUCKET: recallix

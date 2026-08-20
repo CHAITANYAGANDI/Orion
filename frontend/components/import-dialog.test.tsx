@@ -245,3 +245,61 @@ describe("ImportDialog transcript language", () => {
     expect(screen.getByText(/not to a file already dropped above/i)).toBeInTheDocument();
   });
 });
+
+/**
+ * Expected speakers.
+ *
+ * These reach AssemblyAI as hard constraints, so the assertions worth having
+ * are about restraint: nothing is sent unless a human chose, and the default
+ * is the one that constrains nothing.
+ */
+describe("how many people are speaking", () => {
+  async function uploadWith(choice?: string) {
+    render(<ImportDialog open onOpenChange={vi.fn()} />);
+    if (choice) {
+      await userEvent.selectOptions(
+        screen.getByLabelText(/How many people are speaking/i), choice);
+    }
+    await userEvent.upload(screen.getByTestId("import-file-input"), anAudioFile());
+    await userEvent.click(screen.getByRole("button", { name: /Upload & process/ }));
+    await waitFor(() => expect(createMeeting).toHaveBeenCalled());
+    return createMeeting.mock.calls[0][0];
+  }
+
+  it("defaults to letting the provider work it out", () => {
+    render(<ImportDialog open onOpenChange={vi.fn()} />);
+
+    expect(screen.getByLabelText(/How many people are speaking/i)).toHaveValue("auto");
+  });
+
+  it("sends no constraint at all on the default", async () => {
+    const body = await uploadWith();
+
+    // Not `min: null` or `min: 0`. An absent field is what the worker reads as
+    // automatic; a zero would be a constraint of zero speakers.
+    expect(body).not.toHaveProperty("expectedSpeakersMin");
+    expect(body).not.toHaveProperty("expectedSpeakersMax");
+  });
+
+  it("sends an exact count as a range of one value", async () => {
+    expect(await uploadWith("2")).toMatchObject({
+      expectedSpeakersMin: 2,
+      expectedSpeakersMax: 2,
+    });
+  });
+
+  it("sends a range when the user only knows roughly", async () => {
+    expect(await uploadWith("2-4")).toMatchObject({
+      expectedSpeakersMin: 2,
+      expectedSpeakersMax: 4,
+    });
+  });
+
+  it("warns that a wrong answer is worse than no answer", () => {
+    // The asymmetry is the whole reason "work it out" is the default: too few
+    // merges two people into one, too many splits one person in half.
+    render(<ImportDialog open onOpenChange={vi.fn()} />);
+
+    expect(screen.getByText(/a wrong answer/i)).toBeInTheDocument();
+  });
+});

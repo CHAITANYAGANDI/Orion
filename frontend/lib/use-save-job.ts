@@ -3,25 +3,23 @@
 /**
  * Getting a finished recording onto the server, and watching what happens next.
  *
- * <p>This used to live inside the docked control bar, which was fine while the
- * bar was the only thing that showed it. It is not any more: the record page
- * shows the same pipeline as a set of stages, and two components cannot own one
- * upload. So the state moved up to the provider, and both read it.
+ * <p>Lives on the provider rather than in the control bar, because the thing
+ * that reads it is not the bar: saving lands on the meeting's own page, and
+ * that page draws the pipeline and offers the one control that calls it off.
  *
- * <p>Two halves, one number. The upload is a real percentage from the browser;
- * everything after it is a stage reported by the worker. Showing them as two
- * bars — or one bar that fills, empties and fills again — reads as the first
- * half having been thrown away, so they share a scale. See {@link UPLOAD_SHARE}.
+ * <p><b>Nothing here reports the upload any more.</b> There was a percentage,
+ * drawn first in a docked bar and then in a modal that asked for the browser to
+ * be kept open; both were removed on request. Against local storage the upload
+ * is over in milliseconds, so what either of them actually produced was a flash
+ * between pressing Save and arriving at the meeting. Save goes straight there
+ * now, and the wait somebody actually sits through is the pipeline, drawn full
+ * width on the page they land on. See components/processing-card.tsx.
  *
- * <p>Saving leaves for Home immediately and the wait happens there, in the
- * docked bar. The recording page has nothing left to say at that point — the
- * audio is gone from the tab and the microphone is closed — so staying on it
- * would be sitting on a page about a recording that is over.
- *
- * <p>Finishing navigates nowhere. The bar goes and Home is already showing the
- * meeting in its list, which is where somebody would have gone looking anyway.
- * Being thrown onto the meeting page instead takes the choice away from anybody
- * who saved a recording and moved on to something else.
+ * <p><b>The phases past `creating` are still tracked</b>, and they are not
+ * decoration. `processing` is what tells the meeting page that this is the
+ * meeting being saved, and therefore the one whose pipeline can still be
+ * stopped; `done` and `failed` are what invalidate the caches Home lists from,
+ * so a finished meeting stops reading "Processing" in a list nobody refetched.
  */
 
 import * as React from "react";
@@ -53,57 +51,18 @@ export interface SaveJob {
   message: string;
 }
 
-/**
- * Where the upload ends and the pipeline begins, on one scale.
- *
- * <p>Roughly what the upload is worth on a domestic connection for an hour of
- * audio. Approximate on purpose: a number that only ever goes up is worth more
- * here than an accurate one.
- */
-export const UPLOAD_SHARE = 0.3;
-
-/** The stages, in the order they happen, for anything drawing them as steps. */
-export const PIPELINE_STEPS = [
-  { key: "upload", label: "Upload", hint: "Sending the audio to Recallix" },
-  { key: "transcribe", label: "Transcribe", hint: "Turning speech into text" },
-  { key: "summarise", label: "Summarise", hint: "Writing the brief" },
-  { key: "extract", label: "Extract", hint: "Finding tasks, decisions and risks" },
-] as const;
-
-export type StepKey = (typeof PIPELINE_STEPS)[number]["key"];
-
-/** Which step a phase and status are standing on. */
-export function currentStep(phase: SavePhase, status?: MeetingStatus): StepKey | null {
-  if (phase === "uploading" || phase === "creating") return "upload";
-  if (phase === "idle") return null;
-  switch (status) {
-    case "CREATED":
-    case "UPLOADED":
-    case "QUEUED":
-      return "upload";
-    case "TRANSCRIBING":
-      return "transcribe";
-    case "SUMMARIZING":
-      return "summarise";
-    case "EXTRACTING":
-      return "extract";
-    default:
-      return phase === "done" ? null : "transcribe";
-  }
-}
-
 export interface UseSaveJob {
   phase: SavePhase;
   job: SaveJob | null;
-  /** A save is in flight and the audio is still only in this tab. */
+  /**
+   * A save is in flight and the audio is still only in this tab.
+   *
+   * <p>Read by the bar, which stands down for exactly this stretch. Not a
+   * percentage and not a label: what it answers is whether there is anything
+   * to draw, and the answer is no.
+   */
   busy: boolean;
-  /** Something is running that a progress bar should be drawn for. */
-  working: boolean;
   stopping: boolean;
-  /** 0-100 across the upload and the pipeline together. */
-  overallProgress: number;
-  /** What to put beside that number. */
-  label: string;
   save: (result: RecorderResult, title: string) => Promise<void>;
   stop: () => Promise<boolean>;
   dismiss: () => void;
@@ -117,17 +76,12 @@ export function useSaveJob(recorder: UseRecorder): UseSaveJob {
   const [deleteMeeting] = useDeleteMeetingMutation();
 
   const [phase, setPhase] = React.useState<SavePhase>("idle");
-  const [uploadProgress, setUploadProgress] = React.useState(0);
   const [job, setJob] = React.useState<SaveJob | null>(null);
   const [stopping, setStopping] = React.useState(false);
 
   const busy = phase === "uploading" || phase === "creating";
-  const working = busy || phase === "processing";
 
-  const clearPhase = React.useCallback(() => {
-    setPhase("idle");
-    setUploadProgress(0);
-  }, []);
+  const clearPhase = React.useCallback(() => setPhase("idle"), []);
 
   const dismiss = React.useCallback(() => {
     setJob(null);
@@ -212,16 +166,16 @@ export function useSaveJob(recorder: UseRecorder): UseSaveJob {
     }
     try {
       setPhase("uploading");
-      setUploadProgress(5);
       const presign = await createUploadUrl({
         filename: file.name,
         contentType: file.type,
         sizeBytes: file.size,
       }).unwrap();
 
-      await putWithProgress(presign.uploadUrl, file, (pct) =>
-        setUploadProgress(Math.max(5, pct)),
-      );
+      // The progress callback goes nowhere on purpose. `putWithProgress` is
+      // still what performs the PUT -- it is the XHR that can report at all --
+      // and there is nothing left on screen to tell.
+      await putWithProgress(presign.uploadUrl, file, () => {});
 
       setPhase("creating");
       const meeting = await createMeeting({
@@ -242,14 +196,18 @@ export function useSaveJob(recorder: UseRecorder): UseSaveJob {
         message: "Queued for processing…",
       });
       setPhase("processing");
-      setUploadProgress(100);
       // The audio is on the server now. A second copy in the tab is one nothing
       // reads, and one the bar would go on offering to save.
       recorder.reset();
-      // Off the recording page and back to the list. Everything left to happen
-      // happens in the docked bar, which is on every page.
-      router.push("/home");
+      // Onto the meeting that was just made. It exists from this moment, it has
+      // a page, and that page already draws the pipeline full width with the
+      // stage it is on — so the wait is watched in the place the result will
+      // appear rather than in a bar over a list the meeting is not in yet.
+      // Leaving is still free: the bar picks the wait up on any other page.
+      router.push(`/meetings/${meeting.id}`);
     } catch (err) {
+      // The recorder was not reset, so the audio is still in the tab and the
+      // bar comes back offering Save. The toast is the whole of the telling.
       clearPhase();
       toast.error(uploadError(err));
     }
@@ -304,44 +262,5 @@ export function useSaveJob(recorder: UseRecorder): UseSaveJob {
     dismiss();
   }, [phase, job?.id, job?.message, dismiss, dispatch]);
 
-  /**
-   * One number for the whole wait, and it only ever goes up.
-   *
-   * <p>`done` is pinned to 100 rather than read from the last event: the worker
-   * reports 100 on its final stage before the result lands, and a bar sitting
-   * at 100% beside "Extracting…" is a finished job that is not.
-   */
-  const overallProgress =
-    phase === "uploading"
-      ? Math.round(uploadProgress * UPLOAD_SHARE)
-      : phase === "creating"
-        ? Math.round(100 * UPLOAD_SHARE)
-        : phase === "processing"
-          ? Math.min(
-              99,
-              Math.round(100 * UPLOAD_SHARE + (job?.progress ?? 0) * (1 - UPLOAD_SHARE)),
-            )
-          : phase === "done"
-            ? 100
-            : 0;
-
-  const label =
-    phase === "uploading"
-      ? "Uploading the recording…"
-      : phase === "creating"
-        ? "Starting processing…"
-        : job?.message || "Processing…";
-
-  return {
-    phase,
-    job,
-    busy,
-    working,
-    stopping,
-    overallProgress,
-    label,
-    save,
-    stop,
-    dismiss,
-  };
+  return { phase, job, busy, stopping, save, stop, dismiss };
 }

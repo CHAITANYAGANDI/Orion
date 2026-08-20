@@ -29,6 +29,7 @@ import {
   ClipboardCopy,
   ListChecks,
   MessageSquare,
+  Square,
 } from "lucide-react";
 import {
   useGetMeetingQuery,
@@ -66,6 +67,8 @@ import type {
   SummarySection,
 } from "@/lib/types";
 import { Button } from "@/components/ui/button";
+import { useRecordingJob } from "@/lib/recording-context";
+import { ProcessingCard } from "@/components/processing-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -147,6 +150,36 @@ export default function MeetingDetailPage() {
 
   const [live, setLive] = React.useState<StatusEvent | null>(null);
   const meeting = useGetMeetingQuery(id);
+
+  /**
+   * The save that is still running, if it is this meeting's.
+   *
+   * <p>Saving a recording lands here, so the docked bar stands down and this
+   * page carries the wait — including the one control that ends it. Matched on
+   * the id: the bar may be following a different meeting entirely, and offering
+   * to stop that one from this page would delete something not on screen.
+   */
+  const recordingJob = useRecordingJob();
+  const stoppable = recordingJob.phase === "processing" && recordingJob.job?.id === id;
+
+  /**
+   * Call the pipeline off, which means deleting what it is working on.
+   *
+   * <p>The worker is mid-flight and cannot be recalled. Once the meeting is
+   * gone this page is about nothing, so it leaves for the list rather than
+   * sitting on a 404 of the thing it just deleted.
+   */
+  async function stopProcessing() {
+    if (
+      !window.confirm(
+        "Stop processing?\n\nThe meeting and its recording are deleted. The audio " +
+          "only exists on the server now, so this cannot be undone.",
+      )
+    ) {
+      return;
+    }
+    if (await recordingJob.stop()) router.push("/home");
+  }
 
   /**
    * Controlled so the transcript can hand a selection to the chat.
@@ -699,7 +732,15 @@ export default function MeetingDetailPage() {
       )}
 
       {/* Processing / failed */}
-      {!terminal && <ProcessingCard status={status} progress={live?.progress ?? statusProgress(status)} message={live?.message} />}
+      {!terminal && (
+        <ProcessingCard
+          status={status}
+          progress={live?.progress ?? statusProgress(status)}
+          message={live?.message}
+          onStop={stoppable ? () => void stopProcessing() : undefined}
+          stopping={recordingJob.stopping}
+        />
+      )}
       {failed && (
         <Card className="border-destructive/40">
           <CardContent className="flex items-start gap-3 pt-6">
@@ -2273,7 +2314,7 @@ function TranscriptPanel({
                     )
                   }
                 />
-                <SpeakerAvatar name={turn.speaker} />
+                <SpeakerAvatar name={turn.speaker} speakerKey={turn.speakerKey} />
                 <div className="min-w-0 flex-1 space-y-1">
                   <div className="flex items-baseline gap-2">
                     <span className="text-sm font-semibold">{turn.speaker}</span>
@@ -2669,22 +2710,6 @@ const SpokenWords = React.memo(function SpokenWords({
     </>
   );
 });
-
-function ProcessingCard({ status, progress, message }: { status: MeetingStatus; progress: number; message?: string }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Loader2 className="h-4 w-4 animate-spin text-primary" /> {statusLabel(status)}…
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <Progress value={progress} />
-        <p className="text-sm text-muted-foreground">{message || "Working on your meeting brief. This updates live."}</p>
-      </CardContent>
-    </Card>
-  );
-}
 
 function EmptyText({ children }: { children: React.ReactNode }) {
   return <p className="py-6 text-center text-sm text-muted-foreground">{children}</p>;

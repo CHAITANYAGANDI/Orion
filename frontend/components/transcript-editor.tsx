@@ -237,7 +237,7 @@ export const TranscriptEditor = React.forwardRef<
 
         {turns.map((turn, i) => (
           <div key={i} className="flex gap-3">
-            <SpeakerAvatar name={turn.speaker} />
+            <SpeakerAvatar name={turn.speaker} speakerKey={turn.speakerKey} />
             <div className="min-w-0 flex-1">
               {/* Read-only on purpose, and shown rather than hidden: a
                   correction is easier to make when you can see who the words

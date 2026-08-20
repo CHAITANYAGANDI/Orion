@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.recallix.domain.SummarySection;
 import com.recallix.dto.SegmentDto;
 import com.recallix.dto.callback.AiInsight;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -23,6 +25,8 @@ import java.util.Map;
  */
 @Component
 public class AiClient {
+
+    private static final Logger log = LoggerFactory.getLogger(AiClient.class);
 
     private final RestClient client;
 
@@ -45,6 +49,43 @@ public class AiClient {
                            String meetingId, String meetingTitle) {}
 
     public record ChatResult(String answer, List<Citation> citations) {}
+
+    /** A short-lived AssemblyAI streaming credential on its way to a browser. */
+    public record StreamingToken(String token, int expiresInSeconds) {}
+
+    /**
+     * Mint a streaming token. Null when one could not be had.
+     *
+     * <p>Null rather than an exception because the caller has something useful
+     * to say about it and this does not: live transcription being unavailable
+     * is a degraded meeting, not a failed one, and the recording itself is
+     * unaffected either way.
+     *
+     * <p>{@code ASSEMBLYAI_API_KEY} lives in the ai-service and is never read
+     * here. What crosses this call is the token, which expires in under a
+     * minute and can open exactly one streaming session.
+     */
+    public StreamingToken streamingToken() {
+        try {
+            JsonNode body = client.post()
+                    .uri("/ai/streaming-token")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of())
+                    .retrieve()
+                    .body(JsonNode.class);
+            if (body == null || !body.hasNonNull("token")) {
+                return null;
+            }
+            return new StreamingToken(
+                    body.get("token").asText(),
+                    body.hasNonNull("expiresInSeconds") ? body.get("expiresInSeconds").asInt() : 45);
+        } catch (RuntimeException e) {
+            // The message can carry a provider response body; the class name
+            // cannot, and is enough to tell a 503 from a connection refused.
+            log.warn("Streaming token request failed: {}", e.getClass().getSimpleName());
+            return null;
+        }
+    }
 
     public record SearchHit(String meetingId, String meetingTitle, int chunkIndex,
                             String snippet, Double start, Double end, double score) {}

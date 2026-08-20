@@ -75,6 +75,7 @@ class _StubTranscription:
         filename: str,
         vocabulary: list[str] | None = None,
         language: str | None = None,
+        **_,
     ) -> TranscriptResponse:
         return TranscriptResponse(transcript="Hello.", language="en", segments=[])
 

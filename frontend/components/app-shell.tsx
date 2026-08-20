@@ -100,7 +100,11 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
    * by the bar itself; the extra 3rem is so the newest words clear it rather
    * than touch it.
    */
-  const clearance = capturing ? "calc(var(--recording-bar, 0px) + 3rem)" : undefined;
+  // The recorder alone now. The bar stands down for the upload -- the dialog
+  // has that stretch to itself -- so room reserved for it there would be a
+  // three-rem hole at the foot of a page with nothing docked over it.
+  const barShowing = capturing;
+  const clearance = barShowing ? "calc(var(--recording-bar, 0px) + 3rem)" : undefined;
 
   // Ctrl/Cmd-K from anywhere. Bound on the shell rather than on the input so it
   // works while the focus is in a transcript, a chat box or nothing at all.

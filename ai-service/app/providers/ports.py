@@ -7,6 +7,7 @@ on the ports — the factory decides which adapter to wire in.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Any
 
 from app.schemas import (
     ActionItem,
@@ -16,6 +17,9 @@ from app.schemas import (
     SummaryTemplate,
     TranscriptResponse,
 )
+
+if TYPE_CHECKING:  # pragma: no cover - import cycle: the adapter imports this.
+    from app.providers.assemblyai_adapter import TranscriptionRequest
 
 
 class TranscriptionPort(ABC):
@@ -28,6 +32,8 @@ class TranscriptionPort(ABC):
         filename: str,
         vocabulary: list[str] | None = None,
         language: str | None = None,
+        *,
+        request: "TranscriptionRequest | Any | None" = None,
     ) -> TranscriptResponse:
         """Transcribe raw audio bytes into text + segments.
 
@@ -42,6 +48,17 @@ class TranscriptionPort(ABC):
         for the short or bilingual recordings detection gets wrong — and a wrong
         detection is not a cosmetic label, it is a transcript in a language
         nobody spoke. Adapters whose provider cannot be told ignore it.
+
+        `request` carries everything the newer providers can use and the
+        older ones cannot: what the meeting is about, who is expected to be in
+        it, how many voices to look for, and a URL the provider can fetch the
+        audio from itself. Keyword-only and optional so that every existing
+        caller, adapter and test is unaffected — an adapter that ignores it
+        behaves exactly as it did.
+
+        It **supersedes** `vocabulary` and `language` rather than duplicating
+        them; both are still accepted positionally because three adapters and
+        a dozen tests pass them that way.
 
         Both are optional with defaults so existing callers and tests are
         unaffected.

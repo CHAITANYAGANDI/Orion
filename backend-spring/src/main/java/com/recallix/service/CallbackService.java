@@ -221,6 +221,9 @@ public class CallbackService {
             seg.setStartTime(s.start());
             seg.setEndTime(s.end());
             seg.setSpeaker(s.speaker());
+            seg.setSpeakerKey(s.speakerKey());
+            seg.setSpeakerRaw(s.speakerRaw());
+            seg.setSpeakerStatus(s.speakerStatusOrDefault());
             seg.setText(s.text());
             seg.setWords(s.wordsOrEmpty());
             seg.setLanguage(s.language());

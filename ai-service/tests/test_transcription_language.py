@@ -55,7 +55,7 @@ class _RecordingTranscriber:
     def __init__(self) -> None:
         self.language: str | None = "not called"
 
-    async def transcribe(self, audio, filename, vocabulary=None, language=None):
+    async def transcribe(self, audio, filename, vocabulary=None, language=None, **_):
         self.language = language
         return TranscriptResponse(transcript="Acordamos usar S3.", language="es", segments=[])
 

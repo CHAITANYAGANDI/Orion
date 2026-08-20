@@ -61,7 +61,7 @@ vi.mock("@/lib/recording-context", () => ({
 import RecordPage from "@/app/(app)/record/page";
 import type { UseSaveJob } from "@/lib/use-save-job";
 import type { UseRecorder } from "@/lib/use-recorder";
-import type { UseLiveTranscript } from "@/lib/use-live-transcript";
+import type { LiveTurn, UseLiveTranscript } from "@/lib/use-live-transcript";
 import type { RecordingSession } from "@/lib/recording-context";
 
 const start = vi.fn().mockResolvedValue(undefined);
@@ -70,10 +70,28 @@ const setTitle = vi.fn();
 function aTranscript(overrides: Partial<UseLiveTranscript> = {}): UseLiveTranscript {
   return {
     supported: true,
-    phrases: [],
-    interim: "",
+    status: "listening",
+    turns: [],
+    pending: null,
     error: null,
+    reconnects: 0,
     clear: vi.fn(),
+    ...overrides,
+  };
+}
+
+/** One settled turn, as the streaming provider hands it over. */
+function aTurn(overrides: Partial<LiveTurn> = {}): LiveTurn {
+  return {
+    id: "1:1:0",
+    turnKey: "1:1",
+    at: 0,
+    speaker: "Speaker 1",
+    speakerKey: "spk_1",
+    speakerRaw: "A",
+    speakerStatus: "attributed",
+    text: "Hello.",
+    final: true,
     ...overrides,
   };
 }
@@ -83,10 +101,7 @@ function aJob(overrides: Partial<UseSaveJob> = {}): UseSaveJob {
     phase: "idle",
     job: null,
     busy: false,
-    working: false,
     stopping: false,
-    overallProgress: 0,
-    label: "",
     save: vi.fn(),
     stop: vi.fn(),
     dismiss: vi.fn(),
@@ -118,6 +133,7 @@ function renderPage(
     devices: [],
     deviceId: null,
     setDeviceId: vi.fn(),
+    liveSource: null,
     start,
     pause: vi.fn(),
     resume: vi.fn(),
@@ -192,6 +208,39 @@ describe("RecordPage on arrival", () => {
     });
 
     expect(start).not.toHaveBeenCalled();
+  });
+
+  it("draws nothing at all while the save hands over to the meeting", () => {
+    // The real sequence: a finished recording, then `save()` releasing the
+    // audio a tick before the route changes. Drawing the idle state in that gap
+    // puts "Waiting for permission…" on screen as though a recording were about
+    // to start — the last thing somebody sees of a meeting they just saved.
+    const view = renderPage({
+      state: "stopped",
+      result: { file: new File([""], "take.webm"), durationSeconds: 12 },
+    });
+
+    recorder.current = { ...(recorder.current as UseRecorder), state: "idle", result: null };
+    savejob.current = aJob({ phase: "processing" });
+    view.rerender(<RecordPage />);
+
+    expect(screen.queryByText(/Waiting for permission/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Try again/)).not.toBeInTheDocument();
+  });
+
+  it("still asks for the microphone when nothing is being saved", () => {
+    // The guard above must not swallow the ordinary arrival.
+    renderPage();
+
+    expect(screen.getByText(/Waiting for permission/i)).toBeInTheDocument();
+  });
+
+  it("asks for the microphone even while an earlier meeting is still processing", () => {
+    // Nothing stops you recording the next one. Sitting blank behind somebody
+    // else's progress bar would be the guard above overreaching.
+    renderPage({ state: "idle" }, {}, aJob({ phase: "processing" }));
+
+    expect(screen.getByText(/Waiting for permission/i)).toBeInTheDocument();
   });
 
   it("carries no standing explanation before a recording", () => {
@@ -322,16 +371,13 @@ describe("RecordPage note heading", () => {
 
 describe("RecordPage processing", () => {
   it("does not draw the pipeline, which happens after this page is left", () => {
-    // Saving navigates to Home and the wait is carried by the docked bar there,
-    // so by the time there is anything to watch this page is behind you.
+    // Saving navigates to the meeting and the wait is drawn there, so by the
+    // time there is anything to watch this page is behind you.
     renderPage(
       { state: "idle" },
       {},
       aJob({
         phase: "processing",
-        working: true,
-        overallProgress: 58,
-        label: "Generating transcript from audio…",
         job: { id: "mtg_9", status: "TRANSCRIBING", progress: 40, message: "Transcribing…" },
       }),
     );
@@ -342,14 +388,14 @@ describe("RecordPage processing", () => {
 });
 
 describe("RecordPage live text", () => {
-  it("shows the words with the time they were said", () => {
+  it("shows the words with the speaker and the time they were said", () => {
     renderPage(
       { state: "recording" },
       {
         transcript: aTranscript({
-          phrases: [
-            { id: 1, at: 5, text: "Hello, hello, hello." },
-            { id: 2, at: 20, text: "Shall we start?" },
+          turns: [
+            aTurn({ id: "1:1", at: 4, speaker: "Speaker 1", text: "Hello, hello, hello." }),
+            aTurn({ id: "1:2", at: 20, speaker: "Speaker 2", text: "Shall we start?" }),
           ],
         }),
       },
@@ -357,34 +403,54 @@ describe("RecordPage live text", () => {
 
     expect(screen.getByText("Hello, hello, hello.")).toBeInTheDocument();
     expect(screen.getByText("Shall we start?")).toBeInTheDocument();
-    // The same timeline the finished transcript will use.
-    expect(screen.getByText("0:05")).toBeInTheDocument();
-    expect(screen.getByText("0:20")).toBeInTheDocument();
+    // Who said it, which the browser-speech preview could not answer at all.
+    expect(screen.getByText(/Speaker 1 \u00b7/)).toBeInTheDocument();
+    expect(screen.getByText(/Speaker 2 \u00b7/)).toBeInTheDocument();
+    // The provider's own timeline, and the one the finished transcript uses.
+    expect(screen.getByText(/0:04/)).toBeInTheDocument();
+    expect(screen.getByText(/0:20/)).toBeInTheDocument();
   });
 
-  it("shows the phrase still being spoken", () => {
+  it("says it is working out who is speaking rather than guessing", () => {
+    // Filing an unattributed turn under Speaker 1 puts a quotation beside
+    // somebody who may never have said it, and during a live meeting that name
+    // is read and acted on.
     renderPage(
       { state: "recording" },
-      { transcript: aTranscript({ interim: "so the next thing" }) },
+      {
+        transcript: aTranscript({
+          turns: [aTurn({ speaker: "Unknown speaker", speakerStatus: "unknown", text: "mm hm" })],
+        }),
+      },
+    );
+
+    expect(screen.getByText(/Identifying speaker/)).toBeInTheDocument();
+    expect(screen.queryByText(/Speaker 1/)).not.toBeInTheDocument();
+  });
+
+  it("shows the turn still being spoken", () => {
+    renderPage(
+      { state: "recording" },
+      {
+        transcript: aTranscript({
+          pending: aTurn({ id: "1:9", text: "so the next thing", final: false }),
+        }),
+      },
     );
 
     expect(screen.getByText("so the next thing")).toBeInTheDocument();
   });
 
-  it("says plainly that this is not the transcript", () => {
+  it("no longer calls the live text the browser's own speech service", () => {
     renderPage(
       { state: "recording" },
-      {
-        transcript: aTranscript({
-          phrases: [{ id: 1, at: 5, text: "Hello." }],
-        }),
-      },
+      { transcript: aTranscript({ turns: [aTurn()] }) },
     );
 
-    // It is unpunctuated, wrong about names, and thrown away. Presented as the
-    // transcript it would be a product that transcribes badly.
-    expect(screen.getByText(/rough preview from your browser's speech service/i))
-      .toBeInTheDocument();
+    // It was true and is not any more. The words come from the same provider
+    // that writes the final transcript, over a websocket, with diarization --
+    // calling them the browser's would now be the misleading claim.
+    expect(screen.queryByText(/rough preview from your browser/i)).not.toBeInTheDocument();
   });
 
   it("shows nothing until somebody says something", () => {
@@ -420,9 +486,7 @@ describe("RecordPage live text", () => {
         result: { file: new File(["x"], "r.webm", { type: "audio/webm" }), durationSeconds: 90 },
       },
       {
-        transcript: aTranscript({
-          phrases: [{ id: 1, at: 5, text: "Hello." }],
-        }),
+        transcript: aTranscript({ turns: [aTurn({ at: 5, text: "Hello." })] }),
       },
     );
 
@@ -435,9 +499,7 @@ describe("RecordPage live text", () => {
     renderPage(
       { state: "paused" },
       {
-        transcript: aTranscript({
-          phrases: [{ id: 1, at: 5, text: "Hello." }],
-        }),
+        transcript: aTranscript({ turns: [aTurn({ at: 5, text: "Hello." })] }),
       },
     );
 

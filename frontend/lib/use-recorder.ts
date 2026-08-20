@@ -21,6 +21,7 @@
  */
 
 import * as React from "react";
+import type { LiveAudioSource } from "@/lib/use-live-transcript";
 
 export type RecorderState = "idle" | "requesting" | "recording" | "paused" | "stopped";
 
@@ -93,6 +94,21 @@ export interface UseRecorder {
   deviceId: string | null;
   /** Switches the live microphone if there is one, otherwise arms the next. */
   setDeviceId: (id: string | null) => void;
+  /**
+   * A PCM tap on the audio already being recorded, for live transcription.
+   *
+   * <p>Null until a recording is running. Exposed as a factory rather than as
+   * the `AudioContext` so this hook stays the only thing in the app that owns
+   * a microphone: the live transcript reads the stream being recorded, and
+   * cannot end up listening to a different input. That was a real bug and not
+   * a hypothetical one — the browser speech API this replaced opened its own
+   * `getUserMedia` and honoured the system default, so the live text could be
+   * on the laptop lid while the recording was on a headset.
+   *
+   * <p>Follows a microphone change mid-recording for the same reason the
+   * `MediaRecorder` does: it is attached to the graph, not to a device.
+   */
+  liveSource: LiveAudioSource | null;
   start: () => Promise<void>;
   pause: () => void;
   resume: () => void;
@@ -144,6 +160,9 @@ export function useRecorder(): UseRecorder {
   const destinationRef = React.useRef<MediaStreamAudioDestinationNode | null>(null);
   const micSourceRef = React.useRef<MediaStreamAudioSourceNode | null>(null);
   const micStreamRef = React.useRef<MediaStream | null>(null);
+  // The live-transcription tap, when one has been asked for. Held so a
+  // microphone swap can be reconnected to it.
+  const pcmNodeRef = React.useRef<AudioWorkletNode | null>(null);
   const deviceIdRef = React.useRef<string | null>(null);
   // When the input first went quiet, or null while it is not. A timestamp
   // rather than a counter so the answer does not depend on the frame rate.
@@ -174,6 +193,15 @@ export function useRecorder(): UseRecorder {
     analyserRef.current = null;
     destinationRef.current = null;
     micSourceRef.current = null;
+    if (pcmNodeRef.current) {
+      pcmNodeRef.current.port.onmessage = null;
+      try {
+        pcmNodeRef.current.disconnect();
+      } catch {
+        /* Context already closed. */
+      }
+      pcmNodeRef.current = null;
+    }
     micStreamRef.current = null;
     silenceSinceRef.current = null;
     setSilentSeconds(0);
@@ -400,6 +428,10 @@ export function useRecorder(): UseRecorder {
       const source = ctx.createMediaStreamSource(replacement);
       source.connect(destination);
       if (analyserRef.current) source.connect(analyserRef.current);
+      // And the live transcript, which is attached to the graph rather than to
+      // a device. Without this, swapping microphone mid-meeting leaves the
+      // recording running and the live text silently listening to nothing.
+      if (pcmNodeRef.current) source.connect(pcmNodeRef.current);
 
       micSourceRef.current = source;
       micStreamRef.current = replacement;
@@ -410,6 +442,49 @@ export function useRecorder(): UseRecorder {
       setError(null);
     })();
   }, []);
+
+  /**
+   * Build the PCM tap, on the graph that is already being recorded.
+   *
+   * <p>Connected from the microphone source rather than from the recording
+   * destination, because a `MediaStreamAudioDestinationNode` is a sink and
+   * nothing downstream can read it. Same audio either way — it is the same node
+   * feeding both.
+   *
+   * <p><b>The sample rate is checked, not assumed.</b> An `AudioContext` runs
+   * at whatever the hardware likes; 44100 and 48000 are the usual answers and
+   * 16000 is essentially never one of them. The worklet resamples to the rate
+   * the provider is told about, and a mismatch there does not fail loudly — it
+   * transcribes chipmunks, or nothing at all. If the browser reports a rate
+   * that cannot be resampled from, this refuses rather than streaming rubbish.
+   */
+  const createPcmNode = React.useCallback(async (): Promise<AudioWorkletNode> => {
+    const ctx = audioCtxRef.current;
+    const micSource = micSourceRef.current;
+    if (!ctx || !micSource) {
+      throw new Error("No recording to tap for live transcription.");
+    }
+    if (!Number.isFinite(ctx.sampleRate) || ctx.sampleRate < 8000) {
+      throw new Error(`Unusable audio sample rate: ${ctx.sampleRate}`);
+    }
+    if (!ctx.audioWorklet) {
+      throw new Error("This browser has no AudioWorklet.");
+    }
+
+    // Idempotent per context; a second call resolves immediately.
+    await ctx.audioWorklet.addModule("/pcm-worklet.js");
+    const node = new AudioWorkletNode(ctx, "pcm-downsampler");
+    micSource.connect(node);
+    pcmNodeRef.current = node;
+    return node;
+  }, []);
+
+  const liveSource = React.useMemo<LiveAudioSource | null>(
+    // Only once there is a graph to tap. A factory handed out before then
+    // would be one the live transcript could call and be refused by.
+    () => (state === "recording" || state === "paused" ? { createPcmNode } : null),
+    [state, createPcmNode],
+  );
 
   const pause = React.useCallback(() => {
     const rec = recorderRef.current;
@@ -478,6 +553,7 @@ export function useRecorder(): UseRecorder {
     devices,
     deviceId,
     setDeviceId,
+    liveSource,
     start,
     pause,
     resume,

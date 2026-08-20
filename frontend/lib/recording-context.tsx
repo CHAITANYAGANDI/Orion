@@ -24,7 +24,6 @@ import * as React from "react";
 import { useRecorder, type UseRecorder } from "@/lib/use-recorder";
 import { useSaveJob, type UseSaveJob } from "@/lib/use-save-job";
 import { useLiveTranscript, type UseLiveTranscript } from "@/lib/use-live-transcript";
-import { useGetPreferencesQuery } from "@/lib/api";
 
 const RecordingContext = React.createContext<UseRecorder | null>(null);
 
@@ -59,19 +58,19 @@ const SaveJobContext = React.createContext<UseSaveJob | null>(null);
 export function RecordingProvider({ children }: { children: React.ReactNode }) {
   const recorder = useRecorder();
   const [title, setTitle] = React.useState("");
-  // The account's transcript language, which is also what the picker in the
-  // control bar writes to — so changing it there moves the live text too.
-  // Recallix stores ISO-639-1 ("es") where the browser wants BCP-47 ("es-ES");
-  // Chrome resolves the short form to a default region, which is closer than
-  // leaving it on the page language.
-  const prefs = useGetPreferencesQuery();
   const transcript = useLiveTranscript({
-    // Paused means paused. A recogniser still listening through a pause would
-    // put words into a meeting during the exact stretch the user stopped it
-    // from being recorded.
-    active: recorder.state === "recording",
+    // Running *or* paused. A pause mutes the audio tap rather than closing the
+    // session, so the speaker model built up over the meeting so far survives
+    // somebody stepping out for a minute -- and the words already on screen
+    // stay on screen.
+    active: recorder.state === "recording" || recorder.state === "paused",
+    // Paused means paused. Audio streamed through a pause would put words into
+    // the transcript for the exact stretch the user stopped it being recorded.
+    paused: recorder.state === "paused",
+    // The recorder's own graph. Not a second microphone -- see the note on
+    // `liveSource` in lib/use-recorder.ts for the bug that closes.
+    source: recorder.liveSource,
     elapsed: recorder.elapsed,
-    lang: prefs.data?.defaultLanguage ?? null,
   });
 
   // A finished session leaves nothing behind for the next one.

@@ -44,7 +44,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 
 /**
@@ -76,7 +75,7 @@ export function RecordingBar() {
    * upload between them is two uploads the first time both render.
    */
   const job = useRecordingJob();
-  const { phase, busy, working, stopping, overallProgress, label } = job;
+  const { busy } = job;
 
   const live = recorder.state === "recording" || recorder.state === "paused";
   const unsaved = recorder.state === "stopped" && recorder.result !== null;
@@ -88,25 +87,6 @@ export function RecordingBar() {
    * a PUT to be refused by the server with a sentence about object sizes.
    */
   const empty = unsaved && recorder.result!.file.size === 0;
-
-  /**
-   * Stop the pipeline, which means deleting what it is working on.
-   *
-   * <p>The worker is mid-flight and cannot be recalled, so this deletes the
-   * meeting instead. Its callbacks already handle one that is no longer there.
-   * The compute is spent either way; what is stopped is the meeting existing.
-   */
-  async function handleStop() {
-    if (
-      !window.confirm(
-        "Stop processing?\n\nThe meeting and its recording are deleted. The audio " +
-          "only exists on the server now, so this cannot be undone.",
-      )
-    ) {
-      return;
-    }
-    await job.stop();
-  }
 
   /**
    * Throw the recording away, and leave the page that was about it.
@@ -124,7 +104,8 @@ export function RecordingBar() {
 
 
   const shell = React.useRef<HTMLDivElement>(null);
-  usePublishedHeight(shell, recorder.state !== "idle" || phase !== "idle");
+  usePublishedHeight(shell, recorder.state !== "idle" && !busy);
+
 
   async function handleSave() {
     if (!recorder.result) return;
@@ -135,9 +116,23 @@ export function RecordingBar() {
     await job.save(recorder.result, session.title.trim() || defaultRecordingTitle());
   }
 
-  // Not just "is something being recorded" any more: the pipeline runs after
-  // the recorder has been let go, and that is the stretch this bar now covers.
-  if (recorder.state === "idle" && phase === "idle") return null;
+  /**
+   * A recording, or audio in hand. Not the sending of it, and nothing after.
+   *
+   * <p>This used to stay up for the whole pipeline, following the reader from
+   * page to page with a percentage and a stop button. That was removed: the
+   * meeting's own page is where saving lands, it draws the same wait full
+   * width, and it carries the one control that ends it. See
+   * components/processing-card.tsx.
+   *
+   * <p><b>The upload went with it.</b> There is no percentage for it here and
+   * none anywhere else: against local storage it is over in milliseconds, so
+   * anything drawn for it was a flash between pressing Save and arriving at the
+   * meeting -- read as a fault rather than as progress. The bar stands down
+   * instead, and comes back only if the upload fails, when there is once again
+   * a recording in hand and something to do with it.
+   */
+  if (recorder.state === "idle" || busy) return null;
 
   return (
     /*
@@ -163,7 +158,14 @@ export function RecordingBar() {
             somebody said was crossed out by a standing instruction.
 
             Recallix has no bot to announce itself in a participant list, so the
-            only thing that tells the room is the person holding this. */}
+            only thing that tells the room is the person holding this.
+
+            Unconditional again, and safely so. It was gated on there being a
+            microphone open or audio in hand, because unconditional once put
+            "always ask permission before recording" over a job whose recording
+            finished minutes ago -- advice about a thing already done. The bar
+            no longer outlives the recording by so much as an upload, so every
+            state that reaches this line is one the advice still applies to. */}
         <p className="mb-2 text-center text-[11px] text-muted-foreground">
           Always ask permission before recording
         </p>
@@ -253,77 +255,22 @@ export function RecordingBar() {
                   </>
                 )}
               </span>
-              {/* Rendered whether or not something is in flight, and disabled
-                  rather than removed. A control that vanishes while the thing
-                  it would cancel is running leaves somebody looking at a bar
-                  with one disabled button on it and no way out — which is what
-                  a stuck phase used to produce, and what made a bug about
-                  state look like a bug about Discard. */}
-              <Button
-                variant="ghost"
-                size="sm"
-                className="gap-2"
-                disabled={busy}
-                onClick={handleDiscard}
-              >
+              {/* Neither of these carries an in-flight state any more, because
+                  neither can be reached in one: the bar is not rendered while a
+                  save is running, and a save is the only thing they start. */}
+              <Button variant="ghost" size="sm" className="gap-2" onClick={handleDiscard}>
                 <RotateCcw className="h-4 w-4" /> Discard
               </Button>
               {/* Nothing to send, so nothing to offer. */}
               {!empty && (
-                <Button size="sm" className="gap-2" disabled={busy} onClick={() => void handleSave()}>
-                  {busy ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <UploadCloud className="h-4 w-4" />
-                  )}
-                  {busy ? "Working…" : "Save & process"}
+                <Button size="sm" className="gap-2" onClick={() => void handleSave()}>
+                  <UploadCloud className="h-4 w-4" /> Save & process
                 </Button>
               )}
             </div>
           )}
 
-          {phase === "processing" && job && (
-            <div className="flex items-center justify-center gap-3">
-              {/* The one control, as a glyph. The words are on the bar below —
-                  saying them twice in one card reads as two different things
-                  happening — and this is the shape a stop is: a square, in the
-                  same red as the one that ends a recording.
-
-                  Named for what it does to the meeting rather than to the
-                  worker, which cannot be recalled. "Stop processing" that left
-                  a half-finished meeting in the list would tidy nothing. */}
-              <Button
-                variant="destructive"
-                size="icon"
-                className="h-8 w-8 rounded-full"
-                disabled={stopping}
-                onClick={() => void handleStop()}
-                aria-label="Stop processing"
-                title="Stop processing"
-              >
-                {stopping ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Square className="h-3.5 w-3.5 fill-current" />
-                )}
-              </Button>
-            </div>
-          )}
-
         </div>
-
-        {/* One bar across both halves of the wait. See UPLOAD_SHARE: an upload
-            bar that fills and then a pipeline bar that starts again from zero
-            reads as the first one having been thrown away. */}
-        {(working || phase === "done") && (
-          <div className="mt-3 space-y-1.5">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>{label}</span>
-              <span className="tabular-nums">{overallProgress}%</span>
-            </div>
-            <Progress value={overallProgress} />
-          </div>
-        )}
 
         {recorder.error && <p className="mt-3 text-xs text-destructive">{recorder.error}</p>}
       </div>

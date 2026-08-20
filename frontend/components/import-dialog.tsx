@@ -67,6 +67,7 @@ export function ImportDialog({
 
   const [file, setFile] = React.useState<File | null>(null);
   const [duration, setDuration] = React.useState<number | null>(null);
+  const [speakers, setSpeakers] = React.useState<SpeakerChoice>("auto");
   const [phase, setPhase] = React.useState<Phase>("idle");
   const [progress, setProgress] = React.useState(0);
   const [dragging, setDragging] = React.useState(false);
@@ -112,6 +113,8 @@ export function ImportDialog({
         objectKey: presign.objectKey,
         contentType: file.type,
         durationSeconds: duration ?? undefined,
+        // Absent unless somebody chose. See SPEAKER_CHOICES.
+        ...speakerRange(speakers),
       }).unwrap();
 
       toast.success("Uploaded — processing started.");
@@ -229,6 +232,7 @@ export function ImportDialog({
           )}
         </div>
 
+        <ExpectedSpeakers value={speakers} onChange={setSpeakers} disabled={busy} />
         <TranscriptLanguage disabled={busy} />
 
         {busy && (
@@ -253,6 +257,79 @@ export function ImportDialog({
         </Button>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * How many voices to expect, or no opinion at all.
+ *
+ * <p>These reach AssemblyAI as **hard constraints**. An exact count makes
+ * diarization find that many speakers whether or not that many spoke: tell it
+ * two about a four-person call and two people are merged into one; tell it four
+ * about a conversation and one person is split in half. That asymmetry is why
+ * "I'm not sure" is the default, why it is offered first, and why nothing here
+ * is inferred from a calendar — an invitation with four names is not four
+ * speakers, because two of them were listening.
+ *
+ * <p>A range is the setting worth having and the reason this is not a number
+ * box. People know roughly how many were in the room; almost nobody knows how
+ * many of them will turn out to have spoken.
+ */
+type SpeakerChoice = "auto" | "1" | "2" | "3" | "2-4" | "5-10";
+
+const SPEAKER_CHOICES: { value: SpeakerChoice; label: string }[] = [
+  { value: "auto", label: "Work it out (recommended)" },
+  { value: "1", label: "Just me" },
+  { value: "2", label: "2 people" },
+  { value: "3", label: "3 people" },
+  { value: "2-4", label: "A small group (2-4)" },
+  { value: "5-10", label: "A larger meeting (5-10)" },
+];
+
+/** The choice as request fields. Auto sends neither, which is the point. */
+function speakerRange(choice: SpeakerChoice): {
+  expectedSpeakersMin?: number;
+  expectedSpeakersMax?: number;
+} {
+  if (choice === "auto") return {};
+  const [low, high] = choice.split("-");
+  const min = Number(low);
+  const max = Number(high ?? low);
+  return { expectedSpeakersMin: min, expectedSpeakersMax: max };
+}
+
+function ExpectedSpeakers({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: SpeakerChoice;
+  onChange: (v: SpeakerChoice) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="space-y-1.5 border-t pt-4">
+      <label htmlFor="expected-speakers" className="text-sm font-medium">
+        How many people are speaking?
+      </label>
+      <select
+        id="expected-speakers"
+        disabled={disabled}
+        value={value}
+        onChange={(e) => onChange(e.target.value as SpeakerChoice)}
+        className="h-9 w-full rounded-md border bg-background px-3 text-sm disabled:opacity-50"
+      >
+        {SPEAKER_CHOICES.map((choice) => (
+          <option key={choice.value} value={choice.value}>
+            {choice.label}
+          </option>
+        ))}
+      </select>
+      <p className="text-xs text-muted-foreground">
+        Optional. Saying so helps separate the speakers, but a wrong answer
+        hurts — leave it on the first option if you are not sure.
+      </p>
+    </div>
   );
 }
 

@@ -6,9 +6,17 @@
  * if they disagree, the coloured stripe under the scrubber becomes actively
  * misleading rather than merely decorative.
  *
- * Picked by a hash of the name rather than by position, so a speaker keeps
+ * Picked by a hash of an identity rather than by position, so a speaker keeps
  * their colour when a rename reorders the list, and looks the same on every
  * visit.
+ *
+ * That identity is the canonical speaker key ("spk_2") where the transcript has
+ * one, and the display name otherwise. Hashing the *name* alone was wrong in a
+ * way that only showed up on the action it was meant to survive: renaming
+ * Speaker 2 to Sarah changed the hash, so she changed colour at the moment she
+ * acquired a name — and the coloured bands under the scrubber stopped agreeing
+ * with the avatars beside the transcript. Transcripts recorded before canonical
+ * keys existed have none, and fall back to the name exactly as before.
  */
 
 /** Tailwind background classes, for the avatar. */
@@ -41,18 +49,32 @@ export const SPEAKER_HEX = [
   "#6366f1",
 ] as const;
 
-export function speakerIndex(name: string): number {
+/**
+ * What a speaker is coloured by: their canonical key, or their name.
+ *
+ * Exported because the callers hold different shapes — a segment, a turn, a
+ * stats row — and all three have to agree, or the timeline and the transcript
+ * disagree about who is blue.
+ */
+export function speakerIdentity(
+  name: string,
+  key?: string | null,
+): string {
+  return key && key.trim() ? key.trim() : name;
+}
+
+export function speakerIndex(identity: string): number {
   let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = (hash * 31 + name.charCodeAt(i)) | 0;
+  for (let i = 0; i < identity.length; i++) {
+    hash = (hash * 31 + identity.charCodeAt(i)) | 0;
   }
   return Math.abs(hash) % SPEAKER_COLORS.length;
 }
 
-export function speakerColor(name: string): string {
-  return SPEAKER_COLORS[speakerIndex(name)];
+export function speakerColor(name: string, key?: string | null): string {
+  return SPEAKER_COLORS[speakerIndex(speakerIdentity(name, key))];
 }
 
-export function speakerHex(name: string): string {
-  return SPEAKER_HEX[speakerIndex(name)];
+export function speakerHex(name: string, key?: string | null): string {
+  return SPEAKER_HEX[speakerIndex(speakerIdentity(name, key))];
 }

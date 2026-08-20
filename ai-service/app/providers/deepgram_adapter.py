@@ -21,6 +21,14 @@ from typing import Any, Awaitable, Callable, TypeVar
 import httpx
 
 from app.config import Settings
+from app.diarization import (
+    CanonicalSpeakers,
+    SpeakerIdentity,
+    join_words,
+    raw_token,
+    split_by_speaker,
+)
+from app.diarization import SpokenWord as DiarizedWord
 from app.providers.ports import TranscriptionPort
 from app.schemas import Segment, TranscriptResponse, Word
 
@@ -71,6 +79,8 @@ class DeepgramTranscriptionAdapter(TranscriptionPort):
         filename: str,
         vocabulary: list[str] | None = None,
         language: str | None = None,
+        *,
+        request=None,  # noqa: ARG002 - accepted for the port, unused here.
     ) -> TranscriptResponse:
         async def _op() -> TranscriptResponse:
             params: dict[str, Any] = {
@@ -191,18 +201,21 @@ def parse_response(payload: dict[str, Any]) -> TranscriptResponse:
     alternative = alternatives[0] if alternatives else {}
 
     language = _language_of(channel, payload)
-    segments = _segments_from_utterances(results.get("utterances"))
+    # One map per response, fed in chronological order: Deepgram numbers its
+    # speaker clusters from zero and those numbers are cluster ids, not
+    # positions in the meeting. Whichever voice speaks first is Speaker 1.
+    speakers = CanonicalSpeakers()
+    segments = _segments_from_utterances(results.get("utterances"), speakers)
     if not segments:
-        segments = _segments_from_words(alternative.get("words"))
+        segments = _segments_from_words(alternative.get("words"), speakers)
 
     # Prefer text rebuilt from the segments: it carries the speaker turns and
     # the line breaks between them, which the flat `transcript` string does not.
     transcript = _join(segments) or str(alternative.get("transcript") or "").strip()
 
-    speakers = {s.speaker for s in segments}
     logger.info(
         "Deepgram returned %d segment(s) across %d speaker(s), language=%s.",
-        len(segments), len(speakers), language,
+        len(segments), speakers.count, language,
     )
     return TranscriptResponse(transcript=transcript, language=language, segments=segments)
 
@@ -220,32 +233,46 @@ def _language_of(channel: dict[str, Any], payload: dict[str, Any]) -> str:
     return "en"
 
 
-def _words_of(words: Any) -> list[Word]:
-    """Per-word timings, which drive the highlight and click-to-seek.
+def _words_of(words: Any, *, fallback: str | None = None) -> list[DiarizedWord]:
+    """Per-word timings **and attribution**, which drive the highlight and the split.
 
     Deepgram nests these inside each utterance. Without them the UI has to
     spread an utterance's span evenly across its text, which runs ahead of the
-    voice wherever the speaker pauses.
+    voice wherever the speaker pauses — and without the per-word speaker, a
+    change of speaker inside an utterance has nowhere to be recorded.
+
+    `fallback` is the parent utterance's label, for words Deepgram left
+    unattributed inside an otherwise attributed turn.
     """
     if not isinstance(words, list):
         return []
-    out: list[Word] = []
+    out: list[DiarizedWord] = []
     for word in words:
         if not isinstance(word, dict):
             continue
         text = str(word.get("punctuated_word") or word.get("word") or "").strip()
         if not text:
             continue
-        out.append(Word(
+        out.append(DiarizedWord(
             text=text,
             start=_as_float(word.get("start")),
             end=_as_float(word.get("end")),
+            speaker=raw_token(word.get("speaker")) or fallback,
         ))
     return out
 
 
-def _segments_from_utterances(utterances: Any) -> list[Segment]:
-    """Primary path: Deepgram has already grouped words into speaker turns."""
+def _segments_from_utterances(
+    utterances: Any, speakers: CanonicalSpeakers
+) -> list[Segment]:
+    """Primary path: Deepgram has already grouped words into speaker turns.
+
+    An utterance whose words all agree is emitted intact, keeping Deepgram's
+    own punctuation. Where the words disagree with the parent label, the words
+    win — that is a speaker change inside an utterance, and it is exactly the
+    short interjection that used to be absorbed into whichever turn it landed
+    in the middle of.
+    """
     if not isinstance(utterances, list):
         return []
     out: list[Segment] = []
@@ -255,89 +282,98 @@ def _segments_from_utterances(utterances: Any) -> list[Segment]:
         text = str(utterance.get("transcript") or "").strip()
         if not text:
             continue
-        out.append(Segment(
-            start=_as_float(utterance.get("start")),
-            end=_as_float(utterance.get("end")),
-            speaker=speaker_label(utterance.get("speaker")),
-            text=text,
-            words=_words_of(utterance.get("words")),
-        ))
+
+        parent = raw_token(utterance.get("speaker"))
+        words = _words_of(utterance.get("words"), fallback=parent)
+
+        if not words:
+            out.append(_segment(
+                start=_as_float(utterance.get("start")),
+                end=_as_float(utterance.get("end")),
+                identity=speakers.for_token(parent),
+                text=text,
+                words=[],
+            ))
+            continue
+
+        runs = split_by_speaker(words, speakers)
+        if len(runs) == 1:
+            out.append(_segment(
+                start=_as_float(utterance.get("start")),
+                end=_as_float(utterance.get("end")),
+                identity=runs[0].identity,
+                text=text,
+                words=runs[0].words,
+            ))
+            continue
+
+        for run in runs:
+            out.append(_segment(
+                start=run.start,
+                end=run.end,
+                identity=run.identity,
+                text=join_words(run.words, capitalise=run.split),
+                words=run.words,
+            ))
     return out
 
 
-def _segments_from_words(words: Any) -> list[Segment]:
+def _segment(
+    *,
+    start: float,
+    end: float,
+    identity: SpeakerIdentity,
+    text: str,
+    words: list[DiarizedWord],
+) -> Segment:
+    """Assemble a canonical segment, stamping identity onto every word."""
+    return Segment(
+        start=start,
+        end=end,
+        speaker=identity.label,
+        speaker_key=identity.key,
+        speaker_raw=identity.raw,
+        speaker_status=identity.status,
+        text=text,
+        words=[
+            Word(
+                text=word.text,
+                start=word.start,
+                end=word.end,
+                speaker=identity.label,
+                speaker_raw=word.speaker or identity.raw,
+            )
+            for word in words
+        ],
+    )
+
+
+def _segments_from_words(words: Any, speakers: CanonicalSpeakers) -> list[Segment]:
     """Fallback: rebuild turns by grouping consecutive words per speaker.
 
-    Only used when `utterances` is absent. A turn ends when the speaker changes,
-    which is coarser than Deepgram's own segmentation — long monologues become
-    one very long segment — but it beats returning nothing.
+    Only used when `utterances` is absent. A turn ends when the speaker
+    changes, which is coarser than Deepgram's own segmentation — long
+    monologues become one very long segment — but it beats returning nothing.
     """
     if not isinstance(words, list) or not words:
         return []
 
-    out: list[Segment] = []
-    current_speaker: Any = _MISSING
-    buffer: list[Word] = []
-    start = 0.0
-    end = 0.0
+    parsed = _words_of(words)
+    if not parsed:
+        return []
 
-    for word in words:
-        if not isinstance(word, dict):
-            continue
-        # `punctuated_word` exists when smart formatting is on and is the
-        # readable form; `word` is the raw token.
-        text = str(word.get("punctuated_word") or word.get("word") or "").strip()
-        if not text:
-            continue
-        speaker = word.get("speaker")
-
-        if speaker != current_speaker and buffer:
-            out.append(_turn(start, end, current_speaker, buffer))
-            buffer = []
-
-        if not buffer:
-            start = _as_float(word.get("start"))
-            current_speaker = speaker
-
-        buffer.append(Word(
-            text=text,
-            start=_as_float(word.get("start")),
-            end=_as_float(word.get("end")),
-        ))
-        end = _as_float(word.get("end"))
-
-    if buffer:
-        out.append(_turn(start, end, current_speaker, buffer))
-    return out
-
-
-def _turn(start: float, end: float, speaker: Any, words: list[Word]) -> Segment:
-    return Segment(
-        start=start,
-        end=end,
-        speaker=speaker_label(speaker),
-        text=" ".join(w.text for w in words),
-        words=list(words),
-    )
-
-
-class _Missing:
-    """Sentinel: `None` is a real speaker value when diarization is off."""
-
-
-_MISSING = _Missing()
-
-
-def speaker_label(speaker: Any) -> str:
-    """Deepgram's 0-based speaker index -> a label a human can rename.
-
-    Returns "Speaker 1", "Speaker 2", … rather than "S1": the whole point of
-    diarization is that the transcript reads like a conversation, and the
-    existing rename feature turns these into real names.
-    """
-    if isinstance(speaker, bool) or not isinstance(speaker, int):
-        return "Speaker 1"
-    return f"Speaker {speaker + 1}"
+    return [
+        _segment(
+            start=run.start,
+            end=run.end,
+            identity=run.identity,
+            # No provider-formatted utterance text on this path; every run is
+            # rebuilt and every run begins a turn.
+            text=join_words(run.words, capitalise=True),
+            words=run.words,
+        )
+        for run in split_by_speaker(parsed, speakers)
+    ]
 
 
 def _join(segments: list[Segment]) -> str:

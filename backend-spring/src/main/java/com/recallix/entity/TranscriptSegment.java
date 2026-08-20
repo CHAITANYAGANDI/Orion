@@ -47,6 +47,37 @@ public class TranscriptSegment {
     @Column(name = "language")
     private String language;
 
+    /**
+     * Meeting-local speaker identity ("spk_2"), stable across renames.
+     *
+     * <p>{@link #speaker} is the display name and is what a rename overwrites.
+     * This is what a colour is picked from, so renaming Speaker 2 to Sarah
+     * keeps her the same colour. Null for transcripts written before V46,
+     * which fall back to keying on the display name as they always did.
+     */
+    @Column(name = "speaker_key")
+    private String speakerKey;
+
+    /**
+     * The provider's own cluster id ("A", "D"). Never displayed.
+     *
+     * <p>Its value is diagnostic: the display label alone cannot tell you
+     * whether the provider merged two people or Recallix mislabelled one.
+     */
+    @Column(name = "speaker_raw")
+    private String speakerRaw;
+
+    /**
+     * {@code attributed} or {@code unknown}.
+     *
+     * <p>"unknown" is a real answer and is rendered as one. A turn filed under
+     * Speaker 1 because nothing better was known is a quotation beside a name
+     * that may never have said it, and that misattribution travels into
+     * summaries, action-item owners and exports.
+     */
+    @Column(name = "speaker_status")
+    private String speakerStatus = "attributed";
+
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
 
@@ -67,6 +98,15 @@ public class TranscriptSegment {
 
     public String getSpeaker() { return speaker; }
     public void setSpeaker(String speaker) { this.speaker = speaker; }
+
+    public String getSpeakerKey() { return speakerKey; }
+    public void setSpeakerKey(String speakerKey) { this.speakerKey = speakerKey; }
+
+    public String getSpeakerRaw() { return speakerRaw; }
+    public void setSpeakerRaw(String speakerRaw) { this.speakerRaw = speakerRaw; }
+
+    public String getSpeakerStatus() { return speakerStatus; }
+    public void setSpeakerStatus(String speakerStatus) { this.speakerStatus = speakerStatus; }
 
     public String getText() { return text; }
     public void setText(String text) { this.text = text; }

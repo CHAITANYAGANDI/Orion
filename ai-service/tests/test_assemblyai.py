@@ -17,10 +17,13 @@ from __future__ import annotations
 
 import pytest
 
-from app.providers.assemblyai_adapter import (
-    parse_response,
-    speaker_label,
-)
+from app.diarization import UNKNOWN_SPEAKER, CanonicalSpeakers
+from app.providers.assemblyai_adapter import parse_response
+
+
+def label(raw):
+    """What a lone provider label resolves to in a fresh transcript."""
+    return CanonicalSpeakers().resolve(raw).label
 
 
 def _payload(**overrides):
@@ -65,34 +68,52 @@ def test_a_missing_timestamp_does_not_crash_the_meeting():
 
 
 # --- speaker labels -------------------------------------------------------- #
-@pytest.mark.parametrize(
-    "raw,expected",
-    [
-        ("A", "Speaker 1"),
-        ("B", "Speaker 2"),
-        ("G", "Speaker 7"),
-        ("a", "Speaker 1"),
-        (" C ", "Speaker 3"),
-    ],
-)
-def test_letters_map_to_the_labels_the_app_already_uses(raw, expected):
-    assert speaker_label(raw) == expected
+@pytest.mark.parametrize("raw", ["A", "B", "G", "a", " C "])
+def test_whichever_letter_arrives_first_is_speaker_one(raw):
+    """Changed deliberately. This used to assert "G" -> "Speaker 7".
+
+    The letters are the provider's cluster ids. Decoding them by alphabet
+    position is what displayed a two-person meeting as Speaker 1 and Speaker 4,
+    with no Speaker 2 or 3 anywhere -- which reads as two people missing from
+    the room. Numbering belongs to the meeting, not to the provider.
+    """
+    assert label(raw) == "Speaker 1"
 
 
 def test_a_real_name_is_kept_rather_than_numbered():
     """Speaker identification returns names; a name beats "Speaker 4"."""
-    assert speaker_label("Cindy") == "Cindy"
+    assert label("Cindy") == "Cindy"
 
 
-@pytest.mark.parametrize("raw", [None, "", True, 3.7, []])
-def test_an_unusable_speaker_falls_back_rather_than_inventing_one(raw):
-    assert speaker_label(raw) == "Speaker 1"
+@pytest.mark.parametrize("raw", [None, "", True, 3.7, [], "PENDING"])
+def test_an_unusable_speaker_is_not_quietly_filed_under_the_first_one(raw):
+    """Changed deliberately. This used to assert "Speaker 1".
+
+    That was a false attribution and not a cosmetic one: an unattributed turn
+    filed under the first speaker puts a quotation beside a name that may never
+    have said it, and the name travels -- into the summary, into action-item
+    owners, into exports. "Unknown speaker" is worse to look at and is the only
+    one of the two that is true.
+
+    "PENDING" is the live stream's placeholder while clustering catches up. It
+    is on the wire and not in the docs, and it used to reach the UI as a
+    speaker *named* PENDING.
+    """
+    speakers = CanonicalSpeakers()
+    identity = speakers.resolve(raw)
+    assert identity.label == UNKNOWN_SPEAKER
+    assert identity.status == "unknown"
+    # And it does not burn a number: if it did, one unlabelled turn early in a
+    # meeting would shift every later speaker by one.
+    assert speakers.resolve("A").label == "Speaker 1"
 
 
 def test_numeric_speakers_are_still_handled():
     """Defensive: the field is documented as a letter, but responses vary."""
-    assert speaker_label(0) == "Speaker 1"
-    assert speaker_label("1") == "Speaker 2"
+    speakers = CanonicalSpeakers()
+    assert speakers.resolve(0).label == "Speaker 1"
+    assert speakers.resolve("1").label == "Speaker 2"
+    assert speakers.resolve(0).label == "Speaker 1"
 
 
 # --- language -------------------------------------------------------------- #

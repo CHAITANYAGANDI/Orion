@@ -67,6 +67,22 @@ class Word(CamelModel):
     text: str
     start: float
     end: float
+    # 0-1 from the provider, or None where it does not say. Kept for
+    # diagnostics rather than for display: a number beside every word is
+    # clutter, but "which words was it least sure of" is the first question
+    # worth asking about a transcript somebody says is wrong.
+    confidence: float | None = None
+    # Who said this word, canonically ("Speaker 2"). Modern diarization
+    # attributes per word, not only per utterance, and dropping that was how a
+    # one-word interjection came to be absorbed into the surrounding turn:
+    # there was nowhere for "somebody else said this bit" to live. None on
+    # transcripts recorded before this existed, and on providers that only
+    # attribute whole utterances.
+    speaker: str | None = None
+    # The provider's own token ("A", "B") behind that label. Kept so a
+    # diarization complaint can be traced to whoever caused it — see
+    # `app.diarization.trace_lines`.
+    speaker_raw: str | None = None
 
 
 class Segment(CamelModel):
@@ -84,6 +100,25 @@ class Segment(CamelModel):
     # labelling every line would make the marker meaningless in the monolingual
     # meetings that are the overwhelming majority.
     language: str | None = None
+    # How sure the provider was of the words, 0-1, or None where it did not
+    # say. Not drawn in the ordinary transcript.
+    confidence: float | None = None
+    # Whether the speaker on this turn is the provider's attribution or a
+    # stand-in for one it would not make. "unknown" is a real answer and is
+    # rendered as such: a turn merged into Speaker 1 because nothing else was
+    # known is a quotation attributed to somebody who may not have said it,
+    # which is worse than an unattributed line.
+    speaker_status: Literal["attributed", "unknown"] = "attributed"
+    # Meeting-local identity, stable across renames: "spk_2". `speaker` is what
+    # gets displayed and is therefore what a rename overwrites; this is what
+    # picks the colour, so renaming Speaker 2 to Sarah does not also recolour
+    # her. None for transcripts written before canonical numbering existed.
+    speaker_key: str | None = None
+    # The provider's cluster id ("A", "D") this turn came from. Not shown. Its
+    # value is that a renumbering bug is otherwise undiagnosable after the
+    # fact — the display label alone cannot tell you whether the provider
+    # merged two people or Recallix mislabelled one.
+    speaker_raw: str | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -437,6 +472,86 @@ class StatusEvent(CamelModel):
     message: str = ""
 
 
+class StreamingTokenResponse(CamelModel):
+    """A short-lived AssemblyAI streaming credential, on its way to a browser.
+
+    The token is the only secret in this response and it is meant to leave the
+    building -- that is what it is for. `expires_in_seconds` is here so the
+    client can decide whether the one it holds is still worth trying, rather
+    than finding out from a refused websocket.
+    """
+
+    token: str
+    expires_in_seconds: int
+
+
+class SpeakerExpectation(CamelModel):
+    """How many people to expect, when somebody actually knows.
+
+    <p><b>These are hard constraints at the provider.</b> An exact count forces
+    diarization to find that many voices whether or not that many spoke, so it
+    is only ever sent when a human chose it. A calendar with four attendees is
+    not four speakers — two of them were listening — and inferring the count
+    from an invitation is how a two-person conversation comes back split into
+    four.
+
+    <p>"auto" is therefore the default and stays the default unless somebody
+    says otherwise. A range is the middle setting for the common case: you know
+    roughly how many were in the room, not exactly who spoke.
+    """
+
+    mode: Literal["auto", "exact", "range"] = "auto"
+    exact: int | None = None
+    minimum: int | None = None
+    maximum: int | None = None
+
+    def normalised(self) -> "SpeakerExpectation":
+        """The same intent with impossible combinations removed.
+
+        Sanitised here rather than at the adapter so that every provider gets
+        the same answer, and so an out-of-range number becomes "auto" — the
+        behaviour somebody had before the setting existed — rather than a
+        rejected job.
+        """
+        if self.mode == "exact":
+            if self.exact is None or not 1 <= self.exact <= 10:
+                return SpeakerExpectation()
+            return SpeakerExpectation(mode="exact", exact=self.exact)
+        if self.mode == "range":
+            low, high = self.minimum, self.maximum
+            if low is None and high is None:
+                return SpeakerExpectation()
+            if low is not None and not 1 <= low <= 10:
+                low = None
+            if high is not None and not 1 <= high <= 10:
+                high = None
+            if low is not None and high is not None and low > high:
+                low, high = high, low
+            if low is None and high is None:
+                return SpeakerExpectation()
+            return SpeakerExpectation(mode="range", minimum=low, maximum=high)
+        return SpeakerExpectation()
+
+
+class MeetingContext(CamelModel):
+    """What Recallix knows about a recording before transcribing it.
+
+    Carried on the event rather than looked up by the worker, for the same
+    reason the vocabulary is: the worker has no user context, and pinning the
+    values at enqueue keeps a rename mid-run from changing a transcript
+    halfway through.
+    """
+
+    title: str | None = None
+    project: str | None = None
+    #: The summary template's human name, not its slug.
+    meeting_type: str | None = None
+    #: People expected to be heard. Used for prompting and keyterms; never
+    #: used to infer how many speakers there are — see SpeakerExpectation.
+    participants: list[str] = []
+    organisations: list[str] = []
+
+
 class MeetingUploadedEvent(CamelModel):
     meeting_id: str
     user_id: str | None = None
@@ -461,6 +576,18 @@ class MeetingUploadedEvent(CamelModel):
     # no user context to read it in. None or empty means detect, which is what
     # every job did before the setting existed.
     language: str | None = None
+    # What the recording is about, for transcription prompting. Absent on
+    # events published before this field existed, which read as "nothing
+    # known" and produce no prompt at all.
+    context: MeetingContext | None = None
+    # How many voices to expect. Absent means auto, which is what every job
+    # did before the setting existed.
+    speakers: SpeakerExpectation | None = None
+    # Treat each audio channel as its own speaker. Only ever true when the
+    # source is known to be channel-separated -- a stereo recording of a room
+    # has everybody on both channels, and splitting it by channel would invent
+    # two speakers out of one.
+    multichannel: bool = False
 
 
 class ProcessingFailedEvent(CamelModel):

@@ -34,3 +34,11 @@ Thumbs.db
 pgdata/
 miniodata/
 *.log
+
+# Benchmark media and ground-truth transcripts.
+#
+# Never committed. The audio is third-party material we do not own, and the
+# reference transcripts are derived from it. Developers drop their own files
+# here locally; see docs/transcription-benchmark.md.
+benchmark-audio/*
+!benchmark-audio/README.md

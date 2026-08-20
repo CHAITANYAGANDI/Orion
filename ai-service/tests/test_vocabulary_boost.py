@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.providers.assemblyai_adapter import word_boost
 from app.providers.deepgram_adapter import MAX_BOOST_TERMS, boost_params
+from app.transcription_context import MeetingContext, build_keyterms
 from app.providers.openai_adapter import prompt_hint
 
 
@@ -56,13 +56,21 @@ def test_the_list_is_capped():
 
 
 # --- AssemblyAI ------------------------------------------------------------- #
-def test_assemblyai_word_boost_is_empty_without_vocabulary():
-    assert word_boost(None) == []
-    assert word_boost([]) == []
+#
+# `word_boost` is gone as a public function. AssemblyAI's Universal-3 family
+# takes `keyterms_prompt` instead, built by app.transcription_context from the
+# vocabulary *and* everything else Recallix knows about the meeting; the
+# adapter still falls back to word_boost when universal-2 is the only model in
+# play, which is covered in tests/test_assemblyai.py against the request body.
+def test_assemblyai_keyterms_are_empty_without_vocabulary():
+    assert build_keyterms(MeetingContext(), None) == []
+    assert build_keyterms(MeetingContext(), []) == []
 
 
 def test_assemblyai_deduplicates_and_preserves_order():
-    assert word_boost(["SRE", "sre", "Kubernetes"]) == ["SRE", "Kubernetes"]
+    assert build_keyterms(MeetingContext(), ["SRE", "sre", "Kubernetes"]) == [
+        "SRE", "Kubernetes"
+    ]
 
 
 # --- OpenAI / Whisper ------------------------------------------------------- #

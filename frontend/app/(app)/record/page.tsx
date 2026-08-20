@@ -36,16 +36,43 @@ import * as React from "react";
 import Link from "next/link";
 import { Mic, Loader2, AlertTriangle, User, FileText, CalendarDays } from "lucide-react";
 import { useRecordingStartedMutation, useGetPreferencesQuery } from "@/lib/api";
-import { useRecording, useRecordingSession } from "@/lib/recording-context";
+import { useRecording, useRecordingJob, useRecordingSession } from "@/lib/recording-context";
+import type { LiveTurn } from "@/lib/use-live-transcript";
 import { Button } from "@/components/ui/button";
 import { stopwatch } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export default function RecordPage() {
   const recorder = useRecording();
+  const job = useRecordingJob();
   const [announceRecording] = useRecordingStartedMutation();
 
   const started = recorder.state !== "idle";
+
+  /**
+   * The save has taken the audio, and the route is on its way out.
+   *
+   * <p>`save()` releases the recording before it navigates — the audio is on
+   * the server and a second copy in the tab is one nothing reads. For the frame
+   * or two between those two things this page is looking at an idle recorder,
+   * and without this it drew the state it draws for an idle recorder: a spinner
+   * saying "Waiting for permission…", as though it were about to start a
+   * recording again. That flash is the last thing somebody sees of a meeting
+   * they just saved.
+   *
+   * <p>Nothing at all is the right thing to draw here. The meeting's own page
+   * is one tick away and it opens with the wait already on it; anything drawn
+   * in between is a frame of something untrue.
+   *
+   * <p>Narrowed to a recording this page actually held, rather than to any
+   * pipeline running anywhere. Opening /record while an earlier meeting is
+   * still processing is an ordinary arrival — there is nothing stopping you
+   * recording the next one — and it should ask for the microphone like any
+   * other, not sit blank behind somebody else's progress bar.
+   */
+  const held = React.useRef(false);
+  if (started) held.current = true;
+  const handingOver = !started && held.current && job.phase !== "idle";
 
   /**
    * Begin, and tell the server we did.
@@ -115,7 +142,7 @@ export default function RecordPage() {
 
       {started ? (
         <InProgress state={recorder.state} />
-      ) : (
+      ) : handingOver ? null : (
         <Opening
           supported={recorder.supported}
           refused={recorder.error !== null}
@@ -139,7 +166,7 @@ export default function RecordPage() {
  */
 function InProgress({ state }: { state: string }) {
   const { transcript } = useRecordingSession();
-  const hasWords = transcript.phrases.length > 0 || transcript.interim !== "";
+  const hasWords = transcript.turns.length > 0 || transcript.pending !== null;
 
   // Kept, and only this one, because the browser's permission prompt is modal
   // and a page with nothing on it behind that prompt gives no clue what is
@@ -161,6 +188,17 @@ function InProgress({ state }: { state: string }) {
             Save it below to transcribe it. Nothing has left this browser yet, so
             closing the tab now would lose the audio.
           </p>
+          {/* What is on screen above is the live pass: fast, and made without
+              hearing the end of the sentence. The canonical transcript is made
+              from the whole file after saving, with the whole meeting in view,
+              and replaces this. Said plainly so nobody reports the difference
+              between the two as a bug. */}
+          {hasWords && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              These are the live results. The full transcript is written from
+              the recording after you save, and will replace them.
+            </p>
+          )}
         </Empty>
       </div>
     );
@@ -189,7 +227,17 @@ function InProgress({ state }: { state: string }) {
       )}
 
       {/* A line, not a panel: live text failing says nothing about the
-          recording, and dressing it up as a status board implies otherwise. */}
+          recording, and dressing it up as a status board implies otherwise.
+
+          The old disclaimer here — "a rough preview from your browser's speech
+          service" — is gone with the thing it described. The words now come
+          from the same provider that writes the final transcript, so calling
+          them the browser's would be untrue. */}
+      {transcript.status === "reconnecting" && (
+        <p className="text-center text-xs text-muted-foreground">
+          Reconnecting live text… the recording is unaffected.
+        </p>
+      )}
       {transcript.error && (
         <p className="text-center text-xs text-muted-foreground">{transcript.error}</p>
       )}
@@ -198,14 +246,18 @@ function InProgress({ state }: { state: string }) {
 }
 
 /**
- * The live text.
+ * The live text, as speaker turns.
  *
- * Grouped into phrases with a timestamp apiece, which is what the finished
- * transcript looks like — so this reads as an early draft of a thing the user
- * will see again rather than as a different feature. The in-progress phrase is
+ * <p>This is what the finished transcript looks like — a speaker, a timestamp,
+ * a paragraph — so it reads as an early draft of a thing the user will see
+ * again rather than as a different feature. The turn still being spoken is
  * dimmed because it is going to change, sometimes completely, and presenting a
  * guess in the same weight as a settled line is how somebody comes to believe
- * the transcript got a name wrong when it has not been written yet.
+ * the transcript got a name wrong.
+ *
+ * <p>It used to be one undifferentiated column under a generic avatar, because
+ * the browser speech API behind it had no idea who was talking. Diarization is
+ * the provider's now and arrives with the words.
  */
 function Phrases() {
   const { transcript } = useRecordingSession();
@@ -213,41 +265,15 @@ function Phrases() {
 
   React.useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
-  }, [transcript.phrases.length, transcript.interim]);
+  }, [transcript.turns.length, transcript.pending?.text]);
 
   return (
     <div className="space-y-5">
-      {transcript.phrases.map((phrase) => (
-        <div key={phrase.id} className="flex gap-3">
-          {/* One generic speaker. Who said what is decided by diarisation, on
-              the server, after the upload — inventing speaker labels here would
-              mean contradicting the real transcript later. */}
-          <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted">
-            <User className="h-3.5 w-3.5 text-muted-foreground" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <span className="text-xs text-muted-foreground">{stopwatch(phrase.at)}</span>
-            <p className="mt-0.5 text-[15px] leading-relaxed">{phrase.text}</p>
-          </div>
-        </div>
+      {transcript.turns.map((turn) => (
+        <Turn key={turn.id} turn={turn} />
       ))}
 
-      {transcript.interim && (
-        <div className="flex gap-3">
-          <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted">
-            <User className="h-3.5 w-3.5 text-muted-foreground" />
-          </span>
-          <p className="mt-5 min-w-0 flex-1 text-[15px] leading-relaxed text-muted-foreground">
-            {transcript.interim}
-          </p>
-        </div>
-      )}
-
-      <p className="border-t pt-3 text-xs text-muted-foreground">
-        A rough preview from your browser&apos;s speech service, not saved.
-        Recallix writes the real transcript — punctuated, with speakers
-        separated — after you stop.
-      </p>
+      {transcript.pending && <Turn turn={transcript.pending} provisional />}
 
       {/*
        * The scroll target, and the reason it carries a margin.
@@ -264,6 +290,56 @@ function Phrases() {
       />
     </div>
   );
+}
+
+/**
+ * One turn: who, when, and what.
+ *
+ * <p>An unattributed turn says so. It does not say "Speaker 1" — the provider
+ * declining to name a voice and the provider naming the first voice are
+ * different facts, and collapsing them puts a sentence beside somebody who may
+ * not have said it. A short interjection at the start of a meeting is exactly
+ * where diarization is least sure and exactly where a wrong name is most
+ * likely to be believed.
+ *
+ * <p>The label is not final either way: AssemblyAI revises speaker labels as a
+ * session goes on, so an unknown turn commonly resolves to a real speaker a
+ * few seconds later without anybody doing anything.
+ */
+function Turn({ turn, provisional = false }: { turn: LiveTurn; provisional?: boolean }) {
+  const unknown = turn.speakerStatus === "unknown";
+
+  return (
+    <div className={cn("flex gap-3", provisional && "opacity-60")}>
+      <span
+        className={cn(
+          "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-medium",
+          unknown ? "bg-muted text-muted-foreground" : "bg-primary/15 text-primary",
+        )}
+        aria-hidden
+      >
+        {unknown ? <User className="h-3.5 w-3.5" /> : initials(turn.speaker)}
+      </span>
+      <div className="min-w-0 flex-1">
+        <span className="text-xs text-muted-foreground">
+          {unknown ? "Identifying speaker" : turn.speaker} · {stopwatch(turn.at)}
+        </span>
+        <p className="mt-0.5 text-[15px] leading-relaxed">{turn.text}</p>
+      </div>
+    </div>
+  );
+}
+
+/** "Speaker 2" -> "2"; "Sarah Kaur" -> "SK". */
+function initials(speaker: string): string {
+  const numbered = /^Speaker\s+(\d+)$/.exec(speaker);
+  if (numbered) return numbered[1];
+  return speaker
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0] ?? "")
+    .join("")
+    .toUpperCase();
 }
 
 function Empty({ children }: { children: React.ReactNode }) {

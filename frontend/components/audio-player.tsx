@@ -360,7 +360,7 @@ export function AudioPlayer({
                   style={{
                     left: `${(turn.start / duration) * 100}%`,
                     width: `${Math.max(0.15, ((turn.end - turn.start) / duration) * 100)}%`,
-                    backgroundColor: speakerHex(turn.speaker),
+                    backgroundColor: speakerHex(turn.speaker, turn.speakerKey),
                   }}
                 />
               ))}

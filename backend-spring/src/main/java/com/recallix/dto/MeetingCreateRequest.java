@@ -70,7 +70,27 @@ public record MeetingCreateRequest(
          * right for every client that is not the recorder, including any future
          * one that never learns to send this.
          */
-        Boolean recorded
+        Boolean recorded,
+
+        /**
+         * How many people to expect, when the person uploading knows (V45).
+         *
+         * <p>Null is "auto", and auto is the default and the overwhelmingly
+         * common answer. These become <em>hard constraints</em> at the
+         * transcription provider: an exact count forces diarization to find
+         * that many voices whether or not that many spoke, so a wrong two
+         * splits a conversation into four people or merges four into two.
+         *
+         * <p>Which is why nothing infers them. A calendar invitation with four
+         * attendees is not four speakers — two of them were listening — and
+         * Recallix will not turn an invitation into a constraint on somebody's
+         * transcript. A human says this or nobody does.
+         *
+         * <p>A range is the middle setting and the one worth offering: people
+         * know roughly how many were in the room, not exactly how many spoke.
+         */
+        Integer expectedSpeakersMin,
+        Integer expectedSpeakersMax
 ) {
 
     /** Absent and false are the same thing: not captured here. */
@@ -79,6 +99,29 @@ public record MeetingCreateRequest(
     }
     public List<String> tagsOrEmpty() {
         return tags == null ? List.of() : tags;
+    }
+
+    /**
+     * The speaker constraint, sanitised, or null for automatic.
+     *
+     * <p>Out-of-range numbers become null rather than a rejected upload: the
+     * provider accepts 1..10, and somebody who typed 40 has said something
+     * meaningless rather than something worth refusing a recording over.
+     */
+    public int[] expectedSpeakerRangeOrNull() {
+        Integer low = inRange(expectedSpeakersMin);
+        Integer high = inRange(expectedSpeakersMax);
+        if (low == null && high == null) {
+            return null;
+        }
+        if (low != null && high != null && low > high) {
+            return new int[]{high, low};
+        }
+        return new int[]{low == null ? 0 : low, high == null ? 0 : high};
+    }
+
+    private static Integer inRange(Integer value) {
+        return value != null && value >= 1 && value <= 10 ? value : null;
     }
 
     /** The override, or null when the filename-derived title should stand. */

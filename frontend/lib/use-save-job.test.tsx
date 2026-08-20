@@ -90,7 +90,7 @@ vi.mock("@/lib/api", () => ({
   useGetMeetingQuery: () => ({ data: polled.current }),
 }));
 
-import { useSaveJob, currentStep } from "@/lib/use-save-job";
+import { useSaveJob } from "@/lib/use-save-job";
 
 const reset = vi.fn();
 
@@ -143,17 +143,19 @@ describe("saving", () => {
     expect(result.current.job?.id).toBe("mtg_9");
   });
 
-  it("leaves the recording page as soon as there is nothing left on it", async () => {
+  it("lands on the meeting it just made", async () => {
     const { result } = setup();
 
     await act(async () => {
       await result.current.save(aResult(), "x");
     });
 
-    // The audio has gone to the server and the microphone is closed. Staying
-    // would be sitting on a page about a recording that is over; the wait
-    // itself happens in the docked bar, which is on every page.
-    expect(push).toHaveBeenCalledWith("/home");
+    // The audio has gone to the server and the microphone is closed, so the
+    // recording page is about something that is over. The meeting exists from
+    // this moment and its page draws the pipeline full width — the wait is
+    // watched where the result will appear. Leaving is still free: the docked
+    // bar picks it up on every other page.
+    expect(push).toHaveBeenCalledWith("/meetings/mtg_9");
   });
 
   it("lets go of the audio once the server has it", async () => {
@@ -196,32 +198,38 @@ describe("saving", () => {
   });
 });
 
-describe("the percentage", () => {
-  it("counts the upload as the first third, then carries on from there", async () => {
+describe("while the bytes are going", () => {
+  it("is busy for the save, and stops being at the pipeline", async () => {
     const { result } = setup();
     await act(async () => {
       await result.current.save(aResult(), "x");
     });
 
-    await stage("TRANSCRIBING", 40, "Transcribing…");
-    // 30 for the upload plus 70% of 40. A second bar starting again from zero
-    // would read as the first half having been thrown away.
-    expect(result.current.overallProgress).toBe(58);
-
-    await stage("SUMMARIZING", 70, "Summarising…");
-    expect(result.current.overallProgress).toBe(79);
+    // The line the bar reads. Everything past this point is the worker's, and
+    // is drawn on the meeting's own page rather than docked over whatever
+    // somebody happens to be looking at.
+    await stage("TRANSCRIBING", 40, "Transcribing...");
+    expect(result.current.busy).toBe(false);
   });
 
-  it("does not reach 100 until the meeting is actually ready", async () => {
+  it("is busy for as long as the bytes are still going", async () => {
+    // Held open so it can be looked at: `save()` runs to completion otherwise
+    // and the upload is over before any assertion could see it. That is also
+    // the reason there is nothing on screen for it -- see the module comment.
+    let land: (() => void) | null = null;
+    putWithProgress.mockImplementation(() => new Promise<void>((r) => { land = () => r(); }));
     const { result } = setup();
-    await act(async () => {
-      await result.current.save(aResult(), "x");
+
+    act(() => {
+      void result.current.save(aResult(), "x");
     });
 
-    // The worker reports 100 on its last stage, before the result lands. A bar
-    // at 100% beside "Extracting…" is a finished job that is not.
-    await stage("EXTRACTING", 100, "Extracting decisions…");
-    expect(result.current.overallProgress).toBe(99);
+    await waitFor(() => expect(result.current.phase).toBe("uploading"), { timeout: 5000 });
+    expect(result.current.busy).toBe(true);
+
+    await act(async () => {
+      land?.();
+    });
   });
 });
 
@@ -232,12 +240,15 @@ describe("following the work", () => {
       await result.current.save(aResult(), "x");
     });
 
+    // The words are drawn on the meeting's page now, from the job rather than
+    // from this label — what is kept here is that the hook is still following
+    // the work, because `done` is what invalidates the caches Home lists from.
     await stage("TRANSCRIBING", 40, "Generating transcript from audio…");
-    expect(result.current.label).toBe("Generating transcript from audio…");
-    expect(currentStep(result.current.phase, result.current.job?.status)).toBe("transcribe");
+    expect(result.current.job?.status).toBe("TRANSCRIBING");
+    expect(result.current.job?.message).toBe("Generating transcript from audio…");
 
     await stage("SUMMARIZING", 70, "Writing the brief…");
-    expect(currentStep(result.current.phase, result.current.job?.status)).toBe("summarise");
+    expect(result.current.job?.status).toBe("SUMMARIZING");
   });
 
   it("finishes even when the socket never says anything", async () => {

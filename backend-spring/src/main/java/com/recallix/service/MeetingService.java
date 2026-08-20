@@ -28,6 +28,7 @@ import com.recallix.repository.MeetingRepository;
 import com.recallix.repository.MeetingSummaryRepository;
 import com.recallix.repository.MeetingTranslationRepository;
 import com.recallix.repository.MeetingTranscriptRepository;
+import com.recallix.dto.KnownSpeakerResponse;
 import com.recallix.repository.ProjectRepository;
 import com.recallix.repository.TranscriptSegmentRepository;
 import org.slf4j.Logger;
@@ -169,6 +170,13 @@ public class MeetingService {
                     .orElseThrow(() -> ApiException.notFound("Project not found"));
             meeting.setProjectId(req.projectId());
         }
+        int[] speakers = req.expectedSpeakerRangeOrNull();
+        if (speakers != null) {
+            // Zero is the "not given" half of a one-sided range; null is what
+            // the column means by that, and what the worker reads as auto.
+            meeting.setExpectedSpeakersMin(speakers[0] == 0 ? null : speakers[0]);
+            meeting.setExpectedSpeakersMax(speakers[1] == 0 ? null : speakers[1]);
+        }
         if (Boolean.TRUE.equals(req.consentConfirmed())) {
             // Stamped now rather than when the recorder started, because now is
             // when the meeting exists. The few minutes between the two are not
@@ -213,30 +221,145 @@ public class MeetingService {
         // The worker fetches by objectKey via its internal S3 endpoint. We send an
         // empty audioUrl on purpose: a browser-facing presigned URL points at the
         // public (localhost) endpoint, which is unreachable from inside the worker.
-        outbox.enqueue(KafkaTopicsConfig.MEETING_UPLOADED, meeting.getId(), Map.of(
-                "meetingId", meeting.getId(),
-                "userId", meeting.getUserId(),
-                "audioUrl", "",
-                "objectKey", meeting.getObjectKey() == null ? "" : meeting.getObjectKey(),
-                "sourceType", meeting.getSourceType().name(),
-                "sourceUrl", meeting.getSourceUrl() == null ? "" : meeting.getSourceUrl(),
-                // Sent with the job so the worker summarizes in the shape the
-                // user chose the first time, rather than producing General
-                // notes that then have to be rewritten.
-                "summaryTemplate", meeting.getSummaryTemplate() == null
-                        ? SummaryTemplateService.DEFAULT_SLUG : meeting.getSummaryTemplate(),
-                // Read at enqueue rather than fetched by the worker: the worker
-                // runs as a system context with no user, and sending the list
-                // with the job keeps that boundary intact. It also pins the
-                // vocabulary to what it was when the job was queued, so a term
-                // added mid-run cannot change a transcript halfway through.
-                "vocabulary", vocabulary.boostTermsFor(meeting.getUserId()),
-                // Same reasoning as the vocabulary, and the same read: the
-                // worker has no user context to look this up in. Blank means
-                // auto-detect, which is what every account did before the
-                // setting existed.
-                "language", language(meeting)
-        ));
+        // A LinkedHashMap rather than Map.of, which stops at ten pairs and this
+        // outgrew. Ordered, so the serialised event stays diffable between runs
+        // -- worth something when the only view of it is a log line.
+        Map<String, Object> event = new java.util.LinkedHashMap<>();
+        event.put("meetingId", meeting.getId());
+        event.put("userId", meeting.getUserId());
+        event.put("audioUrl", "");
+        event.put("objectKey", meeting.getObjectKey() == null ? "" : meeting.getObjectKey());
+        event.put("sourceType", meeting.getSourceType().name());
+        event.put("sourceUrl", meeting.getSourceUrl() == null ? "" : meeting.getSourceUrl());
+        // Sent with the job so the worker summarizes in the shape the user
+        // chose the first time, rather than producing General notes that then
+        // have to be rewritten.
+        event.put("summaryTemplate", meeting.getSummaryTemplate() == null
+                ? SummaryTemplateService.DEFAULT_SLUG : meeting.getSummaryTemplate());
+        // Read at enqueue rather than fetched by the worker: the worker runs as
+        // a system context with no user, and sending the list with the job
+        // keeps that boundary intact. It also pins the vocabulary to what it
+        // was when the job was queued, so a term added mid-run cannot change a
+        // transcript halfway through.
+        event.put("vocabulary", vocabulary.boostTermsFor(meeting.getUserId()));
+        // Same reasoning as the vocabulary, and the same read: the worker has
+        // no user context to look this up in. Blank means auto-detect, which is
+        // what every account did before the setting existed.
+        event.put("language", language(meeting));
+        // What the recording is about, for transcription prompting -- pinned at
+        // enqueue for the same reason, so a rename mid-run cannot change a
+        // transcript halfway through.
+        event.put("context", transcriptionContext(meeting));
+        // How many voices to look for. Auto unless a human said otherwise.
+        event.put("speakers", speakerExpectation(meeting));
+
+        outbox.enqueue(KafkaTopicsConfig.MEETING_UPLOADED, meeting.getId(), event);
+    }
+
+    /**
+     * What Recallix already knows about this recording, for the transcriber.
+     *
+     * <p>None of this is new information — the title, the project, the shape of
+     * meeting and the names this user has applied to speakers before were all
+     * sitting in the database while every transcription job was submitted
+     * without them. Speech models guess, and they guess differently when told
+     * the domain: "Kafka" over "coffee", a colleague's name over the common
+     * word it sounds like.
+     *
+     * <p>Names come from {@code known_speakers}, which is written by the rename
+     * feature — so it reflects people this user has actually labelled in
+     * meetings rather than an address book that would drift from them. They are
+     * used for prompting and for keyterms, and <em>never</em> to infer how many
+     * speakers there are; see {@link #speakerExpectation}.
+     *
+     * <p>Never fatal. A profile or a project that cannot be read is not a
+     * reason to refuse to transcribe a recording somebody has already uploaded.
+     */
+    private Map<String, Object> transcriptionContext(Meeting meeting) {
+        String project = "";
+        if (meeting.getProjectId() != null) {
+            try {
+                project = projects.findByIdAndUserId(meeting.getProjectId(), meeting.getUserId())
+                        .map(p -> p.getName() == null ? "" : p.getName())
+                        .orElse("");
+            } catch (RuntimeException e) {
+                // Same reasoning as the template name. A project that cannot be
+                // read is a slightly worse prompt, not a meeting that fails.
+                project = "";
+            }
+        }
+
+        List<String> participants = List.of();
+        try {
+            participants = knownSpeakers.list(meeting.getUserId()).stream()
+                    .map(KnownSpeakerResponse::displayName)
+                    .filter(name -> name != null && !name.isBlank())
+                    .distinct()
+                    // Bounded: a heavy user has hundreds of these and a prompt
+                    // listing all of them names nobody in particular.
+                    .limit(24)
+                    .toList();
+        } catch (RuntimeException e) {
+            // Prompting is an accuracy improvement, not a precondition.
+        }
+
+        // A LinkedHashMap, not Map.of, and this is not a style preference:
+        // Map.of throws on a null value, so a collaborator returning null --
+        // which any of these three can, and which a mocked one certainly does
+        // -- would turn "prompting is unavailable" into an exception on the
+        // enqueue path and stop the meeting being processed at all. This block
+        // promises to be never fatal; it has to mean it.
+        Map<String, Object> context = new java.util.LinkedHashMap<>();
+        context.put("title", blank(meeting.getTitle()));
+        context.put("project", blank(project));
+        context.put("meetingType", blank(safeTemplateName(meeting)));
+        context.put("participants", participants);
+        context.put("organisations", List.of());
+        return context;
+    }
+
+    private static String blank(String value) {
+        return value == null ? "" : value;
+    }
+
+    /** The template's human name, or blank if the ai-service cannot be reached. */
+    private String safeTemplateName(Meeting meeting) {
+        try {
+            return templates.displayName(meeting.getSummaryTemplate());
+        } catch (RuntimeException e) {
+            return "";
+        }
+    }
+
+    /**
+     * How many voices the transcriber should expect.
+     *
+     * <p><b>Only ever what a human chose.</b> These are hard constraints at the
+     * provider: an exact count makes diarization find that many speakers
+     * whether or not that many spoke. Recallix has an attendee count available
+     * from calendar subscriptions and deliberately does not use it — an
+     * invitation with four names is not four speakers, two of them were
+     * listening, and a constraint derived from one would split a two-person
+     * conversation into four people.
+     */
+    private Map<String, Object> speakerExpectation(Meeting meeting) {
+        Integer low = meeting.getExpectedSpeakersMin();
+        Integer high = meeting.getExpectedSpeakersMax();
+        if (low == null && high == null) {
+            return Map.of("mode", "auto");
+        }
+        if (low != null && low.equals(high)) {
+            return Map.of("mode", "exact", "exact", low);
+        }
+        Map<String, Object> range = new java.util.LinkedHashMap<>();
+        range.put("mode", "range");
+        if (low != null) {
+            range.put("minimum", low);
+        }
+        if (high != null) {
+            range.put("maximum", high);
+        }
+        return range;
     }
 
     /**

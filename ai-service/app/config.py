@@ -156,6 +156,12 @@ class Settings(BaseSettings):
     s3_access_key: str | None = None
     s3_secret_key: str | None = None
     s3_bucket: str = "recallix"
+    # Where AssemblyAI should fetch a recording from, when it fetches one
+    # itself. Distinct from `s3_endpoint`, which is reachable from inside the
+    # compose network and from nowhere else: a presigned URL signed against
+    # `http://minio:9000` is valid and unreachable, which is the most confusing
+    # possible failure. Blank disables direct fetch and keeps the byte path.
+    s3_public_endpoint: str = ""
     s3_region: str = "us-east-1"
 
     # --- HTTP download ---

@@ -81,8 +81,12 @@ class Pipeline:
         filename: str,
         vocabulary: list[str] | None = None,
         language: str | None = None,
+        *,
+        request=None,
     ) -> TranscriptResponse:
-        return await self._transcription.transcribe(audio, filename, vocabulary, language)
+        return await self._transcription.transcribe(
+            audio, filename, vocabulary, language, request=request
+        )
 
     async def summarize(
         self,
@@ -127,8 +131,16 @@ class Pipeline:
         template_slug: str | None = None,
         vocabulary: list[str] | None = None,
         language: str | None = None,
+        *,
+        request=None,
     ) -> MeetingBriefResult:
-        """Run the full pipeline, emitting stage events through the hook."""
+        """Run the full pipeline, emitting stage events through the hook.
+
+        `request` carries what the transcriber can use and the analysis cannot:
+        the meeting's own context, how many speakers to expect, and a URL the
+        provider may fetch the audio from. Optional, so the HTTP endpoints and
+        every existing test call this exactly as they did.
+        """
 
         async def emit(topic: str, status: str, progress: int, message: str) -> None:
             if progress_hook is None:
@@ -142,7 +154,9 @@ class Pipeline:
 
         # 1) Transcription
         await emit(TOPIC_TRANSCRIPTION_STARTED, "TRANSCRIBING", 10, "Generating transcript from audio...")
-        transcript = await self._transcription.transcribe(audio, filename, vocabulary, language)
+        transcript = await self._transcription.transcribe(
+            audio, filename, vocabulary, language, request=request
+        )
         # Providers report one language for the whole recording, which is wrong
         # for the meetings people actually notice: half in one language, half in
         # another. This marks the utterances that differ, leaving the rest None.
