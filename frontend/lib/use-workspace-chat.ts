@@ -16,6 +16,7 @@
 
 import * as React from "react";
 import { toast } from "sonner";
+import { useActiveChat } from "@/lib/active-chat";
 import {
   useGetWorkspaceChatQuery,
   useGetWorkspaceSuggestionsQuery,
@@ -34,8 +35,12 @@ import {
 import { NO_CONTEXT, type ChatContext } from "@/components/chat-composer";
 import type { ChatMode } from "@/lib/types";
 
+const SCOPE = "workspace";
+
 export function useWorkspaceChat() {
-  const [conversationId, setConversationId] = React.useState<string | null>(null);
+  // Shared between the home rail and the full page, and empty on load — see
+  // `lib/active-chat` for why this is not component state.
+  const [conversationId, setConversationId] = useActiveChat(SCOPE);
   const [context, setContext] = React.useState<ChatContext>(NO_CONTEXT);
   const [mode, setMode] = React.useState<ChatMode>("express");
 
@@ -43,7 +48,13 @@ export function useWorkspaceChat() {
     data: messages,
     isLoading,
     isError: chatError,
-  } = useGetWorkspaceChatQuery(conversationId ? { conversationId } : undefined);
+    // Skipped until a thread is named. Asking the server for history without
+    // one returns the most recent conversation, which is how opening AI Chat
+    // came to resume something from days ago instead of offering a clean
+    // sheet.
+  } = useGetWorkspaceChatQuery(conversationId ? { conversationId } : undefined, {
+    skip: !conversationId,
+  });
   const { data: conversations } = useGetWorkspaceConversationsQuery();
   const { data: suggestions } = useGetWorkspaceSuggestionsQuery();
   const { data: modes } = useGetChatModesQuery();
@@ -59,19 +70,6 @@ export function useWorkspaceChat() {
   const [rename] = useRenameConversationMutation();
   const [removeConversation] = useDeleteConversationMutation();
   const [deleteExchange, { isLoading: deleting }] = useDeleteChatExchangeMutation();
-
-  /**
-   * Follow the thread the server actually filed the turn under.
-   *
-   * Asking without naming one continues the most recent thread or starts one,
-   * and only the response knows which. Without this the picker would keep saying
-   * "New chat" while a named thread sat underneath it.
-   */
-  React.useEffect(() => {
-    if (!conversationId && messages && messages.length > 0) {
-      setConversationId(messages[0].conversationId);
-    }
-  }, [messages, conversationId]);
 
   /**
    * Recover from a thread that is no longer there — deleted in another tab, or
@@ -90,9 +88,16 @@ export function useWorkspaceChat() {
   async function send(question: string) {
     const meetingIds = Array.from(new Set([...context.meetingIds, ...folderMeetings]));
     try {
+      // A question with no thread named gets one of its own, rather than being
+      // filed into whatever was last discussed. The server's rule for an
+      // unnamed ask is "continue the most recent, or start one", so without
+      // this the clean sheet on screen would quietly append to an old
+      // conversation — the worst of both, since it would not even look like
+      // the thread it was joining.
+      const target = conversationId ?? (await newConversation().unwrap()).id;
       const answer = await ask({
         question,
-        conversationId: conversationId ?? undefined,
+        conversationId: target,
         meetingIds: meetingIds.length > 0 ? meetingIds : undefined,
         mode,
       }).unwrap();

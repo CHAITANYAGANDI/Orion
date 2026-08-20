@@ -16,10 +16,12 @@ import type { ChatConversation, ChatMessage } from "@/lib/types";
  * Two defences are asserted here: acting on `conversationDeleted`, and healing
  * from a read error whatever caused it.
  */
-const { chatQuery, deleteExchange, unwrap } = vi.hoisted(() => ({
+const { chatQuery, deleteExchange, unwrap, createConversation, askChat } = vi.hoisted(() => ({
   chatQuery: vi.fn(),
   deleteExchange: vi.fn(),
   unwrap: vi.fn(),
+  createConversation: vi.fn(),
+  askChat: vi.fn(),
 }));
 
 let messages: ChatMessage[] = [];
@@ -32,9 +34,21 @@ vi.mock("@/lib/api", () => ({
   },
   useGetWorkspaceConversationsQuery: () => ({ data: conversations }),
   useGetWorkspaceSuggestionsQuery: () => ({ data: undefined }),
-  useAskWorkspaceChatMutation: () => [vi.fn(), { isLoading: false }],
+  useAskWorkspaceChatMutation: () => [
+    (a: unknown) => {
+      askChat(a);
+      return { unwrap: async () => message({ conversationId: "cnv_new" }) };
+    },
+    { isLoading: false },
+  ],
   useClearWorkspaceChatMutation: () => [vi.fn(), { isLoading: false }],
-  useCreateWorkspaceConversationMutation: () => [vi.fn(), { isLoading: false }],
+  useCreateWorkspaceConversationMutation: () => [
+    () => {
+      createConversation();
+      return { unwrap: async () => ({ id: "cnv_new" }) };
+    },
+    { isLoading: false },
+  ],
   useRenameConversationMutation: () => [vi.fn(), {}],
   useDeleteConversationMutation: () => [vi.fn(), {}],
   useDeleteChatExchangeMutation: () => [
@@ -56,6 +70,8 @@ vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
 let conversations: ChatConversation[] = [];
 
+import { resetActiveChats, setActiveChat } from "@/lib/active-chat";
+
 import AskPage from "@/app/(app)/ask/page";
 
 function message(over: Partial<ChatMessage> = {}): ChatMessage {
@@ -72,6 +88,10 @@ function message(over: Partial<ChatMessage> = {}): ChatMessage {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The thread a surface is on outlives a component, by design — it is what
+  // lets the home rail and this page share a conversation. It must not outlive
+  // a test.
+  resetActiveChats();
   chatIsError = false;
   messages = [message(), message({ id: "msg_2", role: "assistant", content: "Three things." })];
   conversations = [
@@ -94,10 +114,45 @@ function lastQueryArg() {
 }
 
 describe("AskPage conversation state", () => {
-  it("adopts the thread its messages came from", async () => {
+  it("opens a new chat rather than resuming the last one", async () => {
     render(<AskPage />);
-    // Asking without naming a thread continues the most recent one, and only
-    // the response says which — the picker would otherwise stay generic.
+
+    // Changed deliberately. This used to assert that the page adopted the most
+    // recent thread on open, which is what it did: reading history without
+    // naming a thread returns the latest one, so every visit landed in a
+    // conversation from days ago and a clean sheet was a button press you had
+    // to know to look for.
+    //
+    // Nothing is read until a thread is chosen or a question creates one, and
+    // the picker says so rather than naming a conversation you are not in.
+    await waitFor(() => expect(screen.getByText("New chat")).toBeInTheDocument());
+    expect(lastQueryArg()).toBeUndefined();
+    expect(chatQuery).not.toHaveBeenCalledWith({ conversationId: "cnv_1" });
+  });
+
+  it("gives the first question a thread of its own", async () => {
+    // Not just a cosmetic blank page. The server's rule for a question with no
+    // thread named is "continue the most recent, or start one" — so a clean
+    // sheet on screen would quietly append to the old conversation, which is
+    // worse than resuming it openly.
+    render(<AskPage />);
+
+    await userEvent.type(
+      screen.getByPlaceholderText(/ask/i),
+      "What is still open?{Enter}",
+    );
+
+    await waitFor(() => expect(createConversation).toHaveBeenCalled());
+    expect(askChat).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationId: "cnv_new" }),
+    );
+  });
+
+  it("keeps reading the thread once one is chosen", async () => {
+    // The other half: starting fresh must not mean the picker stops working.
+    setActiveChat("workspace", "cnv_1");
+    render(<AskPage />);
+
     await waitFor(() => expect(lastQueryArg()).toEqual({ conversationId: "cnv_1" }));
   });
 
@@ -111,6 +166,7 @@ describe("AskPage conversation state", () => {
       conversations = [];
       return { deletedMessages: 2, conversationDeleted: true };
     });
+    setActiveChat("workspace", "cnv_1");
     render(<AskPage />);
     await waitFor(() => expect(lastQueryArg()).toEqual({ conversationId: "cnv_1" }));
 
@@ -121,24 +177,33 @@ describe("AskPage conversation state", () => {
     await waitFor(() => expect(lastQueryArg()).toBeUndefined());
   });
 
-  it("moves to the remaining thread when one is left", async () => {
-    // Not the same as the case above: the id must not be kept, but nor should
-    // the page sit unscoped when there is a thread to show.
+  it("lands on a clean sheet rather than an older thread when one is emptied", async () => {
+    // Changed deliberately. This used to assert that the page moved to the
+    // remaining thread, reached by dropping the id and letting an unscoped
+    // read return the most recent one. That is the same "resumed into an old
+    // conversation" behaviour AI Chat now avoids everywhere else, and it is
+    // more startling here than on open — the thread arrives unasked, in
+    // response to a delete.
+    //
+    // The remaining thread is not lost; it is one click away in the picker.
     unwrap.mockImplementation(async () => {
       messages = [message({ id: "msg_9", conversationId: "cnv_2", content: "Older question" })];
       conversations = [{ ...conversations[0], id: "cnv_2", title: "Older" }];
       return { deletedMessages: 2, conversationDeleted: true };
     });
+    setActiveChat("workspace", "cnv_1");
     render(<AskPage />);
     await waitFor(() => expect(lastQueryArg()).toEqual({ conversationId: "cnv_1" }));
 
     await userEvent.click(screen.getAllByRole("button", { name: /delete this exchange/i })[0]);
 
-    await waitFor(() => expect(lastQueryArg()).toEqual({ conversationId: "cnv_2" }));
+    await waitFor(() => expect(lastQueryArg()).toBeUndefined());
+    expect(await screen.findByText("New chat")).toBeInTheDocument();
   });
 
   it("keeps the thread when other exchanges remain", async () => {
     unwrap.mockResolvedValue({ deletedMessages: 2, conversationDeleted: false });
+    setActiveChat("workspace", "cnv_1");
     render(<AskPage />);
     await waitFor(() => expect(lastQueryArg()).toEqual({ conversationId: "cnv_1" }));
 
@@ -154,6 +219,7 @@ describe("AskPage conversation state", () => {
   it("heals from a thread that vanished some other way", async () => {
     // Another tab, a stale id, a thread emptied elsewhere. Without this the
     // chat is stuck on 404 with no way out but a reload.
+    setActiveChat("workspace", "cnv_1");
     const { rerender } = render(<AskPage />);
     await waitFor(() => expect(lastQueryArg()).toEqual({ conversationId: "cnv_1" }));
 

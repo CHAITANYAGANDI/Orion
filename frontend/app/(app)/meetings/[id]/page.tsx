@@ -65,6 +65,7 @@ import type {
   SummaryResponse,
   SummarySection,
 } from "@/lib/types";
+import { useActiveChat } from "@/lib/active-chat";
 import { Button } from "@/components/ui/button";
 import { useRecordingJob } from "@/lib/recording-context";
 import { ProcessingCard } from "@/components/processing-card";
@@ -1423,13 +1424,22 @@ function ChatPanel({
   // Null means "whatever I was last saying about this meeting", which is what
   // the server returns for an unspecified conversation — so a first visit needs
   // no conversation to exist.
-  const [conversationId, setConversationId] = React.useState<string | null>(null);
+  // Scoped to this meeting and empty on load, so opening one offers a clean
+  // sheet rather than the conversation you had about it last week. Outside
+  // component state so that switching to the transcript tab and back does not
+  // abandon a thread mid-question.
+  const [conversationId, setConversationId] = useActiveChat(meetingId);
 
   const {
     data: messages,
     isLoading,
     isError: chatError,
-  } = useGetChatQuery({ id: meetingId, conversationId: conversationId ?? undefined });
+    // Skipped until a thread is named: history without one returns the most
+    // recent conversation, which is what used to resume an old chat on open.
+  } = useGetChatQuery(
+    { id: meetingId, conversationId: conversationId ?? undefined },
+    { skip: !conversationId },
+  );
   const { data: conversations } = useGetMeetingConversationsQuery(meetingId);
   const [ask, { isLoading: asking }] = useAskChatMutation();
   const [newConversation, { isLoading: starting }] = useCreateMeetingConversationMutation();
@@ -1456,14 +1466,6 @@ function ChatPanel({
     if (!thread) return;
     thread.scrollTo({ top: thread.scrollHeight, behavior: "smooth" });
   }, [messages, asking]);
-
-  // Follow the thread the server actually filed the turn under — only the
-  // response knows which one an unnamed question continued.
-  React.useEffect(() => {
-    if (!conversationId && messages && messages.length > 0) {
-      setConversationId(messages[0].conversationId);
-    }
-  }, [messages, conversationId]);
 
   /**
    * Recover from a conversation that is no longer there — see the same guard on
@@ -1504,10 +1506,15 @@ function ChatPanel({
     if (!question) return;
     setQ("");
     try {
+      // Its own thread when none is named, rather than being appended to the
+      // last one. The server's rule for an unnamed ask is "continue the most
+      // recent, or start one", so a clean sheet on screen would otherwise file
+      // the question into a conversation it is not showing.
+      const target = conversationId ?? (await newConversation(meetingId).unwrap()).id;
       const answer = await ask({
         id: meetingId,
         question,
-        conversationId: conversationId ?? undefined,
+        conversationId: target,
       }).unwrap();
       setConversationId(answer.conversationId);
     } catch {
