@@ -71,17 +71,10 @@ export function HomeChatPanel() {
             <Skeleton className="h-14 w-2/3" />
           </>
         ) : empty ? (
-          <div className="pt-6">
-            <p className="mb-3 text-center text-sm text-muted-foreground">
-              Ask anything about your conversations.
-            </p>
-            <ChatSuggestions
-              prompts={toPrompts(chat.suggestions, WORKSPACE_PROMPTS)}
-              disabled={chat.asking}
-              onSend={(q) => void chat.send(q)}
-              onCompose={() => undefined}
-            />
-          </div>
+          // Nothing. The starter prompts live above the composer now, and a
+          // heading in the middle of an empty panel only says what the input
+          // underneath it already asks.
+          null
         ) : (
           chat.messages!.map((msg) => (
             <ChatMessageBubble key={msg.id} message={msg}>
@@ -99,6 +92,19 @@ export function HomeChatPanel() {
         )}
         <div ref={endRef} />
       </div>
+
+      {/* Above the composer rather than inside the empty thread, so the panel
+          reads bottom-up: the box you type in, and the shortcuts into it. */}
+      {empty && (
+        <div className="px-3 pb-2">
+          <ChatSuggestions
+            prompts={toPrompts(chat.suggestions, WORKSPACE_PROMPTS)}
+            disabled={chat.asking}
+            onSend={(q) => void chat.send(q)}
+            onCompose={() => undefined}
+          />
+        </div>
+      )}
 
       {/* Not a reassurance for its own sake: the chat reads every transcript in
           the workspace, and saying where the answer came from is the only way a

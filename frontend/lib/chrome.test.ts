@@ -21,12 +21,19 @@ import { SETTINGS_TABS, LEGACY_PATHS, pathForTab } from "@/lib/settings-tabs";
 /** Pages that are neither settings nor the chat, so nothing is hidden. */
 const WORKING_PAGES = [
   "/home",
-  "/meetings/mtg_1",
   "/projects/prj_1",
   "/action-items",
   "/search",
   "/upload",
 ];
+
+/**
+ * Kept out of WORKING_PAGES because its create rule is now the opposite one:
+ * a meeting fills the header slot with its own Share, Export and menu, and
+ * Import and Record stand down. Everything else about it is ordinary, so the
+ * assertions that apply to every page name it explicitly.
+ */
+const MEETING_PAGE = "/meetings/mtg_1";
 
 /** Pages and states where the two buttons that make a meeting are withheld. */
 const CAPTURING_PAGES = ["/record", "/record/live"];
@@ -51,7 +58,7 @@ describe("search in the header", () => {
   });
 
   it("stays everywhere there are meetings to find", () => {
-    for (const path of WORKING_PAGES) {
+    for (const path of [...WORKING_PAGES, MEETING_PAGE]) {
       expect(headerChrome(path).search).toBe(true);
     }
   });
@@ -100,6 +107,15 @@ describe("what the header offers to create", () => {
     for (const path of WORKING_PAGES) {
       expect(headerChrome(path).create).toBe("meeting");
     }
+  });
+
+  it("offers nothing to create on a meeting being read", () => {
+    // The page has its own controls — Share, Export, the overflow menu — and
+    // they go in the same header row. Import and Record there are the two
+    // buttons that make a *different* document, next to the one you are
+    // reading.
+    expect(headerChrome(MEETING_PAGE).create).toBe("none");
+    expect(headerChrome("/meetings/mtg_1/anything").create).toBe("none");
   });
 });
 
@@ -161,7 +177,7 @@ describe("the folder whose actions belong in the header", () => {
 
   it("is nothing anywhere else", () => {
     const notAFolder = WORKING_PAGES.filter((p) => p !== "/projects/prj_1");
-    for (const path of [...notAFolder, ...CAPTURING_PAGES, "/ask", "/settings", "/billing"]) {
+    for (const path of [...notAFolder, MEETING_PAGE, ...CAPTURING_PAGES, "/ask", "/settings", "/billing"]) {
       expect(headerChrome(path).folderId).toBeNull();
     }
   });
@@ -189,6 +205,63 @@ describe("the two pages that strip the header", () => {
       const chrome = headerChrome(path);
       expect(chrome.search).toBe(true);
       expect(chrome.create).not.toBe("none");
+    }
+    // A meeting keeps search; only its create control stands down.
+    expect(headerChrome(MEETING_PAGE).search).toBe(true);
+  });
+});
+
+describe("the pinned rail", () => {
+  it("tells the header that Home ends before the right edge", () => {
+    // Import and Record sit at the end of the header, and the header spans the
+    // window. Without this they land above the AI chat rail and read as
+    // controls on the chat rather than on the list of meetings they act on.
+    expect(headerChrome("/home").sidePanel).toBe(true);
+  });
+
+  it.each(["/search", "/meetings/mtg_1", "/projects", "/projects/prj_1", "/settings"])(
+    "leaves the header full width on %s",
+    (path) => {
+      // Those pages lay out in a measured column with nothing pinned to the
+      // edge, so reserving room for a rail would indent the buttons past
+      // anything to line them up with.
+      expect(headerChrome(path).sidePanel).toBe(false);
+    },
+  );
+
+  it("does not reserve room on the chat, which has no buttons to place", () => {
+    const chrome = headerChrome("/ask");
+    expect(chrome.sidePanel).toBe(false);
+    expect(chrome.create).toBe("none");
+  });
+});
+
+describe("an empty top bar", () => {
+  it("is reported on every settings tab", () => {
+    // Search is stripped there and there is nothing to create, so all that
+    // remains is the button that opens the rail — and that is hidden from lg
+    // up. What was left was sixty-four pixels of nothing above the title.
+    for (const path of ["/settings", "/settings/general", "/settings/integrations", "/billing"]) {
+      const chrome = headerChrome(path);
+      if (chrome.search || chrome.create !== "none") continue;
+      expect(chrome.bare).toBe(true);
+    }
+    expect(headerChrome("/settings").bare).toBe(true);
+  });
+
+  it("is not reported where the bar still has something in it", () => {
+    // Dropping the bar on these would take search with it.
+    for (const path of [...WORKING_PAGES, MEETING_PAGE, "/ask", "/projects", "/record"]) {
+      expect(headerChrome(path).bare).toBe(false);
+    }
+  });
+
+  it("never claims to be empty while it is still holding search", () => {
+    // The two must not disagree: a bar that is dropped while it carries the
+    // only way to search is a feature deleted by a layout tweak.
+    for (const path of ["/home", "/settings", "/ask", MEETING_PAGE, "/projects/prj_1"]) {
+      const chrome = headerChrome(path);
+      if (chrome.bare) expect(chrome.search).toBe(false);
     }
   });
 });

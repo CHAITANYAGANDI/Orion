@@ -17,6 +17,24 @@ export interface HeaderChrome {
   create: CreateAction;
   /** The folder id whose actions belong in the header, or null. */
   folderId: string | null;
+  /**
+   * There is nothing to put in the top bar on a wide screen.
+   *
+   * <p>Search is stripped and there is nothing to create, so all that remains
+   * is the button that opens the rail — and that is hidden from `lg` up. The
+   * bar is then sixty-four pixels of nothing above the page title.
+   */
+  bare: boolean;
+  /**
+   * This page ends its own content before the right edge of the window,
+   * because a panel is pinned there.
+   *
+   * <p>The header spans the whole window, so without this its buttons sit
+   * above that panel — and Import and Record read as things you do to the AI
+   * chat rather than to the list they actually act on. Told the page has a
+   * panel, the header stops where the list stops.
+   */
+  sidePanel: boolean;
 }
 
 /** Whether this is the chat. A prefix, so a future `/ask/:id` cannot fall out. */
@@ -27,6 +45,24 @@ function isChatPath(pathname: string): boolean {
 /** The page that exists to record. A prefix, so `/record/:id` cannot fall out. */
 function isRecordPath(pathname: string): boolean {
   return pathname === "/record" || pathname.startsWith("/record/");
+}
+
+/**
+ * Home pins a chat rail to the right edge. A prefix would be wrong here: this
+ * is a fact about one page's layout, not about a section of the app.
+ */
+function hasSidePanel(pathname: string): boolean {
+  return pathname === "/home";
+}
+
+/**
+ * A meeting being read. Its own Share, Export and overflow menu fill the
+ * header slot, and Import and Record stand down: on the page for one document,
+ * the two buttons that make a *different* one are the two that navigate away
+ * from it.
+ */
+function isMeetingPath(pathname: string): boolean {
+  return pathname.startsWith("/meetings/");
 }
 
 /** The folder list itself, not a folder. */
@@ -59,10 +95,13 @@ function folderIdFrom(pathname: string): string | null {
  * different sittings, and the two of them there are an invitation to leave a
  * half-finished form.
  *
- * <p>That leaves the bar empty on those pages, on a wide window, and it stays
- * rendered anyway. It is what stops the page shifting up by its own height on
- * every navigation into and out of settings, and on a narrow one it still
- * carries the button that opens the rail.
+ * <p>That leaves the bar empty on those pages. It used to stay rendered anyway,
+ * on the argument that a page which shifts up by sixty-four pixels when you
+ * navigate into settings is worse than a strip of nothing — but the shift
+ * happens once, on a deliberate navigation, and the empty strip sits above
+ * every settings page for as long as you are on one. So `bare` reports it and
+ * the shell drops the bar from `lg` up. Below `lg` it stays: it still carries
+ * the button that opens the rail, which is the only way back out.
  *
  * <p><strong>Nothing to create on the chat.</strong> That page is a conversation
  * with one input, and the two buttons that make a meeting are the two things
@@ -99,9 +138,11 @@ export function headerChrome(pathname: string, recording = false): HeaderChrome 
     search: !isSettingsPath(pathname),
     create: isFolderListPath(pathname)
       ? "folder"
-      : isChatPath(pathname) || isSettingsPath(pathname) || capturing
+      : isChatPath(pathname) || isSettingsPath(pathname) || isMeetingPath(pathname) || capturing
         ? "none"
         : "meeting",
     folderId: folderIdFrom(pathname),
+    sidePanel: hasSidePanel(pathname),
+    bare: isSettingsPath(pathname),
   };
 }

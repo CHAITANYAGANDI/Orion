@@ -49,6 +49,7 @@ import { AccountMenu } from "@/components/account-menu";
 import { FolderTree } from "@/components/folder-tree";
 import { FolderDialog } from "@/components/folder-dialog";
 import { FolderHeaderActions } from "@/components/folder-header-actions";
+import { HEADER_SLOT_ID } from "@/components/header-slot";
 
 /**
  * The places.
@@ -199,7 +200,15 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
         )}
 
         <div className="flex min-h-screen flex-1 flex-col lg:pl-0">
-          <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur lg:px-6">
+          <header
+            className={cn(
+              "sticky top-0 z-20 flex h-16 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur lg:px-6",
+              // Nothing in it on a wide screen — see `bare` in lib/chrome.ts.
+              // It stays below `lg`, where it still carries the button that
+              // opens the rail.
+              chrome.bare && "lg:hidden",
+            )}
+          >
             <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setMobileOpen(true)}>
               <Menu />
             </Button>
@@ -217,7 +226,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
               <button
                 type="button"
                 onClick={() => setSearching(true)}
-                className="flex h-9 max-w-md flex-1 items-center gap-2 rounded-full border bg-card px-4 text-sm text-muted-foreground transition-colors hover:bg-accent"
+                className="flex h-9 max-w-sm flex-1 items-center gap-2 rounded-full border bg-card px-4 text-sm text-muted-foreground transition-colors hover:bg-accent"
               >
                 <Search className="h-4 w-4 shrink-0" />
                 <span className="flex-1 text-left">Ask or search</span>
@@ -227,7 +236,18 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
               </button>
             )}
 
-            <div className="flex flex-1 items-center justify-end gap-2">
+            <div
+              className={cn(
+                "flex flex-1 items-center justify-end gap-2",
+                // Stop where the page's own content stops. The header spans the
+                // window, so on a page with a pinned rail these buttons landed
+                // above it — and Import and Record then read as controls on the
+                // AI chat rather than on the list of meetings they actually
+                // act on. The margin is the rail's width; see the `aside` in
+                // app/(app)/home/page.tsx, which states the same 28rem.
+                chrome.sidePanel && "lg:mr-[28rem]",
+              )}
+            >
               {/* No live-recording pill here any more. It said what the
                   docked bar at the bottom of the screen already says, on the
                   same pages, through the same navigations — and the bar says it
@@ -267,6 +287,11 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
                   what you do to the folder you are standing in, so they belong
                   where the other things you do to it already are. */}
               {chrome.folderId && <FolderHeaderActions folderId={chrome.folderId} />}
+
+              {/* Filled by the page underneath, when it has controls of its
+                  own — a meeting's Share, Export and overflow menu. Empty and
+                  zero-width otherwise. See components/header-slot.tsx. */}
+              <div id={HEADER_SLOT_ID} className="flex items-center gap-2" />
             </div>
           </header>
 

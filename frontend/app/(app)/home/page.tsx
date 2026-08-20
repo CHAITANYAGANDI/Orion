@@ -137,7 +137,11 @@ export default function HomePage() {
 
       <aside
         className={cn(
-          "w-full max-w-md shrink-0 border-l bg-card lg:block",
+          // 28rem, written out rather than as `max-w-md`, because the header
+          // aligns its buttons to this edge and a shared number that appears
+          // in two files should be greppable from either. See `sidePanel` in
+          // lib/chrome.ts.
+          "w-full max-w-[28rem] shrink-0 border-l bg-card lg:block",
           panelOpen ? "block" : "hidden",
           "fixed inset-y-16 right-0 z-20 lg:static lg:inset-auto lg:z-auto",
         )}

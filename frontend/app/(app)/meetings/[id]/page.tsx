@@ -66,6 +66,7 @@ import type {
   SummarySection,
 } from "@/lib/types";
 import { useActiveChat } from "@/lib/active-chat";
+import { HeaderSlot } from "@/components/header-slot";
 import { Button } from "@/components/ui/button";
 import { useRecordingJob } from "@/lib/recording-context";
 import { ProcessingCard } from "@/components/processing-card";
@@ -624,7 +625,19 @@ export default function MeetingDetailPage() {
             />
           </div>
         </div>
-        <div className="flex items-center gap-2 no-print">
+        {/* Up in the top bar, on the same line as search — not beside the
+            title. Two rows of controls within an inch of each other, the
+            shell's above and the document's below, and neither row explaining
+            why it was not the other one. The dialogs and every piece of state
+            they need stay here; only the buttons are drawn elsewhere. See
+            components/header-slot.tsx. */}
+        <HeaderSlot>
+        {/* Cleared past the chat rail, whose widths these mirror — see the
+            `aside` below. The shell's header spans the window while this page
+            is a centred column, so on a wide screen these already sit outside
+            the rail; on a narrow one, where the column fills the width, they
+            would land directly over it. */}
+        <div className="flex items-center gap-2 no-print lg:mr-[22rem] xl:mr-[26rem]">
           {ready && (
             <>
               <ShareDialog meetingId={id} />
@@ -693,6 +706,7 @@ export default function MeetingDetailPage() {
             onDelete={() => void onDelete()}
           />}
         </div>
+        </HeaderSlot>
       </div>
 
       {/* The player, over the transcript and nowhere else.
@@ -1599,18 +1613,10 @@ function ChatPanel({
               </ChatMessageBubble>
             ))
           ) : (
-            <div className="space-y-4 py-6">
-              <p className="text-center text-sm text-muted-foreground">
-                Ask anything about this meeting — answers are grounded in the
-                transcript, with citations you can play.
-              </p>
-              <ChatSuggestions
-                prompts={toPrompts(suggestions, MEETING_PROMPTS)}
-                disabled={asking}
-                onSend={(prompt) => void submit(prompt)}
-                onCompose={setQ}
-              />
-            </div>
+            // Nothing in the thread. The starter prompts sit above the
+            // composer instead, so the panel reads bottom-up rather than
+            // opening with a wall of chips where the first answer will appear.
+            null
           )}
           {asking && (
             <div className="flex justify-start">
@@ -1620,6 +1626,17 @@ function ChatPanel({
             </div>
           )}
         </div>
+
+        {!isLoading && (messages?.length ?? 0) === 0 && (
+          <div className="mb-3">
+            <ChatSuggestions
+              prompts={toPrompts(suggestions, MEETING_PROMPTS)}
+              disabled={asking}
+              onSend={(prompt) => void submit(prompt)}
+              onCompose={setQ}
+            />
+          </div>
+        )}
 
         <form onSubmit={send} className="flex gap-2">
           <Input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ask about this meeting…" disabled={asking} />

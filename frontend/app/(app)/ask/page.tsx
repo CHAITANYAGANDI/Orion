@@ -96,7 +96,10 @@ export default function AskPage() {
                 Grounded in every meeting you own. Answers cite the exact moment
                 they came from, so you can check them.
               </p>
-              <div className="mx-auto mt-6 max-w-xl">
+              {/* text-left inside a centred hero: the chips are left-packed
+                  now, so a centred "Suggestions" label above them would be the
+                  only thing not lining up with its own list. */}
+              <div className="mx-auto mt-6 max-w-xl text-left">
                 <ChatSuggestions
                   prompts={toPrompts(chat.suggestions, WORKSPACE_PROMPTS)}
                   disabled={chat.asking}
