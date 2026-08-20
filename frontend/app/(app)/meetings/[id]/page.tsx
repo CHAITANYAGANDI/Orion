@@ -5,7 +5,6 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
-  ArrowLeft,
   RefreshCw,
   Download,
   Loader2,
@@ -82,7 +81,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { StatusBadge } from "@/components/status-badge";
 import { ActionItemRow } from "@/components/action-item-row";
 import { NewActionItemDialog } from "@/components/new-action-item-dialog";
 import { TranslationDialog, ReadingIn, ORIGINAL } from "@/components/translation-dialog";
@@ -541,22 +539,25 @@ export default function MeetingDetailPage() {
           thing competing for first read. */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <Link href="/search" className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="h-4 w-4" /> All meetings
-          </Link>
+          {/* No "All meetings" link. The rail is always there and already says
+              where everything is; a second way back, drawn above the title,
+              pushed the one thing this page is about down the screen. */}
           <MeetingTitle id={id} title={m.title} />
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 font-mono text-xs uppercase tracking-wide text-muted-foreground">
-            <StatusBadge status={status} />
+            {/* No status here. Anything other than READY is already announced
+                below, and far louder — a progress card while it works, a
+                destructive card with the provider's own message when it
+                fails. A badge reading READY beside a meeting you are plainly
+                reading is a label for the only state that needs none. */}
             {/* A document has no runtime, so a duration would be meaningless. */}
             {!isDocument && (
               <>
-                <span className="text-border" aria-hidden>/</span>
                 <span className="tabular inline-flex items-center gap-1.5">
                   <Clock className="h-3.5 w-3.5" /> {formatDuration(m.durationSeconds)}
                 </span>
+                <span className="text-border" aria-hidden>/</span>
               </>
             )}
-            <span className="text-border" aria-hidden>/</span>
             <span className="tabular">{formatDateTime(m.createdAt)}</span>
             {/* Only worth showing when it isn't the default — an "English"
                 badge on every meeting is noise. */}
@@ -1426,11 +1427,24 @@ function ChatPanel({
   const [removeConversation] = useDeleteConversationMutation();
   const [deleteExchange, { isLoading: deleting }] = useDeleteChatExchangeMutation();
   const [q, setQ] = React.useState("");
-  const endRef = React.useRef<HTMLDivElement | null>(null);
+  const threadRef = React.useRef<HTMLDivElement | null>(null);
   const inputRef = React.useRef<HTMLInputElement | null>(null);
 
+  /**
+   * Keep the newest exchange in view — inside the thread, and nowhere else.
+   *
+   * This used to call `scrollIntoView` on a sentinel at the end of the list,
+   * which scrolls *every* scrollable ancestor, the document included. So
+   * opening a meeting scrolled the whole page down to the bottom of the chat
+   * panel the moment its history arrived, and the summary — the thing somebody
+   * opened the meeting to read — started off screen.
+   *
+   * Setting `scrollTop` on the thread's own container cannot reach the window.
+   */
   React.useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
+    const thread = threadRef.current;
+    if (!thread) return;
+    thread.scrollTo({ top: thread.scrollHeight, behavior: "smooth" });
   }, [messages, asking]);
 
   // Follow the thread the server actually filed the turn under — only the
@@ -1530,7 +1544,7 @@ function ChatPanel({
         />
       </CardHeader>
       <CardContent>
-        <div className="mb-4 max-h-[420px] space-y-4 overflow-y-auto">
+        <div ref={threadRef} className="mb-4 max-h-[420px] space-y-4 overflow-y-auto">
           {isLoading ? (
             <Skeleton className="h-16 w-full" />
           ) : messages && messages.length > 0 ? (
@@ -1585,7 +1599,6 @@ function ChatPanel({
               </div>
             </div>
           )}
-          <div ref={endRef} />
         </div>
 
         <form onSubmit={send} className="flex gap-2">
