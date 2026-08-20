@@ -23,6 +23,26 @@ describe("ProcessingCard", () => {
 
     expect(screen.getByText(/Transcribing/i)).toBeInTheDocument();
     expect(screen.getByRole("progressbar")).toBeInTheDocument();
+    // In figures, not only as a length. A bar says "something is happening";
+    // the number is the one that answers "how much longer".
+    expect(screen.getByText("37")).toBeInTheDocument();
+  });
+
+  it("rounds the worker's estimate rather than printing it raw", () => {
+    render(<ProcessingCard status="TRANSCRIBING" progress={37.4999} />);
+
+    // Stage estimates are not whole numbers, and "37.4999%" reads as a bug in
+    // the one number somebody is watching.
+    expect(screen.getByText("37")).toBeInTheDocument();
+  });
+
+  it.each([
+    [-10, "0"],
+    [140, "100"],
+  ])("clamps a progress of %s to %s", (progress, shown) => {
+    render(<ProcessingCard status="SUMMARIZING" progress={progress} />);
+
+    expect(screen.getByText(shown)).toBeInTheDocument();
   });
 
   it("says what is happening rather than leaving the bar to speak for itself", () => {

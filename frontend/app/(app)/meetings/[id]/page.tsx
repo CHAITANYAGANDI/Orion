@@ -586,7 +586,11 @@ export default function MeetingDetailPage() {
                 </a>
               </>
             )}
-            <MeetingTags id={id} tags={m.tags ?? []} />
+            {/* Not while it is still working. Tagging a meeting you cannot
+                read yet is filing a document you have not seen, and the spec
+                line is better off short on the one screen that is otherwise a
+                title and a progress bar. It comes back with the transcript. */}
+            {terminal && <MeetingTags id={id} tags={m.tags ?? []} />}
             {/* In the spec line, beside the facts, rather than only inside the
                 Export menu. Copying the summary is the single commonest thing
                 anybody does with one — it goes into a reply or a doc — and it
@@ -665,7 +669,13 @@ export default function MeetingDetailPage() {
               to read rather than to tidy. Which folder a meeting is in is a
               thing you go and change, not a fact about the meeting worth
               stating beside its date. */}
-          <MeetingMenu
+          {/* Hidden while processing. Everything in it that needs a
+              transcript is already gated off at that point, so what is left is
+              Move, Copy link and Delete — three actions nobody wants mid-wait,
+              drawn as a menu button in the corner of a page with one card on
+              it. It returns the moment the meeting is READY or FAILED, which
+              is when Delete and Transcribe again start to matter. */}
+          {terminal && <MeetingMenu
             meetingId={id}
             projectId={m.projectId}
             hasTranscript={(transcript.data?.segments?.length ?? 0) > 0}
@@ -680,7 +690,7 @@ export default function MeetingDetailPage() {
             onRematchSpeakers={onRematchSpeakers}
             onReprocess={() => void onReprocess()}
             onDelete={() => void onDelete()}
-          />
+          />}
         </div>
       </div>
 
