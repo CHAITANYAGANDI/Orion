@@ -114,7 +114,6 @@ export default function AskPage() {
             busy={chat.asking}
             onSend={(q) => void chat.send(q)}
             onCompose={() => undefined}
-            grounding="Answers come from your own meetings, and go nowhere else."
           >
             <ChatComposer
               busy={chat.asking}

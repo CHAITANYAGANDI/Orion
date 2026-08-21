@@ -99,6 +99,27 @@
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum" 1;
   }
+
+  /*
+   * Scrolls, shows no scrollbar.
+   *
+   * For the composer, where the box is a few lines tall and a permanent bar
+   * down its right-hand side is more furniture than the thing it is measuring.
+   * The caret is the position indicator there, and it is always in view because
+   * the browser keeps it there.
+   *
+   * Not for anything longer. A scrollbar on a transcript or a conversation is
+   * the only thing telling somebody how much of it there is, and taking it away
+   * hides the extent of the content rather than tidying it.
+   */
+  .scrollbar-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* The design system runs at motion 2/10 — transitions are there to show

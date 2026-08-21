@@ -90,3 +90,27 @@ if (!Element.prototype.scrollTo) {
     /* jsdom has no layout, so there is nothing to scroll. */
   };
 }
+
+
+/**
+ * jsdom implements no layout, so there is nothing to observe a resize of.
+ *
+ * The composer watches its own width so it can re-measure the box when the
+ * side panel is dragged, or when the panel it lives in comes back on screen —
+ * neither of which is a render of the composer. Unstubbed, `new
+ * ResizeObserver` is a ReferenceError inside a `useEffect`, which surfaces as
+ * every chat test failing on a name that has nothing to do with what they are
+ * testing.
+ *
+ * A no-op is the honest stand-in: jsdom will never resize anything, so an
+ * observer that never fires is exactly right.
+ */
+if (typeof globalThis.ResizeObserver === "undefined") {
+  globalThis.ResizeObserver = class ResizeObserver {
+    observe() {
+      /* nothing here has a size */
+    }
+    unobserve() {}
+    disconnect() {}
+  };
+}

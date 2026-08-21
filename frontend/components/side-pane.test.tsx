@@ -6,6 +6,7 @@ import {
   SidePane,
   resetSidePane,
   toggleSidePane,
+  toggleSidePaneExpanded,
   useSidePane,
 } from "@/components/side-pane";
 
@@ -27,6 +28,7 @@ function Shell({ children }: { children?: React.ReactNode }) {
     <>
       <p>{pane.occupied ? "occupied" : "empty"}</p>
       <p>{pane.open ? "open" : "closed"}</p>
+      <p>{pane.expanded ? "maximised" : "a column"}</p>
       {/* Hidden when closed, never unmounted — the same thing the real shell
           does, and for the same reason: it is the portal's target, and it is
           holding whatever was being typed. */}
@@ -90,33 +92,35 @@ describe("SidePane", () => {
     expect(screen.getByText("empty")).toBeInTheDocument();
   });
 
-  it("stays occupied while two pages overlap", () => {
-    const { rerender } = render(
-      <Shell>
-        <SidePane key="a">
-          <p>first</p>
-        </SidePane>
-      </Shell>,
-    );
-
+  it("stays occupied when one of two overlapping pages leaves", () => {
     // React mounts the next tree before unmounting the last one during a
     // transition, so both rails exist for a frame. A boolean would be switched
     // off by the one that left and the pane would blink shut mid-navigation.
-    rerender(
+    //
+    // Both rails are passed as an array on every render, and that is load
+    // bearing: a single child becoming an array is a remount, not a
+    // reconciliation, so writing this the obvious way tears down the rail that
+    // was meant to be staying and tests nothing.
+    const { rerender } = render(
       <Shell>
-        <SidePane key="a">
-          <p>first</p>
-        </SidePane>
-        <SidePane key="b">
-          <p>second</p>
-        </SidePane>
+        {[
+          <SidePane key="a">
+            <p>first</p>
+          </SidePane>,
+          <SidePane key="b">
+            <p>second</p>
+          </SidePane>,
+        ]}
       </Shell>,
     );
+
     rerender(
       <Shell>
-        <SidePane key="b">
-          <p>second</p>
-        </SidePane>
+        {[
+          <SidePane key="b">
+            <p>second</p>
+          </SidePane>,
+        ]}
       </Shell>,
     );
 
@@ -190,6 +194,73 @@ describe("collapsing it", () => {
   });
 });
 
+describe("maximising it", () => {
+  it("starts as a column", () => {
+    render(<Shell />);
+
+    expect(screen.getByText("a column")).toBeInTheDocument();
+  });
+
+  it("expands and comes back", async () => {
+    render(<Shell />);
+
+    await act(async () => toggleSidePaneExpanded());
+    expect(screen.getByText("maximised")).toBeInTheDocument();
+
+    await act(async () => toggleSidePaneExpanded());
+    expect(screen.getByText("a column")).toBeInTheDocument();
+  });
+
+  it("shrinks back when the page that was maximised goes", async () => {
+    const { rerender } = render(
+      <Shell>
+        <SidePane>
+          <p>rail</p>
+        </SidePane>
+      </Shell>,
+    );
+    await act(async () => toggleSidePaneExpanded());
+
+    rerender(<Shell />);
+
+    // The control that undoes this lives inside the rail that was maximised.
+    // Carrying the state to the next page would leave a panel covering the
+    // screen with nothing on it offering to move.
+    expect(screen.getByText("a column")).toBeInTheDocument();
+  });
+
+  it("stays maximised when one of two overlapping pages leaves", async () => {
+    const { rerender } = render(
+      <Shell>
+        {[
+          <SidePane key="a">
+            <p>first</p>
+          </SidePane>,
+          <SidePane key="b">
+            <p>second</p>
+          </SidePane>,
+        ]}
+      </Shell>,
+    );
+    await act(async () => toggleSidePaneExpanded());
+
+    rerender(
+      <Shell>
+        {[
+          <SidePane key="b">
+            <p>second</p>
+          </SidePane>,
+        ]}
+      </Shell>,
+    );
+
+    // Mid-navigation the pane is never unoccupied, so nothing has left and
+    // there is nothing to reset. Dropping the maximise here would make it
+    // flicker every time a route transition overlapped two rails.
+    expect(screen.getByText("maximised")).toBeInTheDocument();
+  });
+});
+
 describe("resetSidePane", () => {
   it("puts it back to empty and open", async () => {
     render(<Shell />);
@@ -199,5 +270,6 @@ describe("resetSidePane", () => {
 
     expect(screen.getByText("empty")).toBeInTheDocument();
     expect(screen.getByText("open")).toBeInTheDocument();
+    expect(screen.getByText("a column")).toBeInTheDocument();
   });
 });

@@ -452,20 +452,29 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
             // left border under a full-width block is a line to nowhere.
             "no-print w-full shrink-0 border-t bg-card lg:border-l lg:border-t-0",
             "h-[calc(100vh-4rem)] lg:sticky lg:top-0 lg:h-screen lg:self-start",
-            "lg:w-[var(--side-pane-w,28rem)]",
+            // Maximised, it covers the page instead of replacing it: laid over
+            // everything right of the nav rail, so the document underneath
+            // keeps its scroll position and its layout, and putting the pane
+            // back is not a re-render of the meeting.
+            pane.expanded
+              ? "lg:fixed lg:inset-y-0 lg:left-[var(--rail-w,16rem)] lg:right-0 lg:z-30 lg:w-auto"
+              : "lg:w-[var(--side-pane-w,28rem)]",
             showPane ? "relative flex flex-col" : "hidden",
           )}
         >
-          <PaneResizer
-            side="right"
-            width={paneWidth}
-            min={PANE.min}
-            max={PANE.max}
-            onWidth={setPaneWidth}
-            onReset={() => setPaneWidth(PANE.initial)}
-            label="Resize the side panel"
-            className="absolute inset-y-0 -left-1"
-          />
+          {/* Nothing to drag while it is maximised — its width is the window's. */}
+          {!pane.expanded && (
+            <PaneResizer
+              side="right"
+              width={paneWidth}
+              min={PANE.min}
+              max={PANE.max}
+              onWidth={setPaneWidth}
+              onReset={() => setPaneWidth(PANE.initial)}
+              label="Resize the side panel"
+              className="absolute inset-y-0 -left-1"
+            />
+          )}
           <div id={SIDE_PANE_ID} className="flex min-h-0 flex-1 flex-col" />
         </aside>
       </div>

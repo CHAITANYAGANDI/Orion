@@ -15,7 +15,17 @@
 import * as React from "react";
 import { toast } from "sonner";
 import Link from "next/link";
-import { ChevronDown, Maximize2, Pencil, Plus, Sparkles, Trash2, Check, X } from "lucide-react";
+import {
+  ChevronDown,
+  Maximize2,
+  Minimize2,
+  Pencil,
+  Plus,
+  Sparkles,
+  Trash2,
+  Check,
+  X,
+} from "lucide-react";
 import type { ChatConversation } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,6 +50,18 @@ export interface ChatHistoryProps {
   /** What the maximise control announces. Required when `expandHref` is set. */
   expandLabel?: string;
   /**
+   * Maximise in place instead of navigating.
+   *
+   * For the surface that has nowhere bigger to go. A meeting's chat cannot
+   * open a full page of itself — there is no such route, and inventing one
+   * would mean a second copy of the same conversation at a second URL — so it
+   * grows over the document instead. Ignored when `expandHref` is set; a
+   * control cannot both navigate and stay.
+   */
+  onExpand?: () => void;
+  /** Whether it is currently maximised, so the control can offer the way back. */
+  expanded?: boolean;
+  /**
    * The thread on screen is already an empty one, so New has nothing to do.
    *
    * Separate from `busy`, which means "a request is in flight". They both
@@ -59,6 +81,8 @@ export function ChatHistory({
   busy,
   expandHref,
   expandLabel,
+  onExpand,
+  expanded,
   atNewChat,
 }: ChatHistoryProps) {
   const [open, setOpen] = React.useState(false);
@@ -146,12 +170,30 @@ export function ChatHistory({
           <Plus className="h-4 w-4" />
         </Button>
 
-        {expandHref && (
+        {expandHref ? (
           <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" asChild>
             <Link href={expandHref} aria-label={expandLabel ?? "Open the full chat"}>
               <Maximize2 className="h-4 w-4" />
             </Link>
           </Button>
+        ) : (
+          onExpand && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0"
+              onClick={onExpand}
+              aria-pressed={expanded}
+              // Named for what it will do, not for what it is. "Expand the
+              // chat" on a chat that is already expanded is a control that
+              // lies about its own effect.
+              aria-label={expanded ? "Shrink the chat back to the panel" : "Expand the chat"}
+              title={expanded ? "Shrink the chat back to the panel" : "Expand the chat"}
+            >
+              {expanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            </Button>
+          )
         )}
       </div>
 

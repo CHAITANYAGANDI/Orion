@@ -66,7 +66,7 @@ import type {
 } from "@/lib/types";
 import { useActiveChat } from "@/lib/active-chat";
 import { HeaderSlot } from "@/components/header-slot";
-import { SidePane } from "@/components/side-pane";
+import { SidePane, toggleSidePaneExpanded, useSidePane } from "@/components/side-pane";
 import { Button } from "@/components/ui/button";
 import { useRecordingJob } from "@/lib/recording-context";
 import { ProcessingCard } from "@/components/processing-card";
@@ -1460,6 +1460,8 @@ function ChatPanel({
   // component state so that switching to the transcript tab and back does not
   // abandon a thread mid-question.
   const [conversationId, setConversationId] = useActiveChat(meetingId);
+  // Only for the maximise control's own state. The pane itself is the shell's.
+  const pane = useSidePane();
 
   const {
     data: messages,
@@ -1577,6 +1579,12 @@ function ChatPanel({
           onSelect={setConversationId}
           onNew={onNew}
           busy={starting}
+          // In place rather than by navigating. There is no full page for one
+          // meeting's chat, and adding a route to hold a second copy of this
+          // conversation would be a URL nobody could get back from with the
+          // transcript still on screen. See components/side-pane.tsx.
+          onExpand={toggleSidePaneExpanded}
+          expanded={pane.expanded}
           onRename={async (id, title) => {
             await rename({ conversationId: id, title, scope: meetingId }).unwrap();
           }}
@@ -1594,7 +1602,6 @@ function ChatPanel({
           busy={asking}
           onSend={(prompt) => void submit(prompt)}
           onCompose={(prefix) => setComposeText({ text: prefix, nonce: Date.now() })}
-          grounding="Grounded in this meeting's transcript, with citations you can play."
         >
           <ChatComposer
             busy={asking}

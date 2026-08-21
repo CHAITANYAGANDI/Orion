@@ -30,6 +30,41 @@ import { cn } from "@/lib/utils";
 /** How tall the box is allowed to grow before it scrolls instead. */
 const MAX_ROWS = 8;
 
+/**
+ * The typed line height in pixels, and the box's own vertical padding.
+ *
+ * Both are stated here because the ceiling is computed from them, and both must
+ * match the classes on the textarea — `leading-6` and `py-1.5`. The old code
+ * hardcoded 24 against a `text-sm` box whose line box is 20, so "eight rows"
+ * was nearer ten.
+ */
+const LINE_HEIGHT = 24;
+const PADDING_Y = 12;
+
+/**
+ * The tallest the box may get, after which it scrolls.
+ *
+ * Expressed as a real `max-height` rather than only as a number the resize
+ * effect clamps to. The effect is one `useEffect` away from not running — a
+ * ref that has not attached, text arriving from somewhere other than a
+ * keystroke — and when it does not run there is nothing at all stopping the
+ * box from growing until it has eaten the conversation above it. A CSS ceiling
+ * holds whether or not any JavaScript does, and `overflow-y: auto` under it is
+ * what puts a scrollbar there.
+ */
+const MAX_HEIGHT = MAX_ROWS * LINE_HEIGHT + PADDING_Y;
+
+/**
+ * The shortest it may ever be: one row.
+ *
+ * A floor, for the same reason there is a ceiling. The box is measured by
+ * JavaScript, and a measurement taken while the panel is hidden — inside a
+ * collapsed pane, or behind the Action Items tab — comes back as zero. Writing
+ * zero back gave a box with no height, a placeholder nobody could read and a
+ * caret nobody could see. CSS holds the floor whatever the measurement says.
+ */
+const MIN_HEIGHT = LINE_HEIGHT + PADDING_Y;
+
 export interface ChatContext {
   /** Meetings the question is narrowed to. Empty means the whole workspace. */
   meetingIds: string[];
@@ -102,15 +137,53 @@ export function ChatComposer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [compose?.nonce]);
 
-  // Grow with the content. Reset to auto first or the box can only ever get
-  // taller — scrollHeight includes the height already set.
-  React.useEffect(() => {
+  /*
+   * Grow with the content.
+   *
+   * Reset to auto first or the box can only ever get taller — `scrollHeight`
+   * includes the height already set. No clamping here: `max-height` and
+   * `min-height` do that in CSS, and doing it in both places is two ceilings to
+   * keep in step.
+   */
+  const resize = React.useCallback(() => {
     const el = areaRef.current;
     if (!el) return;
     el.style.height = "auto";
-    const lineHeight = 24;
-    el.style.height = `${Math.min(el.scrollHeight, lineHeight * MAX_ROWS)}px`;
-  }, [text]);
+    // An element that is not being displayed measures as zero, and writing
+    // that back is how the box ended up invisible: the panel is portaled into
+    // the shell's pane, which is `hidden` until a page claims it, so the very
+    // first measurement happened while there was nothing to measure — and
+    // nothing re-ran it afterwards, because the text had not changed.
+    if (el.scrollHeight > 0) el.style.height = `${el.scrollHeight}px`;
+  }, []);
+
+  React.useEffect(resize, [text, resize]);
+
+  /*
+   * Measure again when the box changes width.
+   *
+   * Two cases, one observer. Coming back on screen is a width of zero becoming
+   * a real one, and it is not a render of this component — the class that hid
+   * it belongs to an ancestor — so nothing else would ever re-measure. And the
+   * side panel can now be dragged, which rewraps every line in here; without
+   * this the box keeps the height it needed at the old width and clips.
+   *
+   * The wrapper is observed rather than the textarea, and only its width is
+   * acted on. Observing the box's own height would mean reacting to the height
+   * this very callback sets, which is a loop.
+   */
+  React.useEffect(() => {
+    const box = areaRef.current?.parentElement;
+    if (!box) return;
+    let width = box.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (box.clientWidth === width) return;
+      width = box.clientWidth;
+      resize();
+    });
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [resize]);
 
   function submit() {
     const question = text.trim();
@@ -123,7 +196,20 @@ export function ChatComposer({
   const selectedCount = context.meetingIds.length + context.projectIds.length;
 
   return (
-    <div className="relative rounded-xl border bg-card shadow-sm">
+    /*
+     * One box, three rows, one horizontal rule.
+     *
+     * The rows used to disagree about their own left edge — the chips at 12px,
+     * the text at 16px, the mode picker back at 12px — so the placeholder
+     * started a quarter-inch right of the chip above it and the whole box read
+     * as slightly broken without it being obvious why. They are all `px-3.5`
+     * now and everything in the box lines up.
+     *
+     * The ring is not decoration. The textarea sets `outline-none`, and until
+     * now put nothing in its place: tabbing into the chat gave no indication of
+     * having arrived anywhere.
+     */
+    <div className="relative rounded-2xl border bg-card shadow-sm transition-colors focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/20">
       {picking && !scope && (
         <ContextPicker
           meetings={meetings}
@@ -134,7 +220,7 @@ export function ChatComposer({
         />
       )}
 
-      <div className="flex flex-wrap items-center gap-1.5 px-3 pt-3">
+      <div className="flex flex-wrap items-center gap-1.5 px-3.5 pt-3">
         {scope ? (
           <span className="flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
             <AtSign className="h-3.5 w-3.5" />
@@ -199,10 +285,17 @@ export function ChatComposer({
         }}
         placeholder={placeholder}
         aria-label="Ask a question"
-        className="w-full resize-none bg-transparent px-4 py-3 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-60"
+        // `leading-6` and `py-1.5` are the two numbers MAX_HEIGHT is built
+        // from; changing either without the other moves the ceiling off a
+        // whole number of lines and leaves a clipped half-line at the bottom.
+        style={{ maxHeight: MAX_HEIGHT, minHeight: MIN_HEIGHT }}
+        // `scrollbar-none` scrolls without drawing the bar — see globals.css.
+        // On a box this small the bar is more furniture than the two lines it
+        // is measuring, and the caret already says where you are.
+        className="scrollbar-none block w-full resize-none overflow-y-auto bg-transparent px-3.5 py-1.5 text-sm leading-6 outline-none placeholder:text-muted-foreground disabled:opacity-60"
       />
 
-      <div className="flex items-center justify-between gap-2 px-3 pb-3">
+      <div className="flex items-center justify-between gap-2 px-3.5 pb-3 pt-0.5">
         {modes && modes.length > 0 ? (
           <ModePicker
             modes={modes}
@@ -392,7 +485,7 @@ function ContextPicker({
       ref={ref}
       role="dialog"
       aria-label="Add context"
-      className="absolute bottom-full left-3 z-30 mb-2 w-80 overflow-hidden rounded-lg border bg-popover shadow-xl"
+      className="absolute bottom-full left-3.5 z-30 mb-2 w-80 overflow-hidden rounded-lg border bg-popover shadow-xl"
     >
       <div className="flex items-center gap-2 border-b px-3">
         <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />

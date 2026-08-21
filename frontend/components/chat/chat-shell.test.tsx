@@ -24,7 +24,6 @@ function dock(over: Partial<React.ComponentProps<typeof ChatDock>> = {}) {
     showPrompts: true,
     onSend: vi.fn(),
     onCompose: vi.fn(),
-    grounding: "Answers come from your own meetings, and go nowhere else.",
     children: <textarea aria-label="Ask a question" />,
     ...over,
   };
@@ -39,9 +38,12 @@ describe("ChatDock", () => {
     // Order matters and is the whole point: these used to sit in the middle of
     // the empty thread, where the first answer was about to appear.
     const region = screen.getByLabelText("Ask a question").parentElement!;
-    const text = region.textContent ?? "";
-    expect(text.indexOf("Suggestions")).toBeGreaterThanOrEqual(0);
-    expect(text.indexOf("Suggestions")).toBeLessThan(text.indexOf("Answers come from"));
+    const chips = screen.getByRole("button", { name: /hasn't been completed/i });
+    expect(region).toHaveTextContent("Suggestions");
+    // Before the box, not after it and not in the middle of the empty thread
+    // where the first answer is about to appear.
+    expect(chips.compareDocumentPosition(screen.getByLabelText("Ask a question")))
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it("sends a complete prompt and composes an unfinished one", async () => {
@@ -65,12 +67,17 @@ describe("ChatDock", () => {
     expect(screen.queryByRole("button", { name: /hasn't been completed/i })).not.toBeInTheDocument();
   });
 
-  it("keeps the grounding notice whether or not there are prompts", () => {
+  it("carries no standing notice above the box", () => {
     dock({ showPrompts: false });
 
-    // The chat reads transcripts. One line saying where an answer came from is
-    // the only way a reader knows nothing left.
-    expect(screen.getByText(/go nowhere else/i)).toBeInTheDocument();
+    // There used to be a line here on every surface saying answers came from
+    // your own meetings. It said the same thing on every visit to a panel
+    // whose whole subject is the meetings beside it, which is a line nobody
+    // reads and a composer that is shorter for carrying it. What grounds an
+    // answer is the citations under it, which are specific and only there when
+    // there is something to cite.
+    expect(screen.queryByText(/go nowhere else/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/grounded in/i)).not.toBeInTheDocument();
   });
 
   it("does not offer a prompt while a question is in flight", () => {

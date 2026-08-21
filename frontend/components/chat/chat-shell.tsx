@@ -6,9 +6,8 @@
  * Three surfaces ask questions — the rail beside the home list, the rail beside
  * a meeting, and the full-width AI Chat page — and until now each drew its own
  * version of the same thing. They had drifted: one centred its starter prompts
- * and one left-aligned them, one wrapped the whole conversation in a `Card`
- * titled "Ask this meeting" so the panel was a box inside a box inside a rail,
- * and the grounding notice was a full-width strip on one and absent on another.
+ * and one left-aligned them, and one wrapped the whole conversation in a `Card`
+ * titled "Ask this meeting", so the panel was a box inside a box inside a rail.
  *
  * What is shared here is **presentation only**. The scopes stay apart on
  * purpose: workspace chat reads every meeting you own, meeting chat reads one,
@@ -25,7 +24,6 @@
  *     │                   │      │
  *     ├──────────────────────────┤
  *     │ suggestions              │  ← the dock
- *     │ grounding notice         │
  *     │ composer                 │
  *     └──────────────────────────┘
  *
@@ -36,7 +34,6 @@
  */
 
 import * as React from "react";
-import { ShieldCheck } from "lucide-react";
 import { ChatSuggestions } from "@/components/chat-suggestions";
 import type { ChatPrompt } from "@/lib/chat-prompts";
 import { cn } from "@/lib/utils";
@@ -97,7 +94,6 @@ export function ChatDock({
   busy,
   onSend,
   onCompose,
-  grounding,
   children,
   className,
 }: {
@@ -107,8 +103,6 @@ export function ChatDock({
   busy?: boolean;
   onSend: (prompt: string) => void;
   onCompose: (prefix: string) => void;
-  /** Where answers come from. Product copy, not boilerplate — see below. */
-  grounding: string;
   /** The composer, configured by whichever scope is rendering this. */
   children: React.ReactNode;
   className?: string;
@@ -124,15 +118,12 @@ export function ChatDock({
         />
       )}
 
-      {/* Not a reassurance for its own sake, and not a paragraph. The chat
-          reads transcripts, and one line saying where an answer came from is
-          the only way a reader knows nothing left. Sized and coloured to sit
-          under the composer's notice rather than compete with it. */}
-      <p className="flex items-center gap-1.5 pt-1 text-xs text-muted-foreground">
-        <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
-        <span className="min-w-0">{grounding}</span>
-      </p>
-
+      {/* No standing notice about where answers come from. It said the same
+          sentence on every visit to a panel whose whole subject is the
+          meetings it is sitting next to, and a line of chrome that is never
+          new is a line nobody reads and a line the composer is shorter for.
+          What grounds an answer is the citations under it, which are specific,
+          playable, and only there when there is something to say. */}
       {children}
     </div>
   );

@@ -275,3 +275,103 @@ describe("text handed over from elsewhere on the page", () => {
     expect(box).toHaveValue("Ask about this: ");
   });
 });
+
+
+/**
+ * The box itself.
+ *
+ * Two defects that are invisible in a diff and obvious on screen. The rows
+ * disagreed about their own left edge — chips at 12px, the text at 16px, the
+ * mode picker back at 12px — so the placeholder started a quarter-inch right of
+ * the chip above it. And the ceiling on the box's height lived only inside a
+ * `useEffect`, so anything that stopped the effect running left a box that grew
+ * until it had eaten the conversation above it, with no scrollbar because there
+ * was no overflow to scroll.
+ */
+describe("the box", () => {
+  function box() {
+    return screen.getByLabelText("Ask a question") as HTMLTextAreaElement;
+  }
+
+  /** The `px-*` class a row is using, whatever it happens to be. */
+  function padding(el: Element): string | undefined {
+    return el.className.split(/\s+/).find((c) => c.startsWith("px-"));
+  }
+
+  it("lines its rows up on one left edge", () => {
+    render(<ChatComposer scope="This meeting" onSend={vi.fn()} />);
+
+    const rows = Array.from(box().parentElement!.children);
+    const paddings = new Set(rows.map(padding));
+    expect(paddings.size).toBe(1);
+    expect([...paddings][0]).toBeDefined();
+  });
+
+  it("cannot grow past its ceiling however much is typed", () => {
+    render(<ChatComposer onSend={vi.fn()} />);
+
+    // A real `max-height`, not a number some effect is trusted to clamp to.
+    // Eight lines at the box's own line height, plus its padding.
+    expect(box().style.maxHeight).toBe("204px");
+  });
+
+  it("scrolls once it reaches it", () => {
+    render(<ChatComposer onSend={vi.fn()} />);
+
+    // Without this the ceiling would clip the text being typed instead of
+    // scrolling to it, which is the same bug wearing a hat.
+    expect(box().className).toContain("overflow-y-auto");
+  });
+
+  it("never collapses to nothing, however it was measured", async () => {
+    render(<ChatComposer scope="This meeting" onSend={vi.fn()} />);
+
+    // jsdom lays nothing out, so `scrollHeight` here is zero — which is
+    // precisely what a real browser reports for an element inside a
+    // `display: none` ancestor. The panel is portaled into a pane that is
+    // hidden until a page claims it, so that is the *first* measurement every
+    // chat takes, and writing it back gave a box with no height: no
+    // placeholder, no caret, and nothing to make it re-measure afterwards
+    // because the text had not changed.
+    const el = box();
+    await userEvent.type(el, "a question");
+
+    expect(el.style.height).not.toBe("0px");
+    expect(el.style.minHeight).toBe("36px");
+  });
+
+  it("takes the height it is told when there is something to measure", async () => {
+    render(<ChatComposer scope="This meeting" onSend={vi.fn()} />);
+    const el = box();
+    Object.defineProperty(el, "scrollHeight", { configurable: true, value: 84 });
+
+    await userEvent.type(el, "three lines of question");
+
+    // Three rows' worth. The ceiling and floor are CSS; this is the part that
+    // has to be measured, and it still is.
+    expect(el.style.height).toBe("84px");
+  });
+
+  it("scrolls without drawing a scrollbar", () => {
+    render(<ChatComposer onSend={vi.fn()} />);
+
+    // Asked for. On a box a few lines tall the bar is more furniture than the
+    // content it measures, and the caret already says where you are. The rule
+    // is in globals.css; only the class is visible from here.
+    expect(box().className).toContain("scrollbar-none");
+  });
+
+  it("shows where the focus is", async () => {
+    // Fixed scope, so the chip above the box is a label rather than a button
+    // and the textarea is the first thing Tab reaches.
+    render(<ChatComposer scope="This meeting" onSend={vi.fn()} />);
+
+    // The textarea sets `outline-none` and put nothing in its place, so tabbing
+    // into the chat gave no sign of having arrived anywhere. The ring is on the
+    // box rather than the textarea because the box is what looks like the input.
+    expect(box().parentElement!.className).toContain("focus-within:ring-2");
+
+    await userEvent.tab();
+    expect(box()).toHaveFocus();
+  });
+});

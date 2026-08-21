@@ -229,3 +229,64 @@ describe("ChatHistory", () => {
     expect(screen.getByRole("menu")).toBeInTheDocument();
   });
 });
+
+
+/**
+ * Getting more room.
+ *
+ * Two surfaces, two answers, one icon. The home rail has a full page to open —
+ * /ask, the same conversation at a bigger size — so its control navigates. A
+ * meeting's chat has no such page and inventing one would put a second copy of
+ * the conversation at a second URL, with the transcript it is about left
+ * behind. So that one grows in place instead.
+ */
+describe("the expand control", () => {
+  it("is absent where there is nowhere bigger to go", () => {
+    picker();
+
+    // The full AI Chat page passes neither. A button that reloads the page you
+    // are already on is a dead control.
+    expect(screen.queryByRole("link", { name: /full chat/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /expand/i })).not.toBeInTheDocument();
+  });
+
+  it("navigates when the surface has a bigger page", () => {
+    picker({ expandHref: "/ask", expandLabel: "Open the full chat" });
+
+    expect(screen.getByRole("link", { name: "Open the full chat" })).toHaveAttribute(
+      "href",
+      "/ask",
+    );
+  });
+
+  it("expands in place when it does not", async () => {
+    const onExpand = vi.fn();
+    picker({ onExpand });
+
+    await userEvent.click(screen.getByRole("button", { name: "Expand the chat" }));
+    expect(onExpand).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers the way back once it is expanded", async () => {
+    const onExpand = vi.fn();
+    picker({ onExpand, expanded: true });
+
+    // Named for what pressing it does. "Expand the chat" on a chat that is
+    // already expanded is a control lying about its own effect, and it is the
+    // only way back to the transcript underneath.
+    const button = screen.getByRole("button", { name: "Shrink the chat back to the panel" });
+    expect(button).toHaveAttribute("aria-pressed", "true");
+
+    await userEvent.click(button);
+    expect(onExpand).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not offer both at once", () => {
+    picker({ expandHref: "/ask", expandLabel: "Open the full chat", onExpand: vi.fn() });
+
+    // One control. Two, side by side, would be two icons that both mean "more
+    // room" and disagree about where.
+    expect(screen.getByRole("link", { name: "Open the full chat" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /expand the chat/i })).not.toBeInTheDocument();
+  });
+});

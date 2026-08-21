@@ -54,9 +54,19 @@ export interface SidePaneState {
    * icon to explain where it went — is the wrong thing to remember.
    */
   open: boolean;
+  /**
+   * Whether it has been maximised over the page.
+   *
+   * A rail is a good width for asking and a poor one for reading a long answer
+   * back, and a meeting's chat has nowhere bigger to go: the home rail expands
+   * by opening /ask, and there is no equivalent page for one meeting. So it
+   * expands in place, over the document rather than instead of it, and the same
+   * control puts it back.
+   */
+  expanded: boolean;
 }
 
-const CLOSED: SidePaneState = { occupied: false, open: true };
+const CLOSED: SidePaneState = { occupied: false, open: true, expanded: false };
 
 let state: SidePaneState = CLOSED;
 let occupants = 0;
@@ -70,7 +80,13 @@ function subscribe(listener: () => void): () => void {
 }
 
 function set(next: SidePaneState): void {
-  if (next.occupied === state.occupied && next.open === state.open) return;
+  if (
+    next.occupied === state.occupied &&
+    next.open === state.open &&
+    next.expanded === state.expanded
+  ) {
+    return;
+  }
   state = next;
   for (const listener of listeners) listener();
 }
@@ -87,13 +103,22 @@ export function occupySidePane(): () => void {
   set({ ...state, occupied: true });
   return () => {
     occupants = Math.max(0, occupants - 1);
-    set({ ...state, occupied: occupants > 0 });
+    const occupied = occupants > 0;
+    // Maximised is a state of one page's rail, and the control that undoes it
+    // lives inside that rail. Carrying it across a navigation would maximise a
+    // panel with no way to shrink itself again.
+    set({ ...state, occupied, expanded: occupied && state.expanded });
   };
 }
 
 /** Show or hide the pane. */
 export function toggleSidePane(): void {
   set({ ...state, open: !state.open });
+}
+
+/** Maximise the pane over the page, or put it back to a column. */
+export function toggleSidePaneExpanded(): void {
+  set({ ...state, expanded: !state.expanded });
 }
 
 /** Forget everything. Exists so tests start from a clean sheet. */
