@@ -21,7 +21,7 @@ import { SETTINGS_TABS, LEGACY_PATHS, pathForTab } from "@/lib/settings-tabs";
 /** Pages that offer a new meeting, because none of the rules apply to them. */
 const WORKING_PAGES = [
   "/home",
-  "/projects/prj_1",
+  "/folder/prj_1",
   "/action-items",
   "/search",
   "/upload",
@@ -81,14 +81,14 @@ describe("what the header offers to create", () => {
 
   it("offers a folder on the folder list, not a meeting", () => {
     // The one page whose obvious next action is not recording something.
-    expect(headerChrome("/projects").create).toBe("folder");
-    expect(headerChrome("/projects/").create).toBe("folder");
+    expect(headerChrome("/folders").create).toBe("folder");
+    expect(headerChrome("/folders/").create).toBe("folder");
   });
 
   it("offers a meeting again inside a folder", () => {
     // Filing a call into the folder you are looking at is exactly the moment
     // to record one.
-    expect(headerChrome("/projects/prj_1").create).toBe("meeting");
+    expect(headerChrome("/folder/prj_1").create).toBe("meeting");
   });
 
   it("offers nothing on Account Settings, under every URL it answers to", () => {
@@ -138,7 +138,7 @@ describe("while a recording is in hand", () => {
   it("still offers a folder on the folder list", () => {
     // Filing something is not making a second recording, and the folder list
     // has no other action of its own.
-    expect(headerChrome("/projects", true).create).toBe("folder");
+    expect(headerChrome("/folders", true).create).toBe("folder");
   });
 
   it("leaves search alone, since finding a meeting does not make one", () => {
@@ -159,24 +159,24 @@ describe("while a recording is in hand", () => {
 
 describe("the folder whose actions belong in the header", () => {
   it("is the one being looked at", () => {
-    expect(headerChrome("/projects/prj_1").folderId).toBe("prj_1");
+    expect(headerChrome("/folder/prj_1").folderId).toBe("prj_1");
   });
 
   it("is nothing on the folder list itself", () => {
     // Rename and delete need a folder. On the list there are many, and the
     // per-row menus are where they belong.
-    expect(headerChrome("/projects").folderId).toBeNull();
+    expect(headerChrome("/folders").folderId).toBeNull();
   });
 
   it("is nothing on a deeper path under a folder", () => {
     // Guards the id being read positionally: a third segment means this is not
     // the folder page, and taking parts[1] anyway would put a stale folder's
     // rename and delete in the header.
-    expect(headerChrome("/projects/prj_1/anything").folderId).toBeNull();
+    expect(headerChrome("/folder/prj_1/anything").folderId).toBeNull();
   });
 
   it("is nothing anywhere else", () => {
-    const notAFolder = WORKING_PAGES.filter((p) => p !== "/projects/prj_1");
+    const notAFolder = WORKING_PAGES.filter((p) => p !== "/folder/prj_1");
     for (const path of [...notAFolder, MEETING_PAGE, ...CAPTURING_PAGES, "/ask", "/settings", "/billing"]) {
       expect(headerChrome(path).folderId).toBeNull();
     }
@@ -201,7 +201,7 @@ describe("the two pages that strip the header", () => {
   });
 
   it("strips nothing on any page that is neither", () => {
-    for (const path of [...WORKING_PAGES, "/projects"]) {
+    for (const path of [...WORKING_PAGES, "/folders"]) {
       const chrome = headerChrome(path);
       expect(chrome.search).toBe(true);
       expect(chrome.create).not.toBe("none");
@@ -228,7 +228,7 @@ describe("an empty top bar", () => {
 
   it("is not reported where the bar still has something in it", () => {
     // Dropping the bar on these would take search with it.
-    for (const path of [...WORKING_PAGES, MEETING_PAGE, "/ask", "/projects", "/record"]) {
+    for (const path of [...WORKING_PAGES, MEETING_PAGE, "/ask", "/folders", "/record"]) {
       expect(headerChrome(path).bare).toBe(false);
     }
   });
@@ -236,7 +236,7 @@ describe("an empty top bar", () => {
   it("never claims to be empty while it is still holding search", () => {
     // The two must not disagree: a bar that is dropped while it carries the
     // only way to search is a feature deleted by a layout tweak.
-    for (const path of ["/home", "/settings", "/ask", MEETING_PAGE, "/projects/prj_1"]) {
+    for (const path of ["/home", "/settings", "/ask", MEETING_PAGE, "/folder/prj_1"]) {
       const chrome = headerChrome(path);
       if (chrome.bare) expect(chrome.search).toBe(false);
     }

@@ -47,7 +47,7 @@ vi.mock("@/lib/api", () => ({
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
-import FoldersPage from "@/app/(app)/projects/page";
+import FoldersPage from "@/app/(app)/folders/page";
 
 function folder(over: Partial<Project> = {}): Project {
   return {
@@ -90,7 +90,7 @@ describe("the list", () => {
 
     expect(screen.getByRole("link", { name: /Meetings/ })).toHaveAttribute(
       "href",
-      "/projects/prj_1",
+      "/folder/prj_1",
     );
   });
 

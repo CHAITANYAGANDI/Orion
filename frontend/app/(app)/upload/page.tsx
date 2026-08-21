@@ -18,6 +18,7 @@ import {
 } from "@/lib/uploads";
 import { formatDuration } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { recordHref } from "@/lib/routes";
 
 type Phase = "idle" | "uploading" | "creating";
 
@@ -188,7 +189,7 @@ export default function UploadPage() {
               <Mic className="h-4 w-4 shrink-0 text-primary" />
               <span className="text-muted-foreground">
                 Meeting happening now?{" "}
-                <Link href="/record" className="font-medium text-foreground underline underline-offset-2">
+                <Link href={recordHref("/upload")} className="font-medium text-foreground underline underline-offset-2">
                   Record it live
                 </Link>{" "}
                 — records this device&apos;s microphone.

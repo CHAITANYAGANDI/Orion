@@ -45,6 +45,7 @@ vi.mock("@/lib/api", () => ({
   useCreateUploadUrlMutation: () => [vi.fn()],
   useCreateMeetingMutation: () => [vi.fn()],
   useGetLanguagesQuery: () => ({ data: [] }),
+  useGetProjectQuery: (id: string) => ({ data: { id, name: "Q4 planning" } }),
   useUpdatePreferencesMutation: () => [vi.fn()],
 }));
 
@@ -66,7 +67,7 @@ import type { RecordingSession } from "@/lib/recording-context";
 
 const start = vi.fn().mockResolvedValue(undefined);
 const setTitle = vi.fn();
-const setFolderId = vi.fn();
+const setReturnTo = vi.fn();
 
 function aTranscript(overrides: Partial<UseLiveTranscript> = {}): UseLiveTranscript {
   return {
@@ -119,8 +120,8 @@ function renderPage(
   session.current = {
     title: "",
     setTitle,
-    folderId: null,
-    setFolderId,
+    returnTo: null,
+    setReturnTo,
     transcript: aTranscript(),
     ...sessionOverrides,
   } satisfies RecordingSession;
@@ -147,7 +148,12 @@ function renderPage(
   return render(<RecordPage />);
 }
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  // The address bar is shared state in jsdom, and half of these arrive at
+  // /record with something on it.
+  window.history.replaceState({}, "", "/record");
+});
 
 describe("RecordPage on arrival", () => {
   it("opens the microphone rather than offering to", async () => {
@@ -194,6 +200,56 @@ describe("RecordPage on arrival", () => {
     // A laptop recording and a phone in a pocket are the same account, and the
     // microphone is the one thing the server cannot observe for itself.
     await waitFor(() => expect(announceRecording).toHaveBeenCalled());
+  });
+
+  it("remembers where it was opened from", async () => {
+    // /record?r=%2Ffolder%2Fprj_1 — the Otter shape, and the only thing a
+    // reload of this page still has. The header's Record button says the same
+    // in memory, but memory is what a reload just threw away.
+    window.history.replaceState({}, "", "/record?r=%2Ffolder%2Fprj_1");
+
+    renderPage();
+
+    // Which is where the meeting files and where Discard goes back to. Held as
+    // the path rather than the folder id: those are the same fact, and two
+    // copies of one fact are two things that can disagree.
+    await waitFor(() => expect(setReturnTo).toHaveBeenCalledWith("/folder/prj_1"));
+  });
+
+  it("takes Home when it was opened from nowhere in particular", async () => {
+    renderPage();
+
+    await waitFor(() => expect(setReturnTo).toHaveBeenCalledWith("/home"));
+  });
+
+  it("does not overwrite where a running recording came from", () => {
+    // Reaching /record again while a recording started in a folder is under
+    // way — the back button, a second press. The recording still belongs to
+    // that folder, and the URL now says otherwise.
+    window.history.replaceState({}, "", "/record");
+
+    renderPage({ state: "recording" }, { returnTo: "/folder/prj_1" });
+
+    expect(setReturnTo).not.toHaveBeenCalled();
+  });
+
+  it("says which folder the meeting will land in, and links to it", () => {
+    renderPage({ state: "recording" }, { returnTo: "/folder/prj_1" });
+
+    // Said now rather than discovered later: the folder was chosen a screen ago
+    // and several minutes before the meeting will exist. A link, because it is
+    // also the way back — leaving mid-recording is safe, the recorder lives in
+    // the shell.
+    const link = screen.getByRole("link", { name: "Q4 planning" });
+    expect(link).toHaveAttribute("href", "/folder/prj_1");
+  });
+
+  it("says nothing about a folder when it was not started in one", () => {
+    renderPage({ state: "recording" }, { returnTo: "/home" });
+
+    // "Folder: —" reads as a missing value rather than as a meeting that
+    // belongs nowhere in particular.
+    expect(screen.queryByText(/Folder:/)).not.toBeInTheDocument();
   });
 
   it("does not reopen a microphone that is already open", () => {

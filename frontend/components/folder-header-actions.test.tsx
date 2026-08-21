@@ -125,7 +125,7 @@ describe("deleting", () => {
     await userEvent.click(screen.getByRole("menuitem", { name: /Delete folder/ }));
 
     // Otherwise the page underneath is a folder that no longer exists.
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/projects"));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/folders"));
   });
 
   it("does nothing when the confirm is dismissed", async () => {

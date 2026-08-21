@@ -59,6 +59,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { headerChrome } from "@/lib/chrome";
+import { recordHref, returnPath } from "@/lib/routes";
 import { usePaneWidth, type PaneBounds } from "@/lib/pane-size";
 import { PaneResizer } from "@/components/pane-resizer";
 import { SIDE_PANE_ID, toggleSidePane, useSidePane } from "@/components/side-pane";
@@ -70,6 +71,7 @@ import { SearchCommand } from "@/components/search-command";
 import { ImportDialog } from "@/components/import-dialog";
 import { RecordingBar } from "@/components/recording-bar";
 import { AccountMenu } from "@/components/account-menu";
+import { PlanUsage } from "@/components/plan-usage";
 import { FolderTree } from "@/components/folder-tree";
 import { FolderDialog } from "@/components/folder-dialog";
 import { FolderHeaderActions } from "@/components/folder-header-actions";
@@ -260,6 +262,10 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
               the space rather than positioned into it, and a rail with fifty
               folders in it keeps the same footer as a rail with none. */}
           <div className="mt-auto border-t pt-3">
+            {/* Above the account, because it is about the month rather than
+                about the person, and because the thing it leads to — the Plans
+                tab — is one row further down. */}
+            <PlanUsage onNavigate={() => setMobileOpen(false)} />
             <AccountMenu />
           </div>
         </aside>
@@ -359,12 +365,13 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
                     <Upload className="h-4 w-4" />
                     <span className="hidden sm:inline">Import</span>
                   </Button>
-                  {/* Told which folder it is being pressed in. A recording
-                      started inside one belongs in it, and by the time it is
+                  {/* Told where it is being pressed. A recording started
+                      inside a folder belongs in it, and by the time it is
                       saved — minutes later, from /record or from wherever the
                       user wandered — there is no folder in the pathname to
-                      read. See `folderId` in lib/recording-context. */}
-                  <RecordButton folderId={chrome.folderId} />
+                      read. It is also the way back from a discarded recording.
+                      See `returnTo` in lib/recording-context. */}
+                  <RecordButton from={pathname} />
                 </>
               )}
 
@@ -519,20 +526,23 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
  * screen behind the browser's permission prompt and it is obvious what is
  * being asked for and by whom.
  */
-function RecordButton({ folderId }: { folderId: string | null }) {
+function RecordButton({ from }: { from: string }) {
   const recorder = useRecording();
   const session = useRecordingSession();
   const router = useRouter();
   const [announceRecording] = useRecordingStartedMutation();
 
   function onRecord() {
-    router.push("/record");
+    // /record?r=%2Ffolder%2Fprj_1 — the page this was pressed on, on the URL,
+    // so that a reload of /record still knows where the recording came from.
+    router.push(recordHref(from));
     if (recorder.state !== "idle") return;
-    // Before the navigation lands and before the microphone opens: this is the
-    // only moment the folder is knowable, and it is remembered until the
-    // meeting is created. Set even when null, so a recording started from Home
+    // And in memory, which is what survives navigating away from /record while
+    // the meeting runs. Before the navigation lands and before the microphone
+    // opens: this is the only moment it is knowable, and it is remembered until
+    // the meeting is created. Set every time, so a recording started from Home
     // cannot inherit the last one's folder.
-    session.setFolderId(folderId);
+    session.setReturnTo(returnPath(from));
     void recorder.start().then(() => {
       // The server cannot observe a microphone, and the point of telling it is
       // the account's other devices. Fired and forgotten: a notification that

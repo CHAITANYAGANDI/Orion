@@ -169,3 +169,28 @@ export function usageFraction(used: number, limit: number): number {
   if (limit === 0) return 100;
   return Math.min(100, Math.round((used / limit) * 100));
 }
+
+/**
+ * The count on its own, for a sentence that supplies its own verb.
+ *
+ * `usageLabel` reads "21 used", which is a whole clause and cannot be put in
+ * front of one — "21 used monthly meetings used". The rail's meter needs the
+ * bold half of "**3 of 5** monthly meetings used", so unlimited drops the
+ * ceiling rather than the noun.
+ */
+export function quotaCount(used: number, limit: number): string {
+  return limit < 0 ? `${used}` : `${used} of ${limit}`;
+}
+
+/**
+ * What to call the plan somebody is on.
+ *
+ * FREE is {@link PLAN_NAME}, because that is the word the product uses. The
+ * other two are named as the server names them: an account still carrying PRO
+ * or PREMIUM from an earlier build of Recallix has different limits, and
+ * calling it Basic would explain neither the plan nor the numbers beside it.
+ */
+export function planLabel(plan: string): string {
+  if (plan === "FREE") return PLAN_NAME;
+  return plan.charAt(0) + plan.slice(1).toLowerCase();
+}

@@ -37,6 +37,7 @@ import {
   useRecordingJob,
 } from "@/lib/recording-context";
 import { stopwatch } from "@/lib/format";
+import { folderIdFrom, returnPath } from "@/lib/routes";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -92,14 +93,18 @@ export function RecordingBar() {
    * Throw the recording away, and leave the page that was about it.
    *
    * <p>Only from /record. That page has nothing left to show once the audio is
-   * gone — it falls back to "Ready to record", which reads as an invitation to
-   * do again the thing just abandoned. Everywhere else the bar is incidental to
-   * whatever is being read, and yanking somebody to Home because they tidied up
-   * a recording would be the navigation nobody asked for.
+   * gone — worse, it opens the microphone on arrival, so staying on it is how
+   * abandoning a recording starts another one. Everywhere else the bar is
+   * incidental to whatever is being read, and yanking somebody to Home because
+   * they tidied up a recording would be the navigation nobody asked for.
+   *
+   * <p>Back to where Record was pressed, not to Home. Somebody who opened a
+   * folder, recorded, and thought better of it was in that folder a minute ago
+   * and has not asked to leave it.
    */
   function handleDiscard() {
     recorder.reset();
-    if (pathname === "/record") router.push("/home");
+    if (pathname === "/record") router.push(returnPath(session.returnTo));
   }
 
 
@@ -116,8 +121,9 @@ export function RecordingBar() {
     await job.save(
       recorder.result,
       session.title.trim() || defaultRecordingTitle(),
-      // Where it was started, not where it is being saved from.
-      session.folderId,
+      // The folder it was started in, not the one it is being saved from —
+      // which is none, because saving happens on /record.
+      folderIdFrom(session.returnTo),
     );
   }
 

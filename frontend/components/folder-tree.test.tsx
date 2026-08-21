@@ -47,7 +47,7 @@ describe("the list", () => {
 
     expect(screen.getByRole("link", { name: "Client ABC" })).toHaveAttribute(
       "href",
-      "/projects/prj_1",
+      "/folder/prj_1",
     );
     expect(screen.getByRole("link", { name: "Q3 planning" })).toBeInTheDocument();
   });
@@ -66,7 +66,7 @@ describe("the list", () => {
     // It used to only collapse, which left "show me all of them" to a row at
     // the foot of the list — so seeing every folder meant opening a list of
     // folders and scrolling past them to a link.
-    expect(screen.getByRole("link", { name: "Folders" })).toHaveAttribute("href", "/projects");
+    expect(screen.getByRole("link", { name: "Folders" })).toHaveAttribute("href", "/folders");
     expect(screen.queryByRole("link", { name: "All folders" })).not.toBeInTheDocument();
   });
 
@@ -84,7 +84,7 @@ describe("the list", () => {
     render(<FolderTree onNavigate={() => {}} />);
 
     // This section lists what exists. With nothing in it, an instruction is
-    // the only entry — and /projects, which the heading leads to, has the room
+    // the only entry — and /folders, which the heading leads to, has the room
     // to say what a folder is for and a button to make one.
     expect(screen.queryByRole("button", { name: "Create your first folder" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "All folders" })).not.toBeInTheDocument();

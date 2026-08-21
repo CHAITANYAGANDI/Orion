@@ -74,6 +74,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { FOLDERS } from "@/lib/routes";
 
 export interface MeetingMenuProps {
   meetingId: string;
@@ -249,7 +250,7 @@ function MoveDialog({
               You have no projects yet, so there is nowhere to move this to.
             </p>
             <Button variant="outline" size="sm" asChild>
-              <Link href="/projects">Create one →</Link>
+              <Link href={FOLDERS}>Create one →</Link>
             </Button>
           </div>
         ) : (

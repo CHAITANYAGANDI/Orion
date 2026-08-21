@@ -17,7 +17,7 @@
  *
  * <p>The section holds folders and nothing else. It no longer offers to create
  * one when the list is empty; an empty rail section is a smaller lie than a
- * section whose only entry is an instruction, and /projects has the room to
+ * section whose only entry is an instruction, and /folders has the room to
  * explain what a folder is for.
  *
  * Nothing navigates after a folder is made. The new folder appearing in the rail
@@ -32,6 +32,7 @@ import { ChevronDown, ChevronRight, Folder, FolderOpen, Plus } from "lucide-reac
 import { useGetProjectsQuery } from "@/lib/api";
 import { FolderDialog } from "@/components/folder-dialog";
 import { cn } from "@/lib/utils";
+import { FOLDERS, folderHref } from "@/lib/routes";
 
 export function FolderTree({ onNavigate }: { onNavigate: () => void }) {
   const pathname = usePathname();
@@ -63,11 +64,11 @@ export function FolderTree({ onNavigate }: { onNavigate: () => void }) {
         </button>
 
         <Link
-          href="/projects"
+          href={FOLDERS}
           onClick={onNavigate}
           className={cn(
             "flex-1 py-2 text-xs font-semibold uppercase tracking-wide transition-colors hover:text-foreground",
-            pathname === "/projects" ? "text-foreground" : "text-muted-foreground",
+            pathname === FOLDERS ? "text-foreground" : "text-muted-foreground",
           )}
         >
           Folders
@@ -93,11 +94,11 @@ export function FolderTree({ onNavigate }: { onNavigate: () => void }) {
       {open && (
         <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">
           {folders.map((folder) => {
-            const active = pathname === `/projects/${folder.id}`;
+            const active = pathname === folderHref(folder.id);
             return (
               <Link
                 key={folder.id}
-                href={`/projects/${folder.id}`}
+                href={folderHref(folder.id)}
                 onClick={onNavigate}
                 className={cn(
                   "flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors",
@@ -115,7 +116,7 @@ export function FolderTree({ onNavigate }: { onNavigate: () => void }) {
               No "All folders" row — the heading above goes there. And no
               "create your first folder" row when the list is empty: this
               section is a list of what exists, and teaching belongs on the page
-              that has room for it. /projects carries the empty state and the
+              that has room for it. /folders carries the empty state and the
               New folder button, which is where the heading leads. */}
         </div>
       )}

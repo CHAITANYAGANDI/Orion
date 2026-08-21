@@ -135,7 +135,7 @@ const stop = vi.fn();
 const reset = vi.fn();
 const setDeviceId = vi.fn();
 const setTitle = vi.fn();
-const setFolderId = vi.fn();
+const setReturnTo = vi.fn();
 
 function aTranscript(overrides: Partial<UseLiveTranscript> = {}): UseLiveTranscript {
   return {
@@ -225,8 +225,8 @@ function renderBar(
   session.current = {
     title: "",
     setTitle,
-    folderId: null,
-    setFolderId,
+    returnTo: null,
+    setReturnTo,
     transcript: aTranscript(),
     ...sessionOverrides,
   } satisfies RecordingSession;
@@ -487,7 +487,7 @@ describe("RecordingBar saving", () => {
   });
 
   it("files it into the folder Record was pressed in", async () => {
-    renderBar({ state: "stopped", result: aResult() }, { folderId: "prj_1" });
+    renderBar({ state: "stopped", result: aResult() }, { returnTo: "/folder/prj_1" });
 
     await userEvent.click(screen.getByRole("button", { name: /Save & process/ }));
 
@@ -496,6 +496,14 @@ describe("RecordingBar saving", () => {
     // wandered, so there is no folder left to read — which is how a recording
     // started inside a folder used to end up at the top of the workspace.
     expect(saveJob.mock.calls[0][2]).toBe("prj_1");
+  });
+
+  it("files it nowhere when Record was pressed somewhere that is not a folder", async () => {
+    renderBar({ state: "stopped", result: aResult() }, { returnTo: "/search?q=budget" });
+
+    await userEvent.click(screen.getByRole("button", { name: /Save & process/ }));
+
+    expect(saveJob.mock.calls[0][2]).toBeNull();
   });
 
   it("files it nowhere when it was not started in one", async () => {
@@ -551,10 +559,32 @@ describe("RecordingBar saving", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /Discard/ }));
 
-    // That page has nothing left to show once the audio is gone — it falls back
-    // to "Ready to record", which reads as an invitation to do again the thing
-    // just abandoned.
+    // That page has nothing left to show once the audio is gone — worse, it
+    // opens the microphone on arrival, so staying would start another
+    // recording. Home, because there is nowhere else to have come from.
     expect(reset).toHaveBeenCalled();
+    expect(push).toHaveBeenCalledWith("/home");
+  });
+
+  it("goes back to the folder it was started in, not to Home", async () => {
+    pathname.current = "/record";
+    renderBar({ state: "stopped", result: aResult() }, { returnTo: "/folder/prj_1" });
+
+    await userEvent.click(screen.getByRole("button", { name: /Discard/ }));
+
+    // Somebody who opened a folder, pressed Record and thought better of it was
+    // in that folder a minute ago and has not asked to leave it.
+    expect(push).toHaveBeenCalledWith("/folder/prj_1");
+  });
+
+  it("will not be sent back to the recorder by a doctored return path", async () => {
+    pathname.current = "/record";
+    renderBar({ state: "stopped", result: aResult() }, { returnTo: "//evil.example" });
+
+    await userEvent.click(screen.getByRole("button", { name: /Discard/ }));
+
+    // `returnTo` starts life as ?r= on the address bar. Everything unrecognised
+    // is Home rather than an error: the recording is what matters here.
     expect(push).toHaveBeenCalledWith("/home");
   });
 

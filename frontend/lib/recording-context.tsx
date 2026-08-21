@@ -41,7 +41,11 @@ export interface RecordingSession {
   title: string;
   setTitle: (t: string) => void;
   /**
-   * The folder this recording will be filed into, or null for unfiled.
+   * The page Record was pressed on, or null.
+   *
+   * One value, because it answers two questions and they have the same answer.
+   * *Where does this meeting file?* — into the folder that path is inside, if
+   * any. *Where does Discard go?* — back there, which is where the person was.
    *
    * Captured when Record is pressed, not read when Save is. By then the
    * pathname is /record or wherever the user wandered to while the meeting ran,
@@ -50,9 +54,14 @@ export interface RecordingSession {
    * exists. It lives here rather than in the recorder for the same reason the
    * title does: it is a fact about the meeting, not about the `MediaRecorder`,
    * and it has to survive every navigation the recording does.
+   *
+   * The same value is on the URL as `?r=` (see `recordHref` in lib/routes.ts),
+   * which is what a reload of /record still has once this is gone. Use
+   * `folderIdFrom` to read the folder out; do not store the id separately, or
+   * the two can disagree about one press of one button.
    */
-  folderId: string | null;
-  setFolderId: (id: string | null) => void;
+  returnTo: string | null;
+  setReturnTo: (path: string | null) => void;
   transcript: UseLiveTranscript;
 }
 
@@ -71,7 +80,7 @@ const SaveJobContext = React.createContext<UseSaveJob | null>(null);
 export function RecordingProvider({ children }: { children: React.ReactNode }) {
   const recorder = useRecorder();
   const [title, setTitle] = React.useState("");
-  const [folderId, setFolderId] = React.useState<string | null>(null);
+  const [returnTo, setReturnTo] = React.useState<string | null>(null);
   const transcript = useLiveTranscript({
     // Running *or* paused. A pause mutes the audio tap rather than closing the
     // session, so the speaker model built up over the meeting so far survives
@@ -101,7 +110,7 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
       // With the title, and for the same reason. The next recording is started
       // from wherever the next recording is started from; inheriting the last
       // one's folder would file it somewhere nobody chose.
-      setFolderId(null);
+      setReturnTo(null);
       clearTranscript();
     }
     wasIdle.current = idle;
@@ -112,7 +121,7 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
   useUnloadGuard(recorder);
   return (
     <RecordingContext.Provider value={recorder}>
-      <SessionContext.Provider value={{ title, setTitle, folderId, setFolderId, transcript }}>
+      <SessionContext.Provider value={{ title, setTitle, returnTo, setReturnTo, transcript }}>
         <SaveJobContext.Provider value={job}>{children}</SaveJobContext.Provider>
       </SessionContext.Provider>
     </RecordingContext.Provider>

@@ -28,6 +28,7 @@ import {
 import { sortFolders, type FolderSort } from "@/lib/folders";
 import { relativeDay } from "@/lib/days";
 import { cn } from "@/lib/utils";
+import { folderHref } from "@/lib/routes";
 import type { Project } from "@/lib/types";
 
 /**
@@ -165,7 +166,7 @@ function FolderRow({ folder, onRename }: { folder: Project; onRename: () => void
 
   return (
     <li className="group flex items-center gap-3 border-b px-1 py-3 transition-colors hover:bg-accent/40">
-      <Link href={`/projects/${folder.id}`} className="min-w-0 flex-1">
+      <Link href={folderHref(folder.id)} className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5">
           {folder.favorite && (
             <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400" aria-label="Starred" />

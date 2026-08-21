@@ -1,4 +1,5 @@
 import { isSettingsPath } from "@/lib/settings-tabs";
+import { folderIdFrom, isFolderListPath, isRecordPath } from "@/lib/routes";
 
 /**
  * What the top bar offers to create, if anything.
@@ -32,33 +33,22 @@ function isChatPath(pathname: string): boolean {
   return pathname === "/ask" || pathname.startsWith("/ask/");
 }
 
-/** The page that exists to record. A prefix, so `/record/:id` cannot fall out. */
-function isRecordPath(pathname: string): boolean {
-  return pathname === "/record" || pathname.startsWith("/record/");
-}
-
 /** One meeting, being read. A prefix, so every id and sub-route is covered. */
 function isMeetingPath(pathname: string): boolean {
   return pathname.startsWith("/meetings/");
 }
 
-/** The folder list itself, not a folder. */
-function isFolderListPath(pathname: string): boolean {
-  return pathname === "/projects" || pathname === "/projects/";
-}
-
-/**
- * The folder being looked at, or null.
+/*
+ * `isFolderListPath`, `isRecordPath` and `folderIdFrom` are in lib/routes.ts.
  *
- * <p>Read from the path rather than passed down, because the header is rendered
- * by the shell and the shell does not know what page it is wrapping. The query
- * for the folder is the same one the page underneath already made, so this
- * costs a cache read rather than a request.
+ * The folder being looked at is read from the path rather than passed down,
+ * because the header is rendered by the shell and the shell does not know what
+ * page it is wrapping. The query for the folder is the same one the page
+ * underneath already made, so this costs a cache read rather than a request.
+ *
+ * They moved out when folders moved from /projects to /folder/:id, so that the
+ * parser and the links that produce what it parses live together.
  */
-function folderIdFrom(pathname: string): string | null {
-  const parts = pathname.split("/").filter(Boolean);
-  return parts.length === 2 && parts[0] === "projects" ? parts[1] : null;
-}
 
 /**
  * Decide the header for a pathname.

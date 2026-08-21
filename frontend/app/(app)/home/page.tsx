@@ -42,6 +42,7 @@ import { formatDuration } from "@/lib/format";
 import { groupByDay } from "@/lib/days";
 import type { MeetingResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { recordHref } from "@/lib/routes";
 
 /**
  * Whose conversations to list.
@@ -348,7 +349,7 @@ function EmptyState({
       </p>
       <div className="mt-4 flex gap-2">
         <Button asChild>
-          <Link href="/record">
+          <Link href={recordHref("/home")}>
             <Mic className="mr-2 h-4 w-4" /> Record
           </Link>
         </Button>

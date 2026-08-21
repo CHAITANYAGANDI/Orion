@@ -44,10 +44,12 @@ import { useRecording, useRecordingJob, useRecordingSession } from "@/lib/record
 import type { LiveTurn } from "@/lib/use-live-transcript";
 import { Button } from "@/components/ui/button";
 import { stopwatch } from "@/lib/format";
+import { folderHref, folderIdFrom, returnPath } from "@/lib/routes";
 import { cn } from "@/lib/utils";
 
 export default function RecordPage() {
   const recorder = useRecording();
+  const session = useRecordingSession();
   const job = useRecordingJob();
   const [announceRecording] = useRecordingStartedMutation();
 
@@ -111,8 +113,16 @@ export default function RecordPage() {
     opened.current = true;
     if (!recorder.supported) return;
     // Anything but idle means there is already a recording to show — running,
-    // paused, or stopped and waiting to be saved.
+    // paused, or stopped and waiting to be saved. Which also means the header's
+    // Record button started it, and has already said where it came from.
     if (recorder.state !== "idle") return;
+    // So this is one of the other arrivals — a reload, the back button, a
+    // bookmark — and the URL is the only thing left that knows. `?r=` is where
+    // Record was pressed: the folder this files into, and the way back out.
+    // Read from location rather than useSearchParams(), which would force the
+    // route into a Suspense boundary at build time; same trade as
+    // app/(app)/search/page.tsx.
+    session.setReturnTo(returnPath(new URLSearchParams(window.location.search).get("r")));
     void onStart();
     // Mount only: the whole point is that this does not react to state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -433,7 +443,8 @@ function Opening({
  */
 function NoteHeading({ startedAt }: { startedAt: Date | null }) {
   const prefs = useGetPreferencesQuery();
-  const { title, setTitle, folderId } = useRecordingSession();
+  const { title, setTitle, returnTo } = useRecordingSession();
+  const folderId = folderIdFrom(returnTo);
   const owner = prefs.data?.displayName?.trim();
   const when = startedAt ?? new Date();
 
@@ -528,7 +539,14 @@ function FilingInto({ projectId }: { projectId: string }) {
   return (
     <span className="flex items-center gap-1.5">
       <Folder className="h-4 w-4 shrink-0" />
-      Folder: {project.name}
+      Folder:{" "}
+      {/* A link, because it is the way back to what was on screen when Record
+          was pressed. Leaving mid-recording is safe — the recorder lives in the
+          shell and the bar follows — so there is no reason to strand anybody
+          here. */}
+      <Link href={folderHref(project.id)} className="underline underline-offset-2">
+        {project.name}
+      </Link>
     </span>
   );
 }

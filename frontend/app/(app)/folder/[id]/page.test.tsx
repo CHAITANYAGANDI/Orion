@@ -88,7 +88,7 @@ const { toast } = vi.hoisted(() => ({
 }));
 vi.mock("sonner", () => ({ toast }));
 
-import ProjectPage from "@/app/(app)/projects/[id]/page";
+import ProjectPage from "@/app/(app)/folder/[id]/page";
 
 beforeEach(() => {
   vi.clearAllMocks();
