@@ -11,7 +11,6 @@ import {
   AlertTriangle,
   Clock,
   Sparkles,
-  Send,
   Languages,
   Users,
   Check,
@@ -67,6 +66,7 @@ import type {
 } from "@/lib/types";
 import { useActiveChat } from "@/lib/active-chat";
 import { HeaderSlot } from "@/components/header-slot";
+import { SidePane } from "@/components/side-pane";
 import { Button } from "@/components/ui/button";
 import { useRecordingJob } from "@/lib/recording-context";
 import { ProcessingCard } from "@/components/processing-card";
@@ -116,8 +116,9 @@ import {
   type TranscriptEditorHandle,
   type TranscriptEditorStatus,
 } from "@/components/transcript-editor";
-import { ChatSuggestions } from "@/components/chat-suggestions";
 import { ChatHistory } from "@/components/chat-history";
+import { ChatComposer } from "@/components/chat-composer";
+import { ChatDock, ChatRail } from "@/components/chat/chat-shell";
 import { ChatMessageBubble } from "@/components/chat-message";
 import { MEETING_PROMPTS, toPrompts } from "@/lib/chat-prompts";
 import { SelectionMenu, type SelectionAction } from "@/components/selection-menu";
@@ -632,12 +633,12 @@ export default function MeetingDetailPage() {
             they need stay here; only the buttons are drawn elsewhere. See
             components/header-slot.tsx. */}
         <HeaderSlot>
-        {/* Cleared past the chat rail, whose widths these mirror — see the
-            `aside` below. The shell's header spans the window while this page
-            is a centred column, so on a wide screen these already sit outside
-            the rail; on a narrow one, where the column fills the width, they
-            would land directly over it. */}
-        <div className="flex items-center gap-2 no-print lg:mr-[22rem] xl:mr-[26rem]">
+        {/* Nothing cleared past the chat any more: it is a pane of the shell
+            and the header ends where it begins. What did move out of this row
+            is Import and Record — they made a *different* meeting, at the same
+            end of the same bar as the buttons that act on this one. See
+            lib/chrome.ts. */}
+        <div className="flex items-center gap-2 no-print">
           {ready && (
             <>
               <ShareDialog meetingId={id} />
@@ -732,7 +733,7 @@ export default function MeetingDetailPage() {
              cover the thing it is meant to be read alongside. */
           <div className="no-print">{player}</div>
         ) : (
-          <div className="no-print pointer-events-none fixed inset-x-0 bottom-0 z-20 p-3 sm:p-4 lg:left-64">
+          <div className="no-print pointer-events-none fixed inset-x-0 bottom-0 z-20 p-3 sm:p-4 lg:left-[var(--rail-w,16rem)] lg:right-[var(--side-pane-w,0px)]">
             <div className="pointer-events-auto mx-auto max-w-3xl">{player}</div>
           </div>
         )
@@ -789,8 +790,8 @@ export default function MeetingDetailPage() {
          * a rail that stays put, and the action items sit under the summary
          * they were extracted from.
          */
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-        <Tabs value={tab} onValueChange={changeTab} className="min-w-0 flex-1">
+        <>
+        <Tabs value={tab} onValueChange={changeTab} className="min-w-0">
           <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b">
             <TabsList variant="underline" className="flex gap-x-6 border-b-0">
               <TabsTrigger value="summary">Summary</TabsTrigger>
@@ -986,10 +987,15 @@ export default function MeetingDetailPage() {
           </TabsContent>
         </Tabs>
 
-        {/* The rail. Sticky, because its whole purpose is to stay beside the
-            thing being read — a chat that scrolls away with the transcript is
-            the tab it replaced. */}
-        <aside className="w-full shrink-0 lg:sticky lg:top-20 lg:w-[22rem] xl:w-[26rem] no-print">
+        {/* The rail, in the shell's pane rather than in this page's layout.
+            Its whole purpose is to stay beside the thing being read — a chat
+            that scrolls away with the transcript is the tab it replaced, and
+            one that ends halfway down the page puts its composer wherever the
+            summary happened to stop. As a column of the shell it runs the full
+            height of the window and is dragged to whatever width the reader
+            wants, instead of approximating both with a sticky offset and a
+            clamp this page had to keep in step with the header's. */}
+        <SidePane>
           <MeetingRail
             meetingId={id}
             showOutline={tab === "transcript"}
@@ -1001,8 +1007,8 @@ export default function MeetingDetailPage() {
             // brief is on screen and the player does not exist yet.
             onSeek={playFrom}
           />
-        </aside>
-        </div>
+        </SidePane>
+        </>
       )}
 
       {/* Opened from the ⋯ menu, mounted here. A dialog inside a Radix menu is
@@ -1058,15 +1064,21 @@ function MeetingRail({
   }, [showOutline, pane]);
 
   return (
-    <Tabs value={pane} onValueChange={setPane}>
-      <TabsList variant="underline" className="flex gap-x-6">
+    <Tabs
+      value={pane}
+      onValueChange={setPane}
+      className="flex h-full min-h-0 flex-col"
+    >
+      <TabsList variant="underline" className="flex shrink-0 gap-x-6 px-4">
         <TabsTrigger value="chat">
           <Sparkles className="mr-1.5 h-3.5 w-3.5" /> AI Chat
         </TabsTrigger>
         {showOutline && <TabsTrigger value="outline">Outline</TabsTrigger>}
       </TabsList>
 
-      <TabsContent value="chat" className="pt-4">
+      {/* mt-0 overrides the tab content's default gap: the chat's own header
+          supplies the spacing, and doubling it pushes the composer down. */}
+      <TabsContent value="chat" className="mt-0 min-h-0 flex-1">
         <ChatPanel
           meetingId={meetingId}
           onCite={onSeek}
@@ -1076,7 +1088,7 @@ function MeetingRail({
       </TabsContent>
 
       {showOutline && (
-        <TabsContent value="outline" className="pt-4">
+        <TabsContent value="outline" className="mt-0 min-h-0 flex-1 overflow-y-auto p-4">
           <OutlineNav sections={sections} onSeek={onSeek} />
         </TabsContent>
       )}
@@ -1460,9 +1472,12 @@ function ChatPanel({
   const [rename] = useRenameConversationMutation();
   const [removeConversation] = useDeleteConversationMutation();
   const [deleteExchange, { isLoading: deleting }] = useDeleteChatExchangeMutation();
-  const [q, setQ] = React.useState("");
+  // The composer owns what is typed. What stays here is the prefill: the
+  // transcript can send a passage over as "ask about this", and only the page
+  // knows when that happened.
+  const [composeText, setComposeText] =
+    React.useState<{ text: string; nonce: number } | null>(null);
   const threadRef = React.useRef<HTMLDivElement | null>(null);
-  const inputRef = React.useRef<HTMLInputElement | null>(null);
 
   /**
    * Keep the newest exchange in view — inside the thread, and nowhere else.
@@ -1506,19 +1521,14 @@ function ChatPanel({
       void submitRef.current?.(composed.text);
       return;
     }
-    setQ(composed.text);
-    const el = inputRef.current;
-    if (el) {
-      el.focus();
-      el.setSelectionRange(composed.text.length, composed.text.length);
-    }
+    // Handed to the composer, which owns the box and does the focusing.
+    setComposeText({ text: composed.text, nonce: composed.nonce });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [composed?.nonce]);
 
   async function submit(text: string) {
     const question = text.trim();
     if (!question) return;
-    setQ("");
     try {
       // Its own thread when none is named, rather than being appended to the
       // last one. The server's rule for an unnamed ask is "continue the most
@@ -1541,23 +1551,18 @@ function ChatPanel({
     try {
       const created = await newConversation(meetingId).unwrap();
       setConversationId(created.id);
-      setQ("");
+      // Clears the box: a half-typed question belongs to the thread it was
+      // being asked in.
+      setComposeText({ text: "", nonce: Date.now() });
     } catch {
       toast.error("Couldn't start a new chat.");
     }
   }
 
-  async function send(e: React.FormEvent) {
-    e.preventDefault();
-    await submit(q);
-  }
-
   return (
-    <Card>
-      <CardHeader className="space-y-3">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Sparkles className="h-4 w-4 text-primary" /> Ask this meeting
-        </CardTitle>
+    <ChatRail
+      scrollRef={threadRef}
+      header={
         <ChatHistory
           conversations={conversations ?? []}
           activeId={conversationId}
@@ -1576,9 +1581,30 @@ function ChatPanel({
             if (id === conversationId) setConversationId(null);
           }}
         />
-      </CardHeader>
-      <CardContent>
-        <div ref={threadRef} className="mb-4 max-h-[420px] space-y-4 overflow-y-auto">
+      }
+      dock={
+        <ChatDock
+          prompts={toPrompts(suggestions, MEETING_PROMPTS)}
+          showPrompts={!isLoading && (messages?.length ?? 0) === 0}
+          busy={asking}
+          onSend={(prompt) => void submit(prompt)}
+          onCompose={(prefix) => setComposeText({ text: prefix, nonce: Date.now() })}
+          grounding="Grounded in this meeting's transcript, with citations you can play."
+        >
+          <ChatComposer
+            busy={asking}
+            // No mode picker and no context picker: meeting chat reads one
+            // meeting through one endpoint, and offering either would be a
+            // control that does nothing.
+            scope="This meeting"
+            placeholder="Ask about this meeting"
+            compose={composeText}
+            onSend={submit}
+          />
+        </ChatDock>
+      }
+    >
+      <>
           {isLoading ? (
             <Skeleton className="h-16 w-full" />
           ) : messages && messages.length > 0 ? (
@@ -1625,27 +1651,8 @@ function ChatPanel({
               </div>
             </div>
           )}
-        </div>
-
-        {!isLoading && (messages?.length ?? 0) === 0 && (
-          <div className="mb-3">
-            <ChatSuggestions
-              prompts={toPrompts(suggestions, MEETING_PROMPTS)}
-              disabled={asking}
-              onSend={(prompt) => void submit(prompt)}
-              onCompose={setQ}
-            />
-          </div>
-        )}
-
-        <form onSubmit={send} className="flex gap-2">
-          <Input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ask about this meeting…" disabled={asking} />
-          <Button type="submit" size="icon" disabled={asking || !q.trim()}>
-            <Send className="h-4 w-4" />
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
+      </>
+    </ChatRail>
   );
 }
 

@@ -218,3 +218,60 @@ describe("the mode picker", () => {
     expect(screen.queryByRole("button", { name: /express/i })).not.toBeInTheDocument();
   });
 });
+
+/**
+ * Meeting chat reads one meeting through one endpoint. It has no way to widen
+ * that, and no chat modes — so the two controls that express those choices must
+ * not appear, rather than appear and do nothing.
+ */
+describe("a scope that cannot change", () => {
+  it("states the scope instead of offering a picker", async () => {
+    render(<ChatComposer scope="This meeting" onSend={vi.fn()} />);
+
+    expect(screen.getByText("This meeting")).toBeInTheDocument();
+    // An "Add context" button on a chat that cannot take any is worse than not
+    // offering it: it invites somebody to try, twice.
+    expect(screen.queryByRole("button", { name: /add context/i })).not.toBeInTheDocument();
+  });
+
+  it("hides the mode picker when no modes are supported", () => {
+    render(<ChatComposer scope="This meeting" onSend={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: /express/i })).not.toBeInTheDocument();
+  });
+
+  it("still asks the question", async () => {
+    const onSend = vi.fn();
+    render(<ChatComposer scope="This meeting" onSend={onSend} />);
+
+    await userEvent.type(screen.getByLabelText("Ask a question"), "What did we decide?{Enter}");
+
+    expect(onSend).toHaveBeenCalledWith("What did we decide?");
+  });
+});
+
+describe("text handed over from elsewhere on the page", () => {
+  it("drops a passage into the box ready to finish", () => {
+    render(
+      <ChatComposer
+        onSend={vi.fn()}
+        compose={{ text: "About \"ship on Friday\": ", nonce: 1 }}
+      />,
+    );
+
+    expect(screen.getByLabelText("Ask a question")).toHaveValue('About "ship on Friday": ');
+  });
+
+  it("accepts the same passage twice", () => {
+    const { rerender } = render(
+      <ChatComposer onSend={vi.fn()} compose={{ text: "Ask about this: ", nonce: 1 }} />,
+    );
+    const box = screen.getByLabelText("Ask a question");
+
+    // Keyed on the nonce alone. Comparing the text would silently swallow the
+    // second attempt at the same passage.
+    rerender(<ChatComposer onSend={vi.fn()} compose={{ text: "Ask about this: ", nonce: 2 }} />);
+
+    expect(box).toHaveValue("Ask about this: ");
+  });
+});

@@ -14,7 +14,8 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { ChevronDown, History, Pencil, Plus, Trash2, Check, X } from "lucide-react";
+import Link from "next/link";
+import { ChevronDown, Maximize2, Pencil, Plus, Sparkles, Trash2, Check, X } from "lucide-react";
 import type { ChatConversation } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +31,14 @@ export interface ChatHistoryProps {
   onRename: (conversationId: string, title: string) => Promise<void>;
   onDelete: (conversationId: string) => Promise<void>;
   busy?: boolean;
+  /**
+   * Where the maximise control goes, if this surface has somewhere bigger to
+   * be. Absent on the full page, which is already the bigger place — a button
+   * that reloads the page you are on is a dead control.
+   */
+  expandHref?: string;
+  /** What the maximise control announces. Required when `expandHref` is set. */
+  expandLabel?: string;
   /**
    * The thread on screen is already an empty one, so New has nothing to do.
    *
@@ -48,6 +57,8 @@ export function ChatHistory({
   onRename,
   onDelete,
   busy,
+  expandHref,
+  expandLabel,
   atNewChat,
 }: ChatHistoryProps) {
   const [open, setOpen] = React.useState(false);
@@ -87,33 +98,61 @@ export function ChatHistory({
   );
 
   const active = conversations.find((c) => c.id === activeId);
-  const label = active?.title || "Previous chat history";
+  // The thread you are in, not the name of the control. A picker labelled
+  // "Previous chat history" told you what pressing it did and never what you
+  // were reading, so the panel had no title at all.
+  const label = active?.title || "New chat";
 
   return (
     <div ref={rootRef} className="relative">
-      <div className="flex items-center gap-2">
+      {/* Quiet by design: a title you can press, and two icons. Everything
+          else this component can do — rename, delete, jump to an older
+          thread — is inside the menu, because a header carrying every action
+          at once competes with the conversation it is labelling. */}
+      <div className="flex items-center gap-1">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
           aria-haspopup="menu"
-          className="flex min-w-0 items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-accent"
+          // Named explicitly, because what it *shows* is the conversation's
+          // title. Without this its accessible name is that title — which on a
+          // fresh thread is "New chat", the same name as the button beside it,
+          // leaving a screen reader with two controls called the same thing and
+          // no way to tell which opens the history.
+          aria-label="Previous chat history"
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm font-medium transition-colors hover:bg-accent"
         >
-          <History className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="max-w-[220px] truncate">{label}</span>
-          <ChevronDown className={cn("h-4 w-4 shrink-0 transition-transform", open && "rotate-180")} />
+          <Sparkles className="h-4 w-4 shrink-0 text-primary" />
+          <span className="truncate">{label}</span>
+          <ChevronDown
+            className={cn(
+              "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+              open && "rotate-180",
+            )}
+          />
         </button>
+
         <Button
           type="button"
-          variant="outline"
-          size="sm"
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 shrink-0"
           onClick={onNew}
           disabled={busy || atNewChat}
-          title={atNewChat ? "You're already on a new chat" : undefined}
-          className="gap-1.5"
+          title={atNewChat ? "You're already on a new chat" : "New chat"}
+          aria-label="New chat"
         >
-          <Plus className="h-4 w-4" /> New chat
+          <Plus className="h-4 w-4" />
         </Button>
+
+        {expandHref && (
+          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" asChild>
+            <Link href={expandHref} aria-label={expandLabel ?? "Open the full chat"}>
+              <Maximize2 className="h-4 w-4" />
+            </Link>
+          </Button>
+        )}
       </div>
 
       {open && (

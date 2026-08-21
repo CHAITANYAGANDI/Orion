@@ -47,10 +47,28 @@ export interface ChatComposerProps {
   mode?: ChatMode;
   onModeChange?: (mode: ChatMode) => void;
 
-  context: ChatContext;
-  onContextChange: (context: ChatContext) => void;
-  meetings: MeetingResponse[];
-  projects: Project[];
+  context?: ChatContext;
+  onContextChange?: (context: ChatContext) => void;
+  meetings?: MeetingResponse[];
+  projects?: Project[];
+
+  /**
+   * The scope is fixed and cannot be widened — meeting chat reads one meeting
+   * and has no endpoint for anything else.
+   *
+   * Shown as a plain chip rather than the picker. An "Add context" button on a
+   * chat that cannot take any would be a control that does nothing, which is
+   * worse than not offering it: it invites somebody to try, twice.
+   */
+  scope?: string;
+
+  /**
+   * Text to drop into the box, from somewhere else on the page.
+   *
+   * Keyed on the nonce alone. The same passage can be asked about twice, and
+   * depending on the text would silently swallow the second attempt.
+   */
+  compose?: { text: string; nonce: number } | null;
 
   onSend: (question: string) => void | Promise<void>;
 }
@@ -61,15 +79,28 @@ export function ChatComposer({
   modes,
   mode = "express",
   onModeChange,
-  context,
+  context = NO_CONTEXT,
   onContextChange,
-  meetings,
-  projects,
+  meetings = [],
+  projects = [],
+  scope,
+  compose,
   onSend,
 }: ChatComposerProps) {
   const [text, setText] = React.useState("");
   const [picking, setPicking] = React.useState(false);
   const areaRef = React.useRef<HTMLTextAreaElement | null>(null);
+
+  React.useEffect(() => {
+    if (!compose) return;
+    setText(compose.text);
+    const el = areaRef.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(compose.text.length, compose.text.length);
+    // Deliberately only the nonce -- see the prop's own note.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compose?.nonce]);
 
   // Grow with the content. Reset to auto first or the box can only ever get
   // taller — scrollHeight includes the height already set.
@@ -93,31 +124,38 @@ export function ChatComposer({
 
   return (
     <div className="relative rounded-xl border bg-card shadow-sm">
-      {picking && (
+      {picking && !scope && (
         <ContextPicker
           meetings={meetings}
           projects={projects}
           context={context}
-          onContextChange={onContextChange}
+          onContextChange={onContextChange ?? (() => undefined)}
           onClose={() => setPicking(false)}
         />
       )}
 
       <div className="flex flex-wrap items-center gap-1.5 px-3 pt-3">
-        <button
-          type="button"
-          onClick={() => setPicking((v) => !v)}
-          aria-expanded={picking}
-          className={cn(
-            "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
-            selectedCount > 0
-              ? "border-primary bg-primary/10 text-primary"
-              : "text-muted-foreground hover:bg-accent",
-          )}
-        >
-          <AtSign className="h-3.5 w-3.5" />
-          Add context
-        </button>
+        {scope ? (
+          <span className="flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+            <AtSign className="h-3.5 w-3.5" />
+            {scope}
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setPicking((v) => !v)}
+            aria-expanded={picking}
+            className={cn(
+              "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+              selectedCount > 0
+                ? "border-primary bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-accent",
+            )}
+          >
+            <AtSign className="h-3.5 w-3.5" />
+            Add context
+          </button>
+        )}
 
         {context.projectIds.map((id) => (
           <Chip
@@ -125,7 +163,7 @@ export function ChatComposer({
             icon={<Folder className="h-3 w-3" />}
             label={projects.find((p) => p.id === id)?.name ?? "Folder"}
             onRemove={() =>
-              onContextChange({
+              onContextChange?.({
                 ...context,
                 projectIds: context.projectIds.filter((p) => p !== id),
               })
@@ -138,7 +176,7 @@ export function ChatComposer({
             icon={<FileAudio className="h-3 w-3" />}
             label={meetings.find((m) => m.id === id)?.title ?? "Conversation"}
             onRemove={() =>
-              onContextChange({
+              onContextChange?.({
                 ...context,
                 meetingIds: context.meetingIds.filter((m) => m !== id),
               })

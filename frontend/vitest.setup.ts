@@ -75,3 +75,18 @@ HTMLMediaElement.prototype.pause = function pause(
   this._paused = true;
   this.dispatchEvent(new Event("pause"));
 };
+
+/**
+ * jsdom implements no scrolling at all, so `Element.scrollTo` is missing.
+ *
+ * The chat panels call it to keep the newest message in view — deliberately,
+ * rather than `scrollIntoView` on a sentinel, which walks every scrollable
+ * ancestor including the document and drags the whole page down. A no-op here
+ * keeps that code honest: it is a real browser API and the test environment,
+ * not the component, is the thing that lacks it.
+ */
+if (!Element.prototype.scrollTo) {
+  Element.prototype.scrollTo = function scrollTo() {
+    /* jsdom has no layout, so there is nothing to scroll. */
+  };
+}

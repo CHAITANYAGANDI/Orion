@@ -64,12 +64,20 @@ describe("ChatHistory", () => {
   it("names the open conversation on the trigger", () => {
     picker({ activeId: "cnv_1" });
     // Otherwise there is no way to tell which of five threads is on screen.
-    expect(screen.getByRole("button", { name: /action items last week/i })).toBeInTheDocument();
+    // Read as text, not as the accessible name: the trigger is labelled
+    // "Previous chat history" so it cannot collide with the New chat button
+    // beside it, and the title is what it *shows*.
+    const trigger = screen.getByRole("button", { name: /previous chat history/i });
+    expect(trigger).toHaveTextContent(/action items last week/i);
   });
 
-  it("falls back to a generic label when nothing is selected", () => {
+  it("says New chat when nothing is selected", () => {
     picker({ activeId: null });
-    expect(screen.getByRole("button", { name: /previous chat history/i })).toBeInTheDocument();
+    // Not "Previous chat history" any more: a picker that names the control
+    // rather than the thread told you what pressing it did and never what you
+    // were reading, so the panel had no title at all.
+    const trigger = screen.getByRole("button", { name: /previous chat history/i });
+    expect(trigger).toHaveTextContent(/new chat/i);
   });
 
   it("groups by recency", async () => {

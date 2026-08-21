@@ -144,7 +144,11 @@ export function RecordingBar() {
      */
     <div
       ref={shell}
-      className="pointer-events-none fixed bottom-0 left-0 right-0 z-30 flex flex-col items-center gap-2 p-3 sm:p-4 lg:left-64"
+      /* Between the two panes rather than across the window. Both can be
+         dragged now, so the offsets are the shell's own variables — see
+         components/app-shell.tsx — and the right one is zero on any page
+         without a rail. */
+      className="pointer-events-none fixed bottom-0 left-0 right-0 z-30 flex flex-col items-center gap-2 p-3 sm:p-4 lg:left-[var(--rail-w,16rem)] lg:right-[var(--side-pane-w,0px)]"
     >
       <NoAudioNotice />
 

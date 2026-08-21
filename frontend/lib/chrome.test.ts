@@ -18,7 +18,7 @@ import { SETTINGS_TABS, LEGACY_PATHS, pathForTab } from "@/lib/settings-tabs";
  * before somebody tries to fix it.
  */
 
-/** Pages that are neither settings nor the chat, so nothing is hidden. */
+/** Pages that offer a new meeting, because none of the rules apply to them. */
 const WORKING_PAGES = [
   "/home",
   "/projects/prj_1",
@@ -28,10 +28,10 @@ const WORKING_PAGES = [
 ];
 
 /**
- * Kept out of WORKING_PAGES because its create rule is now the opposite one:
- * a meeting fills the header slot with its own Share, Export and menu, and
- * Import and Record stand down. Everything else about it is ordinary, so the
- * assertions that apply to every page name it explicitly.
+ * Not in WORKING_PAGES, and that is the rule under test. A meeting carries its
+ * own Share, Export and overflow menu, which act on the document being read;
+ * Import and Record make a different one. Both at the same end of the same bar
+ * were five buttons that looked like one toolbar.
  */
 const MEETING_PAGE = "/meetings/mtg_1";
 
@@ -109,11 +109,11 @@ describe("what the header offers to create", () => {
     }
   });
 
-  it("offers nothing to create on a meeting being read", () => {
-    // The page has its own controls — Share, Export, the overflow menu — and
-    // they go in the same header row. Import and Record there are the two
-    // buttons that make a *different* document, next to the one you are
-    // reading.
+  it("offers nothing on a meeting, which has controls of its own", () => {
+    // A prefix rather than an exact match, so every id and any sub-route a
+    // meeting grows later is covered by the same rule. Getting this wrong is
+    // invisible in review and obvious on screen: the buttons would reappear on
+    // one URL of the same page.
     expect(headerChrome(MEETING_PAGE).create).toBe("none");
     expect(headerChrome("/meetings/mtg_1/anything").create).toBe("none");
   });
@@ -206,33 +206,10 @@ describe("the two pages that strip the header", () => {
       expect(chrome.search).toBe(true);
       expect(chrome.create).not.toBe("none");
     }
-    // A meeting keeps search; only its create control stands down.
+    // A meeting keeps search; only its create control stands down. Finding the
+    // next meeting from inside one is how people move between them.
     expect(headerChrome(MEETING_PAGE).search).toBe(true);
-  });
-});
-
-describe("the pinned rail", () => {
-  it("tells the header that Home ends before the right edge", () => {
-    // Import and Record sit at the end of the header, and the header spans the
-    // window. Without this they land above the AI chat rail and read as
-    // controls on the chat rather than on the list of meetings they act on.
-    expect(headerChrome("/home").sidePanel).toBe(true);
-  });
-
-  it.each(["/search", "/meetings/mtg_1", "/projects", "/projects/prj_1", "/settings"])(
-    "leaves the header full width on %s",
-    (path) => {
-      // Those pages lay out in a measured column with nothing pinned to the
-      // edge, so reserving room for a rail would indent the buttons past
-      // anything to line them up with.
-      expect(headerChrome(path).sidePanel).toBe(false);
-    },
-  );
-
-  it("does not reserve room on the chat, which has no buttons to place", () => {
-    const chrome = headerChrome("/ask");
-    expect(chrome.sidePanel).toBe(false);
-    expect(chrome.create).toBe("none");
+    expect(headerChrome(MEETING_PAGE).bare).toBe(false);
   });
 });
 

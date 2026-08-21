@@ -27,8 +27,6 @@ import {
   FileText,
   Upload,
   Mic,
-  PanelRightClose,
-  PanelRightOpen,
   CalendarDays,
 } from "lucide-react";
 import { useGetMeetingsQuery } from "@/lib/api";
@@ -39,6 +37,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { ActionItemsPanel } from "@/components/action-items-panel";
 import { DateFilter, ANY_TIME, type DateWindow } from "@/components/date-filter";
 import { HomeChatPanel } from "@/components/home-chat-panel";
+import { SidePane } from "@/components/side-pane";
 import { formatDuration } from "@/lib/format";
 import { groupByDay } from "@/lib/days";
 import type { MeetingResponse } from "@/lib/types";
@@ -64,7 +63,6 @@ type Panel = "chat" | "actions";
 export default function HomePage() {
   const [scope, setScope] = React.useState<Scope>("for-you");
   const [panel, setPanel] = React.useState<Panel>("chat");
-  const [panelOpen, setPanelOpen] = React.useState(true);
   const [when, setWhen] = React.useState<DateWindow>(ANY_TIME);
 
   // The window goes to the server rather than filtering what came back. This
@@ -85,29 +83,23 @@ export default function HomePage() {
   const groups = React.useMemo(() => groupByDay(shown), [shown]);
 
   return (
-    <div className="flex h-[calc(100vh-4rem)]">
-      <section className="min-w-0 flex-1 overflow-y-auto px-4 py-4 lg:px-6">
+    <>
+      {/* The list, and nothing else. What used to be the second column of this
+          page — the chat and the action items — is now a pane of the shell, so
+          it runs the full height of the window rather than starting under the
+          top bar, and this page no longer states its width. See
+          components/side-pane.tsx. */}
+      <section className="h-[calc(100vh-4rem)] overflow-y-auto px-4 py-4 lg:px-6">
         <div className="mx-auto max-w-3xl">
           <div className="mb-4 flex items-center justify-between gap-3">
             {/* When on the left, whose on the right — the two questions the
                 list itself cannot answer, in the order people ask them. */}
             <DateFilter value={when} onChange={setWhen} />
-            <div className="flex items-center gap-3">
-              <ScopePicker value={scope} onChange={setScope} />
-              <Button
-                variant="ghost"
-                size="icon"
-                className="lg:hidden"
-                onClick={() => setPanelOpen((v) => !v)}
-                aria-label={panelOpen ? "Hide the side panel" : "Show the side panel"}
-              >
-                {panelOpen ? (
-                  <PanelRightClose className="h-4 w-4" />
-                ) : (
-                  <PanelRightOpen className="h-4 w-4" />
-                )}
-              </Button>
-            </div>
+            {/* The button that hid the panel used to sit here. It is in the
+                top bar now, next to the rest of the controls that act on the
+                window rather than on the list, and it works at every width
+                instead of only on a phone. */}
+            <ScopePicker value={scope} onChange={setScope} />
           </div>
 
           {isLoading ? (
@@ -135,19 +127,9 @@ export default function HomePage() {
         </div>
       </section>
 
-      <aside
-        className={cn(
-          // 28rem, written out rather than as `max-w-md`, because the header
-          // aligns its buttons to this edge and a shared number that appears
-          // in two files should be greppable from either. See `sidePanel` in
-          // lib/chrome.ts.
-          "w-full max-w-[28rem] shrink-0 border-l bg-card lg:block",
-          panelOpen ? "block" : "hidden",
-          "fixed inset-y-16 right-0 z-20 lg:static lg:inset-auto lg:z-auto",
-        )}
-      >
-        <div className="flex h-full flex-col">
-          <div className="flex items-center gap-1 border-b px-2">
+      <SidePane>
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="flex shrink-0 items-center gap-1 border-b px-2">
             <PanelTab
               icon={<Sparkles className="h-4 w-4" />}
               label="AI Chat"
@@ -173,8 +155,8 @@ export default function HomePage() {
             </div>
           </div>
         </div>
-      </aside>
-    </div>
+      </SidePane>
+    </>
   );
 }
 

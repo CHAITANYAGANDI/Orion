@@ -25,16 +25,6 @@ export interface HeaderChrome {
    * bar is then sixty-four pixels of nothing above the page title.
    */
   bare: boolean;
-  /**
-   * This page ends its own content before the right edge of the window,
-   * because a panel is pinned there.
-   *
-   * <p>The header spans the whole window, so without this its buttons sit
-   * above that panel — and Import and Record read as things you do to the AI
-   * chat rather than to the list they actually act on. Told the page has a
-   * panel, the header stops where the list stops.
-   */
-  sidePanel: boolean;
 }
 
 /** Whether this is the chat. A prefix, so a future `/ask/:id` cannot fall out. */
@@ -47,20 +37,7 @@ function isRecordPath(pathname: string): boolean {
   return pathname === "/record" || pathname.startsWith("/record/");
 }
 
-/**
- * Home pins a chat rail to the right edge. A prefix would be wrong here: this
- * is a fact about one page's layout, not about a section of the app.
- */
-function hasSidePanel(pathname: string): boolean {
-  return pathname === "/home";
-}
-
-/**
- * A meeting being read. Its own Share, Export and overflow menu fill the
- * header slot, and Import and Record stand down: on the page for one document,
- * the two buttons that make a *different* one are the two that navigate away
- * from it.
- */
+/** One meeting, being read. A prefix, so every id and sub-route is covered. */
 function isMeetingPath(pathname: string): boolean {
   return pathname.startsWith("/meetings/");
 }
@@ -123,6 +100,15 @@ function folderIdFrom(pathname: string): string | null {
  * are on. New folder is untouched: filing something is not making a second
  * recording, and the folder list is the one page whose own action it is.
  *
+ * <p><strong>A meeting offers nothing to create either.</strong> That page is
+ * one document, and it has its own row of controls — Share, Export and the
+ * overflow menu — which act on the thing being read. Import and Record act on
+ * neither: they make a *different* meeting, and sitting them at the same end of
+ * the same bar as Export made five buttons that looked like one toolbar and
+ * were two unrelated ones. Both are a click away on Home, which is where a new
+ * meeting starts. Search stays: finding the next meeting from inside one is the
+ * commonest way anybody moves between them.
+ *
  * <p>This is also where the live-recording pill went. The docked bar along the
  * bottom is on every page, survives the same navigations, and carries the
  * waveform, the clock, and the two buttons that end the recording — so the
@@ -138,11 +124,13 @@ export function headerChrome(pathname: string, recording = false): HeaderChrome 
     search: !isSettingsPath(pathname),
     create: isFolderListPath(pathname)
       ? "folder"
-      : isChatPath(pathname) || isSettingsPath(pathname) || isMeetingPath(pathname) || capturing
+      : isChatPath(pathname) ||
+          isSettingsPath(pathname) ||
+          isMeetingPath(pathname) ||
+          capturing
         ? "none"
         : "meeting",
     folderId: folderIdFrom(pathname),
-    sidePanel: hasSidePanel(pathname),
     bare: isSettingsPath(pathname),
   };
 }

@@ -155,7 +155,7 @@ describe("AskPage conversation state", () => {
     // Pressing it would file an empty conversation into the history list and
     // leave the screen exactly as it was.
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /^new$/i })).toBeDisabled(),
+      expect(screen.getByRole("button", { name: /new chat/i })).toBeDisabled(),
     );
   });
 
@@ -164,7 +164,7 @@ describe("AskPage conversation state", () => {
     render(<AskPage />);
 
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /^new$/i })).toBeEnabled(),
+      expect(screen.getByRole("button", { name: /new chat/i })).toBeEnabled(),
     );
   });
 
