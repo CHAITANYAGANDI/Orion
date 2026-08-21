@@ -191,7 +191,7 @@ export function formatQuery(
   if (state.project) {
     const name =
       state.project === UNFILED_PROJECT
-        ? "unfiled"
+        ? "none"
         : catalog.projects?.find((p) => p.id === state.project)?.name;
     if (name) parts.push(`in:${quote(name)}`);
   }
@@ -222,9 +222,9 @@ function matchOne(typed: string, options?: string[]): string | null {
   return prefixed.length === 1 ? prefixed[0] : null;
 }
 
-/** The same, but a project resolves to its id — and "unfiled" is a real answer. */
+/** The same, but a project resolves to its id — and "none" is a real answer. */
 function matchProject(typed: string, projects?: Project[]): string | null {
-  if (/^unfiled$/i.test(typed.trim())) return UNFILED_PROJECT;
+  if (/^none$/i.test(typed.trim())) return UNFILED_PROJECT;
   const name = matchOne(typed, (projects ?? []).map((p) => p.name));
   return name ? (projects ?? []).find((p) => p.name === name)?.id ?? null : null;
 }
@@ -301,7 +301,7 @@ function valuesFor(
     case "project":
       return [
         ...(catalog.projects ?? []).map((p) => ({ label: p.name, hint: "folder" })),
-        { label: "unfiled", hint: "not in a folder" },
+        { label: "none", hint: "not in a folder" },
       ];
     case "date":
       return DATE_VALUES.map((d) => ({ label: d.value, hint: d.label }));

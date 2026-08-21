@@ -224,7 +224,7 @@ function MoveDialog({
     }
     try {
       await assign({ meetingId, projectId: next }).unwrap();
-      toast.success(next ? "Moved." : "Moved to Unfiled.");
+      toast.success(next ? "Moved." : "Moved out of the folder.");
       onOpenChange(false);
     } catch {
       toast.error("Couldn't move that meeting.");
@@ -256,8 +256,8 @@ function MoveDialog({
         ) : (
           <ul className="max-h-72 space-y-1 overflow-y-auto py-1">
             <Row
-              label="Unfiled"
-              hint="Stays in All meetings and nowhere else."
+              label="No folder"
+              hint="Stays on Home, in no folder."
               selected={!projectId}
               disabled={isLoading}
               onSelect={() => void move(null)}

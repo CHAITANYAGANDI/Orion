@@ -107,14 +107,14 @@ describe("deleting", () => {
     await waitFor(() => expect(deleteProject).toHaveBeenCalledWith("prj_1"));
   });
 
-  it("says how many meetings were unfiled", async () => {
+  it("says how many meetings moved out of it", async () => {
     await openMenu();
 
     await userEvent.click(screen.getByRole("menuitem", { name: /Delete folder/ }));
 
     await waitFor(() =>
       expect(toast.success).toHaveBeenCalledWith(
-        expect.stringContaining("3 meetings moved to Unfiled"),
+        expect.stringContaining("3 meetings moved out of it"),
       ),
     );
   });

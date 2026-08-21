@@ -50,7 +50,7 @@ export function FolderHeaderActions({ folderId }: { folderId: string }) {
     // somebody who believes it keeps folders they do not want.
     if (
       !window.confirm(
-        `Delete “${folder.name}”? Its meetings are kept — they move back to Unfiled.`,
+        `Delete “${folder.name}”? Its meetings are kept — they move out of the folder.`,
       )
     ) {
       return;
@@ -59,7 +59,7 @@ export function FolderHeaderActions({ folderId }: { folderId: string }) {
       const { unfiledMeetings } = await remove(folderId).unwrap();
       toast.success(
         unfiledMeetings > 0
-          ? `Folder deleted. ${unfiledMeetings} meeting${unfiledMeetings === 1 ? "" : "s"} moved to Unfiled.`
+          ? `Folder deleted. ${unfiledMeetings} meeting${unfiledMeetings === 1 ? "" : "s"} moved out of it.`
           : "Folder deleted.",
       );
       // The page behind this is now a folder that does not exist.

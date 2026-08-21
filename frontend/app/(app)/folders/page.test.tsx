@@ -94,12 +94,12 @@ describe("the list", () => {
     );
   });
 
-  it("lists only folders — unfiled meetings are Home's job", () => {
+  it("lists only folders — loose meetings are Home's job", () => {
     render(<FoldersPage />);
 
     // This page was once the only meeting list there was. Home lists everything
-    // now, filed or not, so nothing is hidden by leaving Unfiled out of here.
-    expect(screen.queryByText(/Unfiled/)).not.toBeInTheDocument();
+    // now, filed or not, so nothing is hidden by leaving them out of here.
+    expect(screen.queryByText(/No folder/)).not.toBeInTheDocument();
   });
 
   it("says what a folder is for when there are none", () => {

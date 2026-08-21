@@ -19,11 +19,11 @@ import { cn } from "@/lib/utils";
  * that already exists, and filing one as it is uploaded — so it is a controlled
  * select and the caller decides what saving means.
  *
- * <p>"Unfiled" is always an option, never a placeholder. A picker whose empty
+ * <p>"No folder" is always an option, never a placeholder. A picker whose empty
  * state is a greyed-out prompt can be got into but not out of: once a meeting
  * has a project there would be no way to say it should not.
  */
-const UNFILED = "__unfiled";
+const NO_FOLDER = "__none";
 
 export function ProjectPicker({
   value,
@@ -46,9 +46,9 @@ export function ProjectPicker({
 
   return (
     <Select
-      value={value ?? UNFILED}
+      value={value ?? NO_FOLDER}
       disabled={disabled}
-      onValueChange={(v) => onChange(v === UNFILED ? null : v)}
+      onValueChange={(v) => onChange(v === NO_FOLDER ? null : v)}
     >
       <SelectTrigger
         aria-label={label}
@@ -58,7 +58,7 @@ export function ProjectPicker({
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value={UNFILED}>Unfiled</SelectItem>
+        <SelectItem value={NO_FOLDER}>No folder</SelectItem>
         {projects.map((p) => (
           <SelectItem key={p.id} value={p.id}>
             {p.name}

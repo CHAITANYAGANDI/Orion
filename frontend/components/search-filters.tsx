@@ -101,15 +101,15 @@ export function SearchFilters({
 
       {/* Projects come from their own endpoint rather than from the search
           facets: a facet is a list of strings, and a project needs its id as
-          well as its name. "Unfiled" is an option, not an absence — "what have
-          I not sorted yet" is a real search. */}
+          well as its name. "No folder" is an option, not an absence — "what
+          have I not sorted yet" is a real search. */}
       <FacetSelect
         label="Project"
         value={state.project}
         options={[
           ...projects.map((p) => ({ value: p.id, label: p.name })),
           ...(projects.length > 0
-            ? [{ value: UNFILED_PROJECT, label: "Unfiled" }]
+            ? [{ value: UNFILED_PROJECT, label: "No folder" }]
             : []),
         ]}
         anyLabel="Any project"

@@ -127,7 +127,7 @@ describe("SearchFilters", () => {
 
     expect(screen.getByRole("option", { name: "Client ABC" })).toBeInTheDocument();
     // "What have I not sorted yet" is a search, not an empty box.
-    await userEvent.click(screen.getByRole("option", { name: "Unfiled" }));
+    await userEvent.click(screen.getByRole("option", { name: "No folder" }));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ project: "none" }));
   });
 

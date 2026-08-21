@@ -212,14 +212,14 @@ describe("suggesting", () => {
     expect(screen.queryAllByRole("option")).toHaveLength(0);
   });
 
-  it("offers folders under in:, including unfiled", async () => {
+  it("offers folders under in:, including none", async () => {
     const user = userEvent.setup();
     render(<SearchCommand open onOpenChange={vi.fn()} />);
 
     await user.type(screen.getByLabelText("Search"), "in:");
 
     expect(await screen.findByRole("option", { name: /Q4 planning/ })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /unfiled/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /none/ })).toBeInTheDocument();
   });
 
   it("says nothing for an ordinary word", async () => {

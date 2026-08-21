@@ -39,8 +39,8 @@ import type { Project } from "@/lib/types";
  * question a list of folders is for — which of these did I touch last — because
  * the answer was buried under whichever rows happened to be open.
  *
- * <p>What left with it: the Unfiled row. Home lists every meeting whether it is
- * filed or not, so unfiled work is not hidden by leaving it out; it was here
+ * <p>What left with it: the row for meetings in no folder. Home lists every
+ * meeting whether it is filed or not, so nothing is hidden by that; it was here
  * because this page was once the only meeting list there was.
  */
 export default function FoldersPage() {
@@ -147,7 +147,7 @@ function FolderRow({ folder, onRename }: { folder: Project; onRename: () => void
       !window.confirm(
         `Delete “${folder.name}”? Its ${folder.meetingCount} meeting${
           folder.meetingCount === 1 ? "" : "s"
-        } are kept — they move back to Unfiled.`,
+        } are kept — they move out of the folder.`,
       )
     ) {
       return;
@@ -156,7 +156,7 @@ function FolderRow({ folder, onRename }: { folder: Project; onRename: () => void
       const { unfiledMeetings } = await remove(folder.id).unwrap();
       toast.success(
         unfiledMeetings > 0
-          ? `Folder deleted. ${unfiledMeetings} meeting${unfiledMeetings === 1 ? "" : "s"} moved to Unfiled.`
+          ? `Folder deleted. ${unfiledMeetings} meeting${unfiledMeetings === 1 ? "" : "s"} moved out of it.`
           : "Folder deleted.",
       );
     } catch {

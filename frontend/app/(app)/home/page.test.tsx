@@ -18,28 +18,32 @@ import type { MeetingResponse, MeetingListQuery, Page } from "@/lib/types";
  *
  * <p>What is pinned here is mostly that the filter reaches the server. Applied
  * over the fifty rows that came back, "conversations outside a folder" would be
- * answered with whichever of the fifty newest happened to be unfiled — right
+ * answered with whichever of the fifty newest happened to be outside one — right
  * until somebody had more than fifty meetings, which is the version of this bug
  * that is invisible in development.
  */
 const query = vi.hoisted(() => ({ last: null as MeetingListQuery | null }));
 let rows: MeetingResponse[];
 let loading: boolean;
+/** How many meetings exist at all, filed or not. Only the empty states ask. */
+let workspaceTotal: number;
+
+function aPage(content: MeetingResponse[], total = content.length): Page<MeetingResponse> {
+  return { content, page: 0, size: 50, totalElements: total, totalPages: 1 };
+}
 
 vi.mock("@/lib/api", () => ({
-  useGetMeetingsQuery: (q: MeetingListQuery) => {
+  useGetMeetingsQuery: (q: MeetingListQuery, options?: { skip?: boolean }) => {
+    if (options?.skip) return { data: undefined, isLoading: false, isUninitialized: true };
+    // The one-row probe behind the empty state: is anything filed elsewhere, or
+    // is this account new? It asks for a count, not for rows.
+    if (q.size === 1) return { data: aPage([], workspaceTotal), isLoading: false };
+
     query.last = q;
     // Filtering happens in the query, so the mock returns what it was asked
     // for. Asserting on the request is the point: a client-side filter would
     // pass a test that fed it both kinds of row and hid one.
-    const page: Page<MeetingResponse> = {
-      content: rows,
-      page: 0,
-      size: 50,
-      totalElements: rows.length,
-      totalPages: 1,
-    };
-    return { data: loading ? undefined : page, isLoading: loading };
+    return { data: loading ? undefined : aPage(rows), isLoading: loading };
   },
 }));
 
@@ -63,7 +67,7 @@ function aMeeting(overrides: Partial<MeetingResponse> = {}): MeetingResponse {
 
 /** Open the picker and choose a row by its label. */
 async function choose(label: string) {
-  await userEvent.click(screen.getByRole("button", { name: /Conversations|Unfiled/ }));
+  await userEvent.click(screen.getByRole("button", { name: /Conversations/ }));
   await userEvent.click(screen.getByRole("menuitemradio", { name: new RegExp(label) }));
 }
 
@@ -71,56 +75,63 @@ beforeEach(() => {
   query.last = null;
   loading = false;
   rows = [aMeeting()];
+  workspaceTotal = rows.length;
 });
 
 describe("the scope picker", () => {
-  it("offers the workspace and the unfiled, and nothing else", async () => {
+  it("offers what is outside a folder and the whole workspace, in that order", async () => {
     render(<HomePage />);
 
-    await userEvent.click(screen.getByRole("button", { name: /All Conversations/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Recent Conversations/ }));
     const menu = screen.getByRole("menu");
+    const options = within(menu).getAllByRole("menuitemradio");
 
-    expect(within(menu).getAllByRole("menuitemradio")).toHaveLength(2);
-    expect(within(menu).getByRole("menuitemradio", { name: /All Conversations/ })).toBeInTheDocument();
-    expect(within(menu).getByRole("menuitemradio", { name: /Unfiled/ })).toBeInTheDocument();
+    // Recent first: it is where Home opens, and an option list that does not
+    // start with the one you are on reads as a list of somewhere else.
+    expect(options).toHaveLength(2);
+    expect(options[0]).toHaveTextContent("Recent Conversations");
+    expect(options[1]).toHaveTextContent("All Conversations");
+    // The label is about folders, not about time, and only the hint says so.
+    expect(within(menu).getByText("everything outside your folders")).toBeInTheDocument();
     // It counted twenty rows and called them unread. Nothing tracks whether a
     // meeting has been read.
     expect(within(menu).queryByText(/For you/)).not.toBeInTheDocument();
   });
 
-  it("starts on everything", () => {
+  it("starts on what has not been filed", () => {
     render(<HomePage />);
 
-    // A default that hides anything is how somebody concludes a meeting has
-    // been lost, and a folder is the one place they will not think to look.
-    expect(screen.getByRole("button", { name: /All Conversations/ })).toBeInTheDocument();
-    expect(query.last?.unfiled).toBe(false);
+    // Home is the list of what was not put somewhere else. The count on it is
+    // therefore not the count in the workspace, which is the one thing about
+    // this default anybody is likely to report.
+    expect(screen.getByRole("button", { name: /Recent Conversations/ })).toBeInTheDocument();
+    expect(query.last?.unfiled).toBe(true);
   });
 
-  it("asks the server for the unfiled ones", async () => {
+  it("asks the server for the whole workspace", async () => {
     render(<HomePage />);
 
-    await choose("Unfiled");
+    await choose("All Conversations");
 
     // The whole of the fix. This used to narrow the page in the browser, and
     // narrow it by nothing: both options ran through a function that returned
     // its argument.
-    expect(query.last?.unfiled).toBe(true);
+    expect(query.last?.unfiled).toBe(false);
   });
 
-  it("asks for the whole workspace again on the way back", async () => {
+  it("asks for the ones outside a folder again on the way back", async () => {
     render(<HomePage />);
-    await choose("Unfiled");
-
     await choose("All Conversations");
 
-    expect(query.last?.unfiled).toBe(false);
+    await choose("Recent Conversations");
+
+    expect(query.last?.unfiled).toBe(true);
   });
 
   it("keeps the date window while the scope changes", async () => {
     render(<HomePage />);
 
-    await choose("Unfiled");
+    await choose("All Conversations");
 
     // Two filters over one list. Losing one when the other moves is the bug
     // that follows from rebuilding the query object per control.
@@ -144,15 +155,29 @@ describe("the list", () => {
 describe("when there is nothing to show", () => {
   it("says the rest is filed, and offers the way back", async () => {
     rows = [];
+    workspaceTotal = 11;
 
     render(<HomePage />);
-    await choose("Unfiled");
 
-    expect(screen.getByText("Nothing outside a folder")).toBeInTheDocument();
     // Without this the page offers Record and Import to somebody with a
     // hundred meetings, which reads as an archive that lost them.
+    expect(screen.getByText("Everything is in a folder")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Show all conversations" }));
     expect(query.last?.unfiled).toBe(false);
+  });
+
+  it("offers a first recording to an account with nothing in it", () => {
+    rows = [];
+    workspaceTotal = 0;
+
+    render(<HomePage />);
+
+    // The same empty list, on the same default scope, meaning the opposite
+    // thing. Home opens here, so this is the first screen of a new account:
+    // answering it with "everything is in a folder" and a button to another
+    // empty list would be the worst possible first impression.
+    expect(screen.getByText("No conversations")).toBeInTheDocument();
+    expect(screen.queryByText("Everything is in a folder")).not.toBeInTheDocument();
   });
 
   it("still blames the date window first, since that is the likelier cause", async () => {
@@ -167,8 +192,9 @@ describe("when there is nothing to show", () => {
     expect(screen.getByText(/Nothing from Today/)).toBeInTheDocument();
   });
 
-  it("offers a first recording when the workspace is genuinely empty", () => {
+  it("points a genuinely empty account at the two ways to start", () => {
     rows = [];
+    workspaceTotal = 0;
 
     render(<HomePage />);
 

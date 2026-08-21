@@ -686,7 +686,7 @@ export default function MeetingDetailPage() {
 
               Filing is in here too, as Move. It used to sit in the spec line
               above as a folder picker, which meant every meeting carried a
-              visible "Unfiled" — a label reading as a problem to fix on the
+              visible "No folder" — a label reading as a problem to fix on the
               overwhelming majority of meetings, in the one place somebody came
               to read rather than to tidy. Which folder a meeting is in is a
               thing you go and change, not a fact about the meeting worth

@@ -8,7 +8,7 @@ import type { Project } from "@/lib/types";
  *
  * <p>Two rules, both about not stranding somebody. A workspace with no projects
  * gets no picker at all, because a dropdown with nothing in it advertises a
- * feature and then refuses to do it. And "Unfiled" is a real option rather than
+ * feature and then refuses to do it. And "No folder" is a real option rather than
  * a placeholder — a picker you can get into but not out of would leave a meeting
  * permanently filed under the first project somebody clicked by mistake.
  */
@@ -63,10 +63,10 @@ describe("ProjectPicker", () => {
     render(<ProjectPicker value="prj_1" onChange={onChange} />);
 
     await userEvent.click(screen.getByLabelText("Project"));
-    await userEvent.click(screen.getByRole("option", { name: "Unfiled" }));
+    await userEvent.click(screen.getByRole("option", { name: "No folder" }));
 
     // Null, not the sentinel: the caller says "no project", not "a project
-    // called __unfiled".
+    // called __none".
     expect(onChange).toHaveBeenCalledWith(null);
   });
 

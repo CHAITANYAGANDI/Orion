@@ -247,7 +247,7 @@ describe("MeetingMenu", () => {
       menu({ projectId: "prj_1" });
       await open(user);
       await user.click(screen.getByRole("menuitem", { name: "Move…" }));
-      await user.click(screen.getByRole("button", { name: /Unfiled/ }));
+      await user.click(screen.getByRole("button", { name: /No folder/ }));
 
       expect(mocks.assign).toHaveBeenCalledWith({ meetingId: "mtg_1", projectId: null });
     });

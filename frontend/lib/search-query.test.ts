@@ -122,8 +122,8 @@ describe("resolving against the workspace", () => {
     expect(toSearchState(parseQuery('in:"Q4 planning"'), catalog).project).toBe("prj_1");
   });
 
-  it("treats unfiled as a real answer rather than an absence", () => {
-    expect(toSearchState(parseQuery("in:unfiled"), catalog).project).toBe(UNFILED_PROJECT);
+  it("treats none as a real answer rather than an absence", () => {
+    expect(toSearchState(parseQuery("in:none"), catalog).project).toBe(UNFILED_PROJECT);
   });
 
   it("reads a time frame by name or by label", () => {
@@ -200,11 +200,11 @@ describe("suggestions", () => {
     expect(suggestFor("owner:", catalog)).toHaveLength(0);
   });
 
-  it("offers folders and unfiled for in:", () => {
+  it("offers folders and none for in:", () => {
     expect(suggestFor("in:", catalog).map((s) => s.label)).toEqual([
       "Q4 planning",
       "Billing rewrite",
-      "unfiled",
+      "none",
     ]);
   });
 

@@ -57,23 +57,27 @@ import { recordHref } from "@/lib/routes";
  *
  * <p>What is left is the distinction that does exist now that recordings and
  * imports file themselves into the folder they were started in — whether this
- * is the whole workspace, or only what was never filed.
+ * is the whole workspace, or only what was never filed into one.
  *
- * <p>Called Unfiled rather than Recent, which is what it was nearly named.
- * Nothing about it is about time: both options are newest-first and both sit
- * inside the same date window, so "Recent" would promise a cut-off that is not
- * there and leave somebody wondering why this morning's meeting is missing —
- * when the answer is that they recorded it inside a folder. Unfiled is also
- * already the word the product uses, in the sentence you get when a folder is
- * deleted and its meetings move out of it.
+ * <p><strong>Recent Conversations is about folders, not about time.</strong>
+ * Both options are newest-first and both sit inside the same date window, so
+ * the label is doing no work that "All" is not; what separates them is the
+ * folder. The hint carries that, and it is not decoration — it is the only
+ * thing on screen that explains why a meeting recorded ten minutes ago inside a
+ * folder is missing from a list called Recent. Do not drop it.
+ *
+ * <p>The hints are written as a pair, and read as one: everything outside your
+ * folders, or everything in this workspace. Said that way round they describe
+ * two lists, rather than one list and one property a meeting either has or does
+ * not.
  *
  * <p>Otter offers "Shared with me" as well, and Recallix cannot: nobody can
  * share anything *into* a one-account workspace. Offering the row anyway would
  * be a filter that is permanently empty and reads as a fault.
  */
 const SCOPES = [
+  { value: "recent", label: "Recent Conversations", hint: "everything outside your folders" },
   { value: "all", label: "All Conversations", hint: "everything in this workspace" },
-  { value: "unfiled", label: "Unfiled", hint: "not in a folder" },
 ] as const;
 
 type Scope = (typeof SCOPES)[number]["value"];
@@ -81,25 +85,30 @@ type Scope = (typeof SCOPES)[number]["value"];
 type Panel = "chat" | "actions";
 
 export default function HomePage() {
-  // All, not Unfiled. A default that hides anything is how somebody
-  // concludes a meeting has been lost, and the folder it is in is the one
-  // place they will not think to look for it.
-  const [scope, setScope] = React.useState<Scope>("all");
+  // Home opens on Recent: what has not been filed anywhere else. A meeting
+  // recorded inside a folder is therefore not on this list until you switch to
+  // All — deliberately, because the folder is where it was put and the rail on
+  // the left is how you get back to it. The consequence is worth knowing before
+  // anybody reports it: the count on Home is not the count in the workspace.
+  const [scope, setScope] = React.useState<Scope>("recent");
   const [panel, setPanel] = React.useState<Panel>("chat");
   const [when, setWhen] = React.useState<DateWindow>(ANY_TIME);
 
   // Both filters go to the server rather than narrowing what came back. This
-  // asks for fifty rows; keeping the unfiled ones out of those would answer
+  // asks for fifty rows; dropping the filed ones from those would answer
   // "conversations outside a folder" with whichever of the fifty most recent
-  // happened to be unfiled, and would look right until somebody had more than
-  // fifty meetings. The scope used to be applied here, over the page, which is
-  // half of why it did nothing.
+  // happened to be outside one, and would look right until somebody had more
+  // than fifty meetings. The scope used to be applied here, over the page,
+  // which is half of why it did nothing.
   const { data, isLoading } = useGetMeetingsQuery({
     page: 0,
     size: 50,
     from: when.from ?? undefined,
     to: when.to ?? undefined,
-    unfiled: scope === "unfiled",
+    // The screen says Recent and the wire says unfiled, and each is right where
+    // it is: the label is the product's word for this list, the parameter is
+    // what the query actually does to it. One seam, here.
+    unfiled: scope === "recent",
   });
   // Derived from `data` rather than from a `?? []` above it: the fallback array
   // is a new value on every render, which would make the grouping below rerun
@@ -329,9 +338,17 @@ function ConversationRow({ meeting }: { meeting: MeetingResponse }) {
  * touched.
  *
  * <p>Two filters can do it now. The date window is checked first because it is
- * the likelier cause and the one somebody has just used; Unfiled is checked
+ * the likelier cause and the one somebody has just used; the scope is checked
  * second, and it is the one most likely to be misread, since a folder is
  * exactly where a meeting goes when it stops appearing where you left it.
+ *
+ * <p>Which makes one question worth a request of its own: an empty Recent means
+ * either that everything is filed or that there is nothing at all, and those
+ * two want opposite screens — the way to the folders, or the way to a first
+ * recording. Home opens on Recent, so the second is what a new account sees
+ * first, and getting it wrong would answer "you have no meetings" with a button
+ * that leads to another empty list. One row is enough to tell them apart, and
+ * it is only ever asked for when there is nothing to show.
  */
 function EmptyState({
   scope,
@@ -346,6 +363,14 @@ function EmptyState({
 }) {
   const { userId } = useAuth();
   const filtered = when.from !== null || when.to !== null;
+
+  // Skipped unless it is the question being asked. `size: 1` because the count
+  // is the whole answer.
+  const workspace = useGetMeetingsQuery(
+    { page: 0, size: 1 },
+    { skip: scope !== "recent" || filtered },
+  );
+  const filedElsewhere = (workspace.data?.totalElements ?? 0) > 0;
 
   if (filtered) {
     return (
@@ -367,14 +392,19 @@ function EmptyState({
     );
   }
 
-  if (scope === "unfiled") {
+  // Nothing rather than a guess, for the moment between the two answers. It is
+  // one row over a warm connection, and a sentence that turns out to be wrong
+  // is worse than a blank half-second.
+  if (scope === "recent" && workspace.isLoading) return null;
+
+  if (filedElsewhere) {
     return (
       <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center">
         <FolderOpen className="h-8 w-8 text-muted-foreground" />
-        <p className="mt-3 font-medium">Nothing outside a folder</p>
+        <p className="mt-3 font-medium">Everything is in a folder</p>
         <p className="mt-1 max-w-sm text-sm text-muted-foreground">
           A conversation recorded or imported inside a folder is filed there.
-          Nothing has been lost — this view is the ones that were not.
+          Nothing has been lost — this list is the ones that were not.
         </p>
         <Button variant="outline" className="mt-4" onClick={onShowAll}>
           Show all conversations
