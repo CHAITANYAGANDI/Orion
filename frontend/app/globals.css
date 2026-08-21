@@ -103,14 +103,23 @@
   /*
    * Scrolls, shows no scrollbar.
    *
-   * For the composer, where the box is a few lines tall and a permanent bar
-   * down its right-hand side is more furniture than the thing it is measuring.
-   * The caret is the position indicator there, and it is always in view because
-   * the browser keeps it there.
+   * Two places, for two versions of the same reason.
    *
-   * Not for anything longer. A scrollbar on a transcript or a conversation is
-   * the only thing telling somebody how much of it there is, and taking it away
-   * hides the extent of the content rather than tidying it.
+   * The composer, where the box is a few lines tall and a permanent bar down
+   * its right-hand side is more furniture than the thing it is measuring. The
+   * caret is the position indicator there, and the browser keeps it in view.
+   *
+   * The meeting list on Home, where the bar sits on the seam between the
+   * middle column and the chat pane — a second vertical line a few pixels from
+   * the border, drawn by the OS in a style the app has no say in. The list
+   * cannot hide the fact that it continues: it is grouped under dated
+   * headings and the fold falls across a card, which says "more below" more
+   * plainly than a thumb does.
+   *
+   * Not on a transcript or a conversation. There the scrollbar is the only
+   * thing saying how much of it there is, and the thumb is how somebody gets
+   * to the end of an hour of talk in one throw; taking it away hides the
+   * extent of the content rather than tidying it.
    */
   .scrollbar-none {
     scrollbar-width: none;

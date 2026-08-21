@@ -90,7 +90,7 @@ export default function HomePage() {
           it runs the full height of the window rather than starting under the
           top bar, and this page no longer states its width. See
           components/side-pane.tsx. */}
-      <section className="h-[calc(100vh-4rem)] overflow-y-auto px-4 py-4 lg:px-6">
+      <section className="scrollbar-none h-[calc(100vh-4rem)] overflow-y-auto px-4 py-4 lg:px-6">
         <div className="mx-auto max-w-3xl">
           <div className="mb-4 flex items-center justify-between gap-3">
             {/* When on the left, whose on the right — the two questions the
