@@ -31,12 +31,15 @@ import { ChatMessageBubble } from "@/components/chat-message";
 import { SourceList } from "@/components/scoped-chat";
 import { ChatHistory } from "@/components/chat-history";
 import { ChatDock, ChatRail } from "@/components/chat/chat-shell";
+import { toggleSidePaneExpanded, useSidePane } from "@/components/side-pane";
 import { WORKSPACE_PROMPTS, toPrompts } from "@/lib/chat-prompts";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export function HomeChatPanel() {
   const chat = useWorkspaceChat();
   const threadRef = React.useRef<HTMLDivElement | null>(null);
+  // Only for the maximise control's own state. The pane itself is the shell's.
+  const pane = useSidePane();
 
   // The thread, and only the thread. `scrollIntoView` walks every scrollable
   // ancestor including the document, which is how a chat panel came to drag
@@ -55,8 +58,14 @@ export function HomeChatPanel() {
           activeId={chat.conversationId}
           atNewChat={chat.isNew}
           busy={chat.starting}
-          expandHref="/ask"
-          expandLabel="Open the full chat"
+          // Over the list, not away from it. This used to open /ask, which is
+          // the same conversation at a bigger size and therefore looked right
+          // — but expanding a panel is a change to the window, and answering
+          // it with a navigation threw away the page underneath and wherever
+          // the reader had scrolled to in it. The chat you were mid-sentence
+          // in survives either way; the list behind it now does too.
+          onExpand={toggleSidePaneExpanded}
+          expanded={pane.expanded}
           onSelect={chat.setConversationId}
           onNew={() => void chat.startNew()}
           onRename={chat.rename}

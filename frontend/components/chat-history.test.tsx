@@ -234,34 +234,36 @@ describe("ChatHistory", () => {
 /**
  * Getting more room.
  *
- * Two surfaces, two answers, one icon. The home rail has a full page to open —
- * /ask, the same conversation at a bigger size — so its control navigates. A
- * meeting's chat has no such page and inventing one would put a second copy of
- * the conversation at a second URL, with the transcript it is about left
- * behind. So that one grows in place instead.
+ * Always in place, never by navigating. The home rail used to open /ask, which
+ * is the same conversation at a bigger size and therefore looked like the right
+ * answer — but expanding a panel is a change to the window, and answering it
+ * with a route change threw the page underneath away along with wherever the
+ * reader had scrolled to in it. Nothing navigates now.
  */
 describe("the expand control", () => {
-  it("is absent where there is nowhere bigger to go", () => {
+  it("is absent on a surface that does not offer it", () => {
     picker();
 
-    // The full AI Chat page passes neither. A button that reloads the page you
-    // are already on is a dead control.
-    expect(screen.queryByRole("link", { name: /full chat/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /expand/i })).not.toBeInTheDocument();
+    // Not every caller has a panel to maximise. Nothing is drawn unless one of
+    // the two expand props says so. The title and New chat are still there,
+    // which is why this names the three labels rather than matching loosely.
+    for (const name of [
+      "Expand the chat",
+      "Shrink the chat back to the panel",
+      "This is already the full chat",
+    ]) {
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    }
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
 
-  it("navigates when the surface has a bigger page", () => {
-    picker({ expandHref: "/ask", expandLabel: "Open the full chat" });
-
-    expect(screen.getByRole("link", { name: "Open the full chat" })).toHaveAttribute(
-      "href",
-      "/ask",
-    );
-  });
-
-  it("expands in place when it does not", async () => {
+  it("never navigates", async () => {
     const onExpand = vi.fn();
     picker({ onExpand });
+
+    // A link here would be the old behaviour: a page load, and the list or the
+    // transcript the chat was sitting beside gone.
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Expand the chat" }));
     expect(onExpand).toHaveBeenCalledTimes(1);
@@ -273,7 +275,7 @@ describe("the expand control", () => {
 
     // Named for what pressing it does. "Expand the chat" on a chat that is
     // already expanded is a control lying about its own effect, and it is the
-    // only way back to the transcript underneath.
+    // only way back to the page underneath.
     const button = screen.getByRole("button", { name: "Shrink the chat back to the panel" });
     expect(button).toHaveAttribute("aria-pressed", "true");
 
@@ -281,12 +283,28 @@ describe("the expand control", () => {
     expect(onExpand).toHaveBeenCalledTimes(1);
   });
 
-  it("does not offer both at once", () => {
-    picker({ expandHref: "/ask", expandLabel: "Open the full chat", onExpand: vi.fn() });
+  it("is drawn and refused on the page that is already the full chat", async () => {
+    const onExpand = vi.fn();
+    picker({ expandDisabled: true, onExpand });
 
-    // One control. Two, side by side, would be two icons that both mean "more
-    // room" and disagree about where.
-    expect(screen.getByRole("link", { name: "Open the full chat" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /expand the chat/i })).not.toBeInTheDocument();
+    // Kept rather than hidden, and this is the deliberate exception to not
+    // drawing controls that cannot act: the same header sits on three surfaces,
+    // and one of them quietly missing a button reads as a panel that has lost
+    // something rather than one already at its largest. It says which it is.
+    const button = screen.getByRole("button", { name: "This is already the full chat" });
+    expect(button).toBeDisabled();
+
+    await userEvent.click(button);
+    expect(onExpand).not.toHaveBeenCalled();
+  });
+
+  it("claims no state while it is refused", () => {
+    picker({ expandDisabled: true });
+
+    // `aria-pressed="false"` on a control that cannot be pressed announces a
+    // toggle that is currently off, which is a different and wrong claim.
+    expect(
+      screen.getByRole("button", { name: "This is already the full chat" }),
+    ).not.toHaveAttribute("aria-pressed");
   });
 });

@@ -53,6 +53,12 @@ export default function AskPage() {
               activeId={chat.conversationId}
               atNewChat={chat.isNew}
               busy={chat.starting}
+              // Drawn, and refused. This page is already the full chat, so
+              // there is nothing to maximise — but the same header sits on
+              // three surfaces, and a maximise button simply missing from one
+              // of them reads as a panel that has lost something rather than
+              // one that is already at its largest.
+              expandDisabled
               onSelect={chat.setConversationId}
               onNew={() => void chat.startNew()}
               onRename={chat.rename}

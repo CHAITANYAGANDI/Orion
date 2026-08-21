@@ -14,7 +14,6 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import Link from "next/link";
 import {
   ChevronDown,
   Maximize2,
@@ -42,25 +41,30 @@ export interface ChatHistoryProps {
   onDelete: (conversationId: string) => Promise<void>;
   busy?: boolean;
   /**
-   * Where the maximise control goes, if this surface has somewhere bigger to
-   * be. Absent on the full page, which is already the bigger place — a button
-   * that reloads the page you are on is a dead control.
-   */
-  expandHref?: string;
-  /** What the maximise control announces. Required when `expandHref` is set. */
-  expandLabel?: string;
-  /**
-   * Maximise in place instead of navigating.
+   * Maximise the panel over the page, and restore it.
    *
-   * For the surface that has nowhere bigger to go. A meeting's chat cannot
-   * open a full page of itself — there is no such route, and inventing one
-   * would mean a second copy of the same conversation at a second URL — so it
-   * grows over the document instead. Ignored when `expandHref` is set; a
-   * control cannot both navigate and stay.
+   * In place, never by navigating. Both rails used to have somewhere bigger to
+   * go — the home one opened /ask — and that turned out to be the wrong model:
+   * expanding a panel is a change to the window, and answering it with a route
+   * change threw away the page underneath and the position in it. A meeting's
+   * chat could not do it at all, having no page of its own to open.
    */
   onExpand?: () => void;
   /** Whether it is currently maximised, so the control can offer the way back. */
   expanded?: boolean;
+  /**
+   * Draw the control, and refuse it.
+   *
+   * For the full AI Chat page, which is already as big as this chat gets.
+   * Ordinarily a control that cannot act is worse than no control — it invites
+   * somebody to try twice — but this one is answering a question the reader is
+   * about to ask. The three surfaces share a header, and a maximise button that
+   * is simply missing on one of them reads as a panel that has lost a feature
+   * rather than one that is already at its maximum. Same reasoning as New chat,
+   * which is disabled rather than hidden when the thread on screen is already
+   * a new one, and says so.
+   */
+  expandDisabled?: boolean;
   /**
    * The thread on screen is already an empty one, so New has nothing to do.
    *
@@ -79,10 +83,9 @@ export function ChatHistory({
   onRename,
   onDelete,
   busy,
-  expandHref,
-  expandLabel,
   onExpand,
   expanded,
+  expandDisabled,
   atNewChat,
 }: ChatHistoryProps) {
   const [open, setOpen] = React.useState(false);
@@ -170,30 +173,39 @@ export function ChatHistory({
           <Plus className="h-4 w-4" />
         </Button>
 
-        {expandHref ? (
-          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" asChild>
-            <Link href={expandHref} aria-label={expandLabel ?? "Open the full chat"}>
+        {(onExpand || expandDisabled) && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 shrink-0"
+            onClick={onExpand}
+            disabled={expandDisabled}
+            aria-pressed={expandDisabled ? undefined : expanded}
+            // Named for what it will do, not for what it is. "Expand the chat"
+            // on a chat that is already expanded is a control that lies about
+            // its own effect.
+            aria-label={
+              expandDisabled
+                ? "This is already the full chat"
+                : expanded
+                  ? "Shrink the chat back to the panel"
+                  : "Expand the chat"
+            }
+            title={
+              expandDisabled
+                ? "This is already the full chat"
+                : expanded
+                  ? "Shrink the chat back to the panel"
+                  : "Expand the chat"
+            }
+          >
+            {expanded || expandDisabled ? (
+              <Minimize2 className="h-4 w-4" />
+            ) : (
               <Maximize2 className="h-4 w-4" />
-            </Link>
+            )}
           </Button>
-        ) : (
-          onExpand && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 shrink-0"
-              onClick={onExpand}
-              aria-pressed={expanded}
-              // Named for what it will do, not for what it is. "Expand the
-              // chat" on a chat that is already expanded is a control that
-              // lies about its own effect.
-              aria-label={expanded ? "Shrink the chat back to the panel" : "Expand the chat"}
-              title={expanded ? "Shrink the chat back to the panel" : "Expand the chat"}
-            >
-              {expanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-            </Button>
-          )
         )}
       </div>
 
