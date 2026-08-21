@@ -24,7 +24,9 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -75,7 +77,7 @@ class MeetingListWindowTest {
                 insights, storage, usage, outbox, audit, ai, templates, knownSpeakers,
                 vocabulary, projects, translations, notifications, erasure, users);
 
-        when(meetings.search(anyString(), any(), any(), any(), any(), any(), any()))
+        when(meetings.search(anyString(), any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new org.springframework.data.domain.PageImpl<>(List.<Meeting>of()));
     }
 
@@ -83,7 +85,7 @@ class MeetingListWindowTest {
         ArgumentCaptor<Instant> from = ArgumentCaptor.forClass(Instant.class);
         ArgumentCaptor<Instant> to = ArgumentCaptor.forClass(Instant.class);
         verify(meetings).search(anyString(), any(), any(), any(),
-                from.capture(), to.capture(), any());
+                from.capture(), to.capture(), anyBoolean(), any());
         return new Instant[] { from.getValue(), to.getValue() };
     }
 
@@ -93,7 +95,7 @@ class MeetingListWindowTest {
         Instant from = Instant.parse("2026-07-01T00:00:00Z");
         Instant to = Instant.parse("2026-08-01T00:00:00Z");
 
-        service.list(USER, 0, 20, null, null, null, from, to);
+        service.list(USER, 0, 20, null, null, null, from, to, false);
 
         assertThat(windowSentToTheQuery()).containsExactly(from, to);
     }
@@ -101,13 +103,13 @@ class MeetingListWindowTest {
     @Test
     @DisplayName("no window asks for no window")
     void bothEndsOptional() {
-        service.list(USER, 0, 20, null, null, null, null, null);
+        service.list(USER, 0, 20, null, null, null, null, null, false);
 
         // Nulls rather than a pair of sentinel dates: "any time" has to mean the
         // filter is absent, or the earliest bound anybody hard-codes becomes the
         // oldest meeting the product can show.
         verify(meetings).search(anyString(), isNull(), isNull(), isNull(),
-                isNull(), isNull(), any());
+                isNull(), isNull(), eq(false), any());
     }
 
     @Test
@@ -115,7 +117,7 @@ class MeetingListWindowTest {
     void openEnded() {
         Instant from = Instant.parse("2026-08-01T00:00:00Z");
 
-        service.list(USER, 0, 20, null, null, null, from, null);
+        service.list(USER, 0, 20, null, null, null, from, null, false);
 
         assertThat(windowSentToTheQuery()).containsExactly(from, null);
     }
@@ -125,18 +127,42 @@ class MeetingListWindowTest {
     void combinesWithTheOtherFilters() {
         Instant from = Instant.parse("2026-08-01T00:00:00Z");
 
-        service.list(USER, 0, 20, "sprint", "planning", MeetingStatus.READY, from, null);
+        service.list(USER, 0, 20, "sprint", "planning", MeetingStatus.READY, from, null, false);
 
         verify(meetings).search(USER, "sprint", "READY", "planning", from, null,
-                org.springframework.data.domain.PageRequest.of(0, 20));
+                false, org.springframework.data.domain.PageRequest.of(0, 20));
+    }
+
+    @Test
+    @DisplayName("unfiled goes to the query too, rather than thinning the page")
+    void unfiledNarrowsInTheQuery() {
+        service.list(USER, 0, 20, null, null, null, null, null, true);
+
+        // The same reason the window does. Home asks for fifty and keeps the
+        // ones with no folder; done here, "conversations outside a folder"
+        // would be answered with whichever of the fifty most recent happened to
+        // be unfiled, and the total would count the ones it had just hidden.
+        verify(meetings).search(anyString(), isNull(), isNull(), isNull(),
+                isNull(), isNull(), eq(true), any());
+    }
+
+    @Test
+    @DisplayName("everything in the workspace is the absence of that filter")
+    void filedAndUnfiledTogether() {
+        service.list(USER, 0, 20, null, null, null, null, null, false);
+
+        // False rather than null: a meeting in a folder is still a meeting in
+        // the workspace, and All has to show it.
+        verify(meetings).search(anyString(), isNull(), isNull(), isNull(),
+                isNull(), isNull(), eq(false), any());
     }
 
     @Test
     @DisplayName("a blank search is no search, as before")
     void blankStringsStayNull() {
-        service.list(USER, 0, 20, "   ", "  ", null, null, null);
+        service.list(USER, 0, 20, "   ", "  ", null, null, null, false);
 
         verify(meetings).search(anyString(), isNull(), isNull(), isNull(),
-                isNull(), isNull(), any());
+                isNull(), isNull(), eq(false), any());
     }
 }

@@ -1241,6 +1241,15 @@ export interface MeetingListQuery {
    */
   from?: string;
   to?: string;
+  /**
+   * Only the conversations that are in no folder.
+   *
+   * A flag rather than a `projectId`, because what is being matched is an
+   * absence: an unset id already means "do not filter by folder", so the two
+   * questions cannot share a parameter. Sent only when true, so the default
+   * list keeps the cache key it had.
+   */
+  unfiled?: boolean;
 }
 
 export interface ActionItemListQuery {

@@ -100,6 +100,11 @@ public interface MeetingRepository extends JpaRepository<Meeting, String> {
      * exclusive — so a caller asking for one day passes midnight to midnight
      * and gets that day, rather than that day plus whatever landed exactly on
      * the following midnight.
+     *
+     * <p>{@code unfiled} is the one filter that is a flag rather than a value,
+     * because the thing being matched is an absence: a meeting with no folder.
+     * A nullable {@code projectId} could not express it — null already means
+     * "do not filter by folder" — so the two questions are kept apart.
      */
     @Query(value = """
             SELECT * FROM meetings m
@@ -109,6 +114,7 @@ public interface MeetingRepository extends JpaRepository<Meeting, String> {
               AND (:tag IS NULL OR m.tags @> CAST(('["' || :tag || '"]') AS jsonb))
               AND (CAST(:from AS timestamptz) IS NULL OR m.created_at >= CAST(:from AS timestamptz))
               AND (CAST(:to   AS timestamptz) IS NULL OR m.created_at <  CAST(:to   AS timestamptz))
+              AND (:unfiled = FALSE OR m.project_id IS NULL)
             ORDER BY m.created_at DESC
             """,
             countQuery = """
@@ -119,6 +125,7 @@ public interface MeetingRepository extends JpaRepository<Meeting, String> {
               AND (:tag IS NULL OR m.tags @> CAST(('["' || :tag || '"]') AS jsonb))
               AND (CAST(:from AS timestamptz) IS NULL OR m.created_at >= CAST(:from AS timestamptz))
               AND (CAST(:to   AS timestamptz) IS NULL OR m.created_at <  CAST(:to   AS timestamptz))
+              AND (:unfiled = FALSE OR m.project_id IS NULL)
             """,
             nativeQuery = true)
     Page<Meeting> search(@Param("userId") String userId,
@@ -127,5 +134,6 @@ public interface MeetingRepository extends JpaRepository<Meeting, String> {
                          @Param("tag") String tag,
                          @Param("from") Instant from,
                          @Param("to") Instant to,
+                         @Param("unfiled") boolean unfiled,
                          Pageable pageable);
 }

@@ -393,7 +393,7 @@ public class MeetingService {
     @Transactional(readOnly = true)
     public PageResponse<MeetingResponse> list(String userId, int page, int size,
                                               String search, String tag, MeetingStatus status,
-                                              Instant from, Instant to) {
+                                              Instant from, Instant to, boolean unfiled) {
         // Filtered in the query rather than after the page is built. Narrowing a
         // page of twenty in memory would answer "meetings from July" with
         // whichever of the twenty most recent happened to fall in July — and
@@ -405,6 +405,7 @@ public class MeetingService {
                 blankToNull(tag),
                 from,
                 to,
+                unfiled,
                 PageRequest.of(page, size));
         List<MeetingResponse> content = result.getContent().stream().map(this::toResponse).toList();
         return PageResponse.from(result, content);

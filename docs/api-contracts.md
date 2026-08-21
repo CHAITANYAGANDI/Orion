@@ -76,7 +76,7 @@ again in the worker.
 | POST | `/api/v1/meetings/import` | `{ "url", "title"?, "tags"? }` | `201 MeetingResponse` |
 | GET  | `/api/v1/preferences` | — | `PreferencesResponse` |
 | PATCH | `/api/v1/preferences` | `{ "autoEmailRecap"?, "recapEmail"?, "displayName"?, "department"?, "jobRole"?, "defaultLanguage"?, "shareInclude*"?, "shareExpiryDays"?, "shareNeverExpires"?, "chatHistoryDays"?, "chatReadsEverything"?, "taskReminders"?, "mutedNotifications"? }` | `PreferencesResponse` |
-| GET  | `/api/v1/meetings` | `?page&size&search&tag&status` | `Page<MeetingResponse>` |
+| GET  | `/api/v1/meetings` | `?page&size&search&tag&status&from&to&unfiled` | `Page<MeetingResponse>` |
 | GET  | `/api/v1/meetings/{id}` | — | `MeetingResponse` |
 | PATCH | `/api/v1/meetings/{id}` | `{ "title"?, "tags"? }` | `MeetingResponse` |
 | GET  | `/api/v1/meetings/{id}/transcript` | — | `TranscriptResponse` |

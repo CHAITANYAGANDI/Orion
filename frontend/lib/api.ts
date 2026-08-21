@@ -141,6 +141,9 @@ export const api = createApi({
         if (query.status) params.set("status", query.status);
         if (query.from) params.set("from", query.from);
         if (query.to) params.set("to", query.to);
+        // Only when it is on. `?unfiled=false` and no parameter at all are the
+        // same request and would be cached, and refetched, as two.
+        if (query.unfiled) params.set("unfiled", "true");
         return `/meetings?${params.toString()}`;
       },
       providesTags: (result) =>

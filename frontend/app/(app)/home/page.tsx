@@ -12,8 +12,8 @@
  *
  * The list is grouped by day and the day is a heading, not a column, because a
  * meeting archive is read as a diary. The scope picker above it answers the one
- * question the list cannot: whether "yours" means the ones you recorded or
- * everything in the workspace.
+ * question the list cannot: whether this is everything in the workspace, or
+ * only what was never filed into a folder.
  */
 
 import * as React from "react";
@@ -23,6 +23,7 @@ import {
   ListChecks,
   ChevronDown,
   FileAudio,
+  FolderOpen,
   Youtube,
   FileText,
   Upload,
@@ -45,16 +46,34 @@ import { cn } from "@/lib/utils";
 import { recordHref } from "@/lib/routes";
 
 /**
- * Whose conversations to list.
+ * Which conversations to list.
  *
- * Otter offers a fourth, "Shared with me", and Recallix cannot: one account per
- * workspace means nobody can share anything *into* it. Offering the row anyway
- * would be a filter that is permanently empty and reads as a fault.
+ * <p>Two, and they differ. There were three: "For you" took the twenty most
+ * recent and called them unread, which they were not — nothing tracks whether a
+ * meeting has been read — and "My Conversations" and "All Conversations"
+ * returned the same rows as each other, because one account per workspace means
+ * every meeting is yours. A picker whose options produce identical lists is
+ * worse than no picker: it is read as a filter that is broken.
+ *
+ * <p>What is left is the distinction that does exist now that recordings and
+ * imports file themselves into the folder they were started in — whether this
+ * is the whole workspace, or only what was never filed.
+ *
+ * <p>Called Unfiled rather than Recent, which is what it was nearly named.
+ * Nothing about it is about time: both options are newest-first and both sit
+ * inside the same date window, so "Recent" would promise a cut-off that is not
+ * there and leave somebody wondering why this morning's meeting is missing —
+ * when the answer is that they recorded it inside a folder. Unfiled is also
+ * already the word the product uses, in the sentence you get when a folder is
+ * deleted and its meetings move out of it.
+ *
+ * <p>Otter offers "Shared with me" as well, and Recallix cannot: nobody can
+ * share anything *into* a one-account workspace. Offering the row anyway would
+ * be a filter that is permanently empty and reads as a fault.
  */
 const SCOPES = [
-  { value: "for-you", label: "For you", hint: "recent and unread" },
-  { value: "mine", label: "My Conversations", hint: "ones you recorded or uploaded" },
   { value: "all", label: "All Conversations", hint: "everything in this workspace" },
+  { value: "unfiled", label: "Unfiled", hint: "not in a folder" },
 ] as const;
 
 type Scope = (typeof SCOPES)[number]["value"];
@@ -62,26 +81,31 @@ type Scope = (typeof SCOPES)[number]["value"];
 type Panel = "chat" | "actions";
 
 export default function HomePage() {
-  const [scope, setScope] = React.useState<Scope>("for-you");
+  // All, not Unfiled. A default that hides anything is how somebody
+  // concludes a meeting has been lost, and the folder it is in is the one
+  // place they will not think to look for it.
+  const [scope, setScope] = React.useState<Scope>("all");
   const [panel, setPanel] = React.useState<Panel>("chat");
   const [when, setWhen] = React.useState<DateWindow>(ANY_TIME);
 
-  // The window goes to the server rather than filtering what came back. This
-  // asks for fifty rows; narrowing those to July would answer "meetings in
-  // July" with whichever of the fifty most recent happened to be in July, and
-  // would look right until somebody had more than fifty meetings.
+  // Both filters go to the server rather than narrowing what came back. This
+  // asks for fifty rows; keeping the unfiled ones out of those would answer
+  // "conversations outside a folder" with whichever of the fifty most recent
+  // happened to be unfiled, and would look right until somebody had more than
+  // fifty meetings. The scope used to be applied here, over the page, which is
+  // half of why it did nothing.
   const { data, isLoading } = useGetMeetingsQuery({
     page: 0,
     size: 50,
     from: when.from ?? undefined,
     to: when.to ?? undefined,
+    unfiled: scope === "unfiled",
   });
   // Derived from `data` rather than from a `?? []` above it: the fallback array
   // is a new value on every render, which would make the grouping below rerun
   // — and `new Date()` inside it produce different day boundaries — on renders
   // that have nothing to do with the data changing.
-  const shown = React.useMemo(() => scoped(data?.content ?? [], scope), [data, scope]);
-  const groups = React.useMemo(() => groupByDay(shown), [shown]);
+  const groups = React.useMemo(() => groupByDay(data?.content ?? []), [data]);
 
   return (
     <>
@@ -109,8 +133,13 @@ export default function HomePage() {
                 <Skeleton key={i} className="h-24 w-full" />
               ))}
             </div>
-          ) : shown.length === 0 ? (
-            <EmptyState scope={scope} when={when} onClearDate={() => setWhen(ANY_TIME)} />
+          ) : groups.length === 0 ? (
+            <EmptyState
+              scope={scope}
+              when={when}
+              onClearDate={() => setWhen(ANY_TIME)}
+              onShowAll={() => setScope("all")}
+            />
           ) : (
             groups.map((group) => (
               <div key={group.key} className="mb-6">
@@ -173,13 +202,6 @@ export default function HomePage() {
  * the moment a workspace has two people in it — at which point this is the one
  * place that has to change.
  */
-function scoped(meetings: MeetingResponse[], scope: Scope): MeetingResponse[] {
-  if (scope === "for-you") {
-    return meetings.slice(0, 20);
-  }
-  return meetings;
-}
-
 function ScopePicker({
   value,
   onChange,
@@ -300,19 +322,27 @@ function ConversationRow({ meeting }: { meeting: MeetingResponse }) {
 /**
  * Nothing to show, and why.
  *
- * <p>A date filter that empties the list has to say so. Without it the page
- * offers Record and Import to somebody with a hundred meetings, which reads as
- * an archive that lost them rather than as a filter doing its job — and the way
- * out is a control they have to remember they touched.
+ * <p>A filter that empties the list has to say so, and offer the way back.
+ * Without it the page offers Record and Import to somebody with a hundred
+ * meetings, which reads as an archive that lost them rather than as a filter
+ * doing its job — and the way out is a control they have to remember they
+ * touched.
+ *
+ * <p>Two filters can do it now. The date window is checked first because it is
+ * the likelier cause and the one somebody has just used; Unfiled is checked
+ * second, and it is the one most likely to be misread, since a folder is
+ * exactly where a meeting goes when it stops appearing where you left it.
  */
 function EmptyState({
   scope,
   when,
   onClearDate,
+  onShowAll,
 }: {
   scope: Scope;
   when: DateWindow;
   onClearDate: () => void;
+  onShowAll: () => void;
 }) {
   const { userId } = useAuth();
   const filtered = when.from !== null || when.to !== null;
@@ -337,12 +367,26 @@ function EmptyState({
     );
   }
 
+  if (scope === "unfiled") {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center">
+        <FolderOpen className="h-8 w-8 text-muted-foreground" />
+        <p className="mt-3 font-medium">Nothing outside a folder</p>
+        <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+          A conversation recorded or imported inside a folder is filed there.
+          Nothing has been lost — this view is the ones that were not.
+        </p>
+        <Button variant="outline" className="mt-4" onClick={onShowAll}>
+          Show all conversations
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center">
       <FileAudio className="h-8 w-8 text-muted-foreground" />
-      <p className="mt-3 font-medium">
-        {scope === "for-you" ? "Nothing here yet" : "No conversations"}
-      </p>
+      <p className="mt-3 font-medium">No conversations</p>
       <p className="mt-1 max-w-sm text-sm text-muted-foreground">
         Record a meeting from your browser, or bring in a file you already have.
         {userId ? "" : ""}

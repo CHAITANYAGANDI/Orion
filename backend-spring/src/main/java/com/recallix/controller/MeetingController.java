@@ -78,9 +78,10 @@ public class MeetingController {
                                               @RequestParam(required = false)
                                               @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
                                               @RequestParam(required = false)
-                                              @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to) {
+                                              @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
+                                              @RequestParam(defaultValue = "false") boolean unfiled) {
         return meetings.list(SecurityUtils.currentUserId(), page, Math.min(size, 100),
-                search, tag, status, from, to);
+                search, tag, status, from, to, unfiled);
     }
 
     @GetMapping("/{id}")
