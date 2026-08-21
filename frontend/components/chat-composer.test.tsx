@@ -240,6 +240,28 @@ describe("a scope that cannot change", () => {
     expect(screen.queryByRole("button", { name: /express/i })).not.toBeInTheDocument();
   });
 
+  it("names the thing it reads, rather than describing it", () => {
+    render(<ChatComposer scope="Q4 pricing review" onSend={vi.fn()} />);
+
+    // The chip used to read "This meeting" on every meeting. That was true and
+    // became unhelpful the moment the panel could be maximised over the page:
+    // with the document covered, "this" names nothing the reader can see.
+    expect(screen.getByText("Q4 pricing review")).toBeInTheDocument();
+  });
+
+  it("keeps a long name inside the chip, and readable in full on hover", () => {
+    const long =
+      "Weekly platform sync — migration status, on-call rota and the Q4 roadmap";
+    render(<ChatComposer scope={long} onSend={vi.fn()} />);
+
+    // A meeting title is whatever somebody called it, and one that does not
+    // truncate wraps the chip onto three lines and pushes the box off the
+    // panel. Truncating loses the end of the name, so the whole of it stays
+    // reachable rather than being thrown away.
+    expect(screen.getByText(long).className).toContain("truncate");
+    expect(screen.getByTitle(long)).toBeInTheDocument();
+  });
+
   it("still asks the question", async () => {
     const onSend = vi.fn();
     render(<ChatComposer scope="This meeting" onSend={onSend} />);

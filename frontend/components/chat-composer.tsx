@@ -88,8 +88,12 @@ export interface ChatComposerProps {
   projects?: Project[];
 
   /**
-   * The scope is fixed and cannot be widened — meeting chat reads one meeting
-   * and has no endpoint for anything else.
+   * What this chat reads, when that is fixed and cannot be widened — meeting
+   * chat reads one meeting and has no endpoint for anything else.
+   *
+   * Pass the thing's own name rather than a description of it. "This meeting"
+   * is only meaningful while the meeting is on screen next to it, and the panel
+   * can now be maximised over the page.
    *
    * Shown as a plain chip rather than the picker. An "Add context" button on a
    * chat that cannot take any would be a control that does nothing, which is
@@ -222,9 +226,15 @@ export function ChatComposer({
 
       <div className="flex flex-wrap items-center gap-1.5 px-3.5 pt-3">
         {scope ? (
-          <span className="flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
-            <AtSign className="h-3.5 w-3.5" />
-            {scope}
+          // Bounded and truncated, with the full name on hover: a meeting
+          // title is whatever somebody called it, and an untruncated one wraps
+          // the chip onto three lines and pushes the box off the panel.
+          <span
+            title={scope}
+            className="flex max-w-[240px] items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary"
+          >
+            <AtSign className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{scope}</span>
           </span>
         ) : (
           <button

@@ -1005,6 +1005,7 @@ export default function MeetingDetailPage() {
         <SidePane>
           <MeetingRail
             meetingId={id}
+            title={m.title}
             showOutline={tab === "transcript"}
             sections={showing?.sections ?? summary.data?.sections ?? []}
             suggestions={summary.data?.suggestions}
@@ -1048,6 +1049,7 @@ export default function MeetingDetailPage() {
  */
 function MeetingRail({
   meetingId,
+  title,
   showOutline,
   sections,
   suggestions,
@@ -1055,6 +1057,8 @@ function MeetingRail({
   onSeek,
 }: {
   meetingId: string;
+  /** What the chat is reading, by name. See `scope` in ChatPanel. */
+  title: string;
   showOutline: boolean;
   sections: SummarySection[];
   suggestions?: string[];
@@ -1088,6 +1092,7 @@ function MeetingRail({
       <TabsContent value="chat" className="mt-0 min-h-0 flex-1">
         <ChatPanel
           meetingId={meetingId}
+          title={title}
           onCite={onSeek}
           suggestions={suggestions}
           composed={composed}
@@ -1439,11 +1444,23 @@ function SummaryPanel({
 /* ------------------------------- Chat panel ------------------------------ */
 function ChatPanel({
   meetingId,
+  title,
   onCite,
   suggestions,
   composed,
 }: {
   meetingId: string;
+  /**
+   * The meeting this chat reads, by name.
+   *
+   * The chip used to say "This meeting", which was true and became unhelpful
+   * the moment the panel could be maximised over the page: with the document
+   * covered, "this" names nothing the reader can see. The title is on screen
+   * either way now, and it is also what makes the scope obviously *narrow* —
+   * somebody who has just come from the workspace chat needs to know this one
+   * answers from one transcript.
+   */
+  title: string;
   onCite: (s: number) => void;
   /**
    * Questions generated from this meeting's summary. Passed down rather than
@@ -1629,7 +1646,7 @@ function ChatPanel({
             // Still no context picker. That one would be a control that does
             // nothing: meeting chat reads one meeting through one endpoint and
             // has no way to widen the scope.
-            scope="This meeting"
+            scope={title || "This meeting"}
             placeholder="Ask about this meeting"
             compose={composeText}
             onSend={submit}
