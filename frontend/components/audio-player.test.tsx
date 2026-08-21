@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as React from "react";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AudioPlayer, useAudioController } from "@/components/audio-player";
 import type { TranscriptMoment, TranscriptSegment } from "@/lib/types";
@@ -292,5 +292,215 @@ describe("AudioPlayer keyboard", () => {
     // Ctrl+L is the address bar. Swallowing modified keys would break the
     // browser to save a keystroke.
     expect(media().paused).toBe(true);
+  });
+});
+
+/**
+ * How long the recording is.
+ *
+ * Every recording Recallix makes itself is WebM out of the browser's
+ * MediaRecorder, which writes no duration into the file, so the element
+ * reports Infinity for it. That put a scrubber at zero and an end time of
+ * 00:00 on every recorded meeting in the app — the position counted up
+ * perfectly beside a bar that never moved.
+ */
+describe("the duration", () => {
+  it("uses what the element knows", () => {
+    render(<Harness durationSeconds={903} />);
+    withDuration(120);
+
+    // An uploaded MP3 carries an exact duration. It beats the pipeline's
+    // rounded seconds, so the element wins whenever it has a real answer.
+    expect(screen.getByLabelText("Seek")).toHaveAttribute("aria-valuemax", "120");
+    expect(screen.getByText("00:00 / 02:00")).toBeInTheDocument();
+  });
+
+  it("falls back to what the server measured when the element has no idea", () => {
+    render(<Harness durationSeconds={903} />);
+    withDuration(Number.POSITIVE_INFINITY);
+
+    expect(screen.getByLabelText("Seek")).toHaveAttribute("aria-valuemax", "903");
+    expect(screen.getByText("00:00 / 15:03")).toBeInTheDocument();
+  });
+
+  it("moves the scrubber through a recording the element cannot measure", () => {
+    render(<Harness durationSeconds={903} />);
+    withDuration(Number.POSITIVE_INFINITY);
+    setTime(259);
+
+    // The bug, in one assertion: this read "04:19 of 00:00" and the bar behind
+    // it stayed at zero for the length of the recording.
+    expect(screen.getByLabelText("Seek")).toHaveAttribute("aria-valuetext", "04:19 of 15:03");
+  });
+
+  it("still says nothing rather than guessing when neither knows", () => {
+    render(<Harness />);
+    withDuration(Number.POSITIVE_INFINITY);
+
+    // Meetings recorded before the pipeline stored a duration. An invented
+    // length would put the playhead in the wrong place on every seek.
+    expect(screen.getByText("00:00 / 00:00")).toBeInTheDocument();
+  });
+
+  it("seeks against the duration it settled on", () => {
+    render(<Harness durationSeconds={903} />);
+    withDuration(Number.POSITIVE_INFINITY);
+
+    // jsdom lays nothing out, so the scrubber has no width of its own and the
+    // click handler correctly refuses to divide by it.
+    const seek = screen.getByLabelText("Seek");
+    seek.getBoundingClientRect = () =>
+      ({ left: 0, width: 200, top: 0, height: 8, right: 200, bottom: 8, x: 0, y: 0 }) as DOMRect;
+
+    fireEvent.click(seek, { clientX: 100 });
+
+    // Halfway along a fifteen-minute recording. Clicking a scrubber divides by
+    // the duration, so with none the whole bar seeked to zero — the one place
+    // it was already at.
+    expect(media().currentTime).toBeCloseTo(451.5, 1);
+  });
+});
+
+
+/**
+ * The clock, and why it is not published on every frame.
+ *
+ * This value goes down into the transcript, so each publish re-renders several
+ * hundred segments. At sixty a second React always had urgent work outstanding,
+ * and an urgent update outranks a transition — which is what a route change is.
+ * Clicking Home while audio played did nothing at all until you pressed pause,
+ * at which point the app went straight to the page you had asked for minutes
+ * earlier.
+ *
+ * The other half of the fix — publishing inside `startTransition`, so the
+ * playhead shares a lane with the navigation instead of sitting above it — is
+ * not observable from jsdom, which has no scheduler to starve. What is pinned
+ * here is the rate.
+ */
+describe("the playhead's cost", () => {
+  function Probe() {
+    const controller = useAudioController();
+    return (
+      <audio
+        ref={controller.ref as React.MutableRefObject<HTMLAudioElement | null>}
+        src="http://example.test/a.webm"
+      />
+    );
+  }
+
+  /**
+   * Drives the animation loop by hand, a frame at a time.
+   *
+   * Fake timers are no use for this. They do not control the MessageChannel
+   * React runs transition work through, so every deferred publish coalesces
+   * into a single commit at the end of the test — which is the scheduler
+   * behaving exactly as intended, and which makes render counts useless as a
+   * measure. Stubbing the frame callback instead gives the loop an explicit
+   * clock, which is the input the throttle actually reads.
+   */
+  function frames() {
+    let next: FrameRequestCallback | null = null;
+    // One clock for the whole test, not one per call. A timestamp that starts
+    // over would look to the throttle like time running backwards.
+    let now = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      next = cb;
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => {
+      next = null;
+    });
+    return function advance(count: number, msPerFrame = 16) {
+      for (let i = 0; i < count; i += 1) {
+        const cb = next;
+        if (!cb) return;
+        now += msPerFrame;
+        act(() => cb(now));
+      }
+    };
+  }
+
+  /** Counts how often the loop samples the element's clock. */
+  function countSamples(el: HTMLMediaElement): () => number {
+    let reads = 0;
+    let time = 0;
+    Object.defineProperty(el, "currentTime", {
+      configurable: true,
+      get() {
+        reads += 1;
+        return time;
+      },
+      set(v: number) {
+        time = v;
+      },
+    });
+    return () => reads;
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("samples about ten times a second while playing, not sixty", () => {
+    const advance = frames();
+    render(<Probe />);
+    const el = media();
+    act(() => {
+      void el.play();
+    });
+    const reads = countSamples(el);
+
+    advance(60);
+
+    // Ten-ish, and the range matters in both directions: too many is the bug
+    // this fixes, too few is a playhead that has stopped following the audio.
+    // Sixty — one per frame — is what it used to be.
+    expect(reads()).toBeGreaterThanOrEqual(8);
+    expect(reads()).toBeLessThanOrEqual(12);
+  });
+
+  it("stops sampling entirely once paused", () => {
+    const advance = frames();
+    render(<Probe />);
+    const el = media();
+    act(() => {
+      void el.play();
+    });
+    advance(30);
+    act(() => {
+      el.pause();
+    });
+    const reads = countSamples(el);
+
+    advance(120);
+
+    // The loop keeps running — it has to notice playback starting again — but
+    // a paused element must not re-render the transcript at all. This is the
+    // state the app spends most of its time in.
+    expect(reads()).toBe(0);
+  });
+
+  it("keeps following the audio after it is resumed", () => {
+    const advance = frames();
+    render(<Probe />);
+    const el = media();
+    act(() => {
+      void el.play();
+    });
+    advance(30);
+    act(() => {
+      el.pause();
+    });
+    advance(30);
+    act(() => {
+      void el.play();
+    });
+    const reads = countSamples(el);
+
+    advance(60);
+
+    // The throttle must not have latched on the last frame before the pause,
+    // which would leave the playhead frozen for as long as the gap was.
+    expect(reads()).toBeGreaterThanOrEqual(8);
   });
 });

@@ -520,6 +520,11 @@ export default function MeetingDetailPage() {
       src={m.audioUrl ?? ""}
       controller={audio}
       contentType={m.contentType}
+      // The only source of a duration for anything recorded in the browser:
+      // WebM out of a MediaRecorder carries none, so the element reports
+      // Infinity and the scrubber has nothing to divide by. See
+      // `playbackDuration` in lib/playback.ts.
+      durationSeconds={m.durationSeconds}
       // Skip-silence, the speaker jumps and the coloured timeline are all read
       // out of the transcript rather than the audio signal — see
       // lib/playback.ts. Both queries are already in flight for the tabs below,

@@ -161,6 +161,43 @@ export function nextSpanStart(spans: Span[], at: number): number | null {
 }
 
 /**
+ * How long the recording is: what the element knows, or what the server
+ * measured when it could not.
+ *
+ * Every recording Recallix makes itself is WebM from the browser's
+ * `MediaRecorder`, and a `MediaRecorder` cannot write a duration. It is muxing
+ * a stream of unknown length, so it emits a Segment header of unknown size and
+ * no Duration element and no Cues — verified on a stored recording, whose
+ * header runs `Segment` -> `01 ff ff ff ff ff ff ff` -> `Info` with a
+ * TimecodeScale and nothing else. A browser handed that reports
+ * `duration === Infinity` for the whole file, however much of it has arrived.
+ *
+ * The consequence on screen was a scrubber pinned at zero for the length of the
+ * recording and an end time of `00:00`, on every meeting anybody recorded
+ * rather than uploaded: `progressFraction` divides by a duration and correctly
+ * refuses to divide by an unknown one, so the fraction was always zero.
+ *
+ * The server already knows the answer — the transcription pipeline measures the
+ * audio and stores `durationSeconds`, and the page prints it beside the date —
+ * so nothing has to be fetched or estimated. The element still wins when it has
+ * a real number: an uploaded MP3 or MP4 carries an exact duration in its own
+ * header, and that is a better answer than a pipeline's rounded seconds.
+ *
+ * The alternative fix, seeking to a huge offset to make the browser scan for
+ * the end and then seeking back, is deliberately not used here: it costs a
+ * download of the entire file before playback can start and is audible as a
+ * jump on a slow connection.
+ *
+ * @param reported what the media element says, which may be Infinity or NaN.
+ * @param known what the server measured, in seconds, if it has.
+ */
+export function playbackDuration(reported: number, known?: number | null): number {
+  if (Number.isFinite(reported) && reported > 0) return reported;
+  if (known != null && Number.isFinite(known) && known > 0) return known;
+  return 0;
+}
+
+/**
  * Fraction of the way through, clamped to [0, 1].
  *
  * Guards a zero or unknown duration, which is what a media element reports

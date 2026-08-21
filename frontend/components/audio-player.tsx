@@ -43,6 +43,7 @@ import {
   insideSpan,
   nextSpanStart,
   nextSpeakerStart,
+  playbackDuration,
   previousSpeakerStart,
   progressFraction,
   seekTarget,
@@ -52,6 +53,13 @@ import {
 import { speakerHex } from "@/lib/speakers";
 import { timecode } from "@/lib/format";
 import { cn } from "@/lib/utils";
+
+/**
+ * How often the playhead is published to React while playing, in milliseconds.
+ *
+ * Not a frame budget — a render budget. See the loop in `useAudioController`.
+ */
+const CLOCK_INTERVAL = 100;
 
 export interface AudioController {
   // Typed as the shared media interface, not HTMLAudioElement: the same
@@ -68,20 +76,53 @@ export function useAudioController(): AudioController {
   const ref = React.useRef<HTMLMediaElement | null>(null);
   const [currentTime, setCurrentTime] = React.useState(0);
 
-  // `timeupdate` fires roughly four times a second, which is fine for marking
-  // which paragraph is playing but far too coarse to follow words: at normal
-  // speaking pace several words pass between events, so the highlight jumps
-  // in clumps. While playing, the clock is read every animation frame instead;
-  // `timeupdate` still covers seeking and pausing, when no frames are running.
+  /*
+   * The clock, read on a frame and published on a budget.
+   *
+   * `timeupdate` fires roughly four times a second, which is fine for marking
+   * which paragraph is playing but far too coarse to follow words: at normal
+   * speaking pace several words pass between events, so the highlight jumps in
+   * clumps. So the element is read every animation frame. What changed is what
+   * happens next.
+   *
+   * ## Why it is not published every frame
+   *
+   * This value is passed down into the transcript, so every publish re-renders
+   * several hundred segments. Doing that sixty times a second left React with
+   * urgent work outstanding at all times, and an urgent update outranks a
+   * transition — which is what an App Router navigation is. The symptom was
+   * exact and reproducible: clicking Home while audio played did nothing at
+   * all, and the moment you hit pause the app went straight to the page you
+   * had asked for several minutes earlier. The navigation was never lost, it
+   * was never allowed to finish rendering.
+   *
+   * Two things stop that, and both are needed. Publishing at most every
+   * hundred milliseconds leaves the main thread idle in between, which is where
+   * a route change gets rendered. And publishing inside `startTransition` puts
+   * the clock in the same lane as the navigation rather than above it, so even
+   * under load a playhead can never win against somebody trying to leave the
+   * page.
+   *
+   * A hundred milliseconds is still two and a half times finer than
+   * `timeupdate`, and shorter than the shortest spoken word, so the highlight
+   * this loop exists for is unaffected.
+   */
   React.useEffect(() => {
     let frame = 0;
+    let published = -Infinity;
 
-    const tick = () => {
-      const el = ref.current;
-      if (el && !el.paused && !el.ended) {
-        setCurrentTime(el.currentTime);
-      }
+    const tick = (now: number) => {
       frame = requestAnimationFrame(tick);
+      const el = ref.current;
+      if (!el || el.paused || el.ended) return;
+      if (now - published < CLOCK_INTERVAL) return;
+      published = now;
+      // Read now, published later. A transition runs when React gets to it,
+      // and by then the element has moved on — sampling inside the callback
+      // would quietly make the playhead report a time from a different frame
+      // than the one that decided to publish it.
+      const at = el.currentTime;
+      React.startTransition(() => setCurrentTime(at));
     };
 
     frame = requestAnimationFrame(tick);
@@ -107,6 +148,7 @@ export function AudioPlayer({
   src,
   controller,
   contentType,
+  durationSeconds,
   segments = [],
   moments = [],
 }: {
@@ -114,6 +156,14 @@ export function AudioPlayer({
   controller: AudioController;
   /** MIME type of the stored media. Absent (older meetings) means audio. */
   contentType?: string | null;
+  /**
+   * How long the server measured the recording to be.
+   *
+   * Needed rather than nice to have: a browser recording is WebM with no
+   * duration in it, and without this the scrubber cannot move and the end time
+   * is 00:00. See `playbackDuration` in lib/playback.ts.
+   */
+  durationSeconds?: number | null;
   /** Drives skip-silence, speaker jumps and the coloured timeline. */
   segments?: TranscriptSegment[];
   /** Drives "highlights only". */
@@ -126,12 +176,17 @@ export function AudioPlayer({
   const el = React.useCallback(() => controller.ref.current, [controller.ref]);
 
   const [playing, setPlaying] = React.useState(false);
-  const [duration, setDuration] = React.useState(0);
+  // What the element claims, which for a browser recording is Infinity. Kept
+  // raw and reconciled below rather than sanitised on the way in, so the one
+  // place that decides what the duration is can see both answers.
+  const [reported, setReported] = React.useState(0);
   const [rate, setRate] = React.useState(1);
   const [volume, setVolume] = React.useState(1);
   const [muted, setMuted] = React.useState(false);
   const [skipSilence, setSkipSilence] = React.useState(false);
   const [highlightsOnly, setHighlightsOnly] = React.useState(false);
+
+  const duration = playbackDuration(reported, durationSeconds);
 
   const turns = React.useMemo(() => speakerTurns(segments), [segments]);
   const spans = React.useMemo(() => highlightSpans(moments), [moments]);
@@ -149,7 +204,7 @@ export function AudioPlayer({
       setVolume(media.volume);
       setMuted(media.muted);
     };
-    const onMeta = () => setDuration(Number.isFinite(media.duration) ? media.duration : 0);
+    const onMeta = () => setReported(media.duration);
 
     sync();
     onMeta();

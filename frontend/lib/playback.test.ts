@@ -6,6 +6,7 @@ import {
   nextSpanStart,
   nextSpeakerStart,
   previousSpeakerStart,
+  playbackDuration,
   progressFraction,
   seekTarget,
   silenceSkip,
@@ -224,6 +225,47 @@ describe("playing only the spans", () => {
 });
 
 /* ------------------------------- scrubber ------------------------------- */
+/**
+ * How long the recording is.
+ *
+ * The case that matters is a browser recording. `MediaRecorder` writes WebM
+ * with no Duration element in it, so the element reports Infinity for the whole
+ * file and every meeting anybody recorded had a scrubber frozen at zero beside
+ * an end time of 00:00.
+ */
+describe("playbackDuration", () => {
+  it("trusts the element when it knows", () => {
+    // An uploaded MP3 or MP4 carries an exact duration. It beats a pipeline's
+    // rounded seconds.
+    expect(playbackDuration(903.4, 903)).toBe(903.4);
+  });
+
+  it("falls back to the server when the element reports Infinity", () => {
+    expect(playbackDuration(Number.POSITIVE_INFINITY, 903)).toBe(903);
+  });
+
+  it("falls back before metadata has loaded", () => {
+    // NaN is what a media element reports until `loadedmetadata`, and zero is
+    // what it reports for a file it could not read at all.
+    expect(playbackDuration(Number.NaN, 903)).toBe(903);
+    expect(playbackDuration(0, 903)).toBe(903);
+  });
+
+  it("says nothing rather than guessing when neither knows", () => {
+    // Meetings recorded before the pipeline stored a duration. An invented
+    // length would put the playhead somewhere wrong on every click of the bar,
+    // which is worse than a bar that admits it cannot help.
+    expect(playbackDuration(Number.POSITIVE_INFINITY)).toBe(0);
+    expect(playbackDuration(Number.POSITIVE_INFINITY, null)).toBe(0);
+    expect(playbackDuration(Number.POSITIVE_INFINITY, 0)).toBe(0);
+  });
+
+  it("ignores a negative or unusable stored duration", () => {
+    expect(playbackDuration(Number.NaN, -5)).toBe(0);
+    expect(playbackDuration(Number.NaN, Number.NaN)).toBe(0);
+  });
+});
+
 describe("progressFraction", () => {
   it("is the fraction played", () => {
     expect(progressFraction(30, 120)).toBe(0.25);
