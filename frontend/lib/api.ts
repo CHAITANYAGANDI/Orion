@@ -4,7 +4,6 @@ import type {
   ActionItemComment,
   ActionItemCreateRequest,
   ActionItemListQuery,
-  ActionItemOverview,
   ActionItemStatus,
   ChatConversation,
   ActionItemPatchRequest,
@@ -1011,6 +1010,9 @@ export const api = createApi({
         if (query.owner) params.set("owner", query.owner);
         if (query.due) params.set("due", query.due);
         if (query.meetingId) params.set("meetingId", query.meetingId);
+        // Only what nobody's transcript produced. Not `meetingId` with a magic
+        // value — that filter names one meeting, and there is no id for "none".
+        if (query.standalone) params.set("standalone", "true");
         if (query.mine) params.set("mine", "true");
         return `/action-items?${params.toString()}`;
       },
@@ -1026,17 +1028,10 @@ export const api = createApi({
           : [{ type: "ActionItems" as const, id: "LIST" }],
     }),
 
-    /**
-     * The tab counts, the owner filter's values and the caller's own name.
-     *
-     * Tagged with the same LIST tag as the rows, so completing something moves
-     * its count too — a tracker whose tabs disagree with its list is worse than
-     * one with no tabs.
-     */
-    getActionItemOverview: builder.query<ActionItemOverview, void>({
-      query: () => "/action-items/overview",
-      providesTags: [{ type: "ActionItems", id: "LIST" }],
-    }),
+    /* No `overview` and no bulk `PATCH` here any more. Both existed for the
+       tracker page's filter tabs and its select-many toolbar, and both left
+       with it. The endpoints are still on the server; nothing in the app calls
+       them. */
 
     patchActionItem: builder.mutation<
       ActionItemResponse,
@@ -1051,15 +1046,6 @@ export const api = createApi({
         { type: "ActionItem", id: arg.id },
         { type: "ActionItems", id: "LIST" },
       ],
-    }),
-
-    /** One status, many items — see the backend for why the reply is a count. */
-    bulkPatchActionItems: builder.mutation<
-      { changed: number },
-      { ids: string[]; status: ActionItemStatus }
-    >({
-      query: (body) => ({ url: "/action-items", method: "PATCH", body }),
-      invalidatesTags: [{ type: "ActionItems", id: "LIST" }],
     }),
 
     deleteActionItem: builder.mutation<void, string>({
@@ -1256,9 +1242,7 @@ export const {
   useDeleteVocabularyTermMutation,
   useEditSegmentsMutation,
   useGetActionItemsQuery,
-  useGetActionItemOverviewQuery,
   usePatchActionItemMutation,
-  useBulkPatchActionItemsMutation,
   useDeleteActionItemMutation,
   useGetActionItemCommentsQuery,
   useAddActionItemCommentMutation,

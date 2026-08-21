@@ -222,7 +222,8 @@ class TaskReminderServiceTest {
             task("Ship it", TODAY, "Priya");
 
             String body = bodySentAfter();
-            assertThat(body).contains("http://localhost:3000/action-items");
+            // Home. The tracker page this used to open no longer exists.
+            assertThat(body).contains("http://localhost:3000/home");
             assertThat(body).contains("Settings");
         }
 

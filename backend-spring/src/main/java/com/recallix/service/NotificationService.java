@@ -230,7 +230,7 @@ public class NotificationService {
         emit(userId, NotificationKind.ACTION_ITEM_DUE,
                 count == 1 ? "1 action item due soon" : count + " action items due soon",
                 "Due today or in the next few days.",
-                null, null, "/action-items?view=soon",
+                null, null, "/home",
                 "day:" + today);
     }
 
@@ -242,7 +242,7 @@ public class NotificationService {
         emit(userId, NotificationKind.ACTION_ITEM_OVERDUE,
                 count == 1 ? "1 action item is overdue" : count + " action items are overdue",
                 "Past their deadline and still open.",
-                null, null, "/action-items?view=overdue",
+                null, null, "/home",
                 "day:" + today);
     }
 

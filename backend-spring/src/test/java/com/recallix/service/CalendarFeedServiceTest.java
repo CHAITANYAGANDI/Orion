@@ -220,7 +220,11 @@ class CalendarFeedServiceTest {
             String ics = feedFor(typed);
 
             assertThat(ics).contains("Added by hand in Recallix.");
-            assertThat(ics).contains("URL:https://recallix.test/action-items");
+            // Home, since the tracker page is gone. A typed task has no meeting
+            // to open, and the panel beside the chat is where it was typed and
+            // where it is ticked off. An item out of a transcript still opens
+            // its own meeting — the case above this one.
+            assertThat(ics).contains("URL:https://recallix.test/home");
         }
 
         @Test

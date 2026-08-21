@@ -105,7 +105,7 @@ public class ActivityEmailService {
                 "A comment was added to an action item",
                 "Somebody wrote on one of your action items.\n\n"
                         + quote(event.detail())
-                        + "\n" + frontendUrl + "/action-items\n\n"
+                        + "\n" + frontendUrl + "/home\n\n"
                         + "This is the only comment email today, however many more are "
                         + "written.\n"
                         + footer("Comments"));

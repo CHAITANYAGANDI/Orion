@@ -77,9 +77,11 @@ public class ActionItemController {
                                                  @RequestParam(required = false) String owner,
                                                  @RequestParam(required = false) String due,
                                                  @RequestParam(required = false) String meetingId,
+                                                 @RequestParam(defaultValue = "false") boolean standalone,
                                                  @RequestParam(defaultValue = "false") boolean mine) {
         return actionItems.list(SecurityUtils.currentUserId(),
-                new ActionItemQuery(status, priority, owner, due, meetingId, mine, page, size));
+                new ActionItemQuery(status, priority, owner, due, meetingId, standalone, mine,
+                        page, size));
     }
 
     /** Tab counts, the owner filter's values, and the caller's own name. */

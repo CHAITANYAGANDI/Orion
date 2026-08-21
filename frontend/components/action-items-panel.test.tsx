@@ -4,12 +4,20 @@ import userEvent from "@testing-library/user-event";
 import type { ActionItemResponse } from "@/lib/types";
 
 /**
- * The workspace action-item panel.
+ * The panel for what you gave yourself to do.
  *
- * The thing worth protecting here is that it is one list. A task typed into the
- * box and a commitment lifted out of a transcript are the same row in the same
- * table, so the panel must not grow a notion of "personal" versus "from a
- * meeting" — the moment it does, "what have I got to do" has two answers.
+ * This file used to open by insisting the opposite of what it now tests: that
+ * the panel is one list, that a typed task and a commitment out of a transcript
+ * are the same row in the same table, and that it must never distinguish them —
+ * because the moment it did, "what have I got to do" would have two answers.
+ *
+ * That was the right worry and the wrong conclusion. It did have two answers
+ * anyway, and then three: the same commitment sat on its meeting, in this
+ * panel, and on a tracker page, with nothing to say which of them ticking it
+ * off was supposed to happen in. Splitting by where the row came from is what
+ * gives each one exactly one home. A commitment is read and completed on the
+ * meeting that produced it, beside the sentence it came from. What is left here
+ * is what somebody typed, which belongs to no meeting.
  *
  * The rest is about finished work. A tracker that forgets what you ticked cannot
  * answer "did I do that", which is the second question anybody asks it, so
@@ -21,12 +29,17 @@ const { patch, create } = vi.hoisted(() => ({
 }));
 
 let items: ActionItemResponse[] = [];
+/** What the panel last asked the server for. */
+let lastQuery: Record<string, unknown> | undefined;
 
 vi.mock("@/lib/api", () => ({
-  useGetActionItemsQuery: () => ({
-    data: { content: items, page: 0, size: 100, totalElements: items.length, totalPages: 1 },
-    isLoading: false,
-  }),
+  useGetActionItemsQuery: (q: Record<string, unknown>) => {
+    lastQuery = q;
+    return {
+      data: { content: items, page: 0, size: 100, totalElements: items.length, totalPages: 1 },
+      isLoading: false,
+    };
+  },
   usePatchActionItemMutation: () => [
     (arg: unknown) => {
       patch(arg);
@@ -74,16 +87,19 @@ function item(over: Partial<ActionItemResponse> = {}): ActionItemResponse {
 beforeEach(() => {
   vi.clearAllMocks();
   items = [];
+  lastQuery = undefined;
 });
 
 describe("when there is nothing to do", () => {
-  it("says so, in the words somebody reading an empty panel needs", () => {
+  it("says so, and says where the meeting ones went", () => {
     render(<ActionItemsPanel />);
 
-    expect(screen.getByText("No current action items")).toBeInTheDocument();
-    expect(
-      screen.getByText("Your action items will appear here when assigned"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Nothing on your list")).toBeInTheDocument();
+    // The copy matters more than usual here. This panel used to list every
+    // action item in the workspace and now lists only what you type, so for
+    // most people it went from full to empty in one release. An empty box with
+    // no explanation reads as a fault rather than a change.
+    expect(screen.getByText(/stays on that meeting/i)).toBeInTheDocument();
   });
 
   it("still offers the way to add one", () => {
@@ -134,24 +150,22 @@ describe("the list", () => {
     expect(screen.getByText("Priya")).toBeInTheDocument();
   });
 
-  it("links a task back to the meeting that produced it", () => {
-    items = [item()];
+  it("asks only for the items nobody's transcript produced", () => {
+    items = [item({ meetingId: null, meetingTitle: null, title: "Write the migration" })];
     render(<ActionItemsPanel />);
 
-    expect(screen.getByRole("link", { name: "Sprint planning" })).toHaveAttribute(
-      "href",
-      "/meetings/mtg_1?tab=actions",
-    );
+    // The whole point of the panel now. Without this flag a commitment made in
+    // a meeting is in two lists at once, and neither says which one ticking it
+    // off is supposed to happen in.
+    expect(lastQuery).toMatchObject({ standalone: true });
   });
 
-  it("shows no meeting link for one nobody said out loud", () => {
-    // A typed task has no conversation. Claiming one would be a link to a
-    // meeting it was never mentioned in.
+  it("shows no meeting link, because nothing in it has a meeting", () => {
     items = [item({ meetingId: null, meetingTitle: null, title: "Write the migration" })];
     render(<ActionItemsPanel />);
 
     expect(screen.getByText("Write the migration")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Sprint planning" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
 
   it("ticks one off", async () => {

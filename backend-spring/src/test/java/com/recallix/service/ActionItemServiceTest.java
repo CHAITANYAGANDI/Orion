@@ -39,6 +39,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -113,7 +114,7 @@ class ActionItemServiceTest {
             return stored.stream().filter(a -> ids.contains(a.getId())).toList();
         });
         when(actionItems.findByMeetingId(MEETING)).thenAnswer(inv -> List.copyOf(stored));
-        when(actionItems.findForUser(anyString(), any(), any(), any(), any(), any(), any(), any(), any()))
+        when(actionItems.findForUser(anyString(), any(), any(), any(), anyBoolean(), any(), any(), any(), any(), any()))
                 .thenAnswer(inv -> new PageImpl<>(List.copyOf(stored)));
         // Explicitly typed: List.of with one array argument spreads it, and the
         // varargs call infers List<Object> rather than List<Object[]>.
@@ -448,19 +449,55 @@ class ActionItemServiceTest {
         }
     }
 
+    /**
+     * The home panel's list.
+     *
+     * <p>The panel beside the chat used to show every action item in the
+     * workspace, which put one commitment in three places at once — on its
+     * meeting, in that panel, and on a tracker page — with nothing to say which
+     * of them ticking it off was supposed to happen in. It now asks for the
+     * ones nobody's transcript produced, and a commitment is completed on the
+     * meeting that produced it.
+     *
+     * <p>This is worth a test rather than trust because the failure is silent:
+     * a filter that quietly does nothing gives back a list that looks like an
+     * answer.
+     */
+    @Nested
+    class StandaloneOnly {
+
+        @Test
+        @DisplayName("the filter reaches the query")
+        void asksForStandalone() {
+            service.list(USER, new ActionItemQuery(null, null, null, null, null, true, false, 0, 50));
+
+            verify(actionItems).findForUser(anyString(), any(), any(), any(),
+                    org.mockito.ArgumentMatchers.eq(true), any(), any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("and is off unless asked for, so a meeting's own list is untouched")
+        void defaultsToEverything() {
+            service.list(USER, ActionItemQuery.open());
+
+            verify(actionItems).findForUser(anyString(), any(), any(), any(),
+                    org.mockito.ArgumentMatchers.eq(false), any(), any(), any(), any(), any());
+        }
+    }
+
     @Nested
     class MyTasks {
 
         @Test
         @DisplayName("asking for mine before saying who I am returns nothing")
         void refusesToGuess() {
-            var page = service.list(USER, new ActionItemQuery(null, null, null, null, null, true, 0, 50));
+            var page = service.list(USER, new ActionItemQuery(null, null, null, null, null, false, true, 0, 50));
 
             // The alternative is showing the whole workspace under the heading
             // "My tasks", which reads as an answer and is not one.
             assertThat(page.content()).isEmpty();
-            verify(actionItems, never()).findForUser(anyString(), any(), any(), any(), any(), any(),
-                    any(), any(), any());
+            verify(actionItems, never()).findForUser(anyString(), any(), any(), any(), anyBoolean(),
+                    any(), any(), any(), any(), any());
         }
 
         @Test
@@ -468,9 +505,9 @@ class ActionItemServiceTest {
         void matchesCaseInsensitively() {
             user.setDisplayName("  Priya  ");
 
-            service.list(USER, new ActionItemQuery(null, null, null, null, null, true, 0, 50));
+            service.list(USER, new ActionItemQuery(null, null, null, null, null, false, true, 0, 50));
 
-            verify(actionItems).findForUser(anyString(), any(), any(), any(),
+            verify(actionItems).findForUser(anyString(), any(), any(), any(), anyBoolean(),
                     org.mockito.ArgumentMatchers.eq("priya"), any(), any(), any(), any());
         }
 

@@ -293,7 +293,7 @@ public class TaskReminderService {
             sb.append("\n…and ").append(items.size() - listed).append(" more.\n");
         }
 
-        sb.append("\nOpen your action items: ").append(frontendUrl).append("/action-items\n");
+        sb.append("\nOpen your action items: ").append(frontendUrl).append("/home\n");
         // Name the switch that sent it, not a switch that sounds like it. The
         // two messages come from two rows on the settings page, and a footer
         // that pointed at the wrong one would send somebody to turn off the

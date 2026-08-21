@@ -118,7 +118,7 @@ public class ActionItemService {
         }
 
         Page<MeetingActionItem> result = actionItems.findForUser(
-                userId, q.status(), q.priority(), q.meetingId(), owner, q.due(),
+                userId, q.status(), q.priority(), q.meetingId(), q.standalone(), owner, q.due(),
                 today, today.plusDays(DueStatus.SOON_DAYS),
                 PageRequest.of(q.page(), q.size()));
 

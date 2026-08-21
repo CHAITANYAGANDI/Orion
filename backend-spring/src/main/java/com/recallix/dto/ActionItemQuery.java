@@ -23,6 +23,15 @@ public record ActionItemQuery(
         String owner,
         String due,
         String meetingId,
+        /**
+         * Keep only what nobody's transcript produced.
+         *
+         * <p>The home panel's whole list. Commitments lifted from a meeting are
+         * read on that meeting, where the sentence they came from is a click
+         * away; what is left here is the things somebody typed for themselves,
+         * which belong to no meeting and have nowhere else to live.
+         */
+        boolean standalone,
         /** Restrict to items owned by the caller — resolved against their display name. */
         boolean mine,
         int page,
@@ -54,7 +63,7 @@ public record ActionItemQuery(
 
     /** The default view: everything still outstanding, nearest deadline first. */
     public static ActionItemQuery open() {
-        return new ActionItemQuery("OPEN_ANY", null, null, null, null, false, 0, 50);
+        return new ActionItemQuery("OPEN_ANY", null, null, null, null, false, false, 0, 50);
     }
 
     private static String oneOf(String value, Set<String> allowed, String field) {

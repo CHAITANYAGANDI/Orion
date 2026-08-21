@@ -242,8 +242,11 @@ public class CalendarFeedService {
     }
 
     private static String linkOf(MeetingActionItem item) {
+        // A commitment out of a transcript opens on its meeting, where the
+        // sentence it came from is a click away. One somebody typed has no
+        // meeting to open, so it opens the panel it was typed into.
         return item.getMeetingId() == null
-                ? "/action-items"
+                ? "/home"
                 : "/meetings/" + item.getMeetingId() + "?tab=actions";
     }
 

@@ -1253,6 +1253,13 @@ export interface ActionItemListQuery {
   owner?: string;
   due?: "overdue" | "soon" | "dated" | "none";
   meetingId?: string;
+  /**
+   * Only the items nobody's transcript produced — the ones somebody typed.
+   *
+   * Independent of `meetingId`, which names one meeting and has no value
+   * meaning "none". Asking for both is an empty page and says so.
+   */
+  standalone?: boolean;
   /** Matched against the display name in settings; empty until one is set. */
   mine?: boolean;
 }

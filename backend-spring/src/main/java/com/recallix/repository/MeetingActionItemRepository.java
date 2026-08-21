@@ -92,6 +92,12 @@ public interface MeetingActionItemRepository extends JpaRepository<MeetingAction
      * three stored values — OPEN and IN_PROGRESS are both outstanding, and a
      * page that made you choose between them would hide half your work.
      *
+     * <p>{@code standalone} keeps only the items nobody's transcript produced —
+     * the ones somebody typed. It is not {@code meetingId} with a special value:
+     * that filter names one meeting, and there is no id meaning "none". The two
+     * are independent and a caller asking for both gets the empty page it
+     * deserves.
+     *
      * <p>{@code due} buckets against {@code today} rather than against
      * {@code now()}: a deadline is a day, not an instant, and comparing a date
      * to a timestamp would make everything due today look overdue after
@@ -103,6 +109,7 @@ public interface MeetingActionItemRepository extends JpaRepository<MeetingAction
                    OR a.status = :status)
               AND (:priority IS NULL OR a.priority = :priority)
               AND (:meetingId IS NULL OR a.meetingId = :meetingId)
+              AND (:standalone = FALSE OR a.meetingId IS NULL)
               AND (:owner IS NULL OR LOWER(TRIM(COALESCE(a.ownerName, ''))) = :owner)
               AND (:due IS NULL
                    OR (:due = 'overdue' AND a.status <> 'DONE' AND a.dueOn IS NOT NULL AND a.dueOn < :today)
@@ -115,6 +122,7 @@ public interface MeetingActionItemRepository extends JpaRepository<MeetingAction
                                         @Param("status") String status,
                                         @Param("priority") String priority,
                                         @Param("meetingId") String meetingId,
+                                        @Param("standalone") boolean standalone,
                                         @Param("owner") String owner,
                                         @Param("due") String due,
                                         @Param("today") LocalDate today,

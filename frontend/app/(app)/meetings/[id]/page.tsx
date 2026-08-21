@@ -910,9 +910,10 @@ export default function MeetingDetailPage() {
                 ) : (
                   <EmptyText>No action items were extracted.</EmptyText>
                 )}
-                <Button variant="link" className="px-0" asChild>
-                  <Link href="/action-items">Manage all action items →</Link>
-                </Button>
+                {/* No "manage all" link any more, and no page behind it. This
+                    card is where a commitment out of this call is read and
+                    ticked off; a second list of the same rows somewhere else
+                    was three places to do one thing. */}
               </CardContent>
             </Card>
 
