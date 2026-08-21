@@ -96,11 +96,13 @@ public class AiClient {
      * ownership is checked here too, but the database enforces it
      * independently, so a bug in that check cannot become a cross-tenant read.
      */
-    public ChatResult chat(String userId, String meetingId, String question) {
+    public ChatResult chat(String userId, String meetingId, String question,
+                           com.recallix.domain.ChatMode mode) {
         JsonNode body = client.post()
                 .uri("/ai/chat")
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(Map.of("meetingId", meetingId, "question", question, "userId", userId))
+                .body(Map.of("meetingId", meetingId, "question", question, "userId", userId,
+                        "mode", (mode == null ? com.recallix.domain.ChatMode.EXPRESS : mode).wire()))
                 .retrieve()
                 .body(JsonNode.class);
         return toChatResult(body);

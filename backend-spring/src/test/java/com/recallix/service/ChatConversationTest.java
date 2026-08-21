@@ -35,6 +35,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -89,7 +90,7 @@ class ChatConversationTest {
         when(meetings.findByIdAndUserId(anyString(), anyString())).thenAnswer(inv ->
                 USER.equals(inv.getArgument(1)) ? Optional.of(m) : Optional.empty());
 
-        when(ai.chat(anyString(), anyString(), anyString()))
+        when(ai.chat(anyString(), anyString(), anyString(), any(ChatMode.class)))
                 .thenReturn(new AiClient.ChatResult("An answer.", List.of()));
         when(ai.workspaceChat(anyString(), anyString(), any(), any(), any()))
                 .thenReturn(new AiClient.ChatResult("An answer.", List.of()));
@@ -170,7 +171,7 @@ class ChatConversationTest {
         @Test
         @DisplayName("the first question names the thread")
         void firstQuestionNames() {
-            service.ask(USER, MEETING, "What are the action items from last week?", null);
+            service.ask(USER, MEETING, "What are the action items from last week?", null, ChatMode.EXPRESS);
             assertThat(stored).hasSize(1);
             assertThat(stored.get(0).getTitle()).isEqualTo("Action items from last week");
         }
@@ -178,9 +179,9 @@ class ChatConversationTest {
         @Test
         @DisplayName("later questions do not rename it")
         void laterQuestionsDoNotRename() {
-            service.ask(USER, MEETING, "What are the action items?", null);
+            service.ask(USER, MEETING, "What are the action items?", null, ChatMode.EXPRESS);
             String named = stored.get(0).getTitle();
-            service.ask(USER, MEETING, "And who owns the second one?", null);
+            service.ask(USER, MEETING, "And who owns the second one?", null, ChatMode.EXPRESS);
 
             // A thread that renamed itself on every message would be
             // unfindable — the row would move and change under the reader.
@@ -192,7 +193,7 @@ class ChatConversationTest {
         void doesNotOverwriteAManualName() {
             ChatConversation c = existing("cnv_1", MTG, "Renewal risks", Instant.now());
 
-            service.ask(USER, MEETING, "What are the next steps?", "cnv_1");
+            service.ask(USER, MEETING, "What are the next steps?", "cnv_1", ChatMode.EXPRESS);
 
             assertThat(c.getTitle()).isEqualTo("Renewal risks");
         }
@@ -203,13 +204,49 @@ class ChatConversationTest {
             String id = service.createConversation(USER, MTG).id();
             assertThat(stored.get(0).getTitle()).isEqualTo(ConversationTitle.UNTITLED);
 
-            service.ask(USER, MEETING, "What are the open risks?", id);
+            service.ask(USER, MEETING, "What are the open risks?", id, ChatMode.EXPRESS);
 
             assertThat(stored.get(0).getTitle()).isEqualTo("Open risks");
         }
     }
 
     // --- which thread a turn lands in ---------------------------------------- //
+    /**
+     * Express and Advanced, on a meeting.
+     *
+     * <p>The choice was absent here on the recorded ground that one meeting was
+     * retrieved in full either way. It is not — retrieval takes the nearest
+     * eight passages and a fifteen-minute recording chunks to more than eight —
+     * so a long meeting was answered from a sample of itself.
+     *
+     * <p>What is worth pinning is that the mode survives the trip. It crosses
+     * three services to reach the thing it changes, and a mode dropped anywhere
+     * along the way fails silently: the answer still arrives, still reads well,
+     * and is drawn from a third of the transcript the user asked for.
+     */
+    @Nested
+    class Modes {
+
+        @Test
+        @DisplayName("the chosen mode reaches the ai-service")
+        void carriesTheMode() {
+            service.ask(USER, MEETING, "List everything outstanding", null, ChatMode.ADVANCED);
+
+            verify(ai).chat(eq(USER), eq(MEETING), anyString(), eq(ChatMode.ADVANCED));
+        }
+
+        @Test
+        @DisplayName("express is what an unset mode means")
+        void defaultsToExpress() {
+            // ChatMode.of(null). A client that predates the field — or one that
+            // simply does not offer the picker, as the project chat does not —
+            // must keep getting exactly the behaviour it got before.
+            service.ask(USER, MEETING, "What did we decide?", null, ChatMode.of(null));
+
+            verify(ai).chat(eq(USER), eq(MEETING), anyString(), eq(ChatMode.EXPRESS));
+        }
+    }
+
     @Nested
     class Routing {
 
@@ -219,7 +256,7 @@ class ChatConversationTest {
             existing("cnv_old", MTG, "Older", Instant.now().minus(2, ChronoUnit.HOURS));
             existing("cnv_recent", MTG, "Recent", Instant.now().minus(5, ChronoUnit.MINUTES));
 
-            service.ask(USER, MEETING, "Another question?", null);
+            service.ask(USER, MEETING, "Another question?", null, ChatMode.EXPRESS);
 
             assertThat(turns).allMatch(t -> "cnv_recent".equals(t.getConversationId()));
             assertThat(stored).hasSize(2);
@@ -230,7 +267,7 @@ class ChatConversationTest {
         void startsAThread() {
             // A first-time user has no conversation, and the chat box is the
             // primary control — asking must not require picking one first.
-            service.ask(USER, MEETING, "First question?", null);
+            service.ask(USER, MEETING, "First question?", null, ChatMode.EXPRESS);
             assertThat(stored).hasSize(1);
             assertThat(turns).hasSize(2);
         }
@@ -238,7 +275,7 @@ class ChatConversationTest {
         @Test
         @DisplayName("both turns of an exchange land in the same thread")
         void bothTurnsTogether() {
-            service.ask(USER, MEETING, "A question?", null);
+            service.ask(USER, MEETING, "A question?", null, ChatMode.EXPRESS);
             assertThat(turns).extracting(ChatMessage::getConversationId).containsOnly(stored.get(0).getId());
             assertThat(turns).extracting(ChatMessage::getRole).containsExactly("user", "assistant");
         }
@@ -250,7 +287,7 @@ class ChatConversationTest {
 
             // Accepting it would answer from one meeting and file the turn in
             // the workspace log, where it reads back as a cross-meeting answer.
-            assertThatThrownBy(() -> service.ask(USER, MEETING, "A question?", "cnv_ws"))
+            assertThatThrownBy(() -> service.ask(USER, MEETING, "A question?", "cnv_ws", ChatMode.EXPRESS))
                     .isInstanceOf(ApiException.class)
                     .hasMessageContaining("Conversation not found");
             assertThat(turns).isEmpty();
@@ -268,7 +305,7 @@ class ChatConversationTest {
         @Test
         @DisplayName("a meeting's threads are separate from the workspace's")
         void scopesAreSeparate() {
-            service.ask(USER, MEETING, "About this meeting?", null);
+            service.ask(USER, MEETING, "About this meeting?", null, ChatMode.EXPRESS);
             service.askWorkspace(USER, "About everything?", null, null, ChatMode.EXPRESS);
 
             assertThat(stored).hasSize(2);
@@ -282,7 +319,7 @@ class ChatConversationTest {
             ChatConversation c = existing("cnv_1", MTG, "A thread",
                     Instant.now().minus(3, ChronoUnit.DAYS));
 
-            service.ask(USER, MEETING, "A question?", "cnv_1");
+            service.ask(USER, MEETING, "A question?", "cnv_1", ChatMode.EXPRESS);
 
             assertThat(c.getUpdatedAt()).isAfter(Instant.now().minus(1, ChronoUnit.MINUTES));
         }
@@ -320,7 +357,7 @@ class ChatConversationTest {
         @Test
         @DisplayName("the list carries how many turns each thread holds")
         void listCarriesCounts() {
-            service.ask(USER, MEETING, "A question?", null);
+            service.ask(USER, MEETING, "A question?", null, ChatMode.EXPRESS);
             assertThat(service.listConversations(USER, MTG).get(0).messageCount()).isEqualTo(2);
         }
 
@@ -397,14 +434,14 @@ class ChatConversationTest {
     class DeletingAnExchange {
 
         private void twoExchanges() {
-            service.ask(USER, MEETING, "First question?", null);
-            service.ask(USER, MEETING, "Second question?", null);
+            service.ask(USER, MEETING, "First question?", null, ChatMode.EXPRESS);
+            service.ask(USER, MEETING, "Second question?", null, ChatMode.EXPRESS);
         }
 
         @Test
         @DisplayName("deleting a question takes its answer")
         void takesTheAnswer() {
-            service.ask(USER, MEETING, "A question?", null);
+            service.ask(USER, MEETING, "A question?", null, ChatMode.EXPRESS);
             String questionId = turns.get(0).getId();
 
             assertThat(service.deleteExchange(USER, questionId).deletedMessages()).isEqualTo(2);
@@ -413,7 +450,7 @@ class ChatConversationTest {
         @Test
         @DisplayName("deleting an answer takes its question")
         void takesTheQuestion() {
-            service.ask(USER, MEETING, "A question?", null);
+            service.ask(USER, MEETING, "A question?", null, ChatMode.EXPRESS);
             String answerId = turns.get(1).getId();
 
             assertThat(service.deleteExchange(USER, answerId).deletedMessages()).isEqualTo(2);
@@ -444,8 +481,8 @@ class ChatConversationTest {
             // in the other.
             String a = service.createConversation(USER, MTG).id();
             String b = service.createConversation(USER, MTG).id();
-            service.ask(USER, MEETING, "In A?", a);
-            service.ask(USER, MEETING, "In B?", b);
+            service.ask(USER, MEETING, "In A?", a, ChatMode.EXPRESS);
+            service.ask(USER, MEETING, "In B?", b, ChatMode.EXPRESS);
 
             service.deleteExchange(USER, turns.get(0).getId());
 
@@ -457,7 +494,7 @@ class ChatConversationTest {
         @Test
         @DisplayName("emptying a thread removes the thread, and says so")
         void emptyingRemovesTheThread() {
-            service.ask(USER, MEETING, "The only question?", null);
+            service.ask(USER, MEETING, "The only question?", null, ChatMode.EXPRESS);
 
             ExchangeDeleteResponse result = service.deleteExchange(USER, turns.get(0).getId());
 
@@ -485,7 +522,7 @@ class ChatConversationTest {
         @Test
         @DisplayName("another user's message is not found")
         void cannotDeleteAnotherUsersMessage() {
-            service.ask(USER, MEETING, "A question?", null);
+            service.ask(USER, MEETING, "A question?", null, ChatMode.EXPRESS);
             assertThatThrownBy(() -> service.deleteExchange(OTHER, turns.get(0).getId()))
                     .isInstanceOf(ApiException.class);
             verify(messages, never()).deleteAll(any());

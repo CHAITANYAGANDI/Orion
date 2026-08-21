@@ -208,7 +208,9 @@ async def index(body: IndexRequest, rag: RagService = Depends(get_rag)) -> Index
 @router.post("/chat", response_model=ChatResponse)
 async def chat(body: ChatRequest, rag: RagService = Depends(get_rag)) -> ChatResponse:
     """Answer a question grounded in one meeting's transcript (RAG over pgvector)."""
-    answer, citations = await rag.answer(body.meeting_id, body.question, body.user_id)
+    answer, citations = await rag.answer(
+        body.meeting_id, body.question, body.user_id, body.mode
+    )
     return ChatResponse(answer=answer, citations=[Citation(**c) for c in citations])
 
 

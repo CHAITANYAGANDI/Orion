@@ -343,6 +343,10 @@ class ChatRequest(CamelModel):
     # without it retrieval finds nothing, which is the intended fail-closed
     # behaviour rather than a fallback to reading everyone's transcripts.
     user_id: str | None = None
+    # How hard to look: "express" or "advanced", same two words the workspace
+    # chat uses. Defaults to express, which is exactly the behaviour every
+    # caller got before the field existed, so an older Spring keeps working.
+    mode: str = "express"
 
 
 class Citation(CamelModel):

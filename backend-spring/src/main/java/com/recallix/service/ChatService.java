@@ -148,13 +148,14 @@ public class ChatService {
     // --- asking ------------------------------------------------------------- //
 
     @Transactional
-    public ChatMessageResponse ask(String userId, String meetingId, String question, String conversationId) {
+    public ChatMessageResponse ask(String userId, String meetingId, String question,
+                                   String conversationId, ChatMode mode) {
         requireOwnedMeeting(userId, meetingId);
         ChatScope scope = ChatScope.meeting(meetingId);
         ChatConversation conversation = resolveForAsk(userId, scope, conversationId);
 
         persistTurn(userId, meetingId, conversation, "user", question, null);
-        AiClient.ChatResult result = ai.chat(userId, meetingId, question);
+        AiClient.ChatResult result = ai.chat(userId, meetingId, question, mode);
         ChatMessageResponse answer = persistTurn(userId, meetingId, conversation, "assistant",
                 result.answer() == null ? "" : result.answer(), result.citations());
 

@@ -38,6 +38,7 @@ import {
   useDeleteMeetingMutation,
   useGetChatQuery,
   useAskChatMutation,
+  useGetChatModesQuery,
   useTranslateMeetingMutation,
   useGetTranslationsQuery,
   useGetLanguagesQuery,
@@ -58,6 +59,7 @@ import {
   useDeleteChatExchangeMutation,
 } from "@/lib/api";
 import type {
+  ChatMode,
   SpeakerStats,
   SpokenWord,
   MeetingTranslation,
@@ -1462,6 +1464,21 @@ function ChatPanel({
   const [conversationId, setConversationId] = useActiveChat(meetingId);
   // Only for the maximise control's own state. The pane itself is the shell's.
   const pane = useSidePane();
+  /*
+   * How hard to look, the same two settings the workspace chat offers.
+   *
+   * Not here originally, on the recorded ground that one meeting was retrieved
+   * in full either way and a picker would be a control that did nothing. That
+   * was wrong: retrieval takes the nearest eight passages, and a
+   * fifteen-minute recording already chunks to more than eight, so a long
+   * meeting was being answered from a sample of itself. Advanced widens that
+   * and asks for an enumerated answer. See rag.answer in the ai-service.
+   *
+   * The wording comes from the server so it cannot drift from what the two
+   * settings actually do.
+   */
+  const { data: modes } = useGetChatModesQuery();
+  const [mode, setMode] = React.useState<ChatMode>("express");
 
   const {
     data: messages,
@@ -1546,6 +1563,7 @@ function ChatPanel({
         id: meetingId,
         question,
         conversationId: target,
+        mode,
       }).unwrap();
       setConversationId(answer.conversationId);
     } catch {
@@ -1605,9 +1623,12 @@ function ChatPanel({
         >
           <ChatComposer
             busy={asking}
-            // No mode picker and no context picker: meeting chat reads one
-            // meeting through one endpoint, and offering either would be a
-            // control that does nothing.
+            modes={modes}
+            mode={mode}
+            onModeChange={setMode}
+            // Still no context picker. That one would be a control that does
+            // nothing: meeting chat reads one meeting through one endpoint and
+            // has no way to widen the scope.
             scope="This meeting"
             placeholder="Ask about this meeting"
             compose={composeText}

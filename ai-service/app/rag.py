@@ -192,16 +192,34 @@ class RagService:
 
     # --- retrieval + answer ------------------------------------------------- #
     async def answer(
-        self, meeting_id: str, question: str, user_id: str | None = None
+        self,
+        meeting_id: str,
+        question: str,
+        user_id: str | None = None,
+        mode: str = "express",
     ) -> tuple[str, list[dict]]:
         """Answer a question about one meeting.
 
         `user_id` is what row-level security checks. Spring has already verified
         ownership before calling, but passing the owner means a bug there cannot
         turn into a cross-tenant read: the database independently refuses.
+
+        `mode` is the same choice the workspace chat offers, and it differs in
+        the same two ways: how many passages retrieval returns, and whether the
+        answer is asked to enumerate rather than summarise.
+
+        It used to be absent here, on the recorded ground that one meeting was
+        retrieved in full either way. That was not true. Retrieval takes the
+        `rag_top_k` nearest passages and a fifteen-minute recording already
+        chunks to more than that, so anything of length was answered from a
+        sample of itself -- and which part of the sample depended on the
+        question's embedding, which is the version of this bug nobody notices,
+        because a partial answer still reads like a whole one.
         """
         if not self.enabled:
             return ("RAG chat is not configured on this deployment.", [])
+        deep = mode == "advanced"
+        top_k = self._settings.rag_deep_top_k if deep else self._settings.rag_top_k
         q_emb = (await self._embedder.embed([question]))[0]
         try:
             async with self.connection(user_id) as conn:
@@ -214,7 +232,7 @@ class RagService:
                         ORDER BY embedding <=> %s::vector
                         LIMIT %s
                         """,
-                        (meeting_id, _vec_literal(q_emb), self._settings.rag_top_k),
+                        (meeting_id, _vec_literal(q_emb), top_k),
                     )
                     rows = await cur.fetchall()
         except Exception as exc:  # noqa: BLE001
@@ -226,12 +244,12 @@ class RagService:
 
         context = [r[1] for r in rows]
         # "List every question that went unanswered" is an inventory here too,
-        # even though this chat sees one meeting rather than the workspace.
-        # No `deep` in this scope on purpose: Express/Advanced is a property of
-        # the workspace chat, which chooses how far to retrieve across an entire
-        # archive. One meeting's transcript is retrieved in full either way.
+        # even though this chat sees one meeting rather than the workspace --
+        # and under Advanced it is always treated as one, the same rule the
+        # workspace chat follows. Asking for Advanced is asking to be told
+        # everything, whatever the question's phrasing suggested.
         answer = await self._llm.answer(
-            question, context, exhaustive=wants_full_list(question)
+            question, context, exhaustive=deep or wants_full_list(question)
         )
         citations = [
             {"chunkIndex": r[0], "start": r[2], "end": r[3], "text": r[1]} for r in rows

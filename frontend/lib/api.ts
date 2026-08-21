@@ -50,6 +50,7 @@ import type {
   NotificationKindOption,
   AccountClosed,
   CalendarFeed,
+  ChatMode,
   ChatModeOption,
   PrivacyOverview,
   RetentionPolicy,
@@ -437,12 +438,15 @@ export const api = createApi({
 
     askChat: builder.mutation<
       ChatMessage,
-      { id: string; question: string; conversationId?: string }
+      { id: string; question: string; conversationId?: string; mode?: ChatMode }
     >({
-      query: ({ id, question, conversationId }) => ({
+      query: ({ id, question, conversationId, mode }) => ({
         url: `/meetings/${id}/chat`,
         method: "POST",
-        body: { question, conversationId },
+        // `mode` is Express or Advanced, the same choice the workspace chat
+        // offers. Omitted means Express on the server, so nothing has to be
+        // sent by a caller that does not offer the picker.
+        body: { question, conversationId, mode },
       }),
       // The thread list too: a first question names its thread, and an unnamed
       // row left in the picker is the one the user is looking at.

@@ -120,6 +120,14 @@ class Settings(BaseSettings):
     # answer from. Four passages of 700 gave it under 3k — about half a page,
     # which is why answers used to miss things that were plainly said.
     rag_top_k: int = 8
+    # What "Advanced" retrieves from one meeting instead.
+    #
+    # Three times the width, which is enough to hold an hour of speech whole:
+    # at ~1200 chars a passage, twenty-four of them is nearly thirty thousand
+    # characters of transcript. The eight above is not "the whole meeting" and
+    # never was -- a fifteen-minute recording already chunks to eleven -- so
+    # anything long was being answered from a sample without saying so.
+    rag_deep_top_k: int = 24
     rag_chunk_chars: int = 1200
     # ~15%. Enough that a sentence cut by a boundary survives whole in the
     # neighbouring passage, without duplicating so much that retrieval returns

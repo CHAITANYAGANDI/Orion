@@ -59,7 +59,8 @@ public class ChatController {
 
     @PostMapping("/api/v1/meetings/{id}/chat")
     public ChatMessageResponse ask(@PathVariable String id, @Valid @RequestBody ChatAskRequest req) {
-        return chat.ask(SecurityUtils.currentUserId(), id, req.question(), req.conversationId());
+        return chat.ask(SecurityUtils.currentUserId(), id, req.question(), req.conversationId(),
+                ChatMode.of(req.mode()));
     }
 
     /** Every conversation about this meeting, most recently used first. */
