@@ -12,15 +12,26 @@
  * persisted, so a page load starts empty and every surface offers a fresh
  * thread.
  *
+ * **Leaving the page gives you a new one too.** Opening Account Settings and
+ * coming back to Home used to return you to the conversation you had before,
+ * because the thread survived the navigation. That was deliberate and it was
+ * wrong: at the time, the home rail's expand button *navigated* to /ask, so
+ * losing the thread there would have meant the expand control abandoning a
+ * half-typed question. Expanding is done in place now — see
+ * components/side-pane.tsx — and nothing else needs a thread to outlive a
+ * navigation. So a scope can ask to be forgotten when its surface leaves.
+ *
+ * A meeting's chat deliberately does not. Coming back to a meeting is coming
+ * back to one document, and what you were asking about it is part of reading
+ * it; there is no equivalent of "I have gone somewhere else and I am starting
+ * over".
+ *
  * ## Why it is not component state
  *
- * The panel beside the home list and the full AI Chat page are meant to be *the
- * same* conversation — ask in the rail, expand it, and carry on rather than
- * start a second thread that looks identical. Two `useState` calls cannot do
- * that. Today they only appear to, because both default to "the most recent
- * thread" and the server resolves that identically for each; starting fresh
- * removes that coincidence and would leave the expand button abandoning a
- * half-typed conversation.
+ * The panel beside the home list and the full AI Chat page must not each keep
+ * their own idea of which thread is open — two `useState` calls in two trees
+ * would drift, and only appear not to because both default to "the most recent
+ * thread" and the server resolves that identically for each.
  *
  * ## Why it is not Redux
  *
@@ -30,12 +41,11 @@
  * is a single value shared between two components, which is what
  * `useSyncExternalStore` is for.
  *
- * A module variable also has exactly the lifetime wanted: it survives the
- * client-side navigation between the rail and the page, and dies on reload.
- * That is precisely the line between "still talking" and "opening the chat".
+ * A module variable also has exactly the lifetime wanted: it outlives a render
+ * and dies on reload, and what it does in between is the caller's choice.
  */
 
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 
 /** Scope -> conversation id. `"workspace"`, or a meeting id. */
 const threads = new Map<string, string>();
@@ -83,7 +93,31 @@ export function resetActiveChats(): void {
  */
 export function useActiveChat(
   scope: string,
+  options?: {
+    /**
+     * Forget the thread when this surface leaves the page.
+     *
+     * The workspace chat asks for it, so that going to Settings and coming
+     * back to Home is a clean sheet rather than yesterday's questions. A
+     * meeting's chat does not — see the note at the top of the file.
+     *
+     * Deliberately not reference-counted, unlike the side pane's occupancy.
+     * If two surfaces of the same chat ever overlap for a frame during a
+     * navigation, counting would *preserve* the thread across exactly the
+     * move this exists to reset — going from the home rail to the full chat
+     * page. Clearing on any unmount errs towards the new chat, which is the
+     * behaviour being asked for either way.
+     */
+    resetOnLeave?: boolean;
+  },
 ): [string | null, (conversationId: string | null) => void] {
+  const resetOnLeave = options?.resetOnLeave ?? false;
+
+  useEffect(() => {
+    if (!resetOnLeave) return;
+    return () => setActiveChat(scope, null);
+  }, [scope, resetOnLeave]);
+
   const conversationId = useSyncExternalStore(
     subscribe,
     () => activeChat(scope),

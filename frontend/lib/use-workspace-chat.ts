@@ -4,10 +4,13 @@
  * The workspace chat's wiring, in one place.
  *
  * Two surfaces show the same conversation — the panel beside the home list and
- * the full AI Chat page — and they must be the same conversation, not two that
- * happen to look alike. Asking something in the rail and then opening the page
- * should continue the thread, and both need the same recovery when a thread is
- * deleted underneath them.
+ * the full AI Chat page — and they must agree about which thread is open rather
+ * than each keeping their own idea of it. Both also need the same recovery when
+ * a thread is deleted underneath them.
+ *
+ * The thread does not survive leaving the page. Opening AI Chat, or coming back
+ * to Home from anywhere else, gives a clean sheet; the conversations themselves
+ * are still in the history picker. See `resetOnLeave` in lib/active-chat.
  *
  * Hooks cannot be chosen conditionally, so the alternative to this is each
  * surface repeating nine `use…Mutation` calls and two effects, which is nine
@@ -38,9 +41,11 @@ import type { ChatMode } from "@/lib/types";
 const SCOPE = "workspace";
 
 export function useWorkspaceChat() {
-  // Shared between the home rail and the full page, and empty on load — see
-  // `lib/active-chat` for why this is not component state.
-  const [conversationId, setConversationId] = useActiveChat(SCOPE);
+  // Shared between the home rail and the full page, empty on load, and empty
+  // again after you have been anywhere else — see `lib/active-chat` for both.
+  const [conversationId, setConversationId] = useActiveChat(SCOPE, {
+    resetOnLeave: true,
+  });
   const [context, setContext] = React.useState<ChatContext>(NO_CONTEXT);
   const [mode, setMode] = React.useState<ChatMode>("express");
 
