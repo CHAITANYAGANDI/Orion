@@ -143,6 +143,33 @@ describe("saving", () => {
     expect(result.current.job?.id).toBe("mtg_9");
   });
 
+  it("files it into the folder the recording was started in", async () => {
+    const { result } = setup();
+
+    await act(async () => {
+      await result.current.save(aResult(), "x", "prj_1");
+    });
+
+    // The whole of the journey from "Record pressed inside a folder" to a
+    // meeting that is in it. The server takes `projectId` on create precisely
+    // so this does not have to be a second trip to file it afterwards.
+    expect(createMeeting).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "prj_1" }),
+    );
+  });
+
+  it("leaves it unfiled when it was not started in one", async () => {
+    const { result } = setup();
+
+    await act(async () => {
+      await result.current.save(aResult(), "x", null);
+    });
+
+    // Undefined rather than null: the field is left out of the request, which
+    // is what the server reads as unfiled.
+    expect(createMeeting.mock.calls[0][0]).toMatchObject({ projectId: undefined });
+  });
+
   it("lands on the meeting it just made", async () => {
     const { result } = setup();
 

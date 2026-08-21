@@ -66,6 +66,7 @@ import type { RecordingSession } from "@/lib/recording-context";
 
 const start = vi.fn().mockResolvedValue(undefined);
 const setTitle = vi.fn();
+const setFolderId = vi.fn();
 
 function aTranscript(overrides: Partial<UseLiveTranscript> = {}): UseLiveTranscript {
   return {
@@ -118,6 +119,8 @@ function renderPage(
   session.current = {
     title: "",
     setTitle,
+    folderId: null,
+    setFolderId,
     transcript: aTranscript(),
     ...sessionOverrides,
   } satisfies RecordingSession;

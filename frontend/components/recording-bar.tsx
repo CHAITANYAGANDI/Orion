@@ -113,7 +113,12 @@ export function RecordingBar() {
     // field is offered rather than demanded precisely so this fallback exists:
     // a recording arrives as `recording-1755084000000.webm`, which is not a
     // name for anything.
-    await job.save(recorder.result, session.title.trim() || defaultRecordingTitle());
+    await job.save(
+      recorder.result,
+      session.title.trim() || defaultRecordingTitle(),
+      // Where it was started, not where it is being saved from.
+      session.folderId,
+    );
   }
 
   /**

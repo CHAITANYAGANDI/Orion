@@ -63,7 +63,12 @@ export interface UseSaveJob {
    */
   busy: boolean;
   stopping: boolean;
-  save: (result: RecorderResult, title: string) => Promise<void>;
+  save: (
+    result: RecorderResult,
+    title: string,
+    /** The folder to file it into, captured when Record was pressed. */
+    projectId?: string | null,
+  ) => Promise<void>;
   stop: () => Promise<boolean>;
   dismiss: () => void;
 }
@@ -158,7 +163,14 @@ export function useSaveJob(recorder: UseRecorder): UseSaveJob {
     return () => sub.deactivate();
   }, [jobId, phase, observe]);
 
-  async function save(result: RecorderResult, title: string) {
+  /**
+   * Upload what was recorded and make a meeting of it.
+   *
+   * `projectId` is where it gets filed, captured when Record was pressed rather
+   * than read now — see `folderId` in lib/recording-context. Null is unfiled,
+   * which is what recording from anywhere but inside a folder means.
+   */
+  async function save(result: RecorderResult, title: string, projectId?: string | null) {
     const { file, durationSeconds } = result;
     if (file.size === 0) {
       toast.error("That recording captured no audio, so there is nothing to save.");
@@ -183,6 +195,7 @@ export function useSaveJob(recorder: UseRecorder): UseSaveJob {
         title,
         contentType: file.type,
         durationSeconds: durationSeconds || undefined,
+        projectId: projectId ?? undefined,
         // Not sent, deliberately: nobody is asked about consent any more, and
         // sending `true` would write a timestamp recording a statement nobody
         // made. Null is what "nobody said" looks like.

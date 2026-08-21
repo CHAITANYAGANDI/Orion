@@ -34,8 +34,12 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Mic, Loader2, AlertTriangle, User, FileText, CalendarDays } from "lucide-react";
-import { useRecordingStartedMutation, useGetPreferencesQuery } from "@/lib/api";
+import { Mic, Loader2, AlertTriangle, User, FileText, CalendarDays, Folder } from "lucide-react";
+import {
+  useRecordingStartedMutation,
+  useGetPreferencesQuery,
+  useGetProjectQuery,
+} from "@/lib/api";
 import { useRecording, useRecordingJob, useRecordingSession } from "@/lib/recording-context";
 import type { LiveTurn } from "@/lib/use-live-transcript";
 import { Button } from "@/components/ui/button";
@@ -429,7 +433,7 @@ function Opening({
  */
 function NoteHeading({ startedAt }: { startedAt: Date | null }) {
   const prefs = useGetPreferencesQuery();
-  const { title, setTitle } = useRecordingSession();
+  const { title, setTitle, folderId } = useRecordingSession();
   const owner = prefs.data?.displayName?.trim();
   const when = startedAt ?? new Date();
 
@@ -463,6 +467,13 @@ function NoteHeading({ startedAt }: { startedAt: Date | null }) {
             Owner: {owner}
           </span>
         )}
+        {/* Where this will be filed, if Record was pressed inside a folder.
+            Said now rather than discovered later: the folder was chosen a
+            screen ago and several minutes before the meeting will exist, which
+            is long enough to have stopped being sure. Absent entirely when
+            there is none — "Folder: —" reads as a missing value rather than as
+            a meeting that belongs nowhere in particular. */}
+        {folderId && <FilingInto projectId={folderId} />}
       </div>
     </div>
   );
@@ -501,5 +512,23 @@ function Notice({
       <Icon className="mt-0.5 h-4 w-4 shrink-0" />
       <div>{children}</div>
     </div>
+  );
+}
+
+/**
+ * The folder this recording will land in.
+ *
+ * Only the name is wanted, and only once it has arrived. Rendering the id, or a
+ * skeleton, in a row of plain facts would be worse than waiting a moment.
+ */
+function FilingInto({ projectId }: { projectId: string }) {
+  const { data: project } = useGetProjectQuery(projectId);
+  if (!project) return null;
+
+  return (
+    <span className="flex items-center gap-1.5">
+      <Folder className="h-4 w-4 shrink-0" />
+      Folder: {project.name}
+    </span>
   );
 }

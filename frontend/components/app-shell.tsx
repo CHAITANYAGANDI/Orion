@@ -62,7 +62,7 @@ import { headerChrome } from "@/lib/chrome";
 import { usePaneWidth, type PaneBounds } from "@/lib/pane-size";
 import { PaneResizer } from "@/components/pane-resizer";
 import { SIDE_PANE_ID, toggleSidePane, useSidePane } from "@/components/side-pane";
-import { RecordingProvider, useRecording } from "@/lib/recording-context";
+import { RecordingProvider, useRecording, useRecordingSession } from "@/lib/recording-context";
 import { useRecordingStartedMutation } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { NotificationBell } from "@/components/notification-bell";
@@ -359,7 +359,12 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
                     <Upload className="h-4 w-4" />
                     <span className="hidden sm:inline">Import</span>
                   </Button>
-                  <RecordButton />
+                  {/* Told which folder it is being pressed in. A recording
+                      started inside one belongs in it, and by the time it is
+                      saved — minutes later, from /record or from wherever the
+                      user wandered — there is no folder in the pathname to
+                      read. See `folderId` in lib/recording-context. */}
+                  <RecordButton folderId={chrome.folderId} />
                 </>
               )}
 
@@ -480,7 +485,14 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
       </div>
 
       <SearchCommand open={searching} onOpenChange={setSearching} />
-      <ImportDialog open={importing} onOpenChange={setImporting} />
+      {/* Same rule as Record, by a shorter route: the dialog is opened from
+          the header of the page it will file into, and it is finished with
+          before anybody navigates away. */}
+      <ImportDialog
+        open={importing}
+        onOpenChange={setImporting}
+        projectId={chrome.folderId}
+      />
       <FolderDialog open={newFolder} onOpenChange={setNewFolder} />
       {/* Rendered by the shell, not the record page, for the same reason the
           recorder is: it has to survive the navigation it is telling you is
@@ -507,14 +519,20 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
  * screen behind the browser's permission prompt and it is obvious what is
  * being asked for and by whom.
  */
-function RecordButton() {
+function RecordButton({ folderId }: { folderId: string | null }) {
   const recorder = useRecording();
+  const session = useRecordingSession();
   const router = useRouter();
   const [announceRecording] = useRecordingStartedMutation();
 
   function onRecord() {
     router.push("/record");
     if (recorder.state !== "idle") return;
+    // Before the navigation lands and before the microphone opens: this is the
+    // only moment the folder is knowable, and it is remembered until the
+    // meeting is created. Set even when null, so a recording started from Home
+    // cannot inherit the last one's folder.
+    session.setFolderId(folderId);
     void recorder.start().then(() => {
       // The server cannot observe a microphone, and the point of telling it is
       // the account's other devices. Fired and forgotten: a notification that

@@ -135,6 +135,7 @@ const stop = vi.fn();
 const reset = vi.fn();
 const setDeviceId = vi.fn();
 const setTitle = vi.fn();
+const setFolderId = vi.fn();
 
 function aTranscript(overrides: Partial<UseLiveTranscript> = {}): UseLiveTranscript {
   return {
@@ -224,6 +225,8 @@ function renderBar(
   session.current = {
     title: "",
     setTitle,
+    folderId: null,
+    setFolderId,
     transcript: aTranscript(),
     ...sessionOverrides,
   } satisfies RecordingSession;
@@ -479,7 +482,28 @@ describe("RecordingBar saving", () => {
     expect(saveJob).toHaveBeenCalledWith(
       expect.objectContaining({ durationSeconds: 90 }),
       "Tuesday design review",
+      null,
     );
+  });
+
+  it("files it into the folder Record was pressed in", async () => {
+    renderBar({ state: "stopped", result: aResult() }, { folderId: "prj_1" });
+
+    await userEvent.click(screen.getByRole("button", { name: /Save & process/ }));
+
+    // Captured when Record was pressed, minutes ago and a screen away. By the
+    // time Save is pressed the pathname is /record or wherever the user
+    // wandered, so there is no folder left to read — which is how a recording
+    // started inside a folder used to end up at the top of the workspace.
+    expect(saveJob.mock.calls[0][2]).toBe("prj_1");
+  });
+
+  it("files it nowhere when it was not started in one", async () => {
+    renderBar({ state: "stopped", result: aResult() });
+
+    await userEvent.click(screen.getByRole("button", { name: /Save & process/ }));
+
+    expect(saveJob.mock.calls[0][2]).toBeNull();
   });
 
   it("names it something, because the file is called recording-1755084000000.webm", async () => {

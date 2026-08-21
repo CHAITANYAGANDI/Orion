@@ -25,8 +25,9 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { UploadCloud, FileAudio, Loader2, X } from "lucide-react";
+import { UploadCloud, FileAudio, Loader2, X, Folder } from "lucide-react";
 import {
+  useGetProjectQuery,
   useCreateUploadUrlMutation,
   useCreateMeetingMutation,
   useGetLanguagesQuery,
@@ -57,9 +58,19 @@ type Phase = "idle" | "uploading" | "creating";
 export function ImportDialog({
   open,
   onOpenChange,
+  projectId,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * The folder this import lands in, or null for unfiled.
+   *
+   * Read from the page the dialog was opened over, not asked for here. Import
+   * pressed inside a folder means "into this folder" — going and filing it
+   * afterwards is a second trip through a list of things already dealt with,
+   * which is exactly what the create endpoint's `projectId` exists to avoid.
+   */
+  projectId?: string | null;
 }) {
   const router = useRouter();
   const [createUploadUrl] = useCreateUploadUrlMutation();
@@ -113,6 +124,7 @@ export function ImportDialog({
         objectKey: presign.objectKey,
         contentType: file.type,
         durationSeconds: duration ?? undefined,
+        projectId: projectId ?? undefined,
         // Absent unless somebody chose. See SPEAKER_CHOICES.
         ...speakerRange(speakers),
       }).unwrap();
@@ -150,6 +162,12 @@ export function ImportDialog({
             on its own. The meeting takes its name from the file.
           </DialogDescription>
         </DialogHeader>
+
+        {/* Where it will end up, said before it goes rather than discovered
+            afterwards. Filing silently is the same feature with none of the
+            confidence: the difference between "it went where I meant" and
+            "where has it gone". */}
+        {projectId && <FilingInto projectId={projectId} />}
 
         <div
           role="button"
@@ -390,5 +408,29 @@ function TranscriptLanguage({ disabled }: { disabled: boolean }) {
         can change it here or under Account Settings.
       </p>
     </div>
+  );
+}
+
+/**
+ * Which folder this import is going into.
+ *
+ * Named rather than assumed. The dialog is opened from a folder's own header,
+ * so the destination is obvious in the moment and completely invisible an hour
+ * later when somebody wonders where a file went — and a folder is exactly the
+ * kind of thing people get wrong by one click. Falls back to the id's absence
+ * rather than to a guess: while the name is loading there is nothing truthful
+ * to put here.
+ */
+function FilingInto({ projectId }: { projectId: string }) {
+  const { data: project } = useGetProjectQuery(projectId);
+  if (!project) return null;
+
+  return (
+    <p className="flex items-center gap-1.5 rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+      <Folder className="h-3.5 w-3.5 shrink-0" />
+      <span className="min-w-0">
+        Filing into <span className="font-medium text-foreground">{project.name}</span>
+      </span>
+    </p>
   );
 }

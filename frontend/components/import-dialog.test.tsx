@@ -53,6 +53,9 @@ vi.mock("@/lib/api", () => ({
       return { unwrap: () => Promise.resolve({ id: "mtg_9" }) };
     },
   ],
+  useGetProjectQuery: (id: string) => ({
+    data: id === "prj_1" ? { id, name: "Q4 planning" } : undefined,
+  }),
   useGetLanguagesQuery: () => ({
     data: [
       { code: "en", name: "English", endonym: "English" },
@@ -301,5 +304,52 @@ describe("how many people are speaking", () => {
     render(<ImportDialog open onOpenChange={vi.fn()} />);
 
     expect(screen.getByText(/a wrong answer/i)).toBeInTheDocument();
+  });
+});
+
+/**
+ * Where an import lands.
+ *
+ * Import is in the shell's header, so the same button is pressed from Home and
+ * from inside a folder — and until now it did the same thing both times, which
+ * meant a file imported into a folder went to the top of the workspace and had
+ * to be filed by hand afterwards, through a list of meetings already dealt
+ * with. The destination is read from the page the dialog was opened over.
+ */
+describe("filing it as it arrives", () => {
+  it("sends the folder it was opened in", async () => {
+    render(<ImportDialog open onOpenChange={vi.fn()} projectId="prj_1" />);
+
+    await userEvent.upload(screen.getByTestId("import-file-input"), anAudioFile());
+    await userEvent.click(screen.getByRole("button", { name: /Upload & process/ }));
+
+    await waitFor(() => expect(createMeeting).toHaveBeenCalled());
+    expect(createMeeting).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "prj_1" }),
+    );
+  });
+
+  it("says where it is going before it goes", () => {
+    render(<ImportDialog open onOpenChange={vi.fn()} projectId="prj_1" />);
+
+    // Filing silently is the same feature with none of the confidence. The
+    // folder was chosen a click ago and the file will be gone from this dialog
+    // in a moment; the difference is between "it went where I meant" and
+    // "where has it gone".
+    expect(screen.getByText("Q4 planning")).toBeInTheDocument();
+  });
+
+  it("sends nothing and says nothing when opened from anywhere else", async () => {
+    render(<ImportDialog open onOpenChange={vi.fn()} />);
+
+    expect(screen.queryByText(/filing into/i)).not.toBeInTheDocument();
+
+    await userEvent.upload(screen.getByTestId("import-file-input"), anAudioFile());
+    await userEvent.click(screen.getByRole("button", { name: /Upload & process/ }));
+
+    await waitFor(() => expect(createMeeting).toHaveBeenCalled());
+    // Undefined, not null: the field is absent from the request, which is what
+    // the server reads as unfiled.
+    expect(createMeeting.mock.calls[0][0]).toMatchObject({ projectId: undefined });
   });
 });

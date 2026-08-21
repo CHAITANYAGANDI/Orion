@@ -40,6 +40,19 @@ export interface RecordingSession {
   /** What the user has typed, or empty for the date-stamped default. */
   title: string;
   setTitle: (t: string) => void;
+  /**
+   * The folder this recording will be filed into, or null for unfiled.
+   *
+   * Captured when Record is pressed, not read when Save is. By then the
+   * pathname is /record or wherever the user wandered to while the meeting ran,
+   * and "which folder am I in" has no answer — pressing Record inside a folder
+   * is the whole of the intent, and it happens minutes before the meeting
+   * exists. It lives here rather than in the recorder for the same reason the
+   * title does: it is a fact about the meeting, not about the `MediaRecorder`,
+   * and it has to survive every navigation the recording does.
+   */
+  folderId: string | null;
+  setFolderId: (id: string | null) => void;
   transcript: UseLiveTranscript;
 }
 
@@ -58,6 +71,7 @@ const SaveJobContext = React.createContext<UseSaveJob | null>(null);
 export function RecordingProvider({ children }: { children: React.ReactNode }) {
   const recorder = useRecorder();
   const [title, setTitle] = React.useState("");
+  const [folderId, setFolderId] = React.useState<string | null>(null);
   const transcript = useLiveTranscript({
     // Running *or* paused. A pause mutes the audio tap rather than closing the
     // session, so the speaker model built up over the meeting so far survives
@@ -84,6 +98,10 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     if (idle && !wasIdle.current) {
       setTitle("");
+      // With the title, and for the same reason. The next recording is started
+      // from wherever the next recording is started from; inheriting the last
+      // one's folder would file it somewhere nobody chose.
+      setFolderId(null);
       clearTranscript();
     }
     wasIdle.current = idle;
@@ -94,7 +112,7 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
   useUnloadGuard(recorder);
   return (
     <RecordingContext.Provider value={recorder}>
-      <SessionContext.Provider value={{ title, setTitle, transcript }}>
+      <SessionContext.Provider value={{ title, setTitle, folderId, setFolderId, transcript }}>
         <SaveJobContext.Provider value={job}>{children}</SaveJobContext.Provider>
       </SessionContext.Provider>
     </RecordingContext.Provider>
