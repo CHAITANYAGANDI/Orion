@@ -85,12 +85,27 @@ describe("InsightsPanel", () => {
     expect(risks).toHaveTextContent("The contract is unsigned.");
   });
 
-  it("says an empty section is empty rather than showing nothing", () => {
-    // An Interview meeting settles nothing. A blank card reads as a failure to
-    // generate; a sentence reads as an accurate nothing.
+  it("renders nothing at all when the meeting produced neither", () => {
+    // Interview, 1:1 and Memo carry no decisions section by design, and four of
+    // the eight templates carry no risks. Both cards used to be drawn anyway,
+    // one of them explaining that the template does not track decisions —
+    // a card apologising for its own presence. Where a template does track
+    // them and nothing was settled, the summary's own Decisions section says so
+    // directly above; this said it a second time.
+    //
+    // Nothing in its place either, not even an "Add a decision" link: these
+    // rows are a reading of the brief, and nobody types one into an empty page.
+    const { container } = render(<InsightsPanel meetingId="mtg_1" />);
+
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("keeps the card for the kind that has rows, and drops the other", () => {
+    rows = [insight()];
     render(<InsightsPanel meetingId="mtg_1" />);
-    expect(screen.getByText(/didn't settle anything/i)).toBeInTheDocument();
-    expect(screen.getByText(/Nothing was flagged/i)).toBeInTheDocument();
+
+    expect(screen.getByText("Decisions")).toBeInTheDocument();
+    expect(screen.queryByText("Risks and blockers")).not.toBeInTheDocument();
   });
 
   it("keeps a blocker distinguishable from a risk", () => {
@@ -137,10 +152,16 @@ describe("InsightsPanel", () => {
   });
 
   it("adds a row under the kind whose card it was typed into", async () => {
+    rows = [
+      insight({ id: "ins_1", kind: "DECISION" }),
+      insight({ id: "ins_2", kind: "RISK", text: "The contract is unsigned.", sourceSection: "risks" }),
+    ];
     const user = userEvent.setup();
     render(<InsightsPanel meetingId="mtg_1" />);
 
-    // Second "Add" is the risks card; a mix-up here files a risk as a decision.
+    // Second "Add" is the risks card. A mix-up here files a risk as a decision,
+    // and the decision record is what workspace chat answers "what did we
+    // agree?" from.
     await user.click(screen.getAllByRole("button", { name: /Add/ })[1]);
     await user.type(screen.getByRole("textbox"), "Vendor may slip.{Enter}");
 
