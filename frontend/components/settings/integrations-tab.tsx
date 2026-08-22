@@ -3,32 +3,23 @@
 /**
  * Integrations.
  *
- * One that works, and an honest account of what does not. That ratio is
- * deliberate: an integrations page is usually a wall of logos with "Connect"
- * buttons behind half of which nothing happens, and a reader learns from it only
- * that somebody drew the logos.
+ * One, and it works: a calendar feed of your action item deadlines. It needs no
+ * OAuth client, no provider review and no stored third-party credential — every
+ * calendar application subscribes to an ICS URL — and it puts deadlines where
+ * somebody already looks, which the daily digest email cannot.
  *
- * The one that works is a calendar feed of your action item deadlines. It needs
- * no OAuth client, no provider review and no stored third-party credential —
- * every calendar application subscribes to an ICS URL — and it puts deadlines
- * where somebody already looks, which the daily digest email cannot.
+ * <p>Two lists used to sit under it. "Also connected" restated email, share
+ * links and export — real things, each already documented on the settings page
+ * that owns it — and "Not available" explained the meeting bot, calendar
+ * reading and Slack that Recallix does not have. Both were written against an
+ * integrations page that is usually a wall of logos with dead Connect buttons,
+ * and both answered that with more prose than the one working integration got.
+ * Somebody opening this tab is looking for the feed.
  */
 
 import * as React from "react";
 import { toast } from "sonner";
-import {
-  Plug,
-  CalendarDays,
-  Copy,
-  Check,
-  RefreshCw,
-  Loader2,
-  Trash2,
-  Bot,
-  Mail,
-  Link2,
-  Download,
-} from "lucide-react";
+import { CalendarDays, Copy, Check, RefreshCw, Loader2, Trash2 } from "lucide-react";
 import {
   useGetCalendarFeedQuery,
   useEnableCalendarFeedMutation,
@@ -42,28 +33,11 @@ import { formatDate } from "@/lib/format";
 export function IntegrationsTab() {
   return (
     <div className="space-y-6">
-      <p className="text-sm text-muted-foreground">
-        What Recallix connects to, and what it deliberately does not.
-      </p>
+      <p className="text-sm text-muted-foreground">What Recallix connects to.</p>
 
       <section>
         <h2 className="mb-3 text-lg font-semibold">My Integrations</h2>
         <CalendarCard />
-      </section>
-
-      {/* Where a competitor puts "Discover" — a grid of logos with Connect
-          buttons behind half of which nothing happens. These two sections are
-          the same information without the pretence: what is genuinely wired up,
-          and what is not and why. A logo somebody cannot use teaches them only
-          that it was drawn. */}
-      <section>
-        <h2 className="mb-3 text-lg font-semibold">Also connected</h2>
-        <AlreadyConnected />
-      </section>
-
-      <section>
-        <h2 className="mb-3 text-lg font-semibold">Not available</h2>
-        <NotConnected />
       </section>
     </div>
   );
@@ -222,101 +196,5 @@ function CalendarCard() {
         )}
       </CardContent>
     </Card>
-  );
-}
-
-/**
- * The things that already work and are never called integrations.
- *
- * Worth listing, because "what does this connect to" is usually answered with a
- * shorter list than the truth: email, published links and file export are all
- * ways data leaves Recallix, and somebody auditing that should find them here
- * rather than in three different settings pages.
- */
-function AlreadyConnected() {
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base">Ways your data already leaves Recallix</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3 text-sm">
-        <Row
-          icon={<Mail className="h-4 w-4" />}
-          title="Email"
-          body="Recaps when a meeting finishes, and a daily digest of deadlines. Both opt-in, in Settings."
-        />
-        <Row
-          icon={<Link2 className="h-4 w-4" />}
-          title="Share links"
-          body="Any meeting can be published as a read-only link, with a password and an expiry. Every live one is listed under Privacy & data."
-        />
-        <Row
-          icon={<Download className="h-4 w-4" />}
-          title="Export"
-          body="A meeting as PDF, Word, Markdown or text; the whole account as a zip with JSON another system can read."
-        />
-      </CardContent>
-    </Card>
-  );
-}
-
-/**
- * What is not here, and why — the half of this page that is usually missing.
- *
- * The bot line matters most. Every competitor's integrations page implies a bot
- * that joins your calls, and a reader who assumes Recallix has one will wait for
- * meetings to record themselves.
- */
-function NotConnected() {
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base">Not connected, and why</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3 text-sm">
-        <Row
-          icon={<Bot className="h-4 w-4" />}
-          title="No meeting bot"
-          body="Recallix never joins a Zoom, Meet or Teams call and never appears in a participant list. Recording happens in your own browser tab, which is why nothing here can start it for you."
-          muted
-        />
-        <Row
-          icon={<CalendarDays className="h-4 w-4" />}
-          title="Reading your calendar"
-          body="Nothing useful follows from a list of meetings we cannot join, so it is not built. The feed above is the other direction, and that one earns its keep."
-          muted
-        />
-        <Row
-          icon={<Plug className="h-4 w-4" />}
-          title="Slack, Notion, CRMs"
-          body="None of these are wired up. When one is, it will appear above with a URL you can test — not as a logo with a disabled button."
-          muted
-        />
-      </CardContent>
-    </Card>
-  );
-}
-
-function Row({
-  icon,
-  title,
-  body,
-  muted = false,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  body: string;
-  muted?: boolean;
-}) {
-  return (
-    <div className="flex items-start gap-3">
-      <span className={muted ? "mt-0.5 text-muted-foreground" : "mt-0.5 text-primary"}>
-        {icon}
-      </span>
-      <span>
-        <span className="block font-medium">{title}</span>
-        <span className="block text-muted-foreground">{body}</span>
-      </span>
-    </div>
   );
 }
