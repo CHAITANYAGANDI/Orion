@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
 from app.answering import Answer
+from app.questions import Knowledge
 from app.schemas import (
     ActionItem,
     DraftEmailRequest,
@@ -117,7 +118,7 @@ class LlmPort(ABC):
         intent: str = "fact",
         depth: str = "express",
         history: list[str] | None = None,
-        guidance: bool = False,
+        policy: str = Knowledge.MEETING_ONLY,
     ) -> Answer:
         """Answer a question about the user's meetings from the given passages.
 
@@ -138,14 +139,18 @@ class LlmPort(ABC):
         resolving "those" and "it" — never previous answers, which would let one
         loose claim become evidence for the next.
 
-        `guidance` permits clearly-labelled general knowledge *alongside* the
-        evidence — the ordinary steps for registering for an event, what a
-        follow-up email conventionally contains. It never relaxes grounding: no
-        claim about the meetings, and no specific external fact (a URL, a price,
-        a date), may come from anywhere but the passages either way. It is off
-        by default, and `app.questions.allows_guidance` decides when it is not:
-        a factual question over a transcript with no price must answer "the
-        meeting doesn't state a price", not a typical range.
+        `policy` is where this answer may get its material — one of
+        `Knowledge.MEETING_ONLY`, `PROCEDURAL_GUIDANCE` or
+        `EXPLANATORY_BACKGROUND`, decided by the intent in
+        `app.questions.knowledge_policy`. The two exceptions permit different
+        things and are not interchangeable: one may lay out the usual steps of a
+        process, the other may say what a kind of thing is for.
+
+        Neither relaxes grounding. No claim about the meetings, and no specific
+        external fact — a URL, a price, a date, a venue, a speaker — may come
+        from anywhere but the passages under any of the three. It defaults to
+        the strict one, so a caller that does not know about this argument
+        cannot accidentally widen an answer.
 
         A caller may pass a plain string back from an older implementation;
         `app.answering.parse` normalises it.

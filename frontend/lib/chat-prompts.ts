@@ -31,24 +31,52 @@ export interface ChatPrompt {
   prompt: string;
 }
 
+/** How many chips a chat shows at once. See `useRotatingPrompts`. */
+export const SUGGESTION_ROW = 3;
+
 /**
- * Turn generated questions into chips.
+ * Everything this chat could offer, best first.
  *
  * A generated question is one string used for both the label and the prompt:
  * it is already specific and already short (the generator caps it), so the
  * label/prompt split that the static set needs — short chip, fuller prompt to
  * steer retrieval — has nothing to do here.
  *
- * Returns the fallback when there is nothing generated, which is what makes
- * every caller's empty case identical and keeps the decision in one place.
+ * ## Why this is a pool rather than a row
+ *
+ * It used to return either the generated questions or, when there were none,
+ * the whole static list — which meant a meeting still processing showed seven
+ * chips and the workspace showed six, where the design is three. Worse, the
+ * three never changed: a meeting's suggestions are generated once when it is
+ * processed, so the same row sat there for ever.
+ *
+ * So this returns the pool and `useRotatingPrompts` takes three off it,
+ * advancing each visit. The static prompts are appended rather than replaced,
+ * which is what gives a meeting processed before the pool existed — three
+ * stored questions and nothing else — something to rotate through at all.
+ *
+ * Order is preference, not cosmetics: generated first, because they name the
+ * actual meeting, and the hand-written ones behind them because they would sit
+ * on any meeting ever recorded. Deduplicated case-insensitively, since a
+ * generated "What did we decide?" and the static one are the same chip twice.
  */
 export function toPrompts(
   generated: string[] | undefined | null,
   fallback: ChatPrompt[],
 ): ChatPrompt[] {
-  const clean = (generated ?? []).map((q) => q.trim()).filter(Boolean);
-  if (clean.length === 0) return fallback;
-  return clean.map((q) => ({ label: q, prompt: q }));
+  const pool: ChatPrompt[] = [];
+  const seen = new Set<string>();
+
+  for (const p of [
+    ...(generated ?? []).map((q) => q.trim()).filter(Boolean).map((q) => ({ label: q, prompt: q })),
+    ...fallback,
+  ]) {
+    const key = p.label.toLowerCase().replace(/[?.\s]+$/, "");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    pool.push(p);
+  }
+  return pool;
 }
 
 /** Grounded in one transcript. */

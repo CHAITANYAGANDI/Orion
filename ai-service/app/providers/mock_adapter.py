@@ -24,6 +24,7 @@ from dataclasses import dataclass
 
 from app.providers.ports import EmbeddingPort, LlmPort, TranscriptionPort
 from app.answering import Answer
+from app.questions import Knowledge
 from app.schemas import (
     ActionItem,
     DraftEmailRequest,
@@ -338,7 +339,7 @@ class MockLlmAdapter(LlmPort):
         intent: str = "fact",
         depth: str = "express",
         history: list[str] | None = None,
-        guidance: bool = False,
+        policy: str = Knowledge.MEETING_ONLY,
     ) -> Answer:
         # No real generation in mock mode — compose a grounded-looking answer
         # from the retrieved passages so the RAG UX is demoable without a key.

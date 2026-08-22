@@ -111,6 +111,8 @@ vi.mock("@/lib/api", () => {
 });
 
 import { HomeChatPanel } from "@/components/home-chat-panel";
+import { resetActiveChats } from "@/lib/active-chat";
+import { resetPromptRotation } from "@/lib/use-rotating-prompts";
 
 const QUESTION = "How can I register?";
 
@@ -141,6 +143,14 @@ async function ask(question = QUESTION) {
 }
 
 beforeEach(() => {
+  // The open thread now outlives unmount — it is keyed per surface rather than
+  // cleared on leaving, see lib/active-chat — so one test's conversation would
+  // otherwise be adopted by the next, and `send` would skip creating one.
+  resetActiveChats();
+  // The suggestion row rotates, and its offset outlives an unmount too — so
+  // without this each test would start further into the pool than the last and
+  // the chip it clicks would have scrolled off the row.
+  resetPromptRotation();
   api.reset();
   api.settle = null;
   api.reject = null;

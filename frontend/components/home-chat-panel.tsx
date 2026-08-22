@@ -3,9 +3,12 @@
 /**
  * Workspace chat, in the rail beside the conversation list.
  *
- * The same thread as the AI Chat page — see `useWorkspaceChat` — because asking
- * something here and then opening the page to keep going should continue the
- * conversation rather than start a second one that looks identical.
+ * Reads every meeting you own, exactly as the AI Chat page does, and keeps its
+ * own open thread. It used to share one with that page, from when the expand
+ * button navigated there; expanding widens this rail in place now, so all that
+ * remained was two screens showing each other's questions. The conversations
+ * are still one archive — anything asked here is in /ask's history picker, and
+ * the other way round. See `useWorkspaceChat`.
  *
  * ## What this used to be
  *
@@ -34,14 +37,22 @@ import { ChatHistory } from "@/components/chat-history";
 import { ChatDock, ChatRail } from "@/components/chat/chat-shell";
 import { toggleSidePaneExpanded, useSidePane } from "@/components/side-pane";
 import { WORKSPACE_PROMPTS, toPrompts } from "@/lib/chat-prompts";
+import { useRotatingPrompts } from "@/lib/use-rotating-prompts";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export function HomeChatPanel() {
-  const chat = useWorkspaceChat();
+  const chat = useWorkspaceChat("home");
   // Only for the maximise control's own state. The pane itself is the shell's.
   const pane = useSidePane();
   // Follows the newest turn, and stops following if the reader scrolls up.
   const threadRef = useThreadScroll([chat.messages, chat.pending]);
+  // Three of the pool, and a different three next time. Keyed to this rail
+  // so it does not deal the same row the full page just dealt.
+  const prompts = useRotatingPrompts(
+    "home",
+    toPrompts(chat.suggestions, WORKSPACE_PROMPTS),
+    chat.conversationId,
+  );
 
   return (
     <ChatRail
@@ -67,7 +78,7 @@ export function HomeChatPanel() {
       }
       dock={
         <ChatDock
-          prompts={toPrompts(chat.suggestions, WORKSPACE_PROMPTS)}
+          prompts={prompts}
           showPrompts={chat.showPrompts}
           busy={chat.asking}
           onSend={(q) => void chat.send(q)}

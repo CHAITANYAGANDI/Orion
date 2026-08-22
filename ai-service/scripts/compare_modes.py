@@ -12,7 +12,7 @@ paid more for.
 
 What it prints is deliberately narrow:
 
-    intent / guidance     how the question was routed, and what it may draw on
+    intent / policy       how the question was routed, and what it may draw on
     grounding             whether the answer stayed inside the passages
     passages considered   what the ANN scan returned before filtering
     passages kept         what survived relevance, dedupe and diversity
@@ -37,7 +37,7 @@ import time
 
 from app.config import get_settings
 from app.providers.factory import AiProviderFactory
-from app.questions import allows_guidance, classify
+from app.questions import classify, knowledge_policy
 from app.rag import RagService
 from app.retrieval import RetrievalReport
 
@@ -78,10 +78,8 @@ async def run(user_id: str, question: str, meeting_id: str | None) -> None:
     intent = classify(question)
     print(f"question: {question}")
     print(f"intent:   {intent}   (routes retrieval and answer shape)")
-    print(
-        f"guidance: {allows_guidance(intent)}   "
-        "(may the answer add labelled general knowledge)"
-    )
+    print(f"policy:   {knowledge_policy(intent).value}   "
+          "(where this answer may get its material)")
 
     for mode in ("express", "advanced"):
         capture.last = None

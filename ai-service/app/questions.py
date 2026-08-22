@@ -24,6 +24,7 @@ while the reverse merely produces a shorter answer.
 from __future__ import annotations
 
 import re
+from enum import Enum
 
 # Asking for something to be composed. Checked first and wins outright.
 _COMPOSE = re.compile(
@@ -87,13 +88,18 @@ def wants_full_list(question: str) -> bool:
 
 INTENTS = (
     "compose", "inventory", "timeline", "how_to", "comparison", "summary",
-    "synthesis", "fact",
+    "synthesis", "explain", "fact",
 )
 
+# `when did` used to be here and is deliberately gone. A timeline is an account
+# of how something developed — ordered, dated, several steps. "When did they say
+# the conference starts?" is one date the meeting stated, which is a lookup, and
+# answering it in a timeline's shape is a correct answer wearing the wrong one.
+# Real chronologies route on their own words, which are the ones left below.
 _TIMELINE = re.compile(
     r"\b(timeline|chronolog\w*|history of|over time|evolve[ds]?|evolution|"
     r"how did .{0,40}\b(change|develop|progress|shift)|"
-    r"when did|in what order|sequence of)\b",
+    r"in what order|sequence of)\b",
     re.IGNORECASE,
 )
 
@@ -145,6 +151,77 @@ _HOW_TO = re.compile(
 )
 
 
+# --- explaining a thing, versus reporting what was said about it ------------- #
+#
+# "What is Tech in Asia Conference 2025?" and "What did they say about the
+# conference?" are both `what` questions about the same entity, and they want
+# opposite answers. The second is a request to search a recording. The first is
+# the reader's actual question, and answering it with a paraphrase of the
+# recording is a search engine's answer:
+#
+#     "Tech in Asia Conference 2025 is an event that brings together founders,
+#     product professionals, corporate leaders, and investors…"
+#
+# — accurate, grounded, and not what was asked.
+#
+# The boundary is drawn on two lexical signals, because the alternative is a
+# model call on every question to decide the shape of every question.
+
+# Anything pointing at the recording rather than at the thing. Checked first and
+# refuses `explain` outright: "Explain what Sarah decided" wears an explanatory
+# frame and is a question about a meeting.
+_ABOUT_THE_RECORDING = re.compile(
+    r"\b(?:"
+    r"mention(?:s|ed|ing)?\b"
+    r"|did (?:they|we|you|he|she|[A-Z][a-z]+) (?:say|list|agree|decide|state|quote|discuss)"
+    r"|(?:they|we|you|he|she|[A-Z][a-z]+) (?:said|listed|agreed|decided|discussed|quoted)"
+    r"|(?:was|were) (?:decided|agreed|discussed|said|quoted|raised)"
+    r"|in (?:the|this|that) (?:meeting|call|transcript|speech|recording|conversation)"
+    r"|according to the (?:meeting|call|transcript|speech|recording)"
+    r")",
+    re.IGNORECASE,
+)
+
+# A named thing, as opposed to an ordinary noun. This is what separates "what is
+# Kubernetes" from "what is the deadline" — the second names a fact the meeting
+# either records or does not, and no amount of general knowledge can supply this
+# user's deadline.
+#
+# The capital is the signal, so it is tested case-sensitively with `(?-i:...)`
+# inside an otherwise case-insensitive pattern: people do not reliably capitalise
+# "what", and the whole rule collapses if they have to.
+_NAME = r"(?-i:[A-Z])[\w.-]*"
+
+# An article is allowed, because the regression question has one — "What is
+# **the** Tech in Asia Conference 2025?" — but it raises the bar to two
+# capitalised words. "The URL", "the API", "the CEO", "the PR" are common nouns
+# in capitals far more often than they are names of things to explain, whereas a
+# real proper name after an article almost always runs on: "the Tech in Asia
+# Conference", "the Product Marketing Weekly". Without an article, one
+# capitalised word is plenty: "Kubernetes", "Stripe", "RAG".
+_NAMED = (
+    "(?:"
+    rf"(?:the|a|an|our|their|this|that)\s+{_NAME}(?:\s+[\w.-]+){{0,2}}\s+{_NAME}"
+    rf"|{_NAME}"
+    ")"
+)
+
+_EXPLAIN = re.compile(
+    "(?:"
+    r"\bexplain\b"
+    r"|\btell me (?:about|more about)\b"
+    rf"|\bwhat(?:'s| is| are)\s+(?:exactly\s+)?{_NAMED}"
+    rf"|\bwhat\s+exactly\s+(?:is|are)\s+{_NAMED}"
+    # "What does Kafka do?", "What does pgvector do?" — the frame is itself
+    # explanatory whatever the casing, and nothing factual wears it. Note that
+    # "what does registration cost?" does not match: `cost` is not in the list.
+    r"|\bwhat do(?:es)?\s+[\w.-]+\s+(?:do|mean|stand for)\b"
+    r"|\bwhat kind of (?:thing|company|product|service|event|tool)\b"
+    ")",
+    re.IGNORECASE,
+)
+
+
 def classify(question: str) -> str:
     """Which of {INTENTS} this question is, by the first rule that matches.
 
@@ -161,7 +238,8 @@ def classify(question: str) -> str:
     and "how did the decision change?" is a sequence — each begins with the word
     how and neither is asking to be told how to do anything. What is left after
     those two is a genuine request for a procedure, which is the only intent
-    allowed to reach past the transcript. See `allows_guidance`.
+    allowed to reach past the transcript with a procedure. See
+    `knowledge_policy`.
     """
     if not question or not question.strip():
         return "fact"
@@ -179,6 +257,12 @@ def classify(question: str) -> str:
         return "summary"
     if _SYNTHESIS.search(question):
         return "synthesis"
+    # Last before the fallback, on purpose. `explain` is the only intent that
+    # takes questions away from another one, so putting it here means it can
+    # only ever claim what would otherwise have been `fact` — every established
+    # route keeps its priority and nothing else moves.
+    if not _ABOUT_THE_RECORDING.search(question) and _EXPLAIN.search(question):
+        return "explain"
     return "fact"
 
 
@@ -236,37 +320,62 @@ def answerable_from_records(intent: str) -> bool:
 # follow-up email conventionally contains, what a form will typically ask for.
 # Stable, procedural, and not a claim about this user's meetings at all.
 #
-# Confusing the two is the failure this distinction exists to prevent, and it is
+# Confusing them is the failure this distinction exists to prevent, and it is
 # asymmetric. A meeting question answered from general knowledge produces a
 # confident invented fact — a price nobody quoted, a date nobody set — which is
-# indistinguishable from a real one to the person reading it. A procedural
-# question answered from meeting evidence alone produces a reply that is merely
-# unhelpful:
+# indistinguishable from a real one to the person reading it. A question that
+# reaches past the meeting, answered from the meeting alone, produces a reply
+# that is merely unhelpful.
 #
-#     "Register through the Tech in Asia Conference 2025 registration process
-#     referenced in the speech; it says to 'Register now', but does not provide
-#     a URL or specific steps."
-#
-# Every word of that is true and the reader is exactly where they started. So
-# guidance is permitted, narrowly, for the two intents where the reader has
-# asked to be helped to *do* something rather than told what was said.
-_GUIDANCE = frozenset({"how_to", "compose"})
+# There are two ways of reaching past it and they are **not the same
+# permission**, which is why this is an enum and not a boolean. Modelling it as
+# `guidance: bool` was fine while there was one exception; a second one would
+# have made `True` mean "may add steps, or may add background, we no longer
+# say" — and a policy nobody can name is a policy nobody can check.
 
 
-def allows_guidance(intent: str) -> bool:
-    """Whether this answer may add clearly-labelled general knowledge.
+class Knowledge(str, Enum):
+    """Where an answer is allowed to get its material.
 
-    False for every fact-shaped intent, which is most of them, and that is the
-    load-bearing half: "what price did they quote?" over a transcript with no
-    price must stay "the meeting doesn't state a price", not a typical range.
-
-    A misclassification is wrong in the recoverable direction on both sides. A
-    fact question wrongly marked how_to still cannot invent anything — the
-    grounding rules do not relax, and guidance is confined to procedure — so it
-    costs a paragraph of general steps somebody did not need. A how_to question
-    wrongly marked fact costs the unhelpful answer above, which is what shipped.
+    Exactly one of these applies to any answer. Subclasses `str` so it can be
+    logged, compared and put in a report without unwrapping, while still being
+    a closed set that a typo cannot join.
     """
-    return intent in _GUIDANCE
+
+    #: The passages and nothing else. Every fact-shaped intent, and the default
+    #: for anything unrecognised — "what price did they quote?" over a
+    #: transcript with no price stays "the meeting doesn't state a price".
+    MEETING_ONLY = "meeting_only"
+
+    #: Plus the ordinary steps of a process. "How can I register?" cannot be
+    #: answered from a recording of somebody saying "register now".
+    PROCEDURAL_GUIDANCE = "procedural_guidance"
+
+    #: Plus what a thing of this kind generally is and is for. "What is Tech in
+    #: Asia Conference 2025?" is a question about the world that the meeting
+    #: happens to touch, and a paraphrase of the meeting is not an answer to it.
+    EXPLANATORY_BACKGROUND = "explanatory_background"
+
+
+# Both exceptions are narrow and neither is a superset of the other: a
+# procedural answer may lay out the usual steps of a process and may not
+# describe what a conference is for; an explanatory one may do the reverse.
+_POLICY: dict[str, Knowledge] = {
+    "how_to": Knowledge.PROCEDURAL_GUIDANCE,
+    "compose": Knowledge.PROCEDURAL_GUIDANCE,
+    "explain": Knowledge.EXPLANATORY_BACKGROUND,
+}
+
+
+def knowledge_policy(intent: str) -> Knowledge:
+    """What this intent's answer may draw on.
+
+    Strict by default, so an intent added later and not listed here gains no
+    permission by being forgotten. A misclassification is recoverable in both
+    directions: neither exception relaxes grounding, so the cost is a paragraph
+    of background or steps somebody did not need — never an invented fact.
+    """
+    return _POLICY.get(intent, Knowledge.MEETING_ONLY)
 
 
 # --- who and what the question names ---------------------------------------- #

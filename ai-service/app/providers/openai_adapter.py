@@ -22,6 +22,7 @@ from app import answering
 from app.answering import Answer
 from app.config import Settings
 from app.providers.ports import EmbeddingPort, LlmPort, TranscriptionPort
+from app.questions import Knowledge
 from app.schemas import (
     ActionItem,
     DraftEmailRequest,
@@ -674,13 +675,13 @@ class OpenAiLlmAdapter(LlmPort):
         intent: str = "fact",
         depth: str = "express",
         history: list[str] | None = None,
-        guidance: bool = False,
+        policy: str = Knowledge.MEETING_ONLY,
     ) -> Answer:
         async def _op() -> Answer:
             data = await self._chat_json(
                 answering.system_prompt(
                     intent=intent, depth=depth, exhaustive=exhaustive,
-                    guidance=guidance,
+                    policy=policy,
                 ),
                 answering.user_prompt(question, context, history),
             )
@@ -693,10 +694,15 @@ class OpenAiLlmAdapter(LlmPort):
             label="answer",
         )
 
-    # How many chips a chat shows. Three because they sit above the input and
-    # compete with it: a fourth pushes the box down and starts reading as a
-    # menu the user must choose from rather than a set of examples.
-    _SUGGESTION_COUNT = 3
+    # How many questions to generate. The chat shows three of them at a time —
+    # a fourth on screen pushes the composer down and starts reading as a menu
+    # the reader must choose from — and rotates through the rest, so opening
+    # the same meeting twice does not offer the same three chips twice.
+    #
+    # Eight rather than three because the pool is free: one call either way,
+    # and the alternative way to make chips change is to generate three fresh
+    # ones per visit, which is a model call every time somebody opens a page.
+    _SUGGESTION_POOL = 8
 
     # Longest a chip can be before it wraps and stops being scannable. Enforced
     # in the prompt and again on the way out, because the model treats a length
@@ -765,7 +771,7 @@ class OpenAiLlmAdapter(LlmPort):
                     "You suggest starter questions for someone who has just "
                     "opened the notes for one meeting. You are given its "
                     "summary.\n"
-                    f"Propose {self._SUGGESTION_COUNT} questions this reader "
+                    f"Propose {self._SUGGESTION_POOL} questions this reader "
                     "would plausibly want answered — the specifics behind a "
                     "decision, what someone committed to, the detail the "
                     "summary compressed.\n" + self._SUGGEST_RULES
@@ -781,7 +787,7 @@ class OpenAiLlmAdapter(LlmPort):
                 # mid-sentence would be sent as a truncated question.
                 if q and len(q) <= self._SUGGESTION_MAX_CHARS:
                     out.append(q)
-            return out[: self._SUGGESTION_COUNT]
+            return out[: self._SUGGESTION_POOL]
 
         return await _with_retries(
             _op,

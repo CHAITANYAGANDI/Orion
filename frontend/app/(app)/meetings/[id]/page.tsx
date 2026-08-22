@@ -126,6 +126,7 @@ import { PendingTurn } from "@/components/chat/pending-turn";
 import { usePendingTurn } from "@/lib/pending-turn";
 import { useThreadScroll } from "@/lib/use-thread-scroll";
 import { MEETING_PROMPTS, toPrompts } from "@/lib/chat-prompts";
+import { useRotatingPrompts } from "@/lib/use-rotating-prompts";
 import { SelectionMenu, type SelectionAction } from "@/components/selection-menu";
 import { MomentsPanel } from "@/components/moments-panel";
 import { ActionItemDialog, NoteDialog, type Passage } from "@/components/moment-composer";
@@ -1528,6 +1529,13 @@ function ChatPanel({
   // Follows the newest turn, inside the thread and nowhere else, and stops
   // following the moment the reader scrolls up. See lib/use-thread-scroll.
   const threadRef = useThreadScroll([messages, pending.turn]);
+  // Keyed by meeting: two meetings open in two tabs each get their own row,
+  // and coming back to one carries on through its pool rather than restarting.
+  const prompts = useRotatingPrompts(
+    meetingId,
+    toPrompts(suggestions, MEETING_PROMPTS),
+    conversationId,
+  );
 
   /**
    * Recover from a conversation that is no longer there — see the same guard on
@@ -1631,7 +1639,7 @@ function ChatPanel({
       }
       dock={
         <ChatDock
-          prompts={toPrompts(suggestions, MEETING_PROMPTS)}
+          prompts={prompts}
           // An empty thread only. A thread with a question in flight is not
           // one, and three disabled pills across the rail put chrome where the
           // answer is about to be.

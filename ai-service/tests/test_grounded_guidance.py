@@ -42,6 +42,7 @@ import asyncio
 
 from app import answering, questions
 from app.answering import MEETING_ONLY, MIXED, Answer
+from app.questions import Knowledge
 from app.rag import RagService
 from tests.conftest import rag_settings
 
@@ -81,7 +82,7 @@ class _Llm:
             intent=kw.get("intent", "fact"),
             depth=kw.get("depth", "express"),
             exhaustive=exhaustive,
-            guidance=kw.get("guidance", False),
+            policy=kw.get("policy", Knowledge.MEETING_ONLY),
         )
         return self._answer
 
@@ -200,7 +201,7 @@ def test_the_registration_question_is_recognised_as_a_procedure():
     steps, the hedging — hangs off `how_to` being the intent.
     """
     assert questions.classify(REGISTER) == "how_to"
-    assert questions.allows_guidance("how_to") is True
+    assert questions.knowledge_policy("how_to") is Knowledge.PROCEDURAL_GUIDANCE
 
 
 def test_the_meeting_evidence_still_reaches_the_model():
@@ -224,7 +225,7 @@ def test_the_procedural_brief_permits_general_steps_and_bounds_them():
     _ask(service, REGISTER)
     brief = llm.system
 
-    assert llm.kwargs["guidance"] is True
+    assert llm.kwargs["policy"] is Knowledge.PROCEDURAL_GUIDANCE
     # Meeting first, then guidance, and the reader can tell which is which.
     assert "FIRST, what the meetings support" in brief
     assert "THEN, general guidance" in brief
@@ -248,12 +249,15 @@ def test_both_modes_can_answer_a_procedural_question():
         service, llm = _service()
         _ask(service, REGISTER, mode=mode)
 
-        assert llm.kwargs["guidance"] is True, mode
+        assert llm.kwargs["policy"] is Knowledge.PROCEDURAL_GUIDANCE, mode
         assert "THEN, general guidance" in llm.system, mode
 
     # And they still differ in what they read and how much they write.
-    assert "Be brief" in answering.system_prompt(intent="how_to", depth="express", guidance=True)
-    assert "Go deeper" in answering.system_prompt(intent="how_to", depth="advanced", guidance=True)
+    procedural = Knowledge.PROCEDURAL_GUIDANCE
+    assert "Be concise but complete" in answering.system_prompt(
+        intent="how_to", depth="express", policy=procedural)
+    assert "Go deeper" in answering.system_prompt(
+        intent="how_to", depth="advanced", policy=procedural)
 
 
 def test_the_reader_is_never_shown_the_vocabulary_of_the_pipeline():
@@ -265,7 +269,7 @@ def test_the_reader_is_never_shown_the_vocabulary_of_the_pipeline():
     """
     for intent in questions.INTENTS:
         brief = answering.system_prompt(
-            intent=intent, guidance=questions.allows_guidance(intent)
+            intent=intent, policy=questions.knowledge_policy(intent)
         )
         assert 'Never "the passage"' in brief
         assert 'Call the source "the meeting"' in brief
@@ -281,8 +285,8 @@ def test_no_answer_may_claim_a_capability_recallix_does_not_have():
     An answer that has just admitted the transcript lacks a link is one sentence
     away from offering to look it up, and the reader would wait for it.
     """
-    for guidance in (True, False):
-        brief = answering.system_prompt(intent="how_to", guidance=guidance)
+    for policy in Knowledge:
+        brief = answering.system_prompt(intent="how_to", policy=policy)
         assert "You cannot browse, search the web, open a link" in brief
         assert "look up anything current" in brief
         assert "Never offer to look something up" in brief
@@ -290,11 +294,218 @@ def test_no_answer_may_claim_a_capability_recallix_does_not_have():
 
 def test_guidance_never_arrives_without_the_grounding_rules():
     """The permissive block is an addition, never a substitution."""
-    brief = answering.system_prompt(intent="how_to", guidance=True)
+    brief = answering.system_prompt(
+        intent="how_to", policy=Knowledge.PROCEDURAL_GUIDANCE)
 
     assert "Every claim about these meetings comes from the passages" in brief
     assert "Never invent a fact" in brief
     assert "ANSWER FIRST" in brief
+
+
+# --- explaining a thing ------------------------------------------------------- #
+#
+# The third policy, and the one that is easiest to get wrong in the direction
+# nobody notices. A procedure invented for a conference nobody attended is
+# obviously generic. A *feature* invented for one — "VIP passes", "pitch
+# stages" — reads exactly like a fact, on a page whose whole promise is that
+# facts come from the recording.
+
+WHAT_IS = "What is the Tech in Asia Conference 2025?"
+
+
+def test_the_explanatory_question_is_recognised_as_one():
+    assert questions.classify(WHAT_IS) == "explain"
+    assert questions.knowledge_policy("explain") is Knowledge.EXPLANATORY_BACKGROUND
+
+
+def test_the_explanatory_brief_reaches_the_real_adapter():
+    """Not a stand-in. The prompt asserted here is the one the adapter built."""
+    capture = _CapturingAdapter()
+    service, _ = _service(llm=capture)
+
+    asyncio.run(service.answer("mtg_talk", WHAT_IS, "usr_1", "express"))
+
+    brief = capture.system or ""
+    assert "This question asks what something IS" in brief
+    assert "THEN, general background" in brief
+    # And the meeting's own words went with it — background supplements the
+    # evidence and never replaces it.
+    assert "curated programs" in (capture.user or "")
+
+
+def test_the_explanatory_brief_permits_background_and_bounds_it():
+    brief = answering.system_prompt(
+        intent="explain", policy=Knowledge.EXPLANATORY_BACKGROUND
+    )
+
+    # Permitted, and named as concretely as the prohibitions are — an abstract
+    # permission weighed against five specific bans produces a terse answer,
+    # which is exactly what shipped.
+    assert "FIRST, what the meetings establish about it" in brief
+    assert "what problem it solves, or what it is organised around" in brief
+    assert "who it is for, and what each of those groups is usually there for" in brief
+    assert "One abstract sentence is not background" in brief
+    # And a named, well-established thing is described rather than dodged.
+    assert "describing THAT thing IS" in brief
+
+    # Bounded: every current, event-specific fact, named so there is no
+    # ambiguity about which ones are meant.
+    for forbidden in (
+        "who is speaking", "the dates", "the venue", "the agenda",
+        "the ticket tiers", "the prices", "the discounts", "the web address",
+        "the attendance", "what is currently available",
+    ):
+        assert forbidden in brief, forbidden
+
+
+def test_background_describes_the_category_and_never_this_instance():
+    """The Otter-shaped failure, ruled out by name.
+
+    "Tech in Asia Conference 2025 includes VIP passes and pitch stages" is a
+    sentence about a real event somebody may be about to buy a ticket to. It is
+    not supported by forty-seven seconds of promotional speech and Recallix has
+    no other source for it.
+    """
+    brief = answering.system_prompt(
+        intent="explain", policy=Knowledge.EXPLANATORY_BACKGROUND
+    )
+
+    assert "it is about *specificity*, not topic" in brief
+    assert "General background describes the CATEGORY" in brief
+    assert "conferences of this kind often include" in brief
+    assert "Never write \"the conference includes" in brief
+    assert "never assert a fact" in brief.lower()
+
+
+def test_the_two_permissions_are_not_the_same_permission():
+    """A procedure and an explanation license different material.
+
+    Collapsing them into one flag would let "how can I register?" be answered
+    with what conferences are for, and "what is this conference?" with the steps
+    for buying a ticket. Both are the wrong answer, confidently given.
+    """
+    procedural = answering.system_prompt(
+        intent="how_to", policy=Knowledge.PROCEDURAL_GUIDANCE
+    )
+    explanatory = answering.system_prompt(
+        intent="explain", policy=Knowledge.EXPLANATORY_BACKGROUND
+    )
+
+    assert "THEN, general guidance" in procedural
+    assert "THEN, general guidance" not in explanatory
+    assert "THEN, general background" in explanatory
+    assert "THEN, general background" not in procedural
+
+
+def test_an_explanatory_answer_still_cannot_browse_or_invent():
+    brief = answering.system_prompt(
+        intent="explain", policy=Knowledge.EXPLANATORY_BACKGROUND
+    )
+
+    assert "Every claim about these meetings comes from the passages" in brief
+    assert "You cannot look anything up" in brief
+    assert "ANSWER FIRST" in brief
+
+
+def test_a_background_answer_cites_only_what_it_drew_from_the_meeting():
+    """The timestamp supports "curated programs and new passes".
+
+    It supports nothing about what conferences of this kind are generally for,
+    and an answer whose general half carried a citation would be asserting that
+    somebody in the recording said it.
+    """
+    mixed = Answer(
+        text="It is a technology event.\n\n### Generally\nConferences of this kind…",
+        used=(1,),
+        grounding=answering.MIXED_BACKGROUND,
+    )
+    extra = TRANSCRIPT + [(1, "Speaker 1: Every role faces its own battle.", 47.0, 60.0, 0.66)]
+    service, _ = _service(rows=extra, llm=_Llm(mixed))
+
+    _answer, citations = _ask(service, WHAT_IS)
+
+    assert len(citations) == 1
+    assert "curated programs" in citations[0]["text"]
+
+
+def test_a_background_answer_that_names_nothing_gets_no_citations():
+    """Same rule as the procedural kind, and for the same reason."""
+    mixed = Answer(text="Conferences of this kind…", used=(),
+                   grounding=answering.MIXED_BACKGROUND)
+    service, _ = _service(llm=_Llm(mixed))
+
+    _answer, citations = _ask(service, WHAT_IS)
+
+    assert citations == []
+
+
+def test_thin_evidence_does_not_mean_thin_background():
+    """The clause that made the answer terse, ruled out.
+
+    The block used to close "if the meetings say almost nothing about the
+    thing, keep the background short". The Tech in Asia recording is
+    forty-seven seconds of promotional speech — it says almost nothing — so the
+    model produced one abstract sentence of background and stopped.
+
+    That is backwards. The two halves are sized independently: a reader whose
+    meeting mentioned something once is *more* likely to be asking what it is,
+    not less.
+    """
+    brief = answering.system_prompt(
+        intent="explain", policy=Knowledge.EXPLANATORY_BACKGROUND
+    )
+
+    assert "does NOT decide how much background to give" in brief
+    assert "explain the thing properly" in brief
+    assert "keep the background short" not in brief
+    # The bound that replaced it is about substance, not size.
+    assert "Stop when you run out of things that are true and useful" in brief
+
+
+def test_an_explanation_is_not_capped_at_a_lookups_length():
+    """Express opened "Be brief. A short paragraph, or up to five bullets."
+
+    That is a length chosen before the question is read, and there is no
+    instruction that says both "be brief" and "explain this properly".
+    """
+    express = answering.system_prompt(
+        intent="explain", depth="express", policy=Knowledge.EXPLANATORY_BACKGROUND
+    )
+
+    assert "Be brief" not in express
+    assert "Be concise but complete" in express
+    assert "an explanation that genuinely has parts gets those parts" in express
+    # And no floor either: a question with one answer still gets one sentence.
+    assert "a question with one answer gets one sentence" in express
+    assert "Never pad to look thorough" in express
+
+
+def test_advanced_goes_further_into_the_thing_itself():
+    express = answering.system_prompt(
+        intent="explain", depth="express", policy=Knowledge.EXPLANATORY_BACKGROUND
+    )
+    advanced = answering.system_prompt(
+        intent="explain", depth="advanced", policy=Knowledge.EXPLANATORY_BACKGROUND
+    )
+
+    assert express != advanced
+    assert "how it works, what it relates to, and where it is and is not" in advanced
+    assert "Go deeper" in advanced and "Go deeper" not in express
+    # Both still grounded about the specific thing.
+    for brief in (express, advanced):
+        assert "General background describes the CATEGORY" in brief
+
+
+def test_a_question_about_the_recording_gets_no_background():
+    """The half that proves the new policy did not leak into factual answers."""
+    for question in ("What did they say about the conference?", "What price did they quote?"):
+        capture = _CapturingAdapter()
+        service, _ = _service(llm=capture)
+
+        asyncio.run(service.answer("mtg_talk", question, "usr_1", "express"))
+
+        assert "THEN, general background" not in (capture.system or ""), question
+        assert "the passages are the only source there is" in (capture.system or ""), question
 
 
 # --- the strict direction ---------------------------------------------------- #
@@ -311,7 +522,7 @@ def test_a_factual_question_gets_no_licence_to_supplement():
         service, llm = _service()
         _ask(service, question)
 
-        assert llm.kwargs["guidance"] is False, question
+        assert llm.kwargs["policy"] is Knowledge.MEETING_ONLY, question
         assert "THEN, general guidance" not in llm.system, question
 
 
@@ -337,19 +548,22 @@ def test_how_many_is_a_count_and_not_a_procedure():
     normally estimated, in place of a number the meeting either has or lacks.
     """
     assert questions.classify("How many attendees were mentioned?") == "inventory"
-    assert questions.allows_guidance("inventory") is False
+    assert questions.knowledge_policy("inventory") is Knowledge.MEETING_ONLY
 
 
 def test_how_did_it_change_is_a_sequence_and_not_a_procedure():
     assert questions.classify("How did the pricing decision change over time?") == "timeline"
-    assert questions.allows_guidance("timeline") is False
+    assert questions.knowledge_policy("timeline") is Knowledge.MEETING_ONLY
 
 
 def test_most_questions_get_the_strict_policy():
     """Guidance is the exception. If it stops being one, this fails."""
-    permitted = {i for i in questions.INTENTS if questions.allows_guidance(i)}
+    permitted = {
+        i for i in questions.INTENTS
+        if questions.knowledge_policy(i) is not Knowledge.MEETING_ONLY
+    }
 
-    assert permitted == {"how_to", "compose"}
+    assert permitted == {"how_to", "compose", "explain"}
 
 
 # --- advisory questions: the meeting leads ----------------------------------- #
@@ -365,7 +579,8 @@ def test_generic_advice_may_never_displace_a_real_commitment():
     wants those four items. Generic "send a recap, book a follow-up" advice in
     their place is worse than no answer, because it looks like an answer.
     """
-    brief = answering.system_prompt(intent="how_to", guidance=True)
+    brief = answering.system_prompt(
+        intent="how_to", policy=Knowledge.PROCEDURAL_GUIDANCE)
 
     assert "If the meetings already answer the question in full, stop when they do" in brief
     assert "must never take the place of a real commitment, decision or action item" in brief
@@ -448,7 +663,8 @@ def test_a_meeting_only_answer_that_names_nothing_still_cites_its_evidence():
 # --- the label ---------------------------------------------------------------- #
 
 def test_the_grounding_label_never_reaches_the_reader():
-    brief = answering.system_prompt(intent="how_to", guidance=True)
+    brief = answering.system_prompt(
+        intent="how_to", policy=Knowledge.PROCEDURAL_GUIDANCE)
 
     assert "Never mention it, or these labels, in the answer itself" in brief
 
@@ -474,14 +690,17 @@ def test_the_policy_is_observable_without_reading_a_transcript():
     """
     from app.retrieval import RetrievalReport
 
-    line = RetrievalReport(mode="advanced", intent="how_to", guidance=True, grounding=MIXED)
+    line = RetrievalReport(
+        mode="advanced", intent="how_to",
+        policy=Knowledge.PROCEDURAL_GUIDANCE, grounding=MIXED,
+    )
     line.kept = 4
     line.used = 1
 
     data = line.as_dict()
 
     assert data["intent"] == "how_to"
-    assert data["guidanceAllowed"] is True
+    assert data["policy"] == "procedural_guidance"
     assert data["grounding"] == MIXED
     assert data["mode"] == "advanced"
     assert all(not isinstance(v, str) or "Register" not in v for v in data.values())

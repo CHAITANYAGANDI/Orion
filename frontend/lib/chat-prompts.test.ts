@@ -61,29 +61,55 @@ describe("the split between the two chats", () => {
 });
 
 describe("toPrompts", () => {
-  it("turns generated questions into chips", () => {
-    expect(toPrompts(["What did the vendor commit to?"], MEETING_PROMPTS)).toEqual([
-      { label: "What did the vendor commit to?", prompt: "What did the vendor commit to?" },
-    ]);
+  it("puts the generated questions first", () => {
+    // They name the actual meeting. The hand-written ones would sit on any
+    // meeting ever recorded, so they are what the row reaches only after.
+    const pool = toPrompts(["What did the vendor commit to?"], MEETING_PROMPTS);
+
+    expect(pool[0]).toEqual({
+      label: "What did the vendor commit to?",
+      prompt: "What did the vendor commit to?",
+    });
   });
 
-  it("falls back when nothing was generated", () => {
+  it("keeps the written-by-hand ones behind them, to rotate through", () => {
+    // Not a fallback any more. A meeting processed before the pool existed has
+    // three stored questions and nothing else, and appending these is what
+    // gives it a second row at all.
+    const pool = toPrompts(["A?", "B?"], MEETING_PROMPTS);
+
+    expect(pool.length).toBe(2 + MEETING_PROMPTS.length);
+    expect(pool.slice(2)).toEqual(MEETING_PROMPTS);
+  });
+
+  it("is the written-by-hand set when nothing was generated", () => {
     // Every empty case has to land here, or a meeting still processing shows a
     // blank row where the chips should be.
-    expect(toPrompts(undefined, MEETING_PROMPTS)).toBe(MEETING_PROMPTS);
-    expect(toPrompts(null, MEETING_PROMPTS)).toBe(MEETING_PROMPTS);
-    expect(toPrompts([], MEETING_PROMPTS)).toBe(MEETING_PROMPTS);
+    expect(toPrompts(undefined, MEETING_PROMPTS)).toEqual(MEETING_PROMPTS);
+    expect(toPrompts(null, MEETING_PROMPTS)).toEqual(MEETING_PROMPTS);
+    expect(toPrompts([], MEETING_PROMPTS)).toEqual(MEETING_PROMPTS);
   });
 
-  it("falls back when the generated questions are all blank", () => {
+  it("is the written-by-hand set when the generated questions are all blank", () => {
     // A model that returns ["", "  "] must not produce two empty chips.
-    expect(toPrompts(["", "   "], WORKSPACE_PROMPTS)).toBe(WORKSPACE_PROMPTS);
+    expect(toPrompts(["", "   "], WORKSPACE_PROMPTS)).toEqual(WORKSPACE_PROMPTS);
   });
 
   it("drops the blanks but keeps the rest", () => {
-    expect(toPrompts(["  ", "A real question?"], MEETING_PROMPTS)).toEqual([
-      { label: "A real question?", prompt: "A real question?" },
-    ]);
+    const pool = toPrompts(["  ", "A real question?"], MEETING_PROMPTS);
+
+    expect(pool[0]).toEqual({ label: "A real question?", prompt: "A real question?" });
+    expect(pool.some((p) => p.label.trim() === "")).toBe(false);
+  });
+
+  it("offers the same question once, however it arrived", () => {
+    // The generator, asked for questions about a meeting, quite reasonably
+    // proposes one the static set already has. Two identical chips in a row of
+    // three is a third of the row wasted; further down the pool it is worse,
+    // because rotation surfaces it later as though it were new.
+    const pool = toPrompts(["What did we decide?"], MEETING_PROMPTS);
+
+    expect(pool.filter((p) => p.label.toLowerCase() === "what did we decide?")).toHaveLength(1);
   });
 
   it("trims, so a stray newline does not become a chip that wraps", () => {
@@ -93,8 +119,8 @@ describe("toPrompts", () => {
   it("never composes a generated question", () => {
     // A trailing space is the compose signal for the static set. A generated
     // one is complete, so it must not be left half-sent in the input box.
-    const prompts = toPrompts(["Did we settle the price? "], MEETING_PROMPTS);
-    expect(prompts[0].prompt.endsWith(" ")).toBe(false);
+    const pool = toPrompts(["Did we settle the price? "], MEETING_PROMPTS);
+    expect(pool[0].prompt.endsWith(" ")).toBe(false);
   });
 });
 

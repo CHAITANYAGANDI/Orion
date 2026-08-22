@@ -160,7 +160,7 @@ describe("AskPage conversation state", () => {
   });
 
   it("offers New once the thread has something in it", async () => {
-    setActiveChat("workspace", "cnv_1");
+    setActiveChat("workspace:ask", "cnv_1");
     render(<AskPage />);
 
     await waitFor(() =>
@@ -170,7 +170,7 @@ describe("AskPage conversation state", () => {
 
   it("keeps reading the thread once one is chosen", async () => {
     // The other half: starting fresh must not mean the picker stops working.
-    setActiveChat("workspace", "cnv_1");
+    setActiveChat("workspace:ask", "cnv_1");
     render(<AskPage />);
 
     await waitFor(() => expect(lastQueryArg()).toEqual({ conversationId: "cnv_1" }));
@@ -186,7 +186,7 @@ describe("AskPage conversation state", () => {
       conversations = [];
       return { deletedMessages: 2, conversationDeleted: true };
     });
-    setActiveChat("workspace", "cnv_1");
+    setActiveChat("workspace:ask", "cnv_1");
     render(<AskPage />);
     await waitFor(() => expect(lastQueryArg()).toEqual({ conversationId: "cnv_1" }));
 
@@ -211,7 +211,7 @@ describe("AskPage conversation state", () => {
       conversations = [{ ...conversations[0], id: "cnv_2", title: "Older" }];
       return { deletedMessages: 2, conversationDeleted: true };
     });
-    setActiveChat("workspace", "cnv_1");
+    setActiveChat("workspace:ask", "cnv_1");
     render(<AskPage />);
     await waitFor(() => expect(lastQueryArg()).toEqual({ conversationId: "cnv_1" }));
 
@@ -223,7 +223,7 @@ describe("AskPage conversation state", () => {
 
   it("keeps the thread when other exchanges remain", async () => {
     unwrap.mockResolvedValue({ deletedMessages: 2, conversationDeleted: false });
-    setActiveChat("workspace", "cnv_1");
+    setActiveChat("workspace:ask", "cnv_1");
     render(<AskPage />);
     await waitFor(() => expect(lastQueryArg()).toEqual({ conversationId: "cnv_1" }));
 
@@ -239,7 +239,7 @@ describe("AskPage conversation state", () => {
   it("heals from a thread that vanished some other way", async () => {
     // Another tab, a stale id, a thread emptied elsewhere. Without this the
     // chat is stuck on 404 with no way out but a reload.
-    setActiveChat("workspace", "cnv_1");
+    setActiveChat("workspace:ask", "cnv_1");
     const { rerender } = render(<AskPage />);
     await waitFor(() => expect(lastQueryArg()).toEqual({ conversationId: "cnv_1" }));
 

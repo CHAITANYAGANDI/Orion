@@ -389,7 +389,7 @@ def test_the_brief_keeps_every_grounding_rule():
     # And it holds for every intent, including the two that may supplement.
     for intent in questions.INTENTS:
         brief = answering.system_prompt(
-            intent=intent, guidance=questions.allows_guidance(intent)
+            intent=intent, policy=questions.knowledge_policy(intent)
         )
         assert "Every claim about these meetings comes from the passages" in brief
 
@@ -434,7 +434,8 @@ def test_depth_reaches_the_commonest_question():
     advanced = answering.system_prompt(intent="fact", depth="advanced")
 
     assert express != advanced
-    assert "Be brief" in express and "Be brief" not in advanced
+    assert "Be concise but complete" in express
+    assert "Be concise but complete" not in advanced
     assert "Go deeper" in advanced and "Go deeper" not in express
 
 
@@ -442,7 +443,7 @@ def test_express_and_advanced_are_briefed_differently():
     express = answering.system_prompt(intent="fact", depth="express")
     advanced = answering.system_prompt(intent="fact", depth="advanced")
 
-    assert "Be brief" in express
+    assert "Be concise but complete" in express
     assert "Go deeper" in advanced
     # Depth must not become licence to pad. "Advanced" answers that invent a
     # fourth theme to look thorough are the failure this guards.

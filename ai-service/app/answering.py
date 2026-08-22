@@ -53,7 +53,7 @@ apart rather than to choose between them:
   no exceptions, no rounding off.
 * **General guidance** — how a thing of this kind is ordinarily done. Permitted
   only for the intents that ask to be helped to *do* something (see
-  `app.questions.allows_guidance`), labelled so it cannot be read as evidence,
+  `app.questions.knowledge_policy`), labelled so it cannot be read as evidence,
   and never a specific external fact: no URL, no price, no date, no venue.
 
 The distinction is asymmetric and the asymmetry is the whole design. A price
@@ -77,6 +77,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+
+from app.questions import Knowledge
 
 # Phrasings that describe the machinery rather than the meetings. Listed once,
 # used in the prompt and asserted in the tests, so the prompt and the regression
@@ -199,6 +201,68 @@ _GUIDANCE_ALLOWED = (
     "action item that is sitting in the passages.\n"
 )
 
+# What an explanatory question gets. The third policy, and not a synonym for the
+# second: a procedure and an explanation permit different material, and a
+# question about what a conference *is* is not answered by the steps for
+# attending one.
+_EXPLANATORY_BACKGROUND = (
+    "\nThis question asks what something IS, not what the meetings said about "
+    "it. Those are different questions and the reader asked the first. A "
+    "paraphrase of the recording is a search result, not an explanation.\n"
+    "\nFIRST, what the meetings establish about it. Lead with that, from the "
+    "passages only: what this recording says the thing is, who it is for, what "
+    "it involves, what was said about it. This half is where every specific "
+    "detail comes from.\n"
+    "\nTHEN, general background — the part that makes the answer worth reading "
+    "to somebody who did not already know what the thing was. Use stable, "
+    "long-standing knowledge, and be specific rather than abstract. Depending "
+    "on what was asked, that means things like:\n"
+    "- what a thing of this kind consists of, in practice — the parts of it "
+    "someone would actually encounter;\n"
+    "- what problem it solves, or what it is organised around;\n"
+    "- who it is for, and what each of those groups is usually there for;\n"
+    "- what people typically get out of it, and how it fits alongside the other "
+    "things they use or attend.\n"
+    "\nOne abstract sentence is not background. \"Conferences convene people in "
+    "an industry\" tells the reader nothing they did not know from the word "
+    "conference. Name the actual constituent things — the kinds of session, the "
+    "kinds of attendee, the reasons each of them goes.\n"
+    "\nGive it its own heading. Where it covers separate aspects, sub-headings "
+    "or bullets read better than one dense paragraph; where it has one point, "
+    "one paragraph is the honest length and structure would be decoration.\n"
+    "\nWhen the question names a specific, well-established thing — a "
+    "technology, a protocol, a company, a product — describing THAT thing IS "
+    "the answer, and retreating to its category is a dodge: \"what is "
+    "Kubernetes?\" is not answered by what orchestrators generally do. What "
+    "stays off limits is the same either way: its current details. If you are "
+    "not confident the named thing is what you think it is, describe the kind "
+    "rather than guess at the instance.\n"
+    "\nThe division is absolute and it is about *specificity*, not topic. "
+    "General background describes the CATEGORY. It may never assert a fact "
+    "about THIS instance that the passages did not supply.\n"
+    "Write \"conferences of this kind often include workshops and exhibitor "
+    "areas\". Never write \"the conference includes workshops and exhibitor "
+    "areas\" unless a passage said so. The second sentence invents a fact about "
+    "a real event somebody may be about to spend money on.\n"
+    "\nNever supply, for the specific thing being asked about: who is speaking, "
+    "the dates, the venue, the agenda, the ticket tiers, the prices, the "
+    "discounts, the web address, the attendance, what is currently available, "
+    "or which sessions it runs. You do not know any of those. If a passage did "
+    "not say it, it is not known, and the reader is better served by an "
+    "explanation that stops there.\n"
+    "\nYou cannot look anything up. Say nothing that implies you checked, and "
+    "nothing that depends on knowing this year's details.\n"
+    "\nHow much the meetings said does NOT decide how much background to give. "
+    "They are different halves and they are sized independently. A recording "
+    "that mentions the thing once still leaves the reader wanting to know what "
+    "it is — that is usually why they asked — so say plainly how little the "
+    "meeting covered, then explain the thing properly. Shrinking the "
+    "explanation because the evidence was thin answers neither half.\n"
+    "\nWhat does bound the length is having something to say. Stop when you run "
+    "out of things that are true and useful; never restate a point in other "
+    "words, and never reach for a specific detail to fill a gap.\n"
+)
+
 _FORMAT = (
     "\nSHAPE — let the question decide, not a template:\n"
     "- A short factual answer is one to three plain paragraphs.\n"
@@ -206,7 +270,10 @@ _FORMAT = (
     "sequence of events is dated bullets, oldest first.\n"
     "- Something you were asked to write is just that thing, with no wrapper.\n"
     "- A bold lead-in on a list item only when it has a label and a body.\n"
-    "- No headings unless the answer has three or more distinct parts.\n"
+    "- No headings unless the answer has three or more distinct parts — except "
+    "the one that separates what the meetings said from what is generally true, "
+    "which is always worth a heading however short the answer is. That "
+    "separation is the reader's only way to tell the two apart.\n"
     "- Name the meeting a claim came from only when which meeting it was "
     "matters.\n"
     "- No preamble. No restating the question.\n"
@@ -224,11 +291,27 @@ _CONTRACT = (
     "passages as sources and clicking one that is not in the answer is a broken "
     "promise. If you used none because none were relevant, return an empty "
     "list.\n"
-    '`grounding` is "meeting_only" when every sentence came from the passages, '
-    'or "meeting_plus_general_guidance" when any part of the answer is general '
-    "knowledge rather than something the passages said. It is a record for us. "
-    "Never mention it, or these labels, in the answer itself.\n"
+    "`grounding` says how far the answer went, and is one of exactly three "
+    "values:\n"
+    '  "meeting_only" — every sentence came from the passages.\n'
+    '  "meeting_plus_general_guidance" — you added the general steps for '
+    "doing something.\n"
+    '  "meeting_plus_general_background" — you added general knowledge about '
+    "what a thing of this kind is.\n"
+    "It is a record for us. Never mention it, or these labels, in the answer "
+    "itself.\n"
 )
+
+# The three policies, keyed by the value `app.questions.knowledge_policy`
+# returns. Anything not in here — a new intent whose policy was forgotten, a
+# caller passing a stale string — falls back to the strict block in
+# `system_prompt`, which is the failure worth having.
+_POLICY_BLOCK: dict[str, str] = {
+    Knowledge.MEETING_ONLY: _MEETING_ONLY,
+    Knowledge.PROCEDURAL_GUIDANCE: _GUIDANCE_ALLOWED,
+    Knowledge.EXPLANATORY_BACKGROUND: _EXPLANATORY_BACKGROUND,
+}
+
 
 # What each kind of question wants the answer to look like. The router in
 # `app.questions` picks one; none of them decides what is true.
@@ -292,6 +375,15 @@ _INTENT = {
         "every fact in it still comes from the passages, and a blank stays "
         "blank — write [date] rather than choosing one.\n"
     ),
+    "explain": (
+        "\nThis asks for an explanation. Open with a direct one — a sentence "
+        "that would satisfy somebody who had never heard of the thing — then "
+        "the substance, in whatever arrangement the material actually has: "
+        "short paragraphs, or headed sections with bullets when there are "
+        "genuinely separate aspects. Do not open by narrating the meeting "
+        "(\"the speech describes…\"); say what the thing is, and attribute as "
+        "you go.\n"
+    ),
     "how_to": (
         "\nThis asks how to proceed. Numbered steps when it is a procedure, "
         "plain sentences when it is one thing to do. Each step is an action "
@@ -301,19 +393,29 @@ _INTENT = {
     ),
 }
 
+# Express used to open "Be brief. A short paragraph, or up to five bullets",
+# which is a length decided before the question has been read. It is right for
+# the lookup it was written for and wrong for an explanation, and there is no
+# instruction that says "be brief" and also "explain this properly".
 _EXPRESS = (
-    "\nBe brief. A short paragraph, or up to five bullets. Lead with the "
-    "strongest evidence and leave out the marginal. Brief does not mean vague: "
-    "a short answer that names the actual thing beats a long one that gestures "
-    "at it.\n"
+    "\nBe concise but complete. Let the question and the evidence decide the "
+    "length: a question with one answer gets one sentence, and an explanation "
+    "that genuinely has parts gets those parts. Lead with the strongest "
+    "evidence and leave out the marginal.\n"
+    "Never pad to look thorough, and never cut an answer short to hit a length. "
+    "Concise does not mean vague: a short answer that names the actual thing "
+    "beats a long one that gestures at it.\n"
 )
 
 _ADVANCED = (
     "\nGo deeper. Cover each distinct theme the passages support, note where "
     "meetings disagree or where a position moved, and give dates where the "
-    "sequence matters. Depth comes from the evidence: do not add a point, "
-    "stretch a point, or repeat one in other words to make the answer longer. "
-    "If the material supports three things, three is the answer.\n"
+    "sequence matters. Where the question is about understanding something, go "
+    "further into how it works, what it relates to, and where it is and is not "
+    "useful.\n"
+    "Depth comes from the evidence: do not add a point, stretch a point, or "
+    "repeat one in other words to make the answer longer. If the material "
+    "supports three things, three is the answer.\n"
 )
 
 # Unchanged in substance from the brief that shipped before, because it was
@@ -340,7 +442,7 @@ def system_prompt(
     intent: str = "fact",
     depth: str = "express",
     exhaustive: bool = False,
-    guidance: bool = False,
+    policy: str = Knowledge.MEETING_ONLY,
 ) -> str:
     """The brief for one answer.
 
@@ -349,21 +451,26 @@ def system_prompt(
     asked for, and exhaustive is whether this deployment's caller wants it
     counted. They agree in every current path and are still not the same thing.
 
-    `guidance` is likewise the caller's decision rather than this module's. The
-    router in `app.questions` decides it from the question; the answer is that
-    the permission arrives here already made, so that the one place where an
-    answer may reach past the user's own evidence is a single boolean somebody
-    can grep for. Exactly one of the two policy blocks is always present — the
-    permissive one is an *addition* to grounding, never a replacement, and
-    leaving both out would be a prompt with no policy at all.
+    `policy` is likewise the caller's decision rather than this module's. The
+    router in `app.questions` decides it from the question; the permission
+    arrives here already made, so the place where an answer may reach past the
+    user's own evidence is one named value somebody can grep for.
+
+    **Exactly one policy block is always present.** The two permissive ones are
+    *additions* to grounding, never replacements, and they are not
+    interchangeable with each other — a procedure and an explanation permit
+    different material, and collapsing them into one "may use general knowledge"
+    flag would mean a question about how to register could be answered with what
+    conferences are for. Anything unrecognised falls to the strict block, so a
+    typo cannot widen an answer.
 
     Both modes get the same policy. Express is not a mode that answers worse: a
-    procedural question asked in Express gets the same general next steps, more
-    briefly. See `_EXPRESS` and `_ADVANCED`, which change length and breadth and
-    nothing about what may be said.
+    procedural or explanatory question asked in Express gets the same kind of
+    answer, more concisely. See `_EXPRESS` and `_ADVANCED`, which change length
+    and breadth and nothing about what may be said.
     """
     parts = [_SHARED, _ANSWER_FIRST, _GROUNDING]
-    parts.append(_GUIDANCE_ALLOWED if guidance else _MEETING_ONLY)
+    parts.append(_POLICY_BLOCK.get(policy, _MEETING_ONLY))
     parts.append(_INTENT.get(intent, _INTENT["fact"]))
     if exhaustive:
         parts.append(_ENUMERATE)
@@ -399,8 +506,19 @@ def user_prompt(question: str, passages: list[str], history: list[str] | None = 
 
 
 MEETING_ONLY = "meeting_only"
-MIXED = "meeting_plus_general_guidance"
-_GROUNDING_VALUES = frozenset({MEETING_ONLY, MIXED})
+MIXED_GUIDANCE = "meeting_plus_general_guidance"
+MIXED_BACKGROUND = "meeting_plus_general_background"
+
+#: The old name, kept so nothing importing it breaks. It means the
+#: procedural kind; there are two mixed kinds now.
+MIXED = MIXED_GUIDANCE
+
+#: Every answer that reached past the evidence, whichever way it reached.
+#: What `_cited` needs, because the citation rule is the same for both: an
+#: answer that drew on something other than the passages, and cannot say
+#: which sentence came from where, does not get the blanket fallback.
+_MIXED_VALUES = frozenset({MIXED_GUIDANCE, MIXED_BACKGROUND})
+_GROUNDING_VALUES = frozenset({MEETING_ONLY}) | _MIXED_VALUES
 
 
 @dataclass(frozen=True)
@@ -426,8 +544,13 @@ class Answer:
 
     @property
     def mixed(self) -> bool:
-        """Whether any part of this answer is general knowledge."""
-        return self.grounding == MIXED
+        """Whether any part of this answer is general knowledge.
+
+        True for both kinds — procedural steps and explanatory background.
+        Different permissions, identical citation problem: neither can be
+        pinned to a timestamp.
+        """
+        return self.grounding in _MIXED_VALUES
 
 
 _JSON_FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.IGNORECASE)

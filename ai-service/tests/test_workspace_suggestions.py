@@ -19,7 +19,12 @@ neither.
 
 from __future__ import annotations
 
-from app.suggestions import STATIC_WORKSPACE, blend, signal_questions
+from app.suggestions import (
+    STATIC_WORKSPACE,
+    SUGGESTION_POOL,
+    blend,
+    signal_questions,
+)
 
 
 # --- signals ---------------------------------------------------------------- #
@@ -71,7 +76,10 @@ def test_signals_come_before_anything_a_model_proposed():
 def test_the_model_fills_what_the_signals_left():
     out = blend([], ["A", "B", "C", "D"])
 
-    assert out == ["A", "B", "C"]
+    # Everything, in preference order — this returns a pool now, not a row. The
+    # chat shows the first three and rotates through the rest, so truncating
+    # here would be throwing away the only thing that makes the chips change.
+    assert out[:4] == ["A", "B", "C", "D"]
 
 
 def test_the_static_floor_covers_a_workspace_with_neither():
@@ -85,14 +93,35 @@ def test_the_same_question_is_never_offered_twice():
     # this one itself. Offering it twice is worse than offering two chips.
     out = blend(["What still needs to be completed?"], ["what still needs to be completed"])
 
-    assert len(out) == 3
     assert out.count("What still needs to be completed?") == 1
+    # And the near-duplicate is gone rather than sitting further down the pool,
+    # where rotation would eventually surface it as though it were new.
+    assert not any(q.lower().rstrip("?.") == "what still needs to be completed"
+                   for q in out[1:])
 
 
-def test_three_is_the_row():
-    out = blend(["a?", "b?", "c?"], ["d?", "e?"])
+def test_the_pool_is_ordered_best_first():
+    """The row of three is taken off the front, so order is the contract.
 
-    assert len(out) == 3
+    A reader who opens Home once sees the first three and never the rest, so
+    the strongest questions have to be at the front — signals, then what the
+    model proposed, then the floor.
+    """
+    out = blend(["a?", "b?"], ["c?", "d?"])
+
+    assert out[:4] == ["a?", "b?", "c?", "d?"]
+    assert out[-len(STATIC_WORKSPACE):] == list(STATIC_WORKSPACE)
+
+
+def test_the_pool_is_bounded():
+    """Deep enough to rotate through, short enough not to be a menu.
+
+    Nine is three rows. Past that the tail is questions nobody was ever going
+    to be offered, generated and stored on every workspace.
+    """
+    out = blend([f"s{i}?" for i in range(6)], [f"g{i}?" for i in range(12)])
+
+    assert len(out) == SUGGESTION_POOL == 9
 
 
 def test_every_chip_is_short_enough_to_read():

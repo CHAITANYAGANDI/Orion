@@ -3,9 +3,13 @@
 /**
  * AI Chat, full width.
  *
- * The same conversation as the panel on Home — see `useWorkspaceChat` — with
- * the room to do the things a four-hundred-pixel rail cannot: pick a past
- * thread, rename it, delete an exchange, clear the lot.
+ * The same archive as the panel on Home — see `useWorkspaceChat` — with the
+ * room to do the things a four-hundred-pixel rail cannot: pick a past thread,
+ * rename it, delete an exchange, clear the lot.
+ *
+ * Its own open thread, though. Arriving here does not resume what was being
+ * asked in the rail, and asking here does not appear there; both conversations
+ * are in this picker if you want them.
  *
  * Laid out as a document rather than as a chat client. There is no avatar, no
  * bubble tail and no left-and-right alternation, because a grounded answer is
@@ -25,14 +29,20 @@ import { SourceList } from "@/components/scoped-chat";
 import { ChatHistory } from "@/components/chat-history";
 import { ChatDock } from "@/components/chat/chat-shell";
 import { WORKSPACE_PROMPTS, toPrompts } from "@/lib/chat-prompts";
+import { useRotatingPrompts } from "@/lib/use-rotating-prompts";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function AskPage() {
-  const chat = useWorkspaceChat();
+  const chat = useWorkspaceChat("ask");
   // The thread, not the document — and only while the reader is at the bottom
   // of it. See lib/use-thread-scroll.
   const threadRef = useThreadScroll([chat.messages, chat.pending]);
+  const prompts = useRotatingPrompts(
+    "ask",
+    toPrompts(chat.suggestions, WORKSPACE_PROMPTS),
+    chat.conversationId,
+  );
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col">
@@ -105,7 +115,7 @@ export default function AskPage() {
       <div className="shrink-0 border-t pt-3 lg:px-2">
         <div className="mx-auto max-w-3xl">
           <ChatDock
-            prompts={toPrompts(chat.suggestions, WORKSPACE_PROMPTS)}
+            prompts={prompts}
             showPrompts={chat.showPrompts}
             busy={chat.asking}
             onSend={(q) => void chat.send(q)}

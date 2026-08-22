@@ -12,14 +12,12 @@
  * persisted, so a page load starts empty and every surface offers a fresh
  * thread.
  *
- * **Leaving the page gives you a new one too.** Opening Account Settings and
- * coming back to Home used to return you to the conversation you had before,
- * because the thread survived the navigation. That was deliberate and it was
- * wrong: at the time, the home rail's expand button *navigated* to /ask, so
- * losing the thread there would have meant the expand control abandoning a
- * half-typed question. Expanding is done in place now — see
- * components/side-pane.tsx — and nothing else needs a thread to outlive a
- * navigation. So a scope can ask to be forgotten when its surface leaves.
+ * **A thread belongs to one surface.** Home and the full AI Chat page are keyed
+ * separately (`workspace:home`, `workspace:ask`) even though they read the same
+ * meetings through the same endpoints, because they are two screens and a
+ * question asked on one has no business appearing on the other. They briefly
+ * shared a key, from when Home's expand button navigated to /ask and the two
+ * had to be one conversation; expanding widens the rail in place now.
  *
  * A meeting's chat deliberately does not. Coming back to a meeting is coming
  * back to one document, and what you were asking about it is part of reading
@@ -97,16 +95,22 @@ export function useActiveChat(
     /**
      * Forget the thread when this surface leaves the page.
      *
-     * The workspace chat asks for it, so that going to Settings and coming
-     * back to Home is a clean sheet rather than yesterday's questions. A
-     * meeting's chat does not — see the note at the top of the file.
+     * **Nothing asks for this today**, and the reason it is still here is that
+     * it is one word away from being wanted again.
      *
-     * Deliberately not reference-counted, unlike the side pane's occupancy.
-     * If two surfaces of the same chat ever overlap for a frame during a
-     * navigation, counting would *preserve* the thread across exactly the
-     * move this exists to reset — going from the home rail to the full chat
-     * page. Clearing on any unmount errs towards the new chat, which is the
-     * behaviour being asked for either way.
+     * The workspace chat used to. Home and the full AI Chat page shared a
+     * single scope key, so the only way to stop one adopting the other's
+     * conversation was for the thread to be forgotten whenever either of them
+     * unmounted. That cost more than it bought: it also meant a trip to a
+     * meeting and back lost what you had been asking on Home. The two surfaces
+     * are keyed apart now — `workspace:home` and `workspace:ask` — which
+     * separates them precisely rather than by clearing everything.
+     *
+     * Turn it back on for a surface that genuinely should open blank every
+     * time. Note the deliberate lack of reference counting: if two surfaces of
+     * one scope overlap for a frame during a navigation, counting would
+     * *preserve* the thread across exactly the move this exists to reset.
+     * Clearing on any unmount errs towards the new chat.
      */
     resetOnLeave?: boolean;
   },

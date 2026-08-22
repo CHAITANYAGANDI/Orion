@@ -18,10 +18,11 @@ from app.answering import Answer
 from app.config import Settings
 from app.providers.ports import EmbeddingPort, LlmPort
 from app.questions import (
-    allows_guidance,
+    Knowledge,
     answerable_from_records,
     classify,
     could_name_a_meeting,
+    knowledge_policy,
     named_person,
     names_meeting,
     spans_meetings,
@@ -316,9 +317,9 @@ class RagService:
         if not rows:
             return ("I don't have an indexed transcript for this meeting yet.", [])
 
-        guidance = allows_guidance(intent)
+        policy = knowledge_policy(intent)
         report = RetrievalReport(
-            mode="advanced" if deep else "express", intent=intent, guidance=guidance
+            mode="advanced" if deep else "express", intent=intent, policy=policy
         )
         # A question naming a speaker should be answered from what that speaker
         # said. The names are already in the transcript text, so this is a score
@@ -360,12 +361,11 @@ class RagService:
                 intent=intent,
                 depth="advanced" if deep else "express",
                 history=history,
-                # "How can I register?" over a speech that says only "register
-                # now" is not answerable from the speech, and the reply that
-                # says so and stops is correct and useless. Permitted for
-                # procedural questions only, and never a licence to invent — see
-                # `app.questions.allows_guidance`.
-                guidance=guidance,
+                # Where this answer is allowed to get its material. One of
+                # three values, decided by the intent and never by the model —
+                # see `app.questions.knowledge_policy`. Neither exception
+                # relaxes grounding.
+                policy=policy,
             )
         )
         cited = _cited(list(kept), answer)
@@ -755,9 +755,9 @@ class RagService:
 
         deep = mode == "advanced"
         intent = classify(question)
-        guidance = allows_guidance(intent)
+        policy = knowledge_policy(intent)
         report = RetrievalReport(
-            mode="advanced" if deep else "express", intent=intent, guidance=guidance
+            mode="advanced" if deep else "express", intent=intent, policy=policy
         )
         q_emb = (await self._embedder.embed([question]))[0]
         top_k = (
@@ -973,7 +973,7 @@ class RagService:
                 intent=intent,
                 depth="advanced" if deep else "express",
                 history=history,
-                guidance=guidance,
+                policy=policy,
             )
         )
         cited = _cited(origins, answer)

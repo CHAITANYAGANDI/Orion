@@ -160,7 +160,13 @@ def workspace_material(
 # deterministically, and the model fills what is left with something broad
 # enough to be worth asking of an archive.
 
-SUGGESTION_SLOTS = 3
+# How many questions to hand back. Not how many are shown: the chat shows a
+# row of three and rotates through this pool, so a reader who opens Home
+# twice is not offered the same three chips twice. Generating the pool costs
+# nothing extra — it is the same single call with a larger number in it —
+# whereas regenerating three fresh ones per visit would be a model call every
+# time somebody looked at the page.
+SUGGESTION_POOL = 9
 
 # The floor, used when a workspace has signals for none of the slots. Broad on
 # purpose: these are the questions that are worth asking of any archive, which
@@ -208,14 +214,19 @@ def signal_questions(
 
 
 def blend(signals: list[str], generated: list[str] | None) -> list[str]:
-    """The three chips Home shows.
+    """The pool Home draws its chips from, best first.
 
-    Signals first, because they are grounded in a fact about the workspace
-    rather than in a model's reading of twelve summaries. Generated ones fill
-    what is left, the static floor fills what is still left, and the whole thing
-    is deduplicated case-insensitively — the model, asked for workspace-level
-    questions, quite reasonably proposes "What still needs to be completed?"
-    itself, and offering it twice is worse than offering two chips.
+    Signals lead, because they are grounded in a fact about the workspace rather
+    than in a model's reading of twelve summaries. Generated ones follow, the
+    static floor is last, and the whole thing is deduplicated case-insensitively
+    — the model, asked for workspace-level questions, quite reasonably proposes
+    "What still needs to be completed?" itself, and offering it twice is worse
+    than offering two chips.
+
+    Order is the contract. The chat shows the first three and then rotates, so
+    "best first" means the first thing a reader ever sees is the strongest
+    question available, and the weaker end of the pool is only reached by
+    somebody who has already been offered the better ones.
     """
     out: list[str] = []
     seen: set[str] = set()
@@ -226,6 +237,6 @@ def blend(signals: list[str], generated: list[str] | None) -> list[str]:
             continue
         seen.add(key)
         out.append(text)
-        if len(out) == SUGGESTION_SLOTS:
+        if len(out) == SUGGESTION_POOL:
             break
     return out
