@@ -1140,12 +1140,24 @@ function TemplatePicker({ meetingId, current }: { meetingId: string; current: st
     <div className="flex items-center gap-2 pb-2 no-print">
       <span className="text-sm text-muted-foreground">Template:</span>
       <Select value={current} onValueChange={onChange} disabled={rewriting}>
-        <SelectTrigger className="h-8 w-[170px]">
+        {/* The spinner sits beside the word, not in a wrapper around it.
+            SelectTrigger styles its direct `span` with `line-clamp-1`, which is
+            `display: -webkit-box` with a vertical box orientation — and as a
+            child selector it outranks a `flex` class on that same span. So a
+            span holding an icon and a word laid them out *down* the trigger:
+            the spinner above "Rewriting...", both spilling out of a row eight
+            units tall. The trigger is already a flex row that centres what it
+            is handed, which is all this ever needed. Same shape as the folder
+            icon in components/project-picker. */}
+        <SelectTrigger className="h-8 w-[170px] gap-2">
           {rewriting ? (
-            <span className="flex items-center gap-2 text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Rewriting...
-            </span>
+            <>
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+              {/* mr-auto because the trigger is justify-between: without it the
+                  three children — spinner, word, chevron — would space
+                  themselves out evenly across the whole width. */}
+              <span className="mr-auto text-muted-foreground">Rewriting...</span>
+            </>
           ) : (
             <SelectValue />
           )}
