@@ -22,7 +22,7 @@
  * other's questions for no reason anybody could see.
  *
  * So the thread is keyed per surface. What is still shared is the *archive*:
- * one conversation list, one set of endpoints, one Clear all. A thread started
+ * one conversation list, one set of endpoints. A thread started
  * on Home is still in /ask's history picker and can be opened there
  * deliberately — it just is not adopted by accident.
  *
@@ -171,6 +171,14 @@ export function useWorkspaceChat(surface: ChatSurface) {
     }
   }
 
+  /**
+   * Delete every conversation in the workspace archive.
+   *
+   * Nothing offers this at the moment: the control was in /ask's header, one
+   * click away from a picker people use to switch threads, and it took the
+   * Home rail's conversations with it. Kept because the endpoint is real and
+   * a Settings-shaped home for it is a better one than a chat header.
+   */
   async function clearAll() {
     try {
       await clear().unwrap();

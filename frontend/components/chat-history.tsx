@@ -73,6 +73,16 @@ export interface ChatHistoryProps {
    * the other is a statement about where you are.
    */
   atNewChat?: boolean;
+  /**
+   * Put the icons against the far edge, rather than beside the title.
+   *
+   * For the full-width page. The rails stretch the trigger to fill the row —
+   * right at four hundred pixels, where the header is the picker and nothing
+   * else — and wrong at the width of a monitor, which turns a two-word label
+   * into a hover target that lights up the whole top of the screen on the way
+   * to the buttons.
+   */
+  spread?: boolean;
 }
 
 export function ChatHistory({
@@ -87,6 +97,7 @@ export function ChatHistory({
   expanded,
   expandDisabled,
   atNewChat,
+  spread,
 }: ChatHistoryProps) {
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<string | null>(null);
@@ -148,7 +159,10 @@ export function ChatHistory({
           // leaving a screen reader with two controls called the same thing and
           // no way to tell which opens the history.
           aria-label="Previous chat history"
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm font-medium transition-colors hover:bg-accent"
+          className={cn(
+            "flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm font-medium transition-colors hover:bg-accent",
+            spread ? "max-w-sm" : "flex-1",
+          )}
         >
           <Sparkles className="h-4 w-4 shrink-0 text-primary" />
           <span className="truncate">{label}</span>
@@ -160,53 +174,57 @@ export function ChatHistory({
           />
         </button>
 
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 shrink-0"
-          onClick={onNew}
-          disabled={busy || atNewChat}
-          title={atNewChat ? "You're already on a new chat" : "New chat"}
-          aria-label="New chat"
-        >
-          <Plus className="h-4 w-4" />
-        </Button>
-
-        {(onExpand || expandDisabled) && (
+        {/* One group, so a spread header has two things to push apart rather
+            than three to space out evenly. */}
+        <div className={cn("flex items-center gap-1", spread && "ml-auto")}>
           <Button
             type="button"
             variant="ghost"
             size="icon"
             className="h-8 w-8 shrink-0"
-            onClick={onExpand}
-            disabled={expandDisabled}
-            aria-pressed={expandDisabled ? undefined : expanded}
-            // Named for what it will do, not for what it is. "Expand the chat"
-            // on a chat that is already expanded is a control that lies about
-            // its own effect.
-            aria-label={
-              expandDisabled
-                ? "This is already the full chat"
-                : expanded
-                  ? "Shrink the chat back to the panel"
-                  : "Expand the chat"
-            }
-            title={
-              expandDisabled
-                ? "This is already the full chat"
-                : expanded
-                  ? "Shrink the chat back to the panel"
-                  : "Expand the chat"
-            }
+            onClick={onNew}
+            disabled={busy || atNewChat}
+            title={atNewChat ? "You're already on a new chat" : "New chat"}
+            aria-label="New chat"
           >
-            {expanded || expandDisabled ? (
-              <Minimize2 className="h-4 w-4" />
-            ) : (
-              <Maximize2 className="h-4 w-4" />
-            )}
+            <Plus className="h-4 w-4" />
           </Button>
-        )}
+
+          {(onExpand || expandDisabled) && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0"
+              onClick={onExpand}
+              disabled={expandDisabled}
+              aria-pressed={expandDisabled ? undefined : expanded}
+              // Named for what it will do, not for what it is. "Expand the chat"
+              // on a chat that is already expanded is a control that lies about
+              // its own effect.
+              aria-label={
+                expandDisabled
+                  ? "This is already the full chat"
+                  : expanded
+                    ? "Shrink the chat back to the panel"
+                    : "Expand the chat"
+              }
+              title={
+                expandDisabled
+                  ? "This is already the full chat"
+                  : expanded
+                    ? "Shrink the chat back to the panel"
+                    : "Expand the chat"
+              }
+            >
+              {expanded || expandDisabled ? (
+                <Minimize2 className="h-4 w-4" />
+              ) : (
+                <Maximize2 className="h-4 w-4" />
+              )}
+            </Button>
+          )}
+        </div>
       </div>
 
       {open && (

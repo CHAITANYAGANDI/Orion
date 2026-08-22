@@ -56,6 +56,19 @@ beforeEach(() => {
 });
 
 describe("ChatHistory", () => {
+  it("does not stretch the trigger across a full-width header", () => {
+    picker({ spread: true, onExpand: vi.fn() });
+
+    // In a rail the trigger fills the row, so the whole header opens the
+    // history and there is nothing else up there to hit. At the width of a
+    // monitor that same rule makes a two-word label a hover target that lights
+    // up on the way to the buttons at the other end.
+    const trigger = screen.getByRole("button", { name: /previous chat history/i });
+    expect(trigger).not.toHaveClass("flex-1");
+    expect(screen.getByRole("button", { name: /^new chat$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /expand the chat/i })).toBeInTheDocument();
+  });
+
   it("starts closed", () => {
     picker();
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();

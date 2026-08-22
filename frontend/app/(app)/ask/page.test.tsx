@@ -113,6 +113,25 @@ function lastQueryArg() {
   return chatQuery.mock.calls.at(-1)?.[0];
 }
 
+describe("AskPage header", () => {
+  it("offers no Clear all", () => {
+    render(<AskPage />);
+
+    // It deleted every conversation in the workspace archive — this page's and
+    // the Home rail's, which this page never lists — from a header whose other
+    // controls switch threads and start one. Deleting a thread at a time from
+    // the picker, or an exchange from the message it belongs to, both survive.
+    expect(screen.queryByRole("button", { name: /clear all/i })).not.toBeInTheDocument();
+  });
+
+  it("still gets you to another thread and to a new one", () => {
+    render(<AskPage />);
+
+    expect(screen.getByRole("button", { name: /previous chat history/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^new chat$/i })).toBeInTheDocument();
+  });
+});
+
 describe("AskPage conversation state", () => {
   it("opens a new chat rather than resuming the last one", async () => {
     render(<AskPage />);
