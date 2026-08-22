@@ -12,13 +12,41 @@
  * to paste somewhere else, and selecting a bubble by dragging also picks up the
  * citation chips. Delete removes the whole exchange, not the single turn — see
  * `ChatService.deleteExchange` for why half of one is worse than none.
+ *
+ * ## The two sides are not the same object
+ *
+ * They were, and it cost the answers. A question is short, belongs to the
+ * person who typed it, and reads as an aside: right-aligned, in a tinted
+ * bubble, capped at 85% so the alignment is visible. An answer is the thing
+ * somebody came for — often a hundred words with a heading and a numbered
+ * procedure in it — and putting that in the same container gives it a grey slab
+ * the height of the rail, with the reading measure squeezed by a bubble that
+ * exists to say "not yours".
+ *
+ * So an answer is set as a document: left-aligned, full width, no fill. The
+ * distinction the eye needs is already carried by the alignment and the tint on
+ * the other side. Its text goes through `Markdown`; the question stays plain,
+ * for the reasons in that file.
  */
 
 import * as React from "react";
 import { toast } from "sonner";
 import { Copy, Check, Trash2 } from "lucide-react";
+import { Markdown } from "@/components/markdown";
 import type { ChatMessage as Message } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+/**
+ * How a prompt looks.
+ *
+ * Exported because the pending turn draws the same bubble before the message
+ * exists — see `components/chat/pending-turn`. Two copies of this string is two
+ * chances for the question to change shape at the moment it is persisted, which
+ * would read as the app re-rendering somebody's question rather than keeping
+ * it.
+ */
+export const PROMPT_BUBBLE =
+  "rounded-2xl bg-primary px-3 py-2 text-sm text-primary-foreground";
 
 export function ChatMessageBubble({
   message,
@@ -45,6 +73,9 @@ export function ChatMessageBubble({
 
   async function copy() {
     try {
+      // The markdown source, not the rendered text. Somebody copying a
+      // procedure is usually pasting it somewhere that will render it too, and
+      // a flattened version arrives as one paragraph with the numbers in it.
       await navigator.clipboard.writeText(message.content);
       setCopied(true);
     } catch {
@@ -54,14 +85,23 @@ export function ChatMessageBubble({
 
   return (
     <div className={cn("group/msg flex", isUser ? "justify-end" : "justify-start")}>
-      <div className={cn("flex max-w-[85%] flex-col", isUser ? "items-end" : "items-start")}>
+      <div
+        className={cn(
+          "flex min-w-0 flex-col",
+          isUser ? "max-w-[85%] items-end" : "w-full items-start",
+        )}
+      >
         <div
           className={cn(
-            "rounded-lg px-3 py-2 text-sm",
-            isUser ? "bg-primary text-primary-foreground" : "bg-muted",
+            "min-w-0 text-sm",
+            isUser ? PROMPT_BUBBLE : "w-full",
           )}
         >
-          <p className="whitespace-pre-wrap">{message.content}</p>
+          {isUser ? (
+            <p className="whitespace-pre-wrap">{message.content}</p>
+          ) : (
+            <Markdown>{message.content}</Markdown>
+          )}
           {children}
         </div>
 

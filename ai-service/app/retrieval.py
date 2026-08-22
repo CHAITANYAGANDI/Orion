@@ -142,6 +142,13 @@ class RetrievalReport:
 
     mode: str = "express"
     intent: str = "fact"
+    # The answer policy, which is the other half of what makes two answers to
+    # the same question differ. `guidance` is what we permitted; `grounding` is
+    # what the model says it did with the permission. Both are labels, not
+    # content: knowing that a howto question produced a mixed answer says
+    # nothing about which meeting or whose.
+    guidance: bool = False
+    grounding: str = "meeting_only"
     considered: int = 0
     kept: int = 0
     meetings: int = 0
@@ -159,6 +166,8 @@ class RetrievalReport:
         return {
             "mode": self.mode,
             "intent": self.intent,
+            "guidanceAllowed": self.guidance,
+            "grounding": self.grounding,
             "considered": self.considered,
             "kept": self.kept,
             "used": self.used,

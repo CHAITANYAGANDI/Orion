@@ -12,6 +12,8 @@ paid more for.
 
 What it prints is deliberately narrow:
 
+    intent / guidance     how the question was routed, and what it may draw on
+    grounding             whether the answer stayed inside the passages
     passages considered   what the ANN scan returned before filtering
     passages kept         what survived relevance, dedupe and diversity
     passages used         what the model said it actually drew on
@@ -35,7 +37,7 @@ import time
 
 from app.config import get_settings
 from app.providers.factory import AiProviderFactory
-from app.questions import classify
+from app.questions import allows_guidance, classify
 from app.rag import RagService
 from app.retrieval import RetrievalReport
 
@@ -73,8 +75,13 @@ async def run(user_id: str, question: str, meeting_id: str | None) -> None:
     logger.addHandler(capture)
     logger.setLevel(logging.DEBUG)
 
+    intent = classify(question)
     print(f"question: {question}")
-    print(f"intent:   {classify(question)}   (routes retrieval and answer shape)")
+    print(f"intent:   {intent}   (routes retrieval and answer shape)")
+    print(
+        f"guidance: {allows_guidance(intent)}   "
+        "(may the answer add labelled general knowledge)"
+    )
 
     for mode in ("express", "advanced"):
         capture.last = None
@@ -87,6 +94,7 @@ async def run(user_id: str, question: str, meeting_id: str | None) -> None:
 
         report = capture.last or RetrievalReport().as_dict()
         print(f"\n{mode.upper()}\n{'-' * len(mode)}")
+        print(f"  grounding reported   : {report.get('grounding')}")
         print(f"  passages considered  : {report.get('considered')}")
         print(f"  passages kept        : {report.get('kept')}")
         print(f"  passages used        : {report.get('used')}")

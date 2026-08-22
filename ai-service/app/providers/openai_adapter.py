@@ -674,11 +674,13 @@ class OpenAiLlmAdapter(LlmPort):
         intent: str = "fact",
         depth: str = "express",
         history: list[str] | None = None,
+        guidance: bool = False,
     ) -> Answer:
         async def _op() -> Answer:
             data = await self._chat_json(
                 answering.system_prompt(
-                    intent=intent, depth=depth, exhaustive=exhaustive
+                    intent=intent, depth=depth, exhaustive=exhaustive,
+                    guidance=guidance,
                 ),
                 answering.user_prompt(question, context, history),
             )

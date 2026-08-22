@@ -15,10 +15,12 @@
  */
 
 import * as React from "react";
-import { Loader2, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { useWorkspaceChat } from "@/lib/use-workspace-chat";
 import { ChatComposer } from "@/components/chat-composer";
 import { ChatMessageBubble } from "@/components/chat-message";
+import { PendingTurn } from "@/components/chat/pending-turn";
+import { useThreadScroll } from "@/lib/use-thread-scroll";
 import { SourceList } from "@/components/scoped-chat";
 import { ChatHistory } from "@/components/chat-history";
 import { ChatDock } from "@/components/chat/chat-shell";
@@ -28,16 +30,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export default function AskPage() {
   const chat = useWorkspaceChat();
-  const threadRef = React.useRef<HTMLDivElement | null>(null);
-
-  // The thread, not the document. `scrollIntoView` walks every scrollable
-  // ancestor, which on a page whose composer sits outside the scroll region is
-  // how the composer ends up scrolled past.
-  React.useEffect(() => {
-    const thread = threadRef.current;
-    if (!thread) return;
-    thread.scrollTo({ top: thread.scrollHeight, behavior: "smooth" });
-  }, [chat.messages, chat.asking]);
+  // The thread, not the document — and only while the reader is at the bottom
+  // of it. See lib/use-thread-scroll.
+  const threadRef = useThreadScroll([chat.messages, chat.pending]);
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col">
@@ -103,12 +98,7 @@ export default function AskPage() {
               </ChatMessageBubble>
             ))
           )}
-          {chat.asking && (
-            <p className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Searching across your meetings…
-            </p>
-          )}
+          {chat.pending && <PendingTurn turn={chat.pending} onRetry={chat.retry} />}
         </div>
       </div>
 
@@ -116,7 +106,7 @@ export default function AskPage() {
         <div className="mx-auto max-w-3xl">
           <ChatDock
             prompts={toPrompts(chat.suggestions, WORKSPACE_PROMPTS)}
-            showPrompts={chat.isNew}
+            showPrompts={chat.showPrompts}
             busy={chat.asking}
             onSend={(q) => void chat.send(q)}
             onCompose={() => undefined}

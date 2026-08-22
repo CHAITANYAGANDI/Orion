@@ -24,10 +24,11 @@
  */
 
 import * as React from "react";
-import { Loader2 } from "lucide-react";
 import { useWorkspaceChat } from "@/lib/use-workspace-chat";
 import { ChatComposer } from "@/components/chat-composer";
 import { ChatMessageBubble } from "@/components/chat-message";
+import { PendingTurn } from "@/components/chat/pending-turn";
+import { useThreadScroll } from "@/lib/use-thread-scroll";
 import { SourceList } from "@/components/scoped-chat";
 import { ChatHistory } from "@/components/chat-history";
 import { ChatDock, ChatRail } from "@/components/chat/chat-shell";
@@ -37,18 +38,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export function HomeChatPanel() {
   const chat = useWorkspaceChat();
-  const threadRef = React.useRef<HTMLDivElement | null>(null);
   // Only for the maximise control's own state. The pane itself is the shell's.
   const pane = useSidePane();
-
-  // The thread, and only the thread. `scrollIntoView` walks every scrollable
-  // ancestor including the document, which is how a chat panel came to drag
-  // the whole page down as its history loaded.
-  React.useEffect(() => {
-    const thread = threadRef.current;
-    if (!thread) return;
-    thread.scrollTo({ top: thread.scrollHeight, behavior: "smooth" });
-  }, [chat.messages, chat.asking]);
+  // Follows the newest turn, and stops following if the reader scrolls up.
+  const threadRef = useThreadScroll([chat.messages, chat.pending]);
 
   return (
     <ChatRail
@@ -75,7 +68,7 @@ export function HomeChatPanel() {
       dock={
         <ChatDock
           prompts={toPrompts(chat.suggestions, WORKSPACE_PROMPTS)}
-          showPrompts={chat.isNew}
+          showPrompts={chat.showPrompts}
           busy={chat.asking}
           onSend={(q) => void chat.send(q)}
           onCompose={() => undefined}
@@ -108,12 +101,7 @@ export function HomeChatPanel() {
             </ChatMessageBubble>
           ))
         )}
-        {chat.asking && (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Searching across your meetings…
-          </p>
-        )}
+        {chat.pending && <PendingTurn turn={chat.pending} onRetry={chat.retry} />}
       </>
     </ChatRail>
   );

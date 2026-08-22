@@ -338,6 +338,7 @@ class MockLlmAdapter(LlmPort):
         intent: str = "fact",
         depth: str = "express",
         history: list[str] | None = None,
+        guidance: bool = False,
     ) -> Answer:
         # No real generation in mock mode — compose a grounded-looking answer
         # from the retrieved passages so the RAG UX is demoable without a key.

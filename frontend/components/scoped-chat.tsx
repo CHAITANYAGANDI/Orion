@@ -218,7 +218,7 @@ export function SourceList({ citations }: { citations?: Citation[] }) {
               key={i}
               href={`/meetings/${meetingId}?t=${s.start}`}
               title={s.text}
-              className="inline-flex items-center gap-1 rounded-full bg-background/60 px-2 py-0.5 text-[11px] text-foreground hover:bg-background"
+              className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/60 px-2 py-0.5 text-[11px] text-foreground transition-colors hover:bg-muted"
             >
               <Quote className="h-3 w-3" /> {timecode(s.start)}
             </Link>

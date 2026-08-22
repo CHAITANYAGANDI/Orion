@@ -122,6 +122,9 @@ import { ChatHistory } from "@/components/chat-history";
 import { ChatComposer } from "@/components/chat-composer";
 import { ChatDock, ChatRail } from "@/components/chat/chat-shell";
 import { ChatMessageBubble } from "@/components/chat-message";
+import { PendingTurn } from "@/components/chat/pending-turn";
+import { usePendingTurn } from "@/lib/pending-turn";
+import { useThreadScroll } from "@/lib/use-thread-scroll";
 import { MEETING_PROMPTS, toPrompts } from "@/lib/chat-prompts";
 import { SelectionMenu, type SelectionAction } from "@/components/selection-menu";
 import { MomentsPanel } from "@/components/moments-panel";
@@ -1510,6 +1513,9 @@ function ChatPanel({
   );
   const { data: conversations } = useGetMeetingConversationsQuery(meetingId);
   const [ask, { isLoading: asking }] = useAskChatMutation();
+  // The question, on screen from the click rather than from the refetch that
+  // follows the answer. See lib/pending-turn.
+  const pending = usePendingTurn(messages);
   const [newConversation, { isLoading: starting }] = useCreateMeetingConversationMutation();
   const [rename] = useRenameConversationMutation();
   const [removeConversation] = useDeleteConversationMutation();
@@ -1519,24 +1525,9 @@ function ChatPanel({
   // knows when that happened.
   const [composeText, setComposeText] =
     React.useState<{ text: string; nonce: number } | null>(null);
-  const threadRef = React.useRef<HTMLDivElement | null>(null);
-
-  /**
-   * Keep the newest exchange in view — inside the thread, and nowhere else.
-   *
-   * This used to call `scrollIntoView` on a sentinel at the end of the list,
-   * which scrolls *every* scrollable ancestor, the document included. So
-   * opening a meeting scrolled the whole page down to the bottom of the chat
-   * panel the moment its history arrived, and the summary — the thing somebody
-   * opened the meeting to read — started off screen.
-   *
-   * Setting `scrollTop` on the thread's own container cannot reach the window.
-   */
-  React.useEffect(() => {
-    const thread = threadRef.current;
-    if (!thread) return;
-    thread.scrollTo({ top: thread.scrollHeight, behavior: "smooth" });
-  }, [messages, asking]);
+  // Follows the newest turn, inside the thread and nowhere else, and stops
+  // following the moment the reader scrolls up. See lib/use-thread-scroll.
+  const threadRef = useThreadScroll([messages, pending.turn]);
 
   /**
    * Recover from a conversation that is no longer there — see the same guard on
@@ -1571,6 +1562,9 @@ function ChatPanel({
   async function submit(text: string) {
     const question = text.trim();
     if (!question) return;
+    // Before the first await, so the question appears in the same commit that
+    // clears the composer rather than a round trip later.
+    pending.begin(question);
     try {
       // Its own thread when none is named, rather than being appended to the
       // last one. The server's rule for an unnamed ask is "continue the most
@@ -1585,7 +1579,10 @@ function ChatPanel({
       }).unwrap();
       setConversationId(answer.conversationId);
     } catch {
-      toast.error("Couldn't get an answer.");
+      // Kept on screen with the failure under it and a Retry beside it. A toast
+      // and an empty rail means retyping the question, which the composer has
+      // already cleared.
+      pending.fail();
     }
   }
   submitRef.current = submit;
@@ -1594,6 +1591,7 @@ function ChatPanel({
     try {
       const created = await newConversation(meetingId).unwrap();
       setConversationId(created.id);
+      pending.clear();
       // Clears the box: a half-typed question belongs to the thread it was
       // being asked in.
       setComposeText({ text: "", nonce: Date.now() });
@@ -1634,7 +1632,10 @@ function ChatPanel({
       dock={
         <ChatDock
           prompts={toPrompts(suggestions, MEETING_PROMPTS)}
-          showPrompts={!isLoading && (messages?.length ?? 0) === 0}
+          // An empty thread only. A thread with a question in flight is not
+          // one, and three disabled pills across the rail put chrome where the
+          // answer is about to be.
+          showPrompts={!isLoading && (messages?.length ?? 0) === 0 && !pending.turn}
           busy={asking}
           onSend={(prompt) => void submit(prompt)}
           onCompose={(prefix) => setComposeText({ text: prefix, nonce: Date.now() })}
@@ -1679,7 +1680,7 @@ function ChatPanel({
                           key={i}
                           onClick={() => onCite(c.start as number)}
                           title={c.text}
-                          className="inline-flex items-center gap-1 rounded-full bg-background/60 px-2 py-0.5 text-[11px] text-foreground hover:bg-background"
+                          className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/60 px-2 py-0.5 text-[11px] text-foreground transition-colors hover:bg-muted"
                         >
                           <Quote className="h-3 w-3" /> {timecode(c.start as number)}
                         </button>
@@ -1695,12 +1696,11 @@ function ChatPanel({
             // opening with a wall of chips where the first answer will appear.
             null
           )}
-          {asking && (
-            <div className="flex justify-start">
-              <div className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
-                <Loader2 className="inline h-4 w-4 animate-spin" /> Searching the transcript…
-              </div>
-            </div>
+          {pending.turn && (
+            <PendingTurn
+              turn={pending.turn}
+              onRetry={() => void submit(pending.turn!.question)}
+            />
           )}
       </>
     </ChatRail>

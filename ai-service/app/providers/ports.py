@@ -117,8 +117,9 @@ class LlmPort(ABC):
         intent: str = "fact",
         depth: str = "express",
         history: list[str] | None = None,
+        guidance: bool = False,
     ) -> Answer:
-        """Answer a question grounded ONLY in the provided context passages.
+        """Answer a question about the user's meetings from the given passages.
 
         Returns prose *and* the passage numbers it relied on. Citations used to
         be every passage retrieval returned, which asserts the model read all of
@@ -136,6 +137,15 @@ class LlmPort(ABC):
         true. `history` is the user's own earlier questions in this thread, for
         resolving "those" and "it" — never previous answers, which would let one
         loose claim become evidence for the next.
+
+        `guidance` permits clearly-labelled general knowledge *alongside* the
+        evidence — the ordinary steps for registering for an event, what a
+        follow-up email conventionally contains. It never relaxes grounding: no
+        claim about the meetings, and no specific external fact (a URL, a price,
+        a date), may come from anywhere but the passages either way. It is off
+        by default, and `app.questions.allows_guidance` decides when it is not:
+        a factual question over a transcript with no price must answer "the
+        meeting doesn't state a price", not a typical range.
 
         A caller may pass a plain string back from an older implementation;
         `app.answering.parse` normalises it.

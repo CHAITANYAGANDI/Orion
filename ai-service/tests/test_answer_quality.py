@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import asyncio
 
-from app import answering
+from app import answering, questions
 from app.answering import Answer
 from app.rag import RagService
 from tests.conftest import rag_settings
@@ -371,13 +371,71 @@ def test_the_brief_forbids_asking_the_reader_to_do_the_work():
 
 
 def test_the_brief_keeps_every_grounding_rule():
-    """Writing quality is not bought by loosening this."""
+    """Writing quality is not bought by loosening this.
+
+    The wording moved when general guidance was introduced — "use only the
+    passages" is no longer the whole truth once a procedural answer may add
+    general steps — but it moved in the strict direction: the rule now names
+    the claims it binds ("about these meetings"), and covers prices and links
+    as well as facts, names and dates.
+    """
     prompt = answering.system_prompt(intent="summary", depth="advanced")
 
-    assert "Use only the passages" in prompt
+    assert "Every claim about these meetings comes from the passages" in prompt
     assert "Never invent a fact" in prompt
+    assert "a price, a link" in prompt
     assert "DONE is done" in prompt
     assert "the later dated one holds" in prompt
+    # And it holds for every intent, including the two that may supplement.
+    for intent in questions.INTENTS:
+        brief = answering.system_prompt(
+            intent=intent, guidance=questions.allows_guidance(intent)
+        )
+        assert "Every claim about these meetings comes from the passages" in brief
+
+
+def test_an_intent_says_what_shape_the_answer_is_and_never_how_long():
+    """The bug this guards is the commonest question in the product.
+
+    `fact` used to open "This is a lookup. One or two sentences unless the
+    answer genuinely has parts". That caps the answer before anyone has looked
+    at the evidence, and it is specific where "Go deeper" is vague, so it won
+    in Advanced too:
+
+        Q. "What is the Tech in Asia Conference 2025?"
+        A. one sentence, from a meeting whose whole subject is that conference.
+
+    Length belongs to the evidence and the mode. An intent that states one is
+    reaching into the wrong half of the brief.
+    """
+    # `inventory` has no entry here: it is briefed by `_ENUMERATE` instead, so
+    # both are checked rather than assuming `INTENTS` and `_INTENT` line up.
+    briefs = {**answering._INTENT, "inventory": answering._ENUMERATE}
+    assert set(briefs) == set(questions.INTENTS)
+    for intent, brief in briefs.items():
+        assert "one or two sentences" not in brief.lower(), intent
+        assert "a sentence or two" not in brief.lower(), intent
+
+    fact = answering._INTENT["fact"]
+    assert "Let the evidence set the length" in fact
+    # Both directions, because the fix is not "make answers longer". A meeting
+    # that records one value still answers in one sentence.
+    assert "one sentence is the whole answer" in fact
+    assert "is not an answer to it, it is a summary of one" in fact
+
+
+def test_depth_reaches_the_commonest_question():
+    """Express and Advanced returned the identical sentence for "what is X?".
+
+    A depth control that cannot change the answer is not a depth control. With
+    the cap gone, the difference is carried by the blocks that own length.
+    """
+    express = answering.system_prompt(intent="fact", depth="express")
+    advanced = answering.system_prompt(intent="fact", depth="advanced")
+
+    assert express != advanced
+    assert "Be brief" in express and "Be brief" not in advanced
+    assert "Go deeper" in advanced and "Go deeper" not in express
 
 
 def test_express_and_advanced_are_briefed_differently():

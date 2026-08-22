@@ -18,6 +18,8 @@ from app.answering import Answer
 from app.config import Settings
 from app.providers.ports import EmbeddingPort, LlmPort
 from app.questions import (
+    allows_guidance,
+    answerable_from_records,
     classify,
     could_name_a_meeting,
     named_person,
@@ -67,7 +69,7 @@ def _as_answer(result) -> Answer:
     return Answer(text=str(result))
 
 
-def _cited(origins: list, used: tuple[int, ...]) -> list[Candidate]:
+def _cited(origins: list, answer: Answer) -> list[Candidate]:
     """The passages the model said it relied on.
 
     Takes an origin list the same length as the prompt's numbered passages, with
@@ -80,19 +82,32 @@ def _cited(origins: list, used: tuple[int, ...]) -> list[Candidate]:
     attaches a citation to the wrong moment of the wrong meeting, which is worse
     than attaching none at all.
 
-    An empty `used` means the model did not say, and everything retained is
-    returned. The filter upstream has already discarded what was irrelevant, so
-    that fallback is now a far smaller claim than it used to be.
+    An empty `used` means the model did not say, and for a meeting-only answer
+    everything retained is returned. The filter upstream has already discarded
+    what was irrelevant, so that fallback is now a far smaller claim than it
+    used to be — and it is a true one, because every sentence of such an answer
+    came from the passages.
+
+    **It does not extend to a mixed answer.** An answer that is partly general
+    guidance and names no passage has told us it drew on something other than
+    the evidence, and we have no way to know which half is which. Attaching the
+    transcript to it would put a timestamp under "complete payment if required"
+    — asserting somebody said that, on the one kind of answer where the
+    distinction between what was said and what is merely usual is the whole
+    point. So a mixed answer cites exactly what it names, and nothing when it
+    names nothing.
     """
     chunks = [o for o in origins if isinstance(o, Candidate)]
-    if not used:
-        return chunks
+    if not answer.used:
+        return [] if answer.mixed else chunks
     picked = [
         origins[i - 1]
-        for i in used
+        for i in answer.used
         if 1 <= i <= len(origins) and isinstance(origins[i - 1], Candidate)
     ]
-    return picked or chunks
+    if picked:
+        return picked
+    return [] if answer.mixed else chunks
 
 
 def _passage_of(c: "Candidate") -> str:
@@ -301,7 +316,10 @@ class RagService:
         if not rows:
             return ("I don't have an indexed transcript for this meeting yet.", [])
 
-        report = RetrievalReport(mode="advanced" if deep else "express", intent=intent)
+        guidance = allows_guidance(intent)
+        report = RetrievalReport(
+            mode="advanced" if deep else "express", intent=intent, guidance=guidance
+        )
         # A question naming a speaker should be answered from what that speaker
         # said. The names are already in the transcript text, so this is a score
         # nudge rather than a second index -- and a nudge cannot manufacture
@@ -342,10 +360,17 @@ class RagService:
                 intent=intent,
                 depth="advanced" if deep else "express",
                 history=history,
+                # "How can I register?" over a speech that says only "register
+                # now" is not answerable from the speech, and the reply that
+                # says so and stops is correct and useless. Permitted for
+                # procedural questions only, and never a licence to invent — see
+                # `app.questions.allows_guidance`.
+                guidance=guidance,
             )
         )
-        cited = _cited(list(kept), answer.used)
+        cited = _cited(list(kept), answer)
         report.used = len(cited)
+        report.grounding = answer.grounding
         self._log_retrieval(report)
         citations = [
             {"chunkIndex": c.chunk_index, "start": c.start, "end": c.end, "text": c.text}
@@ -730,7 +755,10 @@ class RagService:
 
         deep = mode == "advanced"
         intent = classify(question)
-        report = RetrievalReport(mode="advanced" if deep else "express", intent=intent)
+        guidance = allows_guidance(intent)
+        report = RetrievalReport(
+            mode="advanced" if deep else "express", intent=intent, guidance=guidance
+        )
         q_emb = (await self._embedder.embed([question]))[0]
         top_k = (
             self._settings.rag_workspace_deep_top_k
@@ -843,7 +871,13 @@ class RagService:
         # Without this split, a question about something nobody has ever
         # discussed is answered by a model handed only the action-item list,
         # which describes that list back rather than saying it found nothing.
-        if not kept and not spans_meetings(intent):
+        #
+        # "What should I do after this meeting?" is on the answerable side too,
+        # and was not: the tracked commitments are precisely what that question
+        # is asking for, and refusing it because no *transcript* passage cleared
+        # the filter would hand back "I couldn't find this" to somebody with
+        # four open items.
+        if not kept and not answerable_from_records(intent):
             self._log_retrieval(report)
             if window is not None and scanned == 0:
                 return (
@@ -939,10 +973,12 @@ class RagService:
                 intent=intent,
                 depth="advanced" if deep else "express",
                 history=history,
+                guidance=guidance,
             )
         )
-        cited = _cited(origins, answer.used)
+        cited = _cited(origins, answer)
         report.used = len(cited)
+        report.grounding = answer.grounding
         self._log_retrieval(report)
         citations = [
             {

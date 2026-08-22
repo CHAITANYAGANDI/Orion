@@ -36,6 +36,7 @@ import {
   useGetProjectMeetingsQuery,
 } from "@/lib/api";
 import { NO_CONTEXT, type ChatContext } from "@/components/chat-composer";
+import { usePendingTurn } from "@/lib/pending-turn";
 import type { ChatMode } from "@/lib/types";
 
 const SCOPE = "workspace";
@@ -87,6 +88,9 @@ export function useWorkspaceChat() {
   const { data: projects } = useGetProjectsQuery();
 
   const [ask, { isLoading: asking }] = useAskWorkspaceChatMutation();
+  // The question, on screen from the click rather than from the refetch. See
+  // lib/pending-turn for why this is not an optimistic cache patch.
+  const pending = usePendingTurn(messages);
   const [newConversation, { isLoading: starting }] = useCreateWorkspaceConversationMutation();
   const [clear, { isLoading: clearing }] = useClearWorkspaceChatMutation();
   const [rename] = useRenameConversationMutation();
@@ -104,6 +108,9 @@ export function useWorkspaceChat() {
 
   async function send(question: string) {
     const meetingIds = scopedMeetings;
+    // Before the first await, so the question is rendered in the same commit as
+    // the composer clearing rather than a network round trip later.
+    pending.begin(question);
     try {
       // A question with no thread named gets one of its own, rather than being
       // filed into whatever was last discussed. The server's rule for an
@@ -120,7 +127,10 @@ export function useWorkspaceChat() {
       }).unwrap();
       setConversationId(answer.conversationId);
     } catch {
-      toast.error("Couldn't get an answer.");
+      // Kept on screen with the failure under it, rather than dropped with a
+      // toast that leaves nothing to retry — the composer was cleared on send,
+      // so discarding it here means retyping the question.
+      pending.fail();
     }
   }
 
@@ -128,6 +138,7 @@ export function useWorkspaceChat() {
     try {
       const created = await newConversation().unwrap();
       setConversationId(created.id);
+      pending.clear();
       // A new thread starts with no narrowing. Carrying the last one's context
       // across is how somebody asks a fresh question and silently gets an answer
       // about three meetings they picked twenty minutes ago.
@@ -142,6 +153,7 @@ export function useWorkspaceChat() {
       await clear().unwrap();
       setConversationId(null);
       setContext(NO_CONTEXT);
+      pending.clear();
       toast.success("Chat history cleared.");
     } catch {
       toast.error("Couldn't clear the conversation.");
@@ -161,6 +173,21 @@ export function useWorkspaceChat() {
      * creates a real conversation up front, so it has an id and no messages.
      */
     isNew: !isLoading && (messages?.length ?? 0) === 0,
+    /**
+     * The turn being asked right now, or null.
+     *
+     * Rendered under the thread by every surface. Null again the moment the
+     * persisted copy arrives, in the same render, so the question never appears
+     * twice.
+     */
+    pending: pending.turn,
+    /**
+     * Starter chips are for an empty thread, and a thread with a question in
+     * flight is not one. Leaving three disabled pills across half a
+     * four-hundred-pixel rail while the answer is being written puts the chrome
+     * where the answer is about to be.
+     */
+    showPrompts: !isLoading && (messages?.length ?? 0) === 0 && pending.turn === null,
     setConversationId,
     suggestions: suggestions?.suggestions,
     modes: modes ?? [],
@@ -178,6 +205,10 @@ export function useWorkspaceChat() {
     deleting,
 
     send,
+    /** Ask the failed question again. Same path as any other send. */
+    retry: () => {
+      if (pending.turn) void send(pending.turn.question);
+    },
     startNew,
     clearAll,
     rename: async (id: string, title: string) => {
