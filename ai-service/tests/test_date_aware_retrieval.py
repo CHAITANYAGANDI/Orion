@@ -18,7 +18,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.rag import RagService, _passage
+from app.rag import RagService, _passage_of
+from app.retrieval import Candidate
+from tests.conftest import rag_settings
 
 
 class _Cursor:
@@ -58,7 +60,11 @@ class _Llm:
         self.context = None
         self.exhaustive = None
 
-    async def answer(self, question, context, *, exhaustive=False):
+    async def answer(self, question, context, *, exhaustive=False, **kw):
+        # The port carries intent, depth and history now. Swallowed rather
+        # than asserted on here: each of these files is about one thing, and
+        # the new arguments have tests of their own.
+        self.kwargs = kw
         self.context = context
         self.exhaustive = exhaustive
         return "an answer"
@@ -88,10 +94,15 @@ def _service(rows) -> tuple[RagService, list, _Llm]:
     service._embedder = _Embedder()  # type: ignore[attr-defined]
     service._llm = llm  # type: ignore[attr-defined]
 
-    class _Settings:
-        rag_workspace_top_k = 8
-
-    service._settings = _Settings()  # type: ignore[attr-defined]
+    service._settings = rag_settings(  # type: ignore[attr-defined]
+        rag_workspace_top_k=8,
+        # The stub rows below carry no real distances, so the relevance filter
+        # would judge them all equally excellent or all equally poor depending
+        # on the number. Held open: this file is about the date window, and a
+        # filter firing in the middle of it would be testing the wrong thing.
+        rag_max_distance=2.0,
+        rag_relevance_margin=2.0,
+    )
     # The ledger enrichments run against the same stub connection and would
     # return the retrieval rows as action items. Silenced so the assertions
     # below are about retrieval.
@@ -194,7 +205,11 @@ def test_a_comparison_splits_the_budget_rather_than_doubling_it():
     _ask(service, "What changed since last week?")
 
     limits = [entry[1][-1] for entry in _selects(log)]
-    assert sum(limits) == 8
+    # Candidate budgets now, so the arithmetic is over-retrieval-scaled. What
+    # is being protected is unchanged: the two halves divide one budget rather
+    # than each taking a full one, because the context window is the same size
+    # either way.
+    assert sum(limits) == 8 * service._settings.rag_candidate_multiplier
 
 
 # --- what the model is shown ------------------------------------------------ #
@@ -202,13 +217,14 @@ def test_every_passage_carries_its_meeting_date():
     """Which of two contradictory statements came later is only answerable if
     the model can see when each was said."""
     row = _row(title="Acme kickoff", when=datetime(2026, 8, 10, tzinfo=timezone.utc))
-    assert _passage(row) == "[Meeting: Acme kickoff · 2026-08-10] some passage"
+    passage = _passage_of(Candidate.from_workspace_row(row))
+    assert passage == "[Meeting: Acme kickoff · 2026-08-10] some passage"
 
 
 def test_a_passage_without_a_usable_date_still_renders():
     """A row whose created_at is missing must not take the whole answer down."""
     row = (0, "text", 1.0, 2.0, "mtg_1", "A meeting", None, 0.1)
-    assert _passage(row) == "[Meeting: A meeting] text"
+    assert _passage_of(Candidate.from_workspace_row(row)) == "[Meeting: A meeting] text"
 
 
 def test_an_empty_window_says_so_instead_of_answering_from_elsewhere():

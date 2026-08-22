@@ -347,6 +347,12 @@ class ChatRequest(CamelModel):
     # chat uses. Defaults to express, which is exactly the behaviour every
     # caller got before the field existed, so an older Spring keeps working.
     mode: str = "express"
+    # The user's own earlier questions in this thread, oldest first. Without
+    # them "which of those changed later?" has no referent and is answered as
+    # though "those" were a word in the transcript. Their questions only —
+    # never previous answers, which would let one loose claim become the
+    # evidence for the next.
+    history: list[str] = Field(default_factory=list)
 
 
 class Citation(CamelModel):
@@ -377,9 +383,15 @@ class SuggestionsResponse(CamelModel):
 
 
 class WorkspaceSuggestionsRequest(CamelModel):
-    """Starter questions across everything one user owns."""
+    """Starter questions across everything one user owns.
+
+    `meeting_ids` narrows them to what the reader selected through Add context.
+    Absent means the whole workspace, which is what every caller sent before
+    this field existed.
+    """
 
     user_id: str
+    meeting_ids: list[str] | None = None
 
 
 class WorkspaceChatRequest(CamelModel):
@@ -399,6 +411,10 @@ class WorkspaceChatRequest(CamelModel):
     # control rather than a privacy boundary: nothing is hidden or deleted, and
     # the meeting's own chat still answers about it.
     history_days: int | None = None
+    # The user's own earlier questions in this thread, oldest first, for
+    # resolving what "those" and "it" point at. Not to be confused with
+    # `history_days` above, which is about the archive rather than the thread.
+    history: list[str] = Field(default_factory=list)
 
 
 class SemanticSearchRequest(CamelModel):

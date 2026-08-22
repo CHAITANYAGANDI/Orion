@@ -73,6 +73,32 @@ public class WorkspaceSuggestionService {
         this.ttl = ttl;
     }
 
+    /**
+     * Starter questions for the meetings the reader has selected.
+     *
+     * <p>Deliberately not cached. The cache above is keyed by user, because
+     * there is one workspace per user and it changes slowly; a selection is a
+     * different set every time somebody touches the picker, and a cache keyed
+     * by user would hand the last selection's questions to the next one. It is
+     * also the wrong thing to keep: these are about a choice being made right
+     * now, not about the archive.
+     *
+     * <p>Failure is empty rather than fatal, like everything else here. The
+     * chips are a convenience on a page that works without them.
+     */
+    public List<String> forSelection(String userId, List<String> meetingIds) {
+        if (meetingIds == null || meetingIds.isEmpty()) {
+            return forUser(userId);
+        }
+        try {
+            return ai.workspaceSuggestions(userId, meetingIds);
+        } catch (Exception e) {
+            log.warn("Could not generate selection suggestions for {}: {}",
+                    userId, e.getMessage());
+            return List.of();
+        }
+    }
+
     @Transactional
     public List<String> forUser(String userId) {
         Optional<WorkspaceSuggestion> existing = cache.findById(userId);

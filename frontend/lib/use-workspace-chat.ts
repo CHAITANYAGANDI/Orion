@@ -61,7 +61,24 @@ export function useWorkspaceChat() {
     skip: !conversationId,
   });
   const { data: conversations } = useGetWorkspaceConversationsQuery();
-  const { data: suggestions } = useGetWorkspaceSuggestionsQuery();
+  // Folders are resolved to their meetings when the question is asked rather
+  // than when the chip is added, so a folder that gains a meeting tomorrow is
+  // still the right answer to "ask about this folder".
+  const folderMeetings = useProjectMeetingIds(context.projectIds);
+  // One list, memoised, because it is both the suggestion query's cache key and
+  // what the question is sent with: rebuilding it per render would refetch the
+  // chips on every keystroke in the composer.
+  const scopedMeetings = React.useMemo(
+    () => Array.from(new Set([...context.meetingIds, ...folderMeetings])),
+    [context.meetingIds, folderMeetings],
+  );
+  // Scoped to whatever the composer has been narrowed to. The chips are an
+  // answer to "what can I ask here", and "here" changes the moment somebody
+  // uses Add context — leaving workspace-level questions on screen over three
+  // meetings they just chose is the picker appearing not to have worked.
+  //
+  // Below `folderMeetings`, which it needs, so it is declared after it.
+  const { data: suggestions } = useGetWorkspaceSuggestionsQuery(scopedMeetings);
   const { data: modes } = useGetChatModesQuery();
   // The context picker's catalogue. A generous page rather than every meeting
   // ever: the picker has a filter box, and somebody with four hundred calls is
@@ -85,13 +102,8 @@ export function useWorkspaceChat() {
     if (chatError && conversationId) setConversationId(null);
   }, [chatError, conversationId]);
 
-  // Folders are resolved to their meetings when the question is asked rather
-  // than when the chip is added, so a folder that gains a meeting tomorrow is
-  // still the right answer to "ask about this folder".
-  const folderMeetings = useProjectMeetingIds(context.projectIds);
-
   async function send(question: string) {
-    const meetingIds = Array.from(new Set([...context.meetingIds, ...folderMeetings]));
+    const meetingIds = scopedMeetings;
     try {
       // A question with no thread named gets one of its own, rather than being
       // filed into whatever was last discussed. The server's rule for an

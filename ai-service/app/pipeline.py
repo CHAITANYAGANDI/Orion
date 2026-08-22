@@ -106,8 +106,12 @@ class Pipeline:
     async def extract_action_items(self, transcript: str):
         return await self._llm.extract_action_items(transcript)
 
-    async def suggest_questions(self, material: str, *, workspace: bool = False) -> list[str]:
-        return await self._llm.suggest_questions(material, workspace=workspace)
+    async def suggest_questions(
+        self, material: str, *, workspace: bool = False, scope: str = "workspace"
+    ) -> list[str]:
+        return await self._llm.suggest_questions(
+            material, workspace=workspace, scope=scope
+        )
 
     async def translate(self, text: str, target_language: str) -> str:
         return await self._llm.translate(text, target_language)
@@ -281,7 +285,13 @@ class Pipeline:
         # the chat costs nothing: they are derived from a summary that will not
         # change, so generating per page view would buy an identical answer
         # every time. Never fatal — a brief without chips is a working brief.
-        suggestions = await self._suggest(meeting_id, summary.short_summary, kept_sections)
+        # The title is deliberately absent: it lives in Spring, not here, and
+        # the pipeline has only ever seen the audio. The action items it does
+        # have, and they are the half a summary cannot supply.
+        suggestions = await self._suggest(
+            meeting_id, summary.short_summary, kept_sections,
+            action_items=[i.task_title for i in action_items],
+        )
 
         return MeetingBriefResult(
             meeting_id=meeting_id,
@@ -300,7 +310,12 @@ class Pipeline:
         )
 
     async def _suggest(
-        self, meeting_id: str, short_summary: str, sections: list
+        self,
+        meeting_id: str,
+        short_summary: str,
+        sections: list,
+        title: str = "",
+        action_items: list[str] | None = None,
     ) -> list[str]:
         """Starter questions for this meeting, or none.
 
@@ -311,7 +326,7 @@ class Pipeline:
         extracted, and would re-run all of it on retry.
         """
         try:
-            material = meeting_material(short_summary, sections)
+            material = meeting_material(short_summary, sections, title, action_items)
             if not material.strip():
                 return []
             return await self._llm.suggest_questions(material)

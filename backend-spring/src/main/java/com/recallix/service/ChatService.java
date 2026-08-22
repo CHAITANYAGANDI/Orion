@@ -154,8 +154,9 @@ public class ChatService {
         ChatScope scope = ChatScope.meeting(meetingId);
         ChatConversation conversation = resolveForAsk(userId, scope, conversationId);
 
+        List<String> asked = earlierQuestions(conversation);
         persistTurn(userId, meetingId, conversation, "user", question, null);
-        AiClient.ChatResult result = ai.chat(userId, meetingId, question, mode);
+        AiClient.ChatResult result = ai.chat(userId, meetingId, question, mode, asked);
         ChatMessageResponse answer = persistTurn(userId, meetingId, conversation, "assistant",
                 result.answer() == null ? "" : result.answer(), result.citations());
 
@@ -204,7 +205,8 @@ public class ChatService {
         // folder somebody explicitly opened would be answering a different
         // question from the one asked.
         AiClient.ChatResult result = ai.workspaceChat(
-                userId, question, meetingIds, ChatMode.EXPRESS, null);
+                userId, question, meetingIds, ChatMode.EXPRESS, null,
+                earlierQuestions(conversation));
         return persistTurn(userId, null, conversation, "assistant",
                 result.answer() == null ? "" : result.answer(), result.citations());
     }
@@ -226,17 +228,61 @@ public class ChatService {
         }
         ChatConversation conversation = resolveForAsk(userId, ChatScope.WORKSPACE, conversationId);
 
+        List<String> asked = earlierQuestions(conversation);
         persistTurn(userId, null, conversation, "user", question, null);
         // The account's window applies to the whole-workspace question and not
         // to a narrowed one: "Add context" names the meetings, and a named
         // meeting outside the window is still a meeting somebody chose.
         Integer window = (meetingIds == null || meetingIds.isEmpty()) ? historyDays(userId) : null;
-        AiClient.ChatResult result = ai.workspaceChat(userId, question, meetingIds, mode, window);
+        AiClient.ChatResult result =
+                ai.workspaceChat(userId, question, meetingIds, mode, window, asked);
         ChatMessageResponse answer = persistTurn(userId, null, conversation, "assistant",
                 result.answer() == null ? "" : result.answer(), result.citations());
 
         touch(conversation, question);
         return answer;
+    }
+
+    /**
+     * How many of the user's own earlier questions travel with the next one.
+     *
+     * <p>Four is enough for the reference that motivates this — "which of those
+     * changed later?" points at the question before it, occasionally the one
+     * before that — and small enough that a long thread does not quietly become
+     * the bulk of the prompt.
+     */
+    private static final int HISTORY_TURNS = 4;
+
+    /**
+     * What the user asked earlier in this thread, oldest last.
+     *
+     * <p><b>Their questions, never the answers.</b> The reference that needs
+     * resolving lives in what was asked: "those" in "which of those changed?"
+     * points at the previous question's subject. Feeding previous answers back
+     * would let one loose claim become the evidence for the next one, which is
+     * how a grounded system stops being grounded without anything visibly
+     * breaking — the second answer is confident, sourced, and built on the
+     * first answer's mistake.
+     *
+     * <p>Called before the new turn is persisted, or the question would arrive
+     * as its own context.
+     */
+    private List<String> earlierQuestions(ChatConversation conversation) {
+        if (conversation == null || conversation.getId() == null) {
+            return List.of();
+        }
+        return messages
+                .findByConversationIdOrderByCreatedAtAsc(conversation.getId())
+                .stream()
+                .filter(m -> "user".equals(m.getRole()))
+                .map(ChatMessage::getContent)
+                .filter(c -> c != null && !c.isBlank())
+                .toList()
+                .reversed()
+                .stream()
+                .limit(HISTORY_TURNS)
+                .toList()
+                .reversed();
     }
 
     /**

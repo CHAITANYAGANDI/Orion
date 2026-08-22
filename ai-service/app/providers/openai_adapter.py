@@ -18,6 +18,8 @@ from typing import Any, Awaitable, Callable, TypeVar
 
 from openai import AsyncOpenAI
 
+from app import answering
+from app.answering import Answer
 from app.config import Settings
 from app.providers.ports import EmbeddingPort, LlmPort, TranscriptionPort
 from app.schemas import (
@@ -657,54 +659,35 @@ class OpenAiLlmAdapter(LlmPort):
 
     # Asked for a lookup. Concise is right here: "what did we decide about
     # pricing?" wants a sentence, not the pricing section reproduced.
-    _ANSWER_SYSTEM = (
-        "You answer questions about the user's meetings using ONLY the provided "
-        "passages. Some passages are transcript extracts; others are tracked "
-        "records (action items with their current status, decisions with dates) "
-        "and are more up to date than any transcript. If the answer is not in "
-        "the passages, say you don't have that information. Be concise and "
-        "specific."
-    )
-
-    # Asked for an inventory. The context is identical — what changes is that
-    # merging is now a defect rather than good writing. Three tracked items
-    # rendered as "like the video, subscribe, and comment" is a complete answer
-    # that cannot be counted, and a reader auditing their commitments is
-    # counting.
-    _ANSWER_SYSTEM_EXHAUSTIVE = (
-        "You answer questions about the user's meetings using ONLY the provided "
-        "passages. Some passages are transcript extracts; others are tracked "
-        "records (action items with their current status, decisions with dates) "
-        "and are more up to date than any transcript.\n\n"
-        "This question asks for a complete list. Therefore:\n"
-        "- Include EVERY item that matches. Not a representative sample, not "
-        "the most important ones.\n"
-        "- One bullet per item. Never combine two items into one bullet, even "
-        "when they are near-identical, share an owner, or came from the same "
-        "meeting. The reader is counting.\n"
-        "- Keep each item recognisable as the item it came from; do not "
-        "generalise several into a category.\n"
-        "- Respect the status given: an item marked DONE is not outstanding, "
-        "whatever a transcript says.\n"
-        "- Finish with a line of the form 'Total: N.'\n"
-        "- If you cannot tell whether the list is complete, say so on that "
-        "line rather than implying it is."
-    )
+    # The brief lives in app/answering.py. It moved out of here when it grew
+    # from four sentences into a policy — answer-first, no retrieval narration,
+    # no clarifying question when a reasonable answer exists — because it is now
+    # the thing most worth reviewing on its own, and because the mock adapter
+    # and the tests need to read the same rules this does.
 
     async def answer(
-        self, question: str, context: list[str], *, exhaustive: bool = False
-    ) -> str:
-        async def _op() -> str:
-            passages = "\n\n".join(f"[{i + 1}] {c}" for i, c in enumerate(context))
-            system = self._ANSWER_SYSTEM_EXHAUSTIVE if exhaustive else self._ANSWER_SYSTEM
-            return await self._chat_text(
-                system, f"Passages:\n{passages}\n\nQuestion: {question}"
+        self,
+        question: str,
+        context: list[str],
+        *,
+        exhaustive: bool = False,
+        intent: str = "fact",
+        depth: str = "express",
+        history: list[str] | None = None,
+    ) -> Answer:
+        async def _op() -> Answer:
+            data = await self._chat_json(
+                answering.system_prompt(
+                    intent=intent, depth=depth, exhaustive=exhaustive
+                ),
+                answering.user_prompt(question, context, history),
             )
+            return answering.parse(data, len(context))
 
         return await _with_retries(
             _op,
             attempts=self._settings.openai_max_retries + 1,
-            fallback="I couldn't reach the model to answer that right now.",
+            fallback=Answer(text="I couldn't reach the model to answer that right now."),
             label="answer",
         )
 
@@ -735,19 +718,46 @@ class OpenAiLlmAdapter(LlmPort):
         'Respond with JSON: {"questions": ["...", "..."]}'
     )
 
-    async def suggest_questions(self, material: str, *, workspace: bool = False) -> list[str]:
+    # Home, with nothing selected. The old brief here asked for questions that
+    # "refer to real meetings and real topics by name", which is right for a
+    # meeting and wrong for an archive: it turns whichever call happened to be
+    # most recent into the entry point for everything the user owns.
+    _WORKSPACE_SYSTEM = (
+        "You suggest starter questions for someone opening their whole meeting "
+        "archive. You are given their recent meetings: titles, dates, summaries "
+        "and outstanding commitments.\n"
+        "Propose questions about the ARCHIVE, not about one meeting. A good "
+        "question here is one whose answer draws on several meetings — what has "
+        "recurred, what is still owed, what a position moved on, what is "
+        "building up. A question only one of these meetings can answer belongs "
+        "on that meeting's own page, not here: the reader may have fifty "
+        "meetings and only twelve are in front of you.\n"
+        "Name a project or a topic only when it appears in several of the "
+        "meetings. One mention is not a theme.\n"
+    )
+
+    # Home, with meetings chosen through Add context. Now naming things is
+    # right: the reader picked these, so a question about them by name is a
+    # question about what they asked for.
+    _SELECTION_SYSTEM = (
+        "You suggest starter questions for someone who has just selected "
+        "specific meetings to ask about. You are given those meetings.\n"
+        "Propose questions answerable from THESE meetings and worth asking of "
+        "this particular set — where they agree, where they differ, what "
+        "carried over between them, what was left open across them. Name the "
+        "real topics: the reader chose these deliberately.\n"
+    )
+
+    async def suggest_questions(
+        self, material: str, *, workspace: bool = False, scope: str = "workspace"
+    ) -> list[str]:
         async def _op() -> list[str]:
             if workspace:
                 system = (
-                    "You suggest starter questions for someone browsing their "
-                    "own meeting archive. You are given recent meetings: their "
-                    "titles, dates and summaries.\n"
-                    f"Propose {self._SUGGESTION_COUNT} questions that span "
-                    "meetings or pick out something notable across them — "
-                    "themes that recur, commitments that are outstanding, a "
-                    "meeting worth revisiting. Refer to real meetings and real "
-                    "topics by name.\n" + self._SUGGEST_RULES
-                )
+                    self._SELECTION_SYSTEM
+                    if scope == "selection"
+                    else self._WORKSPACE_SYSTEM
+                ) + self._SUGGEST_RULES
             else:
                 system = (
                     "You suggest starter questions for someone who has just "

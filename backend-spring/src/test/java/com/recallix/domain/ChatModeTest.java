@@ -50,7 +50,25 @@ class ChatModeTest {
     @DisplayName("describes itself, so the picker's wording cannot drift from the behaviour")
     void describesItself() {
         assertThat(ChatMode.EXPRESS.label()).isEqualTo("Express");
-        assertThat(ChatMode.EXPRESS.hint()).contains("speed");
-        assertThat(ChatMode.ADVANCED.hint()).contains("in-depth");
+        assertThat(ChatMode.EXPRESS.hint()).contains("strongest evidence");
+        assertThat(ChatMode.ADVANCED.hint()).contains("more conversation context");
+    }
+
+    @Test
+    @DisplayName("neither mode is sold as the accurate one")
+    void neitherPromisesAccuracy() {
+        // The hints used to read "Balanced for accuracy and speed" against "For
+        // in-depth analysis and actions", which together imply Express may be
+        // wrong. It may not: both modes obey the same grounding rules and are
+        // held to the same evidence. What differs is how much of the archive is
+        // read. A reader who believes otherwise pays for Advanced on every
+        // question they care about, which is a tax on a promise nobody meant to
+        // make.
+        for (ChatMode mode : ChatMode.values()) {
+            assertThat(mode.hint().toLowerCase())
+                    .doesNotContain("accurate")
+                    .doesNotContain("accuracy")
+                    .doesNotContain("better");
+        }
     }
 }

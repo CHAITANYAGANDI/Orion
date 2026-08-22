@@ -23,6 +23,7 @@ import re
 from dataclasses import dataclass
 
 from app.providers.ports import EmbeddingPort, LlmPort, TranscriptionPort
+from app.answering import Answer
 from app.schemas import (
     ActionItem,
     DraftEmailRequest,
@@ -329,16 +330,34 @@ class MockLlmAdapter(LlmPort):
 
 
     async def answer(
-        self, question: str, context: list[str], *, exhaustive: bool = False
-    ) -> str:
+        self,
+        question: str,
+        context: list[str],
+        *,
+        exhaustive: bool = False,
+        intent: str = "fact",
+        depth: str = "express",
+        history: list[str] | None = None,
+    ) -> Answer:
         # No real generation in mock mode — compose a grounded-looking answer
         # from the retrieved passages so the RAG UX is demoable without a key.
+        #
+        # It names the two passages it built the sentence from rather than
+        # claiming all of them, because the citation path is exactly what a
+        # keyless demo is for: a mock that reported every passage as used would
+        # make the one bug this contract exists to catch invisible until
+        # production.
         if not context:
-            return "I couldn't find anything about that in this meeting's transcript."
+            return Answer(
+                text="I couldn't find anything about that in this meeting's transcript."
+            )
+        used = tuple(range(1, min(2, len(context)) + 1))
         joined = " ".join(context[:2]).strip()
-        return f"Based on the meeting, {joined}"
+        return Answer(text=f"Based on the meeting, {joined}", used=used)
 
-    async def suggest_questions(self, material: str, *, workspace: bool = False) -> list[str]:
+    async def suggest_questions(
+        self, material: str, *, workspace: bool = False, scope: str = "workspace"
+    ) -> list[str]:
         # Nothing to generate from without a model. Empty rather than invented:
         # the caller falls back to its written-by-hand static prompts, which is
         # a better demo than three fabricated questions about a meeting the

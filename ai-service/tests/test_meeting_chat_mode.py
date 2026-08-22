@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 
 from app.rag import RagService
+from tests.conftest import rag_settings
 
 
 class _Cursor:
@@ -56,7 +57,11 @@ class _Llm:
         self.exhaustive = None
         self.context = None
 
-    async def answer(self, question, context, *, exhaustive=False):
+    async def answer(self, question, context, *, exhaustive=False, **kw):
+        # The port carries intent, depth and history now. Swallowed rather
+        # than asserted on here: each of these files is about one thing, and
+        # the new arguments have tests of their own.
+        self.kwargs = kw
         self.context = context
         self.exhaustive = exhaustive
         return "an answer"
@@ -64,6 +69,7 @@ class _Llm:
 
 EXPRESS_K = 8
 DEEP_K = 24
+MULTIPLIER = 3
 
 
 def _service(rows) -> tuple[RagService, list, _Llm]:
@@ -83,17 +89,31 @@ def _service(rows) -> tuple[RagService, list, _Llm]:
     service._embedder = _Embedder()  # type: ignore[attr-defined]
     service._llm = llm  # type: ignore[attr-defined]
 
-    class _Settings:
-        rag_top_k = EXPRESS_K
-        rag_deep_top_k = DEEP_K
-
-    service._settings = _Settings()  # type: ignore[attr-defined]
+    service._settings = rag_settings(  # type: ignore[attr-defined]
+        rag_top_k=EXPRESS_K,
+        rag_deep_top_k=DEEP_K,
+        rag_candidate_multiplier=MULTIPLIER,
+    )
     return service, log, llm
 
 
-def _rows(n=3):
-    # (chunk_index, text, start, end)
-    return [(i, f"passage {i}", float(i), float(i) + 1.0) for i in range(n)]
+def _rows(n=3, distance=0.5):
+    # (chunk_index, text, start, end, distance)
+    #
+    # Distances are equal and comfortably inside the relevance ceiling, so
+    # every row survives filtering. This file is about the two modes; the
+    # filter has tests of its own in test_retrieval.py, and letting it fire
+    # here would make these assertions about it instead.
+    # Distinct words, not "passage 0/1/2": the near-duplicate filter works on
+    # content words and would collapse three passages whose only content word
+    # is "passage" -- correctly, which is exactly why the fixture must not be
+    # three of the same sentence.
+    subjects = ["pricing", "migration", "hiring", "roadmap", "renewal", "latency"]
+    return [
+        (i, f"we talked about {subjects[i % len(subjects)]} number {i}",
+         float(i), float(i) + 1.0, distance)
+        for i in range(n)
+    ]
 
 
 def _ask(service, question, mode="express"):
@@ -101,7 +121,12 @@ def _ask(service, question, mode="express"):
 
 
 def _limit(log):
-    """The LIMIT the retrieval query was given."""
+    """The LIMIT the retrieval query was given — the candidate budget.
+
+    Not the answer budget any more. Retrieval over-fetches and then filters, so
+    what the SQL asks for is a multiple of what survives; the two were the same
+    number back when everything retrieved became evidence.
+    """
     assert len(log) == 1, log
     _sql, params = log[0]
     return params[-1]
@@ -112,7 +137,7 @@ def test_express_retrieves_the_ordinary_width():
 
     _ask(service, "What did we decide?")
 
-    assert _limit(log) == EXPRESS_K
+    assert _limit(log) == EXPRESS_K * MULTIPLIER
 
 
 def test_advanced_retrieves_wider():
@@ -122,7 +147,7 @@ def test_advanced_retrieves_wider():
 
     # The whole point of the setting. Eight passages of an hour-long meeting is
     # a fraction of it, and the fraction is chosen by embedding distance.
-    assert _limit(log) == DEEP_K
+    assert _limit(log) == DEEP_K * MULTIPLIER
 
 
 def test_an_unknown_mode_is_express():
@@ -132,7 +157,7 @@ def test_an_unknown_mode_is_express():
     # beats refusing to answer -- the same rule ChatMode.of follows in Spring.
     _ask(service, "What did we decide?", mode="thorough")
 
-    assert _limit(log) == EXPRESS_K
+    assert _limit(log) == EXPRESS_K * MULTIPLIER
 
 
 def test_express_enumerates_only_when_the_question_asks_for_a_list():
@@ -145,15 +170,39 @@ def test_express_enumerates_only_when_the_question_asks_for_a_list():
     assert llm.exhaustive is True
 
 
-def test_advanced_always_enumerates():
+def test_advanced_does_not_turn_every_question_into_an_inventory():
+    """Reversed on purpose, and this is the reasoning.
+
+    Advanced used to force enumeration on everything on the argument that asking
+    for Advanced is asking to be told everything. What that produced, for a
+    question with one answer, was a single bullet followed by the line
+    "Total: 1." — an audit report where somebody had asked what a word meant.
+
+    Depth is a claim about evidence: look at more of the archive, cover more of
+    what it supports. Whether the answer is a counted list is a claim about the
+    question. Advanced widens the first and now leaves the second alone.
+    """
     service, _log, llm = _service(_rows())
 
-    # Asking for Advanced is asking to be told everything, whatever the
-    # question's phrasing suggested. This is the second of the two differences,
-    # and the one that is invisible in the SQL.
-    _ask(service, "What did Priya say about pricing?", mode="advanced")
+    _ask(service, "What does JWT mean in this meeting?", mode="advanced")
+    assert llm.exhaustive is False
 
+    # And an inventory is still an inventory in either mode: a reader who asked
+    # for every open question is counting whichever mode they are in.
+    _ask(service, "List every open question", mode="advanced")
     assert llm.exhaustive is True
+
+
+def test_the_mode_reaches_the_model_as_depth():
+    """The other half of the difference, and the one invisible in the SQL: the
+    same passages are written up differently."""
+    service, _log, llm = _service(_rows())
+
+    _ask(service, "What did we decide?")
+    assert llm.kwargs["depth"] == "express"
+
+    _ask(service, "What did we decide?", mode="advanced")
+    assert llm.kwargs["depth"] == "advanced"
 
 
 def test_the_mode_does_not_change_what_is_cited():
@@ -161,8 +210,13 @@ def test_the_mode_does_not_change_what_is_cited():
 
     answer, citations = _ask(service, "What did we decide?", mode="advanced")
 
-    # Citations are the retrieved passages, whichever mode retrieved them. A
+    # Citations are what survived filtering, whichever mode retrieved them. A
     # wider net must not mean a differently-shaped answer.
+    #
+    # This fake returns a bare string rather than an Answer, so it names no
+    # passages — which is the documented fallback: cite everything retained.
+    # That is what every caller did before the contract carried `used`, and it
+    # is now a much smaller claim, because what is retained has been filtered.
     assert answer == "an answer"
-    assert [c["chunkIndex"] for c in citations] == [0, 1, 2]
-    assert llm.context == ["passage 0", "passage 1", "passage 2"]
+    assert sorted(c["chunkIndex"] for c in citations) == [0, 1, 2]
+    assert len(llm.context) == 3

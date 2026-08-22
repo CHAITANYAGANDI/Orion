@@ -20,10 +20,10 @@ import java.util.Locale;
 public enum ChatMode {
 
     /** Balanced. The width the workspace chat has always used. */
-    EXPRESS("Express", "Balanced for accuracy and speed"),
+    EXPRESS("Express", "Fast answers from the strongest evidence"),
 
     /** Wider retrieval and an enumerated answer. Costs more context and time. */
-    ADVANCED("Advanced", "For in-depth analysis and actions");
+    ADVANCED("Advanced", "Deeper analysis across more conversation context");
 
     private final String label;
     private final String hint;

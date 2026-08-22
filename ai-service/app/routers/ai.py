@@ -46,7 +46,7 @@ from app.schemas import (
 )
 from app.storage import fetch_audio
 from app.streaming import StreamingTokenError, StreamingTokenService
-from app.suggestions import meeting_material
+from app.suggestions import blend, meeting_material, signal_questions
 from app.templates import BUILT_IN, resolve
 
 logger = logging.getLogger("ai-service.router.ai")
@@ -161,11 +161,45 @@ async def workspace_suggestions(
     An empty archive returns an empty list rather than an error, and the UI
     falls back to its static prompts.
     """
-    material = await rag.workspace_material(body.user_id)
-    if not material.strip():
+    selection = bool(body.meeting_ids)
+    material = await rag.workspace_material(body.user_id, body.meeting_ids)
+
+    # A selection is answered entirely from what was selected: signals are
+    # facts about the whole workspace, and mixing "what overdue commitments
+    # need attention?" into chips for three meetings somebody just chose is the
+    # picker appearing not to have worked.
+    if selection:
+        if not material.strip():
+            return SuggestionsResponse(suggestions=[])
+        return SuggestionsResponse(
+            suggestions=await pipeline.suggest_questions(
+                material, workspace=True, scope="selection"
+            )
+        )
+
+    signals = await rag.workspace_signals(body.user_id)
+    generated: list[str] = []
+    if material.strip():
+        generated = await pipeline.suggest_questions(
+            material, workspace=True, scope="workspace"
+        )
+    # An archive with nothing in it gets nothing, and the UI falls back to its
+    # written-by-hand prompts. Blending the static floor in here instead would
+    # offer "What still needs to be completed?" to somebody with no meetings.
+    if not material.strip() and not signals.get("open_items") and not signals.get("decisions"):
         return SuggestionsResponse(suggestions=[])
-    questions = await pipeline.suggest_questions(material, workspace=True)
-    return SuggestionsResponse(suggestions=questions)
+
+    return SuggestionsResponse(
+        suggestions=blend(
+            signal_questions(
+                overdue=signals.get("overdue", 0),
+                open_items=signals.get("open_items", 0),
+                decisions=signals.get("decisions", 0),
+                recurring=signals.get("recurring"),
+            ),
+            generated,
+        )
+    )
 
 
 @router.post("/extract-action-items", response_model=ActionItemsResponse)
@@ -209,7 +243,7 @@ async def index(body: IndexRequest, rag: RagService = Depends(get_rag)) -> Index
 async def chat(body: ChatRequest, rag: RagService = Depends(get_rag)) -> ChatResponse:
     """Answer a question grounded in one meeting's transcript (RAG over pgvector)."""
     answer, citations = await rag.answer(
-        body.meeting_id, body.question, body.user_id, body.mode
+        body.meeting_id, body.question, body.user_id, body.mode, body.history
     )
     return ChatResponse(answer=answer, citations=[Citation(**c) for c in citations])
 
@@ -224,7 +258,8 @@ async def workspace_chat(
     if a caller passes someone else's meeting ids.
     """
     answer, citations = await rag.answer_workspace(
-        body.user_id, body.question, body.meeting_ids, body.mode, body.history_days
+        body.user_id, body.question, body.meeting_ids, body.mode,
+        body.history_days, body.history,
     )
     return ChatResponse(answer=answer, citations=[Citation(**c) for c in citations])
 

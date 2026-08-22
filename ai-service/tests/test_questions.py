@@ -19,6 +19,7 @@ import asyncio
 import pytest
 
 from app.questions import wants_full_list
+from tests.conftest import rag_settings
 from app.rag import RagService
 
 
@@ -149,7 +150,11 @@ class _Llm:
     def __init__(self):
         self.exhaustive = None
 
-    async def answer(self, question, context, *, exhaustive=False):
+    async def answer(self, question, context, *, exhaustive=False, **kw):
+        # The port carries intent, depth and history now. Swallowed rather
+        # than asserted on here: each of these files is about one thing, and
+        # the new arguments have tests of their own.
+        self.kwargs = kw
         self.exhaustive = exhaustive
         return "an answer"
 
@@ -169,15 +174,20 @@ def _service(rows):
         async def embed(self, texts):
             return [[0.1, 0.2, 0.3] for _ in texts]
 
-    class _Settings:
-        rag_workspace_top_k = 10
-        rag_top_k = 10
 
     service.connection = lambda user_id=None: _Ctx()  # type: ignore[assignment]
     service._pool = object()  # type: ignore[attr-defined]
     service._embedder = _Embedder()  # type: ignore[attr-defined]
     service._llm = llm  # type: ignore[attr-defined]
-    service._settings = _Settings()  # type: ignore[attr-defined]
+    service._settings = rag_settings(  # type: ignore[attr-defined]
+        rag_workspace_top_k=10,
+        rag_top_k=10,
+        # The stub rows carry no distances, so the relevance filter is held open
+        # here: this file is about whether the enumeration flag reaches the
+        # model, and a filter firing mid-test would be testing something else.
+        rag_max_distance=2.0,
+        rag_relevance_margin=2.0,
+    )
 
     async def _none(*_a, **_k):
         return []

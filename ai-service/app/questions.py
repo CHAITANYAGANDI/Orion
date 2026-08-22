@@ -67,3 +67,181 @@ def wants_full_list(question: str) -> bool:
     if _COMPOSE.search(question):
         return False
     return bool(_INVENTORY_RE.search(question))
+
+
+# --- what kind of question is this ------------------------------------------ #
+#
+# `wants_full_list` above answers one bit: enumerate, or write prose. That bit
+# is real and stays, but it is not enough to shape an answer. "How did the
+# AssemblyAI decision change?" and "What did Sarah say about pricing?" are both
+# prose and want completely different things — one is a sequence with dates,
+# the other is one attributed statement, and answering either in the other's
+# shape is how a correct answer still reads as a wrong one.
+#
+# This is a router, not a judge. It picks how to retrieve and how to write. It
+# never decides what is true, never filters evidence on its own, and a
+# misclassification costs a differently-shaped answer rather than a wrong one —
+# which is why it is regex over the question rather than a model call: it runs
+# on every question, and a classifier that costs a round trip would be paid for
+# on every question too.
+
+INTENTS = ("compose", "inventory", "timeline", "comparison", "summary", "synthesis", "fact")
+
+_TIMELINE = re.compile(
+    r"\b(timeline|chronolog\w*|history of|over time|evolve[ds]?|evolution|"
+    r"how did .{0,40}\b(change|develop|progress|shift)|"
+    r"when did|in what order|sequence of)\b",
+    re.IGNORECASE,
+)
+
+_COMPARISON = re.compile(
+    r"\b(compare|comparison|versus|vs\.?|difference between|differ|"
+    r"changed since|changed from|what changed|contradict\w*|conflict\w*|"
+    r"disagree\w*|inconsisten\w*)\b",
+    re.IGNORECASE,
+)
+
+_SUMMARY = re.compile(
+    r"\b(summar\w+|overview|recap|brief me|catch me up|what happened|"
+    r"what was discussed|what did we (talk|discuss))\b",
+    re.IGNORECASE,
+)
+
+_SYNTHESIS = re.compile(
+    r"\b(themes?|patterns?|recurr\w+|repeatedly|across (the |my |our )?"
+    r"(meetings|calls|conversations)|common\w*|trends?|overall)\b",
+    re.IGNORECASE,
+)
+
+
+def classify(question: str) -> str:
+    """Which of {INTENTS} this question is, by the first rule that matches.
+
+    Order is the design. Composition wins outright for the reason
+    `wants_full_list` already gives — an agenda with "Total: 5." stapled to it
+    is visibly broken. Inventory is second because "list every decision that
+    changed" is a list first and a comparison second: the reader is counting.
+    Timeline precedes comparison because "how did X change over time" contains
+    the word change and wants an ordered account, not a two-column diff. Fact is
+    the fallback, and is by far the commonest.
+    """
+    if not question or not question.strip():
+        return "fact"
+    if _COMPOSE.search(question):
+        return "compose"
+    if wants_full_list(question):
+        return "inventory"
+    if _TIMELINE.search(question):
+        return "timeline"
+    if _COMPARISON.search(question):
+        return "comparison"
+    if _SUMMARY.search(question):
+        return "summary"
+    if _SYNTHESIS.search(question):
+        return "synthesis"
+    return "fact"
+
+
+# Intents whose answers are lists of items the reader counts. The only ones that
+# should ever produce an enumeration — which is the correction to Advanced mode
+# having previously enumerated everything, so that "what does JWT mean here?"
+# came back as one bullet and the line "Total: 1."
+_ENUMERATING = frozenset({"inventory"})
+
+
+def wants_enumeration(intent: str) -> bool:
+    """Whether the answer should be a counted list rather than prose."""
+    return intent in _ENUMERATING
+
+
+# Intents that benefit from reading more of the archive rather than more of one
+# passage. Advanced widens retrieval for every question; these are the ones
+# where it also widens how many *meetings* may contribute, because the answer is
+# a claim about several of them.
+_CROSS_MEETING = frozenset({"comparison", "timeline", "synthesis", "inventory"})
+
+
+def spans_meetings(intent: str) -> bool:
+    """Whether this question is about the archive rather than about a passage."""
+    return intent in _CROSS_MEETING
+
+
+# --- who and what the question names ---------------------------------------- #
+
+_SPEAKER = re.compile(
+    r"\b(?:what|when|why|how|which)?\s*(?:did|does|do)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+"
+    r"(?:say|said|mention|ask|promise|commit|decide|think|want|propose|suggest|raise)",
+    re.IGNORECASE if False else 0,
+)
+
+_SPEAKER_POSSESSIVE = re.compile(r"\b([A-Z][a-z]+)'s\b")
+
+
+def named_person(question: str) -> str | None:
+    """The person a question is about, or None.
+
+    Capitalisation is the signal, which is why this is case-sensitive: lowering
+    the case first makes "did we say" match as enthusiastically as "did Sarah
+    say", and the boost then applies to every question containing a verb.
+
+    Used only to raise the score of passages that mention that name — never to
+    filter. A meeting where the transcript spells a name differently, or where
+    diarization never resolved it, must still be able to answer.
+    """
+    if not question:
+        return None
+    m = _SPEAKER.search(question)
+    if m:
+        return m.group(1).strip()
+    m = _SPEAKER_POSSESSIVE.search(question)
+    if m:
+        return m.group(1).strip()
+    return None
+
+
+def names_meeting(question: str, titles: list[str]) -> list[str]:
+    """Meeting titles the question appears to name, longest first.
+
+    Substring rather than fuzzy matching, on normalised text. A user who writes
+    "in the Product Marketing Weekly meeting" has named a meeting and expects
+    that meeting; a user who happens to use three words that also appear in a
+    title has not, which is why the match must be contiguous and why one-word
+    titles are ignored — "Recording" would otherwise capture every question
+    asked of an archive full of them.
+    """
+    if not question:
+        return []
+    haystack = " ".join(question.lower().split())
+    hits: list[str] = []
+    for title in titles:
+        clean = " ".join((title or "").lower().split())
+        if len(clean.split()) < 2 or len(clean) < 8:
+            continue
+        if clean in haystack:
+            hits.append(title)
+    hits.sort(key=len, reverse=True)
+    return hits
+
+
+_LOOKS_NAMED = re.compile(
+    r"(?<!^)\b[A-Z][a-zA-Z0-9]+\b|\b(meeting|call|sync|standup|stand-up|review|"
+    r"session|kickoff|retro|1:1|one-on-one)\b",
+    re.IGNORECASE if False else 0,
+)
+
+
+def could_name_a_meeting(question: str) -> bool:
+    """Whether it is worth reading the archive's titles to find out.
+
+    `names_meeting` needs the titles, and reading them is a query. Most
+    questions — "what changed since last week?", "what is still open?" — cannot
+    possibly name a meeting, and running that query on every one of them buys
+    nothing. A capitalised word that is not the first, or one of the words
+    people use for a meeting, is the cheapest signal that it might.
+
+    Wrong in the safe direction: a false positive costs one indexed lookup, a
+    false negative costs a wider search, which is where this started.
+    """
+    if not question:
+        return False
+    return bool(_LOOKS_NAMED.search(question))

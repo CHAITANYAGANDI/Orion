@@ -13,6 +13,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application source.
 COPY app ./app
+# Developer tools, not runtime: scripts/compare_modes.py proves Express and
+# Advanced actually differ, and it has to run where the database and the
+# embedding model are, which is in here.
+COPY scripts ./scripts
 COPY README.md ./
 
 EXPOSE 8000

@@ -13,9 +13,20 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
+from app import retrieval
+from app.answering import Answer
 from app.config import Settings
 from app.providers.ports import EmbeddingPort, LlmPort
-from app.questions import wants_full_list
+from app.questions import (
+    classify,
+    could_name_a_meeting,
+    named_person,
+    names_meeting,
+    spans_meetings,
+    wants_enumeration,
+    wants_full_list,
+)
+from app.retrieval import Candidate, RetrievalReport
 from app.schemas import Segment
 from app.suggestions import MAX_MEETINGS, MAX_OPEN_ITEMS, workspace_material
 from app.timeframe import detect_window
@@ -42,17 +53,58 @@ def _history_floor(history_days: int | None) -> datetime | None:
     return datetime.now(timezone.utc) - timedelta(days=history_days)
 
 
-def _passage(row: tuple) -> str:
+def _as_answer(result) -> Answer:
+    """Whatever the LLM port returned, as an Answer.
+
+    The port returns one now, but a fake in a test and an older adapter both
+    return a bare string. An unknown `used` means the caller falls back to
+    citing everything it retained, which is exactly what citations were before
+    the field existed — no worse, and never a claim that a passage was used
+    when it is known it was not.
+    """
+    if isinstance(result, Answer):
+        return result
+    return Answer(text=str(result))
+
+
+def _cited(origins: list, used: tuple[int, ...]) -> list[Candidate]:
+    """The passages the model said it relied on.
+
+    Takes an origin list the same length as the prompt's numbered passages, with
+    None wherever a line is not a transcript chunk. That is not fussiness: the
+    action-item ledger, the decision record and the "--- from last week ---"
+    separators are all numbered passages the model can cite, so a model citing
+    [2] when the first four entries are ledger lines is not citing the second
+    chunk. Computing this as an offset works right up to the windowed comparison
+    path, where passages and separators interleave — and getting it wrong
+    attaches a citation to the wrong moment of the wrong meeting, which is worse
+    than attaching none at all.
+
+    An empty `used` means the model did not say, and everything retained is
+    returned. The filter upstream has already discarded what was irrelevant, so
+    that fallback is now a far smaller claim than it used to be.
+    """
+    chunks = [o for o in origins if isinstance(o, Candidate)]
+    if not used:
+        return chunks
+    picked = [
+        origins[i - 1]
+        for i in used
+        if 1 <= i <= len(origins) and isinstance(origins[i - 1], Candidate)
+    ]
+    return picked or chunks
+
+
+def _passage_of(c: "Candidate") -> str:
     """One retrieved chunk, labelled with its meeting and date.
 
     The date is what lets the model say which of two contradictory statements
     came later. Without it, "we decided X" and "we decided not-X" are two
     equally-present facts and the answer picks one arbitrarily.
     """
-    created = row[6]
-    when = created.date().isoformat() if isinstance(created, datetime) else ""
+    when = c.created_at.date().isoformat() if isinstance(c.created_at, datetime) else ""
     stamp = f" · {when}" if when else ""
-    return f"[Meeting: {row[5]}{stamp}] {row[1]}"
+    return f"[Meeting: {c.meeting_title}{stamp}] {c.text}"
 
 
 class RagService:
@@ -197,6 +249,7 @@ class RagService:
         question: str,
         user_id: str | None = None,
         mode: str = "express",
+        history: list[str] | None = None,
     ) -> tuple[str, list[dict]]:
         """Answer a question about one meeting.
 
@@ -218,21 +271,27 @@ class RagService:
         """
         if not self.enabled:
             return ("RAG chat is not configured on this deployment.", [])
+
         deep = mode == "advanced"
+        intent = classify(question)
         top_k = self._settings.rag_deep_top_k if deep else self._settings.rag_top_k
+        # Over-retrieve, then filter. Filtering can only discard, so a scan that
+        # returns exactly the final budget arrives with nothing to spare.
+        candidates = top_k * self._settings.rag_candidate_multiplier
         q_emb = (await self._embedder.embed([question]))[0]
         try:
             async with self.connection(user_id) as conn:
                 async with conn.cursor() as cur:
                     await cur.execute(
                         """
-                        SELECT chunk_index, text, start_time, end_time
+                        SELECT chunk_index, text, start_time, end_time,
+                               embedding <=> %s::vector AS distance
                         FROM transcript_chunks
                         WHERE meeting_id = %s
-                        ORDER BY embedding <=> %s::vector
+                        ORDER BY distance
                         LIMIT %s
                         """,
-                        (meeting_id, _vec_literal(q_emb), top_k),
+                        (_vec_literal(q_emb), meeting_id, candidates),
                     )
                     rows = await cur.fetchall()
         except Exception as exc:  # noqa: BLE001
@@ -242,19 +301,68 @@ class RagService:
         if not rows:
             return ("I don't have an indexed transcript for this meeting yet.", [])
 
-        context = [r[1] for r in rows]
-        # "List every question that went unanswered" is an inventory here too,
-        # even though this chat sees one meeting rather than the workspace --
-        # and under Advanced it is always treated as one, the same rule the
-        # workspace chat follows. Asking for Advanced is asking to be told
-        # everything, whatever the question's phrasing suggested.
-        answer = await self._llm.answer(
-            question, context, exhaustive=deep or wants_full_list(question)
+        report = RetrievalReport(mode="advanced" if deep else "express", intent=intent)
+        # A question naming a speaker should be answered from what that speaker
+        # said. The names are already in the transcript text, so this is a score
+        # nudge rather than a second index -- and a nudge cannot manufacture
+        # evidence, because a boosted passage still had to clear the filter.
+        person = named_person(question)
+        kept = retrieval.select(
+            rows,
+            question,
+            limit=top_k,
+            max_distance=self._settings.rag_max_distance,
+            margin=self._settings.rag_relevance_margin,
+            minimum=self._settings.rag_min_passages,
+            lexical_weight=self._settings.rag_lexical_weight,
+            duplicate_similarity=self._settings.rag_duplicate_similarity,
+            # One meeting, so there is no crowding to prevent: capping here
+            # would cap the answer.
+            per_meeting_cap=0,
+            workspace=False,
+            boost_terms=retrieval.tokens(person) if person else None,
+            boost=self._settings.rag_name_boost,
+            report=report,
         )
+        if not kept:
+            self._log_retrieval(report)
+            return ("I couldn't find this in this meeting's transcript.", [])
+
+        context = [c.text for c in kept]
+        report.context_chars = sum(len(c) for c in context)
+        # Enumeration follows the *question*, not the mode. Advanced used to
+        # force it on everything, so "what does JWT mean here?" came back as one
+        # bullet and the line "Total: 1." Advanced means look deeper, not
+        # convert the answer into an inventory.
+        answer = _as_answer(
+            await self._llm.answer(
+                question,
+                context,
+                exhaustive=wants_enumeration(intent) or wants_full_list(question),
+                intent=intent,
+                depth="advanced" if deep else "express",
+                history=history,
+            )
+        )
+        cited = _cited(list(kept), answer.used)
+        report.used = len(cited)
+        self._log_retrieval(report)
         citations = [
-            {"chunkIndex": r[0], "start": r[2], "end": r[3], "text": r[1]} for r in rows
+            {"chunkIndex": c.chunk_index, "start": c.start, "end": c.end, "text": c.text}
+            for c in cited
         ]
-        return (answer, citations)
+        return (answer.text, citations)
+
+    def _log_retrieval(self, report: RetrievalReport) -> None:
+        """Counts, at debug level, and never a word of transcript.
+
+        This is how the two modes are shown to be genuinely different rather
+        than differently labelled — see `scripts/compare_modes.py`, which prints
+        the same numbers side by side. It carries no passage text, no question
+        and no meeting title on purpose: these lines land in log aggregators,
+        and a transcript must not.
+        """
+        logger.debug("retrieval %s", report.as_dict())
 
     # --- the commitment ledger ---------------------------------------------- #
     # How many action items to put in front of the model. Enough to cover a
@@ -395,7 +503,67 @@ class RagService:
             *lines,
         ]
 
-    async def workspace_material(self, user_id: str) -> str:
+    async def workspace_signals(self, user_id: str) -> dict:
+        """Facts about the workspace that justify a question being offered.
+
+        Counts only, and cheap ones. This exists because Home's chips were being
+        generated entirely from whichever twelve meetings were most recent,
+        which is how "Competitive messaging framework?" became somebody's entry
+        point into an archive of fifty unrelated calls. A question backed by
+        "you have four things overdue" is about the workspace; a question backed
+        by one summary is about one meeting.
+
+        `recurring` is a folder with more than one recent meeting in it — the
+        one signal available here that says several meetings are about the same
+        work without reading any of them. Never raises: no signals means the
+        generated questions and the static floor carry the row, which is what
+        happened before this existed.
+        """
+        if not self.enabled:
+            return {}
+
+        sql = """
+            SELECT
+              (SELECT count(*) FROM meeting_action_items a
+                 JOIN meetings m ON m.id = a.meeting_id
+                WHERE m.user_id = %(u)s AND a.status <> 'DONE') AS open_items,
+              (SELECT count(*) FROM meeting_action_items a
+                 JOIN meetings m ON m.id = a.meeting_id
+                WHERE m.user_id = %(u)s AND a.status <> 'DONE'
+                  AND a.due_date IS NOT NULL AND a.due_date < CURRENT_DATE) AS overdue,
+              (SELECT count(*) FROM meeting_insights i
+                 JOIN meetings m ON m.id = i.meeting_id
+                WHERE m.user_id = %(u)s AND i.kind = 'DECISION') AS decisions
+        """
+        recurring_sql = """
+            SELECT p.name, count(*) AS n
+              FROM meetings m JOIN projects p ON p.id = m.project_id
+             WHERE m.user_id = %s AND m.status = 'READY'
+             GROUP BY p.name HAVING count(*) > 1
+             ORDER BY n DESC, max(m.created_at) DESC
+             LIMIT 1
+        """
+        try:
+            async with self.connection(user_id) as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(sql, {"u": user_id})
+                    row = await cur.fetchone()
+                    await cur.execute(recurring_sql, (user_id,))
+                    top = await cur.fetchone()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not read workspace signals for %s: %s", user_id, exc)
+            return {}
+
+        return {
+            "open_items": int(row[0] or 0) if row else 0,
+            "overdue": int(row[1] or 0) if row else 0,
+            "decisions": int(row[2] or 0) if row else 0,
+            "recurring": top[0] if top else None,
+        }
+
+    async def workspace_material(
+        self, user_id: str, meeting_ids: list[str] | None = None
+    ) -> str:
         """Recent meetings and outstanding work, rendered for the suggester.
 
         Read here rather than assembled in Spring and posted over, matching
@@ -421,24 +589,35 @@ class RagService:
                      LIMIT 1
                    ) s ON TRUE
              WHERE m.user_id = %s AND m.status = 'READY'
-             ORDER BY m.created_at DESC
-             LIMIT %s
         """
         items_sql = """
             SELECT a.title, m.title
               FROM meeting_action_items a
               JOIN meetings m ON m.id = a.meeting_id
              WHERE m.user_id = %s AND a.status <> 'DONE'
-             ORDER BY a.due_date NULLS LAST, a.created_at
-             LIMIT %s
         """
+        # Narrowed to what the reader chose, when they chose. "Add context" is
+        # a statement about what the next question is about, so the chips have
+        # to move with it — offering workspace-level suggestions over three
+        # meetings somebody just selected is the picker visibly not working.
+        m_params: list = [user_id]
+        i_params: list = [user_id]
+        if meeting_ids:
+            meetings_sql += " AND m.id = ANY(%s)"
+            m_params.append(list(meeting_ids))
+            items_sql += " AND a.meeting_id = ANY(%s)"
+            i_params.append(list(meeting_ids))
+        meetings_sql += " ORDER BY m.created_at DESC LIMIT %s"
+        m_params.append(MAX_MEETINGS)
+        items_sql += " ORDER BY a.due_date NULLS LAST, a.created_at LIMIT %s"
+        i_params.append(MAX_OPEN_ITEMS)
 
         try:
             async with self.connection(user_id) as conn:
                 async with conn.cursor() as cur:
-                    await cur.execute(meetings_sql, (user_id, MAX_MEETINGS))
+                    await cur.execute(meetings_sql, tuple(m_params))
                     meetings = await cur.fetchall()
-                    await cur.execute(items_sql, (user_id, MAX_OPEN_ITEMS))
+                    await cur.execute(items_sql, tuple(i_params))
                     items = await cur.fetchall()
         except Exception as exc:  # noqa: BLE001
             logger.warning("Could not read workspace material for %s: %s", user_id, exc)
@@ -512,6 +691,7 @@ class RagService:
         meeting_ids: list[str] | None = None,
         mode: str = "express",
         history_days: int | None = None,
+        history: list[str] | None = None,
     ) -> tuple[str, list[dict]]:
         """Answer a question grounded in EVERY meeting the user owns.
 
@@ -519,16 +699,20 @@ class RagService:
         another user's transcript. `meeting_ids`, when given, narrows the search
         to a subset (e.g. "only these three calls").
 
-        `mode` decides how hard to look, and the two settings differ in exactly
-        two ways so that neither is a worse version of the other:
+        `mode` decides how hard to look, and the two differ in three ways so
+        that neither is a worse version of the other:
 
-        * **express** — the default, and precisely what every caller got before
-          the setting existed. `rag_workspace_top_k` passages, and the answer is
-          asked to enumerate only when the question sounds like a list.
-        * **advanced** — `rag_workspace_deep_top_k` passages, so an answer can
-          draw on more calls and more of each, and enumeration is always on.
-          Costs proportionally more context and takes proportionally longer,
-          which is why it is a choice rather than the default.
+        * **express** — one pass at `rag_workspace_top_k` passages, from at most
+          `rag_max_passages_per_meeting` of any one meeting, written short.
+        * **advanced** — `rag_workspace_deep_top_k` passages over a wider
+          candidate scan, more of each meeting allowed, and written to cover
+          every theme the evidence supports. Costs proportionally more context
+          and time, which is why it is a choice rather than the default.
+
+        Advanced deliberately no longer forces enumeration. It used to, so
+        "what does JWT mean here?" came back as a single bullet under the line
+        "Total: 1." Depth is about evidence; whether the answer is a counted
+        list is about what was asked.
 
         The commitment and decision ledgers are in both. They are the complete
         record rather than a retrieved sample, and withholding them from the
@@ -545,12 +729,65 @@ class RagService:
             return ("Workspace chat is not configured on this deployment.", [])
 
         deep = mode == "advanced"
+        intent = classify(question)
+        report = RetrievalReport(mode="advanced" if deep else "express", intent=intent)
         q_emb = (await self._embedder.embed([question]))[0]
         top_k = (
             self._settings.rag_workspace_deep_top_k
             if deep
             else self._settings.rag_workspace_top_k
         )
+        candidates = top_k * self._settings.rag_candidate_multiplier
+
+        # "What did we decide in the Product Marketing Weekly?" names a meeting.
+        # Answering it from three other meetings whose text happens to sit
+        # nearby in embedding space is not a partial answer, it is a different
+        # question — so a named meeting narrows retrieval outright rather than
+        # merely scoring higher.
+        if not meeting_ids and could_name_a_meeting(question):
+            named = await self._meetings_named_in(user_id, question)
+            if named:
+                meeting_ids = named
+                report.notes.append("named-meeting")
+
+        person = named_person(question)
+        boost_terms = retrieval.tokens(person) if person else None
+        if person:
+            report.notes.append("named-person")
+
+        # A claim about several meetings needs room for several meetings; a
+        # lookup does not, and letting one meeting fill the context is how a
+        # workspace answer quietly becomes a single-meeting answer.
+        cap = (
+            self._settings.rag_deep_max_passages_per_meeting
+            if deep or spans_meetings(intent)
+            else self._settings.rag_max_passages_per_meeting
+        )
+
+        # How many rows the scan produced at all, across both halves of a
+        # comparison. Distinct from `report.considered`, which the second call
+        # overwrites, and distinct from what survived: an archive with nothing
+        # in it and an archive with nothing relevant are different answers.
+        scanned = 0
+
+        def keep(rows: list[tuple], limit: int) -> list[Candidate]:
+            nonlocal scanned
+            scanned += len(rows)
+            return retrieval.select(
+                rows,
+                question,
+                limit=limit,
+                max_distance=self._settings.rag_max_distance,
+                margin=self._settings.rag_relevance_margin,
+                minimum=self._settings.rag_min_passages,
+                lexical_weight=self._settings.rag_lexical_weight,
+                duplicate_similarity=self._settings.rag_duplicate_similarity,
+                per_meeting_cap=cap,
+                workspace=True,
+                boost_terms=boost_terms,
+                boost=self._settings.rag_name_boost,
+                report=report,
+            )
 
         # "What changed since last week?" is a question about a period, and
         # nearest-neighbour search has no notion of one — it would answer from
@@ -562,9 +799,9 @@ class RagService:
         try:
             if window is None:
                 rows = await self._retrieve(
-                    user_id, q_emb, meeting_ids, top_k, not_before=floor
+                    user_id, q_emb, meeting_ids, candidates, not_before=floor
                 )
-                recent, earlier = rows, []
+                recent, earlier = keep(rows, top_k), []
             else:
                 # A comparison needs both halves or there is nothing to have
                 # changed from, and the two are retrieved separately so the
@@ -572,55 +809,86 @@ class RagService:
                 # Split evenly rather than doubling the budget: the context
                 # window is the same size either way.
                 half = max(1, top_k // 2) if window.comparative else top_k
-                recent = await self._retrieve(
-                    user_id, q_emb, meeting_ids, half,
-                    since=window.start, until=window.end, not_before=floor,
+                recent = keep(
+                    await self._retrieve(
+                        user_id, q_emb, meeting_ids, half * self._settings.rag_candidate_multiplier,
+                        since=window.start, until=window.end, not_before=floor,
+                    ),
+                    half,
                 )
                 earlier = (
-                    await self._retrieve(
-                        user_id, q_emb, meeting_ids, top_k - half,
-                        until=window.start, not_before=floor,
+                    keep(
+                        await self._retrieve(
+                            user_id, q_emb, meeting_ids,
+                            (top_k - half) * self._settings.rag_candidate_multiplier,
+                            until=window.start, not_before=floor,
+                        ),
+                        top_k - half,
                     )
                     if window.comparative
                     else []
                 )
-                rows = recent + earlier
         except Exception as exc:  # noqa: BLE001
             logger.warning("Workspace retrieval failed for user %s: %s", user_id, exc)
             return ("I couldn't search your meetings right now.", [])
 
-        if not rows:
-            if window is not None:
+        kept = recent + earlier
+        ledger = await self._commitment_context(user_id, meeting_ids)
+        decisions = await self._decision_context(user_id, meeting_ids)
+
+        # No transcript survived the filter. Whether that ends the question
+        # depends on what was asked: the ledgers are the complete record of what
+        # is owed and what was decided, so "what is still outstanding?" is
+        # answerable from them with no passage at all — and a lookup is not.
+        # Without this split, a question about something nobody has ever
+        # discussed is answered by a model handed only the action-item list,
+        # which describes that list back rather than saying it found nothing.
+        if not kept and not spans_meetings(intent):
+            self._log_retrieval(report)
+            if window is not None and scanned == 0:
                 return (
                     f"I couldn't find any meetings from {window.label}. Try asking "
                     "without the time frame, or over a longer period.",
                     [],
                 )
-            return (
-                "I don't have any indexed meetings for you yet. Upload a meeting "
-                "and I'll be able to answer questions across all of them.",
-                [],
-            )
+            if scanned == 0:
+                return (
+                    "I don't have any indexed meetings for you yet. Upload a meeting "
+                    "and I'll be able to answer questions across all of them.",
+                    [],
+                )
+            return ("I couldn't find this in the meetings currently in scope.", [])
 
-        # Label each passage with its meeting and date so the model can attribute
-        # answers across calls ("in the Acme kickoff you said...") and can tell
-        # which of two conflicting statements came later.
-        if window is None:
-            context = [_passage(r) for r in rows]
-        else:
-            context = [
-                f"The passages below are grouped by when the meeting happened. "
-                f"The question is about {window.label}.",
-                f"--- From {window.label} ---",
-                *(_passage(r) for r in recent),
-            ]
-            if earlier:
-                context += [
-                    f"--- From before {window.label}, for comparison only ---",
-                    *(_passage(r) for r in earlier),
-                    "Answer about what is in the first group. Use the second only "
-                    "to say what is different, and never present it as recent.",
-                ]
+        if not kept and not ledger and not decisions:
+            self._log_retrieval(report)
+            if window is not None and scanned == 0:
+                return (
+                    f"I couldn't find any meetings from {window.label}. Try asking "
+                    "without the time frame, or over a longer period.",
+                    [],
+                )
+            if scanned == 0:
+                return (
+                    "I don't have any indexed meetings for you yet. Upload a meeting "
+                    "and I'll be able to answer questions across all of them.",
+                    [],
+                )
+            # Something was there and none of it was about this. Said in one
+            # sentence and left there: the old behaviour was to answer anyway
+            # from the least-unrelated passages in the archive, which is where
+            # "I found three potentially relevant recordings" came from.
+            return ("I couldn't find this in the meetings currently in scope.", [])
+
+        # `context` is what the model reads; `origins` is the same list with the
+        # candidate each line came from, or None where the line is a ledger
+        # entry or a separator. They are built together and must stay the same
+        # length — see `_cited`.
+        context: list[str] = []
+        origins: list = []
+
+        def add(line: str, origin=None) -> None:
+            context.append(line)
+            origins.append(origin)
 
         # Retrieval only ever sees transcript text, which records what people
         # *promised* and can never record what happened afterwards. Asked "what
@@ -628,33 +896,98 @@ class RagService:
         # lists everything anyone ever committed to — including the items the
         # user closed last week — and states it with total confidence. The
         # tracker holds the missing half, so it is put in front of the model.
-        context = await self._commitment_context(user_id, meeting_ids) + context
-        # And "do any decisions conflict?" cannot be answered from passages at
-        # all: two contradictory decisions made six weeks apart are unlikely to
-        # both land in one top-k, and even together they arrive undated. The
-        # store holds every decision with the date it was made.
-        context = await self._decision_context(user_id, meeting_ids) + context
+        for line in decisions:
+            add(line)
+        for line in ledger:
+            add(line)
 
-        # The ledger above is complete — every action item, not a retrieved
-        # sample — so an inventory question fails on *writing*, not on evidence.
-        # Told to be concise, the model merges near-identical items into one
-        # line: fifteen tracked items come back as thirteen bullets, complete
-        # and uncountable. This asks it to enumerate instead.
-        answer = await self._llm.answer(
-            question, context, exhaustive=deep or wants_full_list(question)
+        # Label each passage with its meeting and date so the model can attribute
+        # answers across calls ("in the Acme kickoff you said...") and can tell
+        # which of two conflicting statements came later.
+        if window is None:
+            for c in kept:
+                add(_passage_of(c), c)
+        else:
+            add(
+                "The passages below are grouped by when the meeting happened. "
+                f"The question is about {window.label}."
+            )
+            add(f"--- From {window.label} ---")
+            for c in recent:
+                add(_passage_of(c), c)
+            if earlier:
+                add(f"--- From before {window.label}, for comparison only ---")
+                for c in earlier:
+                    add(_passage_of(c), c)
+                add(
+                    "Answer about what is in the first group. Use the second only "
+                    "to say what is different, and never present it as recent."
+                )
+
+        report.context_chars = sum(len(c) for c in context)
+        # The ledger is complete — every action item, not a retrieved sample —
+        # so an inventory question fails on *writing*, not on evidence. Told to
+        # be concise, the model merges near-identical items into one line:
+        # fifteen tracked items come back as thirteen bullets, complete and
+        # uncountable. This asks it to enumerate instead. Mode does not enter
+        # into it; the question does.
+        answer = _as_answer(
+            await self._llm.answer(
+                question,
+                context,
+                exhaustive=wants_enumeration(intent) or wants_full_list(question),
+                intent=intent,
+                depth="advanced" if deep else "express",
+                history=history,
+            )
         )
+        cited = _cited(origins, answer.used)
+        report.used = len(cited)
+        self._log_retrieval(report)
         citations = [
             {
-                "chunkIndex": r[0],
-                "start": r[2],
-                "end": r[3],
-                "text": r[1],
-                "meetingId": r[4],
-                "meetingTitle": r[5],
+                "chunkIndex": c.chunk_index,
+                "start": c.start,
+                "end": c.end,
+                "text": c.text,
+                "meetingId": c.meeting_id,
+                "meetingTitle": c.meeting_title,
             }
-            for r in rows
+            for c in cited
         ]
-        return (answer, citations)
+        return (answer.text, citations)
+
+    async def _meetings_named_in(self, user_id: str, question: str) -> list[str]:
+        """Ids of meetings whose titles the question names, or an empty list.
+
+        Titles are read rather than guessed at, and only recent ones: a question
+        naming a meeting is naming one the person remembers, and scanning an
+        archive of thousands to honour that would cost more than the narrowing
+        saves. Never raises — failing to spot a named meeting costs a wider
+        search, which is where this started.
+        """
+        try:
+            async with self.connection(user_id) as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        """
+                        SELECT id, title FROM meetings
+                         WHERE user_id = %s AND title IS NOT NULL
+                         ORDER BY created_at DESC LIMIT 200
+                        """,
+                        (user_id,),
+                    )
+                    rows = await cur.fetchall()
+            # Inside the guard as well: a row that is not the shape this expects
+            # is the same class of problem as a query that would not run, and
+            # both cost a wider search rather than an error.
+            by_title = {title: mid for mid, title in rows}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not read meeting titles for %s: %s", user_id, exc)
+            return []
+
+        hits = names_meeting(question, list(by_title))
+        return [by_title[t] for t in hits]
 
     async def search(self, user_id: str, query: str, limit: int | None = None) -> list[dict]:
         """Semantic search across the user's transcripts.

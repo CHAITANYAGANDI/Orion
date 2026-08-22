@@ -241,3 +241,44 @@ def test_no_questions_is_a_valid_outcome():
     """Better than three generic ones: the UI has hand-written prompts to fall
     back on, and a generic chip is indistinguishable from a broken one."""
     assert _run(_Llm(questions=[])).suggestions == []
+
+
+# --- what a meeting's chips can see ----------------------------------------- #
+
+def test_commitments_are_part_of_a_meetings_material():
+    """The one thing a summary cannot supply.
+
+    A summary records what was said; it never records what somebody was left
+    holding. "Status of the pricing follow-up?" is a question about this meeting
+    that no amount of summary text suggests, and before this the generator had
+    no way to know the meeting produced any work at all.
+    """
+    material = meeting_material(
+        "The team moved the launch to April.",
+        [_section("decisions", "Decisions", bullets=["Move the launch to April."])],
+        title="Launch sync",
+        action_items=["Send the revised pricing to Acme", "Book the vendor call"],
+    )
+
+    assert "Send the revised pricing to Acme" in material
+    assert "Book the vendor call" in material
+
+
+def test_the_commitments_are_bounded_like_everything_else():
+    material = meeting_material(
+        "A busy meeting.",
+        [],
+        action_items=[f"item number {i}" for i in range(40)],
+    )
+
+    # Past a handful these stop adding distinct things to ask about and start
+    # adding tokens, on every meeting the product ever processes.
+    assert material.count("item number") <= 6
+
+
+def test_no_commitments_adds_no_heading():
+    material = meeting_material("A quiet meeting.", [], action_items=[])
+
+    # An "Action items" heading with nothing under it tells the generator this
+    # meeting produced work, which is the opposite of true.
+    assert "Action items" not in material

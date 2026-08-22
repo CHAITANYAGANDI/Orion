@@ -193,8 +193,23 @@ export const api = createApi({
      * call. Untagged deliberately: nothing in the app should invalidate it, and
      * a refetch on every mutation would defeat the cache it is fronting.
      */
-    getWorkspaceSuggestions: builder.query<{ suggestions: string[] }, void>({
-      query: () => "/suggestions/workspace",
+    /**
+     * Starter questions for the workspace chat.
+     *
+     * <p>Takes the meetings the composer has been narrowed to, so the chips
+     * follow Add context instead of sitting there describing the whole archive
+     * after somebody has just picked three calls out of it. Undefined means the
+     * whole workspace, and produces the same request URL it always did — so the
+     * cached, unscoped set stays one cache entry rather than fragmenting.
+     */
+    getWorkspaceSuggestions: builder.query<{ suggestions: string[] }, string[] | void>({
+      query: (meetingIds) => {
+        const ids = Array.isArray(meetingIds) ? meetingIds : [];
+        if (ids.length === 0) return "/suggestions/workspace";
+        const params = new URLSearchParams();
+        for (const id of ids) params.append("meetingIds", id);
+        return `/suggestions/workspace?${params.toString()}`;
+      },
     }),
 
     // ---- Decisions and risks ----

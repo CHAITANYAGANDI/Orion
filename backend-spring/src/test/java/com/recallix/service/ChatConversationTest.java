@@ -37,6 +37,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -90,9 +91,9 @@ class ChatConversationTest {
         when(meetings.findByIdAndUserId(anyString(), anyString())).thenAnswer(inv ->
                 USER.equals(inv.getArgument(1)) ? Optional.of(m) : Optional.empty());
 
-        when(ai.chat(anyString(), anyString(), anyString(), any(ChatMode.class)))
+        when(ai.chat(anyString(), anyString(), anyString(), any(ChatMode.class), any()))
                 .thenReturn(new AiClient.ChatResult("An answer.", List.of()));
-        when(ai.workspaceChat(anyString(), anyString(), any(), any(), any()))
+        when(ai.workspaceChat(anyString(), anyString(), any(), any(), any(), any()))
                 .thenReturn(new AiClient.ChatResult("An answer.", List.of()));
 
         when(conversations.save(any())).thenAnswer(inv -> {
@@ -232,7 +233,7 @@ class ChatConversationTest {
         void carriesTheMode() {
             service.ask(USER, MEETING, "List everything outstanding", null, ChatMode.ADVANCED);
 
-            verify(ai).chat(eq(USER), eq(MEETING), anyString(), eq(ChatMode.ADVANCED));
+            verify(ai).chat(eq(USER), eq(MEETING), anyString(), eq(ChatMode.ADVANCED), any());
         }
 
         @Test
@@ -243,7 +244,7 @@ class ChatConversationTest {
             // must keep getting exactly the behaviour it got before.
             service.ask(USER, MEETING, "What did we decide?", null, ChatMode.of(null));
 
-            verify(ai).chat(eq(USER), eq(MEETING), anyString(), eq(ChatMode.EXPRESS));
+            verify(ai).chat(eq(USER), eq(MEETING), anyString(), eq(ChatMode.EXPRESS), any());
         }
     }
 
@@ -552,8 +553,8 @@ class ChatConversationTest {
 
             // Resolved here rather than accepted from the caller: what a project
             // contains is a fact about the database, not a client's assertion.
-            verify(ai).workspaceChat(USER, "What did we decide?", List.of("mtg_a", "mtg_b"),
-                    ChatMode.EXPRESS, null);
+            verify(ai).workspaceChat(eq(USER), eq("What did we decide?"),
+                    eq(List.of("mtg_a", "mtg_b")), eq(ChatMode.EXPRESS), isNull(), any());
         }
 
         @Test
@@ -567,7 +568,7 @@ class ChatConversationTest {
             // An empty id list means "do not filter" downstream, so sending one
             // would answer a question about this project from every meeting in
             // the workspace and present it as the project's.
-            verify(ai, never()).workspaceChat(anyString(), anyString(), any(), any(), any());
+            verify(ai, never()).workspaceChat(anyString(), anyString(), any(), any(), any(), any());
             assertThat(answer.content()).isEqualTo(ChatService.EMPTY_PROJECT);
         }
 
@@ -630,7 +631,7 @@ class ChatConversationTest {
         void cannotAskSomebodyElsesProject() {
             assertThatThrownBy(() -> service.askProject(OTHER, PROJECT, "A question?", null))
                     .isInstanceOf(ApiException.class);
-            verify(ai, never()).workspaceChat(anyString(), anyString(), any(), any(), any());
+            verify(ai, never()).workspaceChat(anyString(), anyString(), any(), any(), any(), any());
         }
     }
 }

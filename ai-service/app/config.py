@@ -140,6 +140,57 @@ class Settings(BaseSettings):
     # than ten: past roughly this the top-k stops adding calls and starts adding
     # more of the same one, and the context window pays for all of it.
     rag_workspace_deep_top_k: int = 25
+    # --- relevance filtering (see app/retrieval.py for the measurements) ---
+    #
+    # Nearest-neighbour search returns k rows whether or not any of them are
+    # about the question. These bound what counts as evidence.
+    #
+    # The ceiling is measured, not chosen. Against a real indexed workspace on
+    # text-embedding-3-small, questions the archive answers bottom out at
+    # 0.59-0.61 cosine distance and questions about material that is simply
+    # absent start at 0.87. 0.80 sits in that empty band with room on both
+    # sides. Anything below ~0.59 returns nothing for every question ever
+    # asked, which is the failure mode of picking this number by intuition.
+    rag_max_distance: float = 0.80
+    # How much worse than the best match a passage may be and still be evidence.
+    # Absolute distance says whether anything is relevant at all; this says
+    # which survivors are in the same league as the leader. On the benchmark
+    # question the strongest meeting spans 0.613-0.680 and the next meeting
+    # appears at 0.711, so this keeps the leader whole and trims the echo.
+    rag_relevance_margin: float = 0.12
+    # Never cut below this many, when this many cleared the ceiling. A broad
+    # question ("what did we talk about?") has a long shallow gradient and no
+    # leader, and trimming that to one passage answers a wide question from a
+    # sliver.
+    rag_min_passages: int = 3
+    # How many candidates to pull before filtering, as a multiple of what will
+    # be kept. Filtering can only discard, so a scan that returns exactly the
+    # final budget arrives with nothing to spare and any drop leaves the answer
+    # short.
+    rag_candidate_multiplier: int = 3
+    # Weight of exact word overlap against vector similarity when reranking.
+    # Small on purpose: the vector is the ranking and this breaks its ties.
+    # Larger, and passages that merely repeat the question's words outrank
+    # passages that answer it.
+    rag_lexical_weight: float = 0.25
+    # Token overlap at which two passages are the same passage. Chunks overlap
+    # by design, so consecutive ones genuinely share text.
+    rag_duplicate_similarity: float = 0.8
+    # Most passages one meeting may contribute to a workspace answer. Without
+    # it the meeting with the most chunks takes every slot -- not for being the
+    # best answer, for being the longest.
+    rag_max_passages_per_meeting: int = 3
+    # And what Advanced allows instead, because a comparison or a timeline is a
+    # claim about several meetings and needs more than three lines of each.
+    rag_deep_max_passages_per_meeting: int = 6
+    # How much a passage's score rises for naming the person or the meeting the
+    # question named. Enough to reorder near-equals, never enough to promote
+    # something the relevance filter would have dropped.
+    rag_name_boost: float = 0.15
+    # The user's own earlier questions carried into the prompt so "which of
+    # those?" resolves. Their questions only -- never previous answers.
+    rag_history_turns: int = 4
+
     rag_search_limit: int = 20
     # Semantic search dedupes to one hit per meeting after the ANN scan, and the
     # owner filter discards some candidates, so the inner scan fetches this

@@ -9,6 +9,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
+from app.answering import Answer
 from app.schemas import (
     ActionItem,
     DraftEmailRequest,
@@ -108,21 +109,44 @@ class LlmPort(ABC):
 
     @abstractmethod
     async def answer(
-        self, question: str, context: list[str], *, exhaustive: bool = False
-    ) -> str:
+        self,
+        question: str,
+        context: list[str],
+        *,
+        exhaustive: bool = False,
+        intent: str = "fact",
+        depth: str = "express",
+        history: list[str] | None = None,
+    ) -> Answer:
         """Answer a question grounded ONLY in the provided context passages.
+
+        Returns prose *and* the passage numbers it relied on. Citations used to
+        be every passage retrieval returned, which asserts the model read all of
+        them and drew on all of them — neither true, and visibly so the moment a
+        reader clicks a source that has nothing to do with the answer.
 
         `exhaustive` asks for an enumeration rather than prose: every matching
         item on its own line, with a count. It changes only the instruction —
         the context is the same either way — and exists because a concise answer
         to "what is outstanding?" silently merges near-identical items, so the
         reply is complete but cannot be counted. See `app.questions`.
+
+        `intent` is the shape the question asks for and `depth` is how hard the
+        user asked us to look. Both steer writing only; neither decides what is
+        true. `history` is the user's own earlier questions in this thread, for
+        resolving "those" and "it" — never previous answers, which would let one
+        loose claim become evidence for the next.
+
+        A caller may pass a plain string back from an older implementation;
+        `app.answering.parse` normalises it.
         """
         raise NotImplementedError
 
     @abstractmethod
     @abstractmethod
-    async def suggest_questions(self, material: str, *, workspace: bool = False) -> list[str]:
+    async def suggest_questions(
+        self, material: str, *, workspace: bool = False, scope: str = "workspace"
+    ) -> list[str]:
         """Questions worth asking about this material.
 
         The starter chips on a chat. Generated from the material rather than

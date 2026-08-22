@@ -97,12 +97,21 @@ public class AiClient {
      * independently, so a bug in that check cannot become a cross-tenant read.
      */
     public ChatResult chat(String userId, String meetingId, String question,
-                           com.recallix.domain.ChatMode mode) {
+                           com.recallix.domain.ChatMode mode, List<String> history) {
+        Map<String, Object> payload = new java.util.HashMap<>();
+        payload.put("meetingId", meetingId);
+        payload.put("question", question);
+        payload.put("userId", userId);
+        payload.put("mode", (mode == null ? com.recallix.domain.ChatMode.EXPRESS : mode).wire());
+        // The thread so far, so a follow-up resolves. Sent even when empty:
+        // an absent list and an empty one mean the same thing downstream, and
+        // a field that is only sometimes present is one somebody eventually
+        // reads as significant.
+        payload.put("history", history == null ? List.of() : history);
         JsonNode body = client.post()
                 .uri("/ai/chat")
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(Map.of("meetingId", meetingId, "question", question, "userId", userId,
-                        "mode", (mode == null ? com.recallix.domain.ChatMode.EXPRESS : mode).wire()))
+                .body(payload)
                 .retrieve()
                 .body(JsonNode.class);
         return toChatResult(body);
@@ -114,10 +123,12 @@ public class AiClient {
      * user's transcripts.
      */
     public ChatResult workspaceChat(String userId, String question, List<String> meetingIds,
-                                    com.recallix.domain.ChatMode mode, Integer historyDays) {
+                                    com.recallix.domain.ChatMode mode, Integer historyDays,
+                                    List<String> history) {
         Map<String, Object> payload = new java.util.HashMap<>();
         payload.put("userId", userId);
         payload.put("question", question);
+        payload.put("history", history == null ? List.of() : history);
         if (meetingIds != null && !meetingIds.isEmpty()) {
             payload.put("meetingIds", meetingIds);
         }
@@ -215,10 +226,25 @@ public class AiClient {
      * which is how the two come to disagree about what "recent" means.
      */
     public List<String> workspaceSuggestions(String userId) {
+        return workspaceSuggestions(userId, null);
+    }
+
+    /**
+     * The same, narrowed to meetings the reader selected through Add context.
+     *
+     * <p>Sent as ids rather than as material for the same reason as above: the
+     * ai-service reads the summaries. What travels is the reader's choice.
+     */
+    public List<String> workspaceSuggestions(String userId, List<String> meetingIds) {
+        Map<String, Object> payload = new java.util.HashMap<>();
+        payload.put("userId", userId);
+        if (meetingIds != null && !meetingIds.isEmpty()) {
+            payload.put("meetingIds", meetingIds);
+        }
         JsonNode body = client.post()
                 .uri("/ai/suggestions/workspace")
                 .contentType(MediaType.APPLICATION_JSON)
-                .body(Map.of("userId", userId))
+                .body(payload)
                 .retrieve()
                 .body(JsonNode.class);
 
