@@ -4,7 +4,51 @@ import * as React from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { cn } from "@/lib/utils";
 
-const DropdownMenu = DropdownMenuPrimitive.Root;
+/**
+ * A menu closes when you dismiss it. Leaving the window is not dismissing it.
+ *
+ * Radix's menu root closes on window blur, unconditionally:
+ *
+ *     const handleBlur = () => handleOpenChange(false);
+ *     window.addEventListener("blur", handleBlur);
+ *
+ * So switching browser tabs, alt-tabbing to another window, or opening dev
+ * tools took any open menu with it, and coming back left a reader looking for
+ * a menu they had not closed. There is no prop for it — the listener is inside
+ * `Menu.Root` — so the only way past is to hold `open` out here and decline
+ * that particular close.
+ *
+ * `document.hasFocus()` is what tells it apart from a real one. The blur
+ * handler runs while the window is not focused; a click outside, Escape and
+ * choosing an item all happen while it is. So a close asked for by an
+ * unfocused window is the one to ignore, and every other dismissal is
+ * untouched.
+ *
+ * Controlled callers are unaffected: `open` and `onOpenChange` pass through,
+ * and they hear about the closes that survive the filter.
+ */
+function DropdownMenu({
+  open,
+  defaultOpen,
+  onOpenChange,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Root>) {
+  const [uncontrolled, setUncontrolled] = React.useState(defaultOpen ?? false);
+  const isOpen = open ?? uncontrolled;
+
+  return (
+    <DropdownMenuPrimitive.Root
+      open={isOpen}
+      onOpenChange={(next) => {
+        if (!next && !document.hasFocus()) return;
+        if (open === undefined) setUncontrolled(next);
+        onOpenChange?.(next);
+      }}
+      {...props}
+    />
+  );
+}
+
 const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
 
 const DropdownMenuContent = React.forwardRef<
@@ -32,7 +76,7 @@ const DropdownMenuItem = React.forwardRef<
   <DropdownMenuPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground [&>svg]:size-4",
+      "relative flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4",
       className
     )}
     {...props}

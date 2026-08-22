@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 /**
@@ -52,10 +52,18 @@ import { MeetingMenu } from "@/components/meeting-menu";
  * removed item reappears, because adding one back is a single line and reads
  * like a fix.
  *
- * <p>The last test is about something that used to be here. "Change language…"
- * re-transcribed the audio and threw away every hand-typed correction, and it
- * sat beside a translation picker doing something else entirely. Both said
- * "language". It is asserted absent so it cannot come back by accident.
+ * <p>Nothing else is ever absent. An item with nothing to act on is greyed and
+ * stays where it was, so the menu is the same eight lines on every meeting;
+ * `data-disabled` is Radix's mark for that, and it is asserted rather than
+ * inferred from a click, because a disabled item takes no pointer events and a
+ * click on one proves only that nothing happened.
+ *
+ * <p>Two items that used to be here are asserted absent by name. "Transcribe
+ * again" re-ran the pipeline over the same audio and threw away every hand
+ * correction and speaker rename to do it. And "Change language…" — a different
+ * item, now a reused name — did the same thing while sounding like the
+ * translation picker it sat next to. The name is back on the picker; what must
+ * not come back is either of them re-transcribing.
  */
 function menu(over: Partial<React.ComponentProps<typeof MeetingMenu>> = {}) {
   const props = {
@@ -64,13 +72,11 @@ function menu(over: Partial<React.ComponentProps<typeof MeetingMenu>> = {}) {
     hasTranscript: true,
     hasSummary: true,
     canTranslate: true,
-    canReprocess: true,
     onCopySummary: vi.fn(),
     onCopyTranscript: vi.fn(),
     onRegenerateSummary: vi.fn(),
     onTranslate: vi.fn(),
     onRematchSpeakers: vi.fn(),
-    onReprocess: vi.fn(),
     onDelete: vi.fn(),
     ...over,
   };
@@ -97,16 +103,71 @@ describe("MeetingMenu", () => {
     for (const label of [
       "Move…",
       "Copy link",
-      "Copy summary",
-      "Regenerate summary",
       "Copy transcript",
       "Rematch speakers",
-      "Read in another language…",
-      "Transcribe again",
+      "Change language",
+      "Copy summary",
+      "Regenerate summary",
       "Delete this meeting",
     ]) {
       expect(screen.getByRole("menuitem", { name: label })).toBeInTheDocument();
     }
+  });
+
+  it("keeps the transcript's own actions together, and above the brief's", async () => {
+    const user = userEvent.setup();
+    menu();
+    await open(user);
+
+    // The order is the argument: the summary is written from the transcript, so
+    // correcting a speaker or switching language comes first and Regenerate is
+    // what you reach for afterwards. Asserted as a whole sequence because the
+    // grouping is the thing being pinned, and a single item drifting one line
+    // up puts it in the wrong group without failing any other test here.
+    expect(
+      screen.getAllByRole("menuitem").map((el) => el.textContent?.trim()),
+    ).toEqual([
+      "Move…",
+      "Copy link",
+      "Copy transcript",
+      "Rematch speakers",
+      "Change language",
+      "Copy summary",
+      "Regenerate summary",
+      "Delete this meeting",
+    ]);
+  });
+
+  it("survives the window losing focus", async () => {
+    const user = userEvent.setup();
+    menu();
+    await open(user);
+
+    // Switching browser tabs, or alt-tabbing away, blurs the window — and
+    // Radix's menu root closes on that. Nobody dismissed anything; they looked
+    // away, and came back to a menu they had not closed. jsdom always reports
+    // the document as focused, so the unfocused window is the part stubbed.
+    // The fix is on DropdownMenu, so every menu in the app behaves this way;
+    // this is the one it was reported on.
+    const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    fireEvent.blur(window);
+
+    expect(screen.getByRole("menuitem", { name: "Delete this meeting" })).toBeInTheDocument();
+    hasFocus.mockRestore();
+  });
+
+  it("still closes on a click outside it", async () => {
+    const user = userEvent.setup();
+    menu();
+    await open(user);
+
+    // The other half. Declining one close must not decline them all — and the
+    // window is focused for this one, which is exactly what tells them apart.
+    // Fired rather than clicked because an open modal menu sets pointer-events
+    // to none on everything behind it, which user-event refuses to click.
+    fireEvent.pointerDown(document.body);
+
+    expect(screen.queryByRole("menuitem", { name: "Delete this meeting" })).not.toBeInTheDocument();
   });
 
   it("hands each item back to the page that owns its data", async () => {
@@ -122,41 +183,82 @@ describe("MeetingMenu", () => {
     expect(props.onRematchSpeakers).toHaveBeenCalled();
 
     await open(user);
-    await user.click(screen.getByRole("menuitem", { name: "Read in another language…" }));
+    await user.click(screen.getByRole("menuitem", { name: "Change language" }));
     expect(props.onTranslate).toHaveBeenCalled();
   });
 
-  it("does not offer a reading language for a meeting with nothing written yet", async () => {
+  it("greys the reading language for a meeting with nothing written yet", async () => {
     const user = userEvent.setup();
     menu({ canTranslate: false });
     await open(user);
 
-    expect(
-      screen.queryByRole("menuitem", { name: "Read in another language…" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Change language" })).toHaveAttribute(
+      "data-disabled",
+    );
   });
 
-  it("no longer offers to re-transcribe in a different language", async () => {
+  it("offers nothing that re-runs the transcriber", async () => {
     const user = userEvent.setup();
-    menu();
+    const props = menu();
     await open(user);
 
-    // Two items saying "language", one of which silently destroyed corrections.
-    // Transcribing again is still here; it just cannot change the language.
-    expect(screen.queryByRole("menuitem", { name: /Change language/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Transcribe again" })).toBeInTheDocument();
+    // "Transcribe again" bought the same pipeline over the same audio for the
+    // price of every correction and speaker rename anybody had made.
+    expect(screen.queryByRole("menuitem", { name: /Transcribe again/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /re-?transcribe/i })).not.toBeInTheDocument();
+
+    // And the item that says "language" translates. An earlier item of that
+    // exact name re-transcribed from the audio, which is why this one spent a
+    // while called "Read in another language…" — the name is only safe now
+    // because the destructive one is gone, so what it does is asserted here.
+    await user.click(screen.getByRole("menuitem", { name: "Change language" }));
+    expect(props.onTranslate).toHaveBeenCalled();
   });
 
-  it("offers nothing to copy from a meeting with nothing in it", async () => {
+  it("greys what a meeting with nothing in it cannot do, and keeps it in place", async () => {
     const user = userEvent.setup();
-    menu({ hasTranscript: false, hasSummary: false });
+    menu({ hasTranscript: false, hasSummary: false, canTranslate: false });
     await open(user);
 
-    expect(screen.queryByRole("menuitem", { name: "Copy transcript" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: "Copy summary" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: "Rematch speakers" })).not.toBeInTheDocument();
-    // Deleting it is still the commonest thing to want to do with one.
-    expect(screen.getByRole("menuitem", { name: "Delete this meeting" })).toBeInTheDocument();
+    // Greyed rather than gone. A menu five lines long on one meeting and eight
+    // on the next has to be read from the top every time, and "there is no
+    // transcript" and "there is no transcript yet" look identical when the
+    // difference is an item that is simply missing.
+    for (const label of [
+      "Copy transcript",
+      "Rematch speakers",
+      "Change language",
+      "Copy summary",
+      "Regenerate summary",
+    ]) {
+      expect(screen.getByRole("menuitem", { name: label })).toHaveAttribute("data-disabled");
+    }
+
+    // The three that never needed a transcript stay live — deleting it is the
+    // commonest thing to want to do with a meeting that has nothing in it.
+    for (const label of ["Move…", "Copy link", "Delete this meeting"]) {
+      expect(screen.getByRole("menuitem", { name: label })).not.toHaveAttribute("data-disabled");
+    }
+  });
+
+  it("greys the three that act while one of them is still running", async () => {
+    const user = userEvent.setup();
+    menu({ working: true });
+    await open(user);
+
+    // Rematching, changing language and regenerating all end in the summary
+    // being rewritten. Two of those racing on one meeting is the concrete thing
+    // this prevents.
+    for (const label of ["Rematch speakers", "Change language", "Regenerate summary"]) {
+      expect(screen.getByRole("menuitem", { name: label })).toHaveAttribute("data-disabled");
+    }
+
+    // Copying is not one of them: taking what is on screen is safe whatever is
+    // happening behind it, and refusing it mid-rewrite would be a menu that
+    // goes dead for no reason the reader can see.
+    for (const label of ["Copy transcript", "Copy summary", "Copy link"]) {
+      expect(screen.getByRole("menuitem", { name: label })).not.toHaveAttribute("data-disabled");
+    }
   });
 
   it("keeps deleting the meeting whole, and offers no smaller grain", async () => {

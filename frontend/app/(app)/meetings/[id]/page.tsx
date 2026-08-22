@@ -34,7 +34,6 @@ import {
   useGetSummaryQuery,
   useGetTranscriptQuery,
   useGetMeetingActionItemsQuery,
-  useReprocessMeetingMutation,
   useDeleteMeetingMutation,
   useGetChatQuery,
   useAskChatMutation,
@@ -209,7 +208,13 @@ export default function MeetingDetailPage() {
    * item a second time works a second time.
    */
   const [speakerTools, setSpeakerTools] = React.useState(0);
-  const [resummarize] = useResummarizeMutation();
+  // Keyed so the three places that can rewrite this summary share one
+  // in-flight flag: this page's menu item, the template picker on the tab row,
+  // and the "transcript changed" banner. Without it each knows only about its
+  // own call, and the menu would start a second rewrite on top of the picker's.
+  const [resummarize, { isLoading: regenerating }] = useResummarizeMutation({
+    fixedCacheKey: `resummarize:${id}`,
+  });
 
   const [editingTranscript, setEditingTranscript] = React.useState(false);
   const transcriptEditor = React.useRef<TranscriptEditorHandle>(null);
@@ -395,7 +400,6 @@ export default function MeetingDetailPage() {
     }
   }
 
-  const [reprocess, reprocessState] = useReprocessMeetingMutation();
   const [remove, removeState] = useDeleteMeetingMutation();
 
   /**
@@ -471,25 +475,6 @@ export default function MeetingDetailPage() {
   function onRematchSpeakers() {
     changeTab("transcript");
     setSpeakerTools((n) => n + 1);
-  }
-
-  async function onReprocess() {
-    if (
-      !window.confirm(
-        "Transcribe this recording again?\n\nThe new transcript replaces the one " +
-          "on screen, including any lines you corrected, and the summary is " +
-          "rewritten from it.",
-      )
-    ) {
-      return;
-    }
-    try {
-      await reprocess(id).unwrap();
-      setLive(null);
-      toast.success("Transcribing again.");
-    } catch {
-      toast.error("Could not reprocess.");
-    }
   }
 
   async function onDelete() {
@@ -700,21 +685,23 @@ export default function MeetingDetailPage() {
               Move, Copy link and Delete — three actions nobody wants mid-wait,
               drawn as a menu button in the corner of a page with one card on
               it. It returns the moment the meeting is READY or FAILED, which
-              is when Delete and Transcribe again start to matter. */}
+              is when the rest of it starts to matter. */}
           {terminal && <MeetingMenu
             meetingId={id}
             projectId={m.projectId}
             hasTranscript={(transcript.data?.segments?.length ?? 0) > 0}
             hasSummary={ready && Boolean(summary.data)}
             canTranslate={ready}
-            canReprocess={terminal && (!!m.audioUrl || !!m.sourceUrl)}
-            busy={reprocessState.isLoading || removeState.isLoading}
+            // Rematch, Change language and Regenerate grey while either is
+            // running. Both end in the summary being rewritten, and starting a
+            // second one on top of the first is the race this closes.
+            working={regenerating || translating}
+            busy={removeState.isLoading}
             onCopySummary={() => void onCopySummary()}
             onCopyTranscript={() => void onCopyTranscript()}
             onRegenerateSummary={() => void onRegenerateSummary()}
             onTranslate={() => setPickingLanguage(true)}
             onRematchSpeakers={onRematchSpeakers}
-            onReprocess={() => void onReprocess()}
             onDelete={() => void onDelete()}
           />}
         </div>
@@ -785,7 +772,7 @@ export default function MeetingDetailPage() {
             <AlertTriangle className="mt-0.5 h-5 w-5 text-destructive" />
             <div>
               <p className="font-medium">Processing failed</p>
-              <p className="text-sm text-muted-foreground">{m.errorMessage || "Try reprocessing the meeting."}</p>
+              <p className="text-sm text-muted-foreground">{m.errorMessage || "Something went wrong while processing this recording."}</p>
             </div>
           </CardContent>
         </Card>
@@ -1123,7 +1110,12 @@ function MeetingRail({
  */
 function TemplatePicker({ meetingId, current }: { meetingId: string; current: string }) {
   const { data: templates } = useGetSummaryTemplatesQuery();
-  const [resummarize, { isLoading: rewriting }] = useResummarizeMutation();
+  // Shared with the menu and the banner — see the page's own call. A rewrite
+  // started anywhere shows as "Rewriting…" here, which is where a reader looks
+  // to find out what the brief in front of them is.
+  const [resummarize, { isLoading: rewriting }] = useResummarizeMutation({
+    fixedCacheKey: `resummarize:${meetingId}`,
+  });
 
   if (!templates || templates.length === 0) return null;
 
@@ -1279,7 +1271,10 @@ function SummaryPanel({
   // The picker itself lives on the tab row now (see TemplatePicker). This call
   // stays because the "the transcript changed" banner below rewrites with the
   // template already in use, which is the same request without the choosing.
-  const [resummarize, { isLoading: rewriting }] = useResummarizeMutation();
+  // Same fixed key as the other two, so all three know when one is running.
+  const [resummarize, { isLoading: rewriting }] = useResummarizeMutation({
+    fixedCacheKey: `resummarize:${meetingId}`,
+  });
   const translated = translation;
 
   async function onTemplateChange(slug: string) {

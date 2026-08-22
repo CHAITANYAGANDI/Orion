@@ -11,11 +11,25 @@
  * delete) were the two sitting loose in the header where they could be hit
  * while reaching for something else.
  *
- * <p>Ordered by what it costs to be wrong. Copying is free and reversible,
- * filing is one click to undo, regenerating spends a model call and rewrites
- * the brief, re-transcribing throws away every correction anybody made, and
- * deleting the meeting is last so nothing lands there by momentum. The
- * separators are where the cost changes.
+ * <p>Nothing is hidden for want of something to act on. An item with no
+ * transcript behind it is greyed, not removed: a menu that is five lines long
+ * on one meeting and eight on the next is a menu you have to read from the top
+ * every time, and "it is not there" and "it is not there yet" look identical
+ * while you are hunting for it. Greyed says which of the two it is.
+ *
+ * <p>The three that *do* something — rematch, change language, regenerate —
+ * also grey while one of them is still running. Two rewrites of one summary
+ * raced in the same meeting is the concrete thing this prevents; the general
+ * one is that none of the three is worth starting on a brief that is about to
+ * be replaced. Copying is left alone, because copying what is on screen is
+ * safe whatever is happening behind it.
+ *
+ * <p>Grouped by what an item acts on, and within that by what it costs to be
+ * wrong. Filing and copying a link are free; then the transcript — copy it,
+ * fix who said what, read it in another language; then the brief that was
+ * written from it, which is the order those happen in, because rematching the
+ * speakers or changing the language is the usual reason to regenerate.
+ * Deleting the meeting is last and alone, so nothing lands there by momentum.
  *
  * <p>Deleting the recording and deleting the transcript used to sit above it,
  * as their own grains. They are gone from the menu; only the whole meeting can
@@ -29,13 +43,21 @@
  * — their data (the summary, the segments, the erasure timestamps, the language
  * being read in) lives on the page.
  *
- * <p>What is deliberately not here: telling the transcriber it heard the wrong
- * language. That was "Change language…", it re-transcribed from the audio, and
- * it sat one menu away from a picker that translated — two controls saying
- * "language", one of which quietly destroyed hand corrections. It was removed
- * rather than renamed. POST /meetings/:id/language still works and nothing in
- * the app calls it; "Transcribe again" below re-runs the pipeline with the
- * language the meeting already has.
+ * <p>What is deliberately not here: re-running the transcriber. "Transcribe
+ * again" bought the same pipeline over the same audio at the price of every
+ * hand correction and every speaker rename anybody had made, one confirm deep
+ * in a menu people open to copy a link. POST /meetings/:id/reprocess is
+ * untouched and `useReprocessMeetingMutation` is still exported, but nothing in
+ * the app calls either — a meeting that failed to process is deleted and
+ * uploaded again rather than retried in place.
+ *
+ * <p>"Change language" translates. It does not tell the transcriber it heard
+ * the wrong language: that was a *different* item with the same name, it
+ * re-transcribed from the audio, and having two controls saying "language" —
+ * one of them destructive — is why this one was called "Read in another
+ * language…" for a while. With the destructive one gone there is only one
+ * thing here that says language, so it can have the shorter name. POST
+ * /meetings/:id/language still exists and nothing calls it.
  */
 
 import * as React from "react";
@@ -43,12 +65,13 @@ import Link from "next/link";
 import { toast } from "sonner";
 import {
   Check,
+  ClipboardCopy,
+  FileText,
   FolderInput,
   Languages,
   Link2,
   Loader2,
   MoreHorizontal,
-  RefreshCw,
   Sparkles,
   Trash2,
   Users,
@@ -80,9 +103,13 @@ export interface MeetingMenuProps {
   meetingId: string;
   /** Where it is filed now, so Move can show the current answer as chosen. */
   projectId?: string | null;
-  /** There is a transcript to copy, and speakers in it worth rematching. */
+  /**
+   * There is a transcript to copy, and speakers in it worth rematching.
+   *
+   * False greys those items rather than removing them. See the note above.
+   */
   hasTranscript: boolean;
-  /** There is a summary to copy or rewrite. */
+  /** There is a summary to copy or rewrite. Greys both when false. */
   hasSummary: boolean;
   /**
    * There is something worth reading in another language.
@@ -92,15 +119,21 @@ export interface MeetingMenuProps {
    * has to own it.
    */
   canTranslate: boolean;
-  /** There is a source to run the pipeline over again. */
-  canReprocess: boolean;
+  /**
+   * One of the three acting items is still running in the backend.
+   *
+   * Separate from `busy`, which closes the whole menu off while the meeting
+   * itself is being deleted. This one leaves the menu usable — you can still
+   * copy, file it, follow the link — and only stops a second rewrite landing
+   * on top of the first.
+   */
+  working?: boolean;
 
   onCopySummary: () => void;
   onCopyTranscript: () => void;
   onRegenerateSummary: () => void;
   onTranslate: () => void;
   onRematchSpeakers: () => void;
-  onReprocess: () => void;
   onDelete: () => void;
 
   /** Greys the whole menu while something it started is in flight. */
@@ -137,38 +170,42 @@ export function MeetingMenu(props: MeetingMenuProps) {
           <DropdownMenuItem onSelect={() => void copyLink()}>
             <Link2 /> Copy link
           </DropdownMenuItem>
-          {props.canTranslate && (
-            <DropdownMenuItem onSelect={props.onTranslate}>
-              <Languages /> Read in another language…
-            </DropdownMenuItem>
-          )}
 
+          {/* The transcript: what was said, who said it, and what language you
+              read it in. Together because they are one subject, and above the
+              summary because the summary is written from them. */}
           <DropdownMenuSeparator />
 
-          {props.hasSummary && (
-            <>
-              <DropdownMenuItem onSelect={props.onCopySummary}>Copy summary</DropdownMenuItem>
-              <DropdownMenuItem onSelect={props.onRegenerateSummary}>
-                <Sparkles /> Regenerate summary
-              </DropdownMenuItem>
-            </>
-          )}
-          {props.hasTranscript && (
-            <DropdownMenuItem onSelect={props.onCopyTranscript}>Copy transcript</DropdownMenuItem>
-          )}
+          <DropdownMenuItem disabled={!props.hasTranscript} onSelect={props.onCopyTranscript}>
+            <FileText /> Copy transcript
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={!props.hasTranscript || props.working}
+            onSelect={props.onRematchSpeakers}
+          >
+            <Users /> Rematch speakers
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={!props.canTranslate || props.working}
+            onSelect={props.onTranslate}
+          >
+            <Languages /> Change language
+          </DropdownMenuItem>
 
-          {(props.hasTranscript || props.canReprocess) && <DropdownMenuSeparator />}
+          {/* The brief, and the one control that rewrites it — which is what
+              you reach for after correcting a name above, or to have it
+              written in the language you just switched to. */}
+          <DropdownMenuSeparator />
 
-          {props.hasTranscript && (
-            <DropdownMenuItem onSelect={props.onRematchSpeakers}>
-              <Users /> Rematch speakers
-            </DropdownMenuItem>
-          )}
-          {props.canReprocess && (
-            <DropdownMenuItem onSelect={props.onReprocess}>
-              <RefreshCw /> Transcribe again
-            </DropdownMenuItem>
-          )}
+          <DropdownMenuItem disabled={!props.hasSummary} onSelect={props.onCopySummary}>
+            <ClipboardCopy /> Copy summary
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={!props.hasSummary || props.working}
+            onSelect={props.onRegenerateSummary}
+          >
+            <Sparkles /> Regenerate summary
+          </DropdownMenuItem>
 
           <DropdownMenuSeparator />
 
