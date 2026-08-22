@@ -142,6 +142,54 @@ def _ask(service, question, mode="express"):
     return asyncio.run(service.answer("mtg_talk", question, "usr_1", mode))
 
 
+# --- the classifier, stated as a table ---------------------------------------- #
+#
+# The spelling matters as much as the behaviour. The intent shipped as `howto`,
+# which meant a reader grepping the agreed name — `how_to` — found nothing and
+# reasonably concluded the intent had never been added. It is `how_to`
+# everywhere now, and this table is where that is pinned.
+
+HOW_TO_QUESTIONS = [
+    "How can I register for the Tech in Asia Conference 2025 mentioned in the speech?",
+    "How do I register?",
+    "What should I do next?",
+    "How should I follow up?",
+    "How can we implement this?",
+    "How do I apply?",
+    "What steps should I take?",
+    "How should I prepare for this?",
+]
+
+# Every one of these is a value the meeting either records or does not. Routing
+# any of them to how_to would licence a plausible invented answer, which is the
+# one failure worse than an unhelpful one.
+FACT_QUESTIONS = [
+    "What is the registration URL?",
+    "What does registration cost?",
+    "When is the conference?",
+    "Who is organizing it?",
+    "What did Sarah say?",
+    "When does registration close?",
+]
+
+
+def test_a_procedural_question_is_classified_how_to():
+    for question in HOW_TO_QUESTIONS:
+        assert questions.classify(question) == "how_to", question
+
+
+def test_a_factual_question_is_never_classified_how_to():
+    for question in FACT_QUESTIONS:
+        assert questions.classify(question) == "fact", question
+
+
+def test_the_intent_is_spelled_how_to():
+    """Not `howto`. The name is part of the contract with whoever reads this."""
+    assert "how_to" in questions.INTENTS
+    assert "howto" not in questions.INTENTS
+    assert "how_to" in answering._INTENT
+
+
 # --- the permissive direction ------------------------------------------------ #
 
 def test_the_registration_question_is_recognised_as_a_procedure():
@@ -149,10 +197,10 @@ def test_the_registration_question_is_recognised_as_a_procedure():
 
     Classified as a lookup, the question gets the strict brief and the reply
     that shipped. Everything downstream — the two-part answer, the labelled
-    steps, the hedging — hangs off `howto` being the intent.
+    steps, the hedging — hangs off `how_to` being the intent.
     """
-    assert questions.classify(REGISTER) == "howto"
-    assert questions.allows_guidance("howto") is True
+    assert questions.classify(REGISTER) == "how_to"
+    assert questions.allows_guidance("how_to") is True
 
 
 def test_the_meeting_evidence_still_reaches_the_model():
@@ -204,8 +252,8 @@ def test_both_modes_can_answer_a_procedural_question():
         assert "THEN, general guidance" in llm.system, mode
 
     # And they still differ in what they read and how much they write.
-    assert "Be brief" in answering.system_prompt(intent="howto", depth="express", guidance=True)
-    assert "Go deeper" in answering.system_prompt(intent="howto", depth="advanced", guidance=True)
+    assert "Be brief" in answering.system_prompt(intent="how_to", depth="express", guidance=True)
+    assert "Go deeper" in answering.system_prompt(intent="how_to", depth="advanced", guidance=True)
 
 
 def test_the_reader_is_never_shown_the_vocabulary_of_the_pipeline():
@@ -234,7 +282,7 @@ def test_no_answer_may_claim_a_capability_recallix_does_not_have():
     away from offering to look it up, and the reader would wait for it.
     """
     for guidance in (True, False):
-        brief = answering.system_prompt(intent="howto", guidance=guidance)
+        brief = answering.system_prompt(intent="how_to", guidance=guidance)
         assert "You cannot browse, search the web, open a link" in brief
         assert "look up anything current" in brief
         assert "Never offer to look something up" in brief
@@ -242,7 +290,7 @@ def test_no_answer_may_claim_a_capability_recallix_does_not_have():
 
 def test_guidance_never_arrives_without_the_grounding_rules():
     """The permissive block is an addition, never a substitution."""
-    brief = answering.system_prompt(intent="howto", guidance=True)
+    brief = answering.system_prompt(intent="how_to", guidance=True)
 
     assert "Every claim about these meetings comes from the passages" in brief
     assert "Never invent a fact" in brief
@@ -250,16 +298,6 @@ def test_guidance_never_arrives_without_the_grounding_rules():
 
 
 # --- the strict direction ---------------------------------------------------- #
-
-FACT_QUESTIONS = [
-    "What does registration cost?",
-    "What is the registration URL?",
-    "When is the conference?",
-    "What price did they quote?",
-    "Who is speaking at the event?",
-    "How many attendees were mentioned?",
-]
-
 
 def test_a_factual_question_gets_no_licence_to_supplement():
     """The test that proves the new policy did not destroy grounding.
@@ -269,7 +307,7 @@ def test_a_factual_question_gets_no_licence_to_supplement():
     and completely useless here: it would be read as the price *this* event
     charges, because that is what was asked.
     """
-    for question in FACT_QUESTIONS:
+    for question in FACT_QUESTIONS + ["What price did they quote?"]:
         service, llm = _service()
         _ask(service, question)
 
@@ -311,13 +349,13 @@ def test_most_questions_get_the_strict_policy():
     """Guidance is the exception. If it stops being one, this fails."""
     permitted = {i for i in questions.INTENTS if questions.allows_guidance(i)}
 
-    assert permitted == {"howto", "compose"}
+    assert permitted == {"how_to", "compose"}
 
 
 # --- advisory questions: the meeting leads ----------------------------------- #
 
 def test_what_should_i_do_next_is_procedural():
-    assert questions.classify("What should I do after this meeting?") == "howto"
+    assert questions.classify("What should I do after this meeting?") == "how_to"
 
 
 def test_generic_advice_may_never_displace_a_real_commitment():
@@ -327,7 +365,7 @@ def test_generic_advice_may_never_displace_a_real_commitment():
     wants those four items. Generic "send a recap, book a follow-up" advice in
     their place is worse than no answer, because it looks like an answer.
     """
-    brief = answering.system_prompt(intent="howto", guidance=True)
+    brief = answering.system_prompt(intent="how_to", guidance=True)
 
     assert "If the meetings already answer the question in full, stop when they do" in brief
     assert "must never take the place of a real commitment, decision or action item" in brief
@@ -410,7 +448,7 @@ def test_a_meeting_only_answer_that_names_nothing_still_cites_its_evidence():
 # --- the label ---------------------------------------------------------------- #
 
 def test_the_grounding_label_never_reaches_the_reader():
-    brief = answering.system_prompt(intent="howto", guidance=True)
+    brief = answering.system_prompt(intent="how_to", guidance=True)
 
     assert "Never mention it, or these labels, in the answer itself" in brief
 
@@ -436,17 +474,111 @@ def test_the_policy_is_observable_without_reading_a_transcript():
     """
     from app.retrieval import RetrievalReport
 
-    line = RetrievalReport(mode="advanced", intent="howto", guidance=True, grounding=MIXED)
+    line = RetrievalReport(mode="advanced", intent="how_to", guidance=True, grounding=MIXED)
     line.kept = 4
     line.used = 1
 
     data = line.as_dict()
 
-    assert data["intent"] == "howto"
+    assert data["intent"] == "how_to"
     assert data["guidanceAllowed"] is True
     assert data["grounding"] == MIXED
     assert data["mode"] == "advanced"
     assert all(not isinstance(v, str) or "Register" not in v for v in data.values())
+
+
+# --- the intent actually reaches the model ------------------------------------ #
+#
+# Adding `how_to` to the classifier and forgetting to hand it to the adapter
+# would leave every symptom identical: the same unhelpful answer, from a service
+# that now classifies the question correctly. So this walks the real chain —
+#
+#     classify -> RagService.answer -> LlmPort.answer -> OpenAiLlmAdapter
+#               -> answering.system_prompt
+#
+# — with only the network call stubbed. Nothing here rebuilds the prompt itself;
+# it reads the one the adapter actually sent.
+
+class _CapturingAdapter:
+    """The real adapter, with only its HTTP call replaced.
+
+    Subclassing rather than faking, so `answer()` — the method that decides
+    which brief to build — is the shipped one.
+    """
+
+    def __init__(self):
+        from app.providers.openai_adapter import OpenAiLlmAdapter
+
+        self.system: str | None = None
+        self.user: str | None = None
+
+        adapter = OpenAiLlmAdapter.__new__(OpenAiLlmAdapter)
+        adapter._settings = rag_settings()  # type: ignore[attr-defined]
+
+        async def _chat_json(system, user, *, model=None):
+            self.system, self.user = system, user
+            return {"answer": "…", "used": [1], "grounding": MIXED}
+
+        adapter._chat_json = _chat_json  # type: ignore[assignment]
+        self.adapter = adapter
+
+    async def answer(self, *a, **kw):
+        return await self.adapter.answer(*a, **kw)
+
+
+def test_the_how_to_intent_reaches_the_real_adapters_prompt():
+    capture = _CapturingAdapter()
+    service, _ = _service(llm=capture)
+
+    asyncio.run(service.answer("mtg_talk", REGISTER, "usr_1", "express"))
+
+    assert capture.system is not None, "the adapter was never called"
+    # The procedural half of the brief, in the prompt the adapter built.
+    assert "This question asks how to *do* something" in capture.system
+    assert "THEN, general guidance" in capture.system
+    assert "This asks how to proceed" in capture.system
+    # And the evidence went with it.
+    assert "Register now" in (capture.user or "")
+
+
+def test_a_factual_question_reaches_that_same_adapter_with_the_strict_brief():
+    """The other side of the same propagation, or the test above proves only
+    that *some* brief arrives."""
+    capture = _CapturingAdapter()
+    service, _ = _service(llm=capture)
+
+    asyncio.run(service.answer("mtg_talk", "When is the conference?", "usr_1", "express"))
+
+    assert "the passages are the only source there is" in (capture.system or "")
+    assert "THEN, general guidance" not in (capture.system or "")
+
+
+def test_both_answer_paths_classify_and_pass_the_intent():
+    """`answer` and `answer_workspace` are separate code paths and each has to
+    do this itself. One of them quietly not classifying is invisible."""
+    # The two queries return differently shaped rows — the workspace one carries
+    # the meeting id, title and date the single-meeting one has no need of — so
+    # each path is given its own.
+    workspace_rows = [(0, SPEECH, 0.0, 47.0, "mtg_talk", "Tech in Asia", None, 0.61)]
+    paths = [
+        (TRANSCRIPT, lambda svc: svc.answer("mtg_talk", REGISTER, "usr_1", "express")),
+        (workspace_rows, lambda svc: svc.answer_workspace("usr_1", REGISTER, mode="express")),
+    ]
+
+    for rows, run in paths:
+        capture = _CapturingAdapter()
+        service, _ = _service(rows=rows, llm=capture)
+
+        async def _none(*_a, **_k):
+            return []
+
+        service._commitment_context = _none  # type: ignore[assignment]
+        service._decision_context = _none  # type: ignore[assignment]
+        service._meetings_named_in = _none  # type: ignore[assignment]
+
+        asyncio.run(run(service))
+
+        assert "THEN, general guidance" in (capture.system or ""), run
 
 
 # --- general guidance is not evidence ---------------------------------------- #

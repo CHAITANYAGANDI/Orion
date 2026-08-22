@@ -292,7 +292,7 @@ _INTENT = {
         "every fact in it still comes from the passages, and a blank stays "
         "blank — write [date] rather than choosing one.\n"
     ),
-    "howto": (
+    "how_to": (
         "\nThis asks how to proceed. Numbered steps when it is a procedure, "
         "plain sentences when it is one thing to do. Each step is an action "
         "stated in the imperative, with a line under it only where the step is "

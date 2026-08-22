@@ -145,7 +145,7 @@ class RetrievalReport:
     # The answer policy, which is the other half of what makes two answers to
     # the same question differ. `guidance` is what we permitted; `grounding` is
     # what the model says it did with the permission. Both are labels, not
-    # content: knowing that a howto question produced a mixed answer says
+    # content: knowing that a how_to question produced a mixed answer says
     # nothing about which meeting or whose.
     guidance: bool = False
     grounding: str = "meeting_only"

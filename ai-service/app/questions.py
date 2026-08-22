@@ -86,7 +86,7 @@ def wants_full_list(question: str) -> bool:
 # on every question too.
 
 INTENTS = (
-    "compose", "inventory", "timeline", "howto", "comparison", "summary",
+    "compose", "inventory", "timeline", "how_to", "comparison", "summary",
     "synthesis", "fact",
 )
 
@@ -124,7 +124,7 @@ _SYNTHESIS = re.compile(
 # not here, and should not be — that is a question about what the meeting
 # explained, and answering it from general knowledge would be inventing the
 # user's own system.
-_HOWTO = re.compile(
+_HOW_TO = re.compile(
     r"\b(?:"
     r"how (?:can|do|should|would|could|might|will) (?:i|we|you|one|someone)\b"
     r"|how to\b"
@@ -132,6 +132,10 @@ _HOWTO = re.compile(
     r"|what (?:do|does|did) (?:i|we|you) need to\b"
     r"|next steps?\b"
     r"|steps? (?:to|for)\b"
+    # "What steps should I take?" — the actor is there but the word order puts
+    # it past "what should I". Anchored on the pronoun rather than on "steps"
+    # alone, because "what steps were agreed?" is a question about the meeting.
+    r"|steps? (?:should|do|can|would|could) (?:i|we|you)\b"
     r"|walk me through\b"
     r"|(?:go about|get started)\b"
     r"|advice on\b"
@@ -152,7 +156,7 @@ def classify(question: str) -> str:
     the word change and wants an ordered account, not a two-column diff. Fact is
     the fallback, and is by far the commonest.
 
-    Howto sits *after* inventory and timeline and before everything else, and
+    How-to sits *after* inventory and timeline and before everything else, and
     both halves of that matter. "How many attendees were mentioned?" is a count
     and "how did the decision change?" is a sequence — each begins with the word
     how and neither is asking to be told how to do anything. What is left after
@@ -167,8 +171,8 @@ def classify(question: str) -> str:
         return "inventory"
     if _TIMELINE.search(question):
         return "timeline"
-    if _HOWTO.search(question):
-        return "howto"
+    if _HOW_TO.search(question):
+        return "how_to"
     if _COMPARISON.search(question):
         return "comparison"
     if _SUMMARY.search(question):
@@ -211,7 +215,7 @@ def spans_meetings(intent: str) -> bool:
 # Everything else ends when the evidence does. A lookup with nothing behind it,
 # handed only the ledger, produces a model describing the ledger back — which is
 # the shape of answer this whole change exists to stop.
-_FROM_RECORDS = _CROSS_MEETING | {"howto"}
+_FROM_RECORDS = _CROSS_MEETING | {"how_to"}
 
 
 def answerable_from_records(intent: str) -> bool:
@@ -246,7 +250,7 @@ def answerable_from_records(intent: str) -> bool:
 # Every word of that is true and the reader is exactly where they started. So
 # guidance is permitted, narrowly, for the two intents where the reader has
 # asked to be helped to *do* something rather than told what was said.
-_GUIDANCE = frozenset({"howto", "compose"})
+_GUIDANCE = frozenset({"how_to", "compose"})
 
 
 def allows_guidance(intent: str) -> bool:
@@ -257,9 +261,9 @@ def allows_guidance(intent: str) -> bool:
     price must stay "the meeting doesn't state a price", not a typical range.
 
     A misclassification is wrong in the recoverable direction on both sides. A
-    fact question wrongly marked howto still cannot invent anything — the
+    fact question wrongly marked how_to still cannot invent anything — the
     grounding rules do not relax, and guidance is confined to procedure — so it
-    costs a paragraph of general steps somebody did not need. A howto question
+    costs a paragraph of general steps somebody did not need. A how_to question
     wrongly marked fact costs the unhelpful answer above, which is what shipped.
     """
     return intent in _GUIDANCE
