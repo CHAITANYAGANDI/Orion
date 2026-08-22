@@ -3,20 +3,16 @@ package com.recallix.domain;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * A plan is a name now, and nothing else.
+ *
+ * <p>It used to carry a ceiling per tier, which meant PREMIUM -- a value no
+ * account was ever sold, left on one row by an earlier build -- was unlimited.
+ * The allowance is one pair of numbers for every account, in
+ * UsageLimitService, so there is nothing here to assert but the parsing.
+ */
 class PlanTest {
-
-    @Test
-    void limitsMatchContract() {
-        assertEquals(5, Plan.FREE.meetingsLimit());
-        assertEquals(60, Plan.FREE.aiMinutesLimit());
-        assertEquals(50, Plan.PRO.meetingsLimit());
-        assertEquals(600, Plan.PRO.aiMinutesLimit());
-        assertTrue(Plan.PREMIUM.isUnlimited());
-        assertFalse(Plan.FREE.isUnlimited());
-    }
 
     @Test
     void fromStringIsLenientAndDefaultsToFree() {

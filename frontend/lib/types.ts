@@ -1206,14 +1206,24 @@ export interface CheckoutResponse {
   checkoutUrl: string;
 }
 
+/**
+ * What this account has used, and what it is allowed.
+ *
+ * The allowance is a lifetime one — 100 transcribed minutes and 3 imports, for
+ * the life of the account — so there is no period on it and no reset date. It
+ * was five meetings a calendar month; `periodStart`/`periodEnd` described that
+ * month and are gone with it.
+ *
+ * `meetingsUsed` has no ceiling beside it because it no longer has one: what is
+ * capped is minutes and imports.
+ */
 export interface UsageResponse {
   plan: Plan;
-  periodStart: string;
-  periodEnd: string;
+  minutesUsed: number;
+  minutesLimit: number;
+  importsUsed: number;
+  importsLimit: number;
   meetingsUsed: number;
-  meetingsLimit: number; // -1 = unlimited
-  aiMinutesUsed: number;
-  aiMinutesLimit: number; // -1 = unlimited
 }
 
 // ---- WebSocket / status ----

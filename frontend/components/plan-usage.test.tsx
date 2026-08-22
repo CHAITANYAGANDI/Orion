@@ -5,13 +5,16 @@ import type { UsageResponse } from "@/lib/types";
 /**
  * The meter at the foot of the rail.
  *
- * <p>Most of this is about which number it draws. Recallix enforces meetings —
- * the sixth of the month is refused with a 429 — and counts minutes without
- * ever checking them, so `Plan.FREE` reports a 60-minute limit that nothing
- * reads. A bar drawn against that number would fill up while nothing was wrong,
- * and somebody who believed it would stop recording meetings they were entitled
- * to record. That is the failure these guard against, and it is the reason the
- * bar is not on the figure a competitor's is.
+ * <p>Most of this is about which number it draws, and the answer changed. The
+ * allowance was five meetings a calendar month, with minutes tallied and
+ * checked against nothing; it is now 100 transcribed minutes and 3 imports for
+ * the life of the account. So the bar is on minutes — the number that actually
+ * runs out — and the second line is imports.
+ *
+ * <p>The thing worth guarding is the sentence at the bottom. It used to read
+ * "None left until 1 September", which was the useful thing to say about a
+ * monthly quota and would be a lie about this one: nothing arrives on the 1st.
+ * Somebody who believes it waits for an allowance that is never coming back.
  */
 let usage: UsageResponse;
 let error: boolean;
@@ -26,60 +29,58 @@ beforeEach(() => {
   error = false;
   usage = {
     plan: "FREE",
-    periodStart: "2026-08-01T00:00:00Z",
-    periodEnd: "2026-09-01T00:00:00Z",
-    meetingsUsed: 3,
-    meetingsLimit: 5,
-    aiMinutesUsed: 142,
-    aiMinutesLimit: 60,
+    minutesUsed: 42,
+    minutesLimit: 100,
+    importsUsed: 2,
+    importsLimit: 3,
+    meetingsUsed: 11,
   };
 });
 
 describe("PlanUsage", () => {
-  it("names the plan and what is left of the month", () => {
+  it("names the plan and how much of the allowance is gone", () => {
     render(<PlanUsage />);
 
     expect(screen.getByText("Basic")).toBeInTheDocument();
-    expect(screen.getByText("3 of 5")).toBeInTheDocument();
-    expect(screen.getByText(/monthly meetings used/)).toBeInTheDocument();
+    expect(screen.getByText("42 of 100")).toBeInTheDocument();
+    expect(screen.getByText(/minutes transcribed/)).toBeInTheDocument();
   });
 
-  it("counts the minutes without inventing a ceiling for them", () => {
+  it("shows the imports underneath, which are the other thing that runs out", () => {
     render(<PlanUsage />);
 
-    // 142 against the plan's nominal 60, and nothing is wrong: minutes are
-    // added up after each meeting and checked against nothing. Drawn as a
-    // fraction this would read as more than twice over a limit that does not
-    // exist.
-    expect(screen.getByText("142 minutes transcribed")).toBeInTheDocument();
-    expect(screen.queryByText(/of 60/)).not.toBeInTheDocument();
+    // Three files, ever. It is the allowance somebody hits first and the one
+    // with no way to see it coming — a recording spends minutes it can feel
+    // the length of, an import spends a whole slot whatever the file is.
+    expect(screen.getByText("2 of 3 imports used")).toBeInTheDocument();
   });
 
-  it("says what to do about it once the month is spent", () => {
-    usage = { ...usage, meetingsUsed: 5 };
-
-    render(<PlanUsage />);
-
-    // The one moment there is something to say other than a statistic. Nothing
-    // already processed goes away when the month turns over.
-    expect(screen.getByText("5 of 5")).toBeInTheDocument();
-    expect(screen.getByText(/None left until/)).toBeInTheDocument();
-    expect(screen.queryByText(/minutes transcribed/)).not.toBeInTheDocument();
-  });
-
-  it("drops the ceiling for a plan that has none", () => {
-    usage = { ...usage, plan: "PREMIUM", meetingsUsed: 21, meetingsLimit: -1 };
+  it("does not offer a date when the allowance is spent, because there is none", () => {
+    usage = { ...usage, minutesUsed: 100 };
 
     render(<PlanUsage />);
 
-    // -1 is the server's unlimited and has to survive the round trip as its own
-    // state: "21 of -1" is the kind of thing that ships.
+    // This said "None left until 1 September" when it was a monthly quota.
+    // Saying it here would have somebody waiting for the 1st of a month that
+    // brings nothing.
+    expect(screen.getByText("100 of 100")).toBeInTheDocument();
+    expect(screen.getByText(/whole allowance/)).toBeInTheDocument();
+    expect(screen.queryByText(/until/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/imports used/)).not.toBeInTheDocument();
+  });
+
+  it("drops the ceiling for an account that has none", () => {
+    usage = { ...usage, plan: "PREMIUM", minutesUsed: 21, minutesLimit: -1 };
+
+    render(<PlanUsage />);
+
+    // No plan is unlimited any more — the allowance is one pair of numbers for
+    // every account. -1 is still what the field means, though, and "21 of -1"
+    // is the kind of thing that ships if the branch is deleted for being
+    // unreachable.
     expect(screen.getByText("21")).toBeInTheDocument();
     expect(screen.queryByText(/of -1/)).not.toBeInTheDocument();
-    // And it is not called Basic, because its limits are not Basic's.
     expect(screen.getByText("Premium")).toBeInTheDocument();
-    // The track sits at a token sliver forever on a plan with no ceiling, which
-    // reads as a month barely started unless the line underneath says why.
     expect(screen.getByText(/no limit/)).toBeInTheDocument();
   });
 

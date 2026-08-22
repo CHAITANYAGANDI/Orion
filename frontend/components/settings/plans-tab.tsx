@@ -89,13 +89,15 @@ function PlanCard() {
 }
 
 /**
- * This month.
+ * What this account has spent of what it is allowed.
  *
- * Two figures that are deliberately not presented alike, because only one of
- * them stops anything. The meeting count is enforced — a sixth recording is
- * refused with a 429 — so it gets a bar. Minutes are added up after a meeting
- * finishes and never checked against anything, so showing them inside a
- * progress track would invent a ceiling that does not exist.
+ * Both figures are enforced now, so both get a bar: 100 transcribed minutes and
+ * 3 imports, for the life of the account. It used to be one bar — five meetings
+ * a calendar month — beside a minute count with no ceiling, because minutes
+ * were tallied and checked against nothing.
+ *
+ * The meeting count is gone from here entirely. Nothing refuses a recording for
+ * being the eleventh; what it costs is its minutes, and those are the bar above.
  */
 function UsageSection() {
   const { data, isLoading } = useGetUsageQuery();
@@ -103,7 +105,7 @@ function UsageSection() {
   return (
     <section aria-labelledby="usage-heading" className="space-y-3">
       <h2 id="usage-heading" className="flex items-center gap-2 text-lg font-semibold">
-        <Gauge className="h-4 w-4 text-muted-foreground" /> This month
+        <Gauge className="h-4 w-4 text-muted-foreground" /> This account
       </h2>
 
       <Card>
@@ -114,43 +116,40 @@ function UsageSection() {
             <>
               <div>
                 <div className="mb-1.5 flex items-baseline justify-between gap-4 text-sm">
-                  <span className="font-medium">Meetings</span>
+                  <span className="font-medium">Minutes transcribed</span>
                   <span className="text-muted-foreground">
-                    {usageLabel(data.meetingsUsed, data.meetingsLimit)}
+                    {usageLabel(data.minutesUsed, data.minutesLimit)}
                   </span>
                 </div>
                 <Progress
-                  value={usageFraction(data.meetingsUsed, data.meetingsLimit)}
-                  aria-label="Meetings used this month"
+                  value={usageFraction(data.minutesUsed, data.minutesLimit)}
+                  aria-label="Minutes transcribed"
                 />
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Recording and importing both count. Resets on{" "}
-                  {formatDate(data.periodEnd)}, and nothing already processed is
-                  removed when it does.
+                  Recording and importing both spend them, and this is the whole
+                  allowance — it is not monthly and there is no date it comes
+                  back. {data.meetingsUsed} meeting
+                  {data.meetingsUsed === 1 ? "" : "s"} so far, which nothing
+                  limits: what a recording costs is its length.
                 </p>
               </div>
 
               <div className="border-t pt-4">
-                <div className="flex items-baseline justify-between gap-4 text-sm">
-                  <span className="font-medium">Minutes transcribed</span>
-                  <span className="text-muted-foreground">{data.aiMinutesUsed}</span>
+                <div className="mb-1.5 flex items-baseline justify-between gap-4 text-sm">
+                  <span className="font-medium">Imports</span>
+                  <span className="text-muted-foreground">
+                    {usageLabel(data.importsUsed, data.importsLimit)}
+                  </span>
                 </div>
+                <Progress
+                  value={usageFraction(data.importsUsed, data.importsLimit)}
+                  aria-label="Imports used"
+                />
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Counted so you can see it, not capped. Recallix does not stop
-                  transcribing at a number of minutes — the meeting count above
-                  is the only ceiling.
+                  Files you upload. Recording in the browser is not one of these
+                  — it spends minutes only.
                 </p>
               </div>
-
-              {data.plan !== "FREE" && (
-                <p className="border-t pt-4 text-xs text-muted-foreground">
-                  This account still carries a{" "}
-                  <span className="font-medium">{data.plan}</span> plan from an
-                  earlier build of Recallix, which is why the figures above may
-                  not match the five-meeting limit. Its limits are what apply to
-                  you.
-                </p>
-              )}
             </>
           )}
         </CardContent>

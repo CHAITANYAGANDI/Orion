@@ -101,9 +101,10 @@ export function putWithProgress(
 /**
  * The API's own message, when it sent one.
  *
- * <p>It is nearly always the useful part — "Monthly meeting limit reached"
- * beats "Something went wrong", and the quota refusal is the one somebody is
- * most likely to hit here.
+ * <p>It is nearly always the useful part — "You have used all 3 imports on
+ * this account" beats "Something went wrong", and the allowance refusal is the
+ * one somebody is most likely to hit here. The server writes those sentences
+ * (UsageLimitService) precisely so this can pass them straight through.
  */
 export function uploadError(err: unknown): string {
   if (typeof err === "object" && err && "data" in err) {

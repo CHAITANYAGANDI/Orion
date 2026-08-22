@@ -30,12 +30,11 @@ beforeEach(() => {
   loading = false;
   usage = {
     plan: "FREE",
-    periodStart: "2026-08-01T00:00:00Z",
-    periodEnd: "2026-09-01T00:00:00Z",
-    meetingsUsed: 2,
-    meetingsLimit: 5,
-    aiMinutesUsed: 47,
-    aiMinutesLimit: 60,
+    minutesUsed: 47,
+    minutesLimit: 100,
+    importsUsed: 2,
+    importsLimit: 3,
+    meetingsUsed: 9,
   };
 });
 
@@ -73,42 +72,45 @@ describe("PlansTab, the plan", () => {
   });
 });
 
-describe("PlansTab, this month", () => {
-  it("shows the meeting allowance against what is used", () => {
+describe("PlansTab, this account", () => {
+  it("shows both allowances against what is used", () => {
     render(<PlansTab />);
 
-    expect(screen.getByText("2 of 5")).toBeInTheDocument();
-    expect(
-      screen.getByRole("progressbar", { name: "Meetings used this month" }),
-    ).toBeInTheDocument();
+    expect(screen.getByText("47 of 100")).toBeInTheDocument();
+    expect(screen.getByText("2 of 3")).toBeInTheDocument();
+    // Both are enforced now, so both get a bar. It used to be one, because
+    // minutes were tallied and checked against nothing.
+    expect(screen.getByRole("progressbar", { name: "Minutes transcribed" })).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Imports used" })).toBeInTheDocument();
   });
 
-  it("says when the allowance comes back, and that nothing is taken away", () => {
+  it("says the allowance does not come back, and that nothing is taken away", () => {
     render(<PlansTab />);
 
-    expect(screen.getByText(/Resets on/i)).toBeInTheDocument();
-    expect(screen.getByText(/nothing already processed is\s+removed/i)).toBeInTheDocument();
+    // The old copy said "Resets on 1 September". There is no reset: this is
+    // the account's whole allowance, and somebody told otherwise waits.
+    expect(screen.getByText(/not monthly/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Resets on/i)).not.toBeInTheDocument();
   });
 
-  it("counts minutes without drawing a ceiling round them", () => {
+  it("gives the meeting count as a figure, with no ceiling round it", () => {
     render(<PlansTab />);
 
-    expect(screen.getByText("47")).toBeInTheDocument();
-    // 60 is on the plan and enforced nowhere: `addAiMinutes` increments and
-    // never throws. Rendering it as a limit would be the page inventing one.
-    expect(screen.queryByText(/47 of 60/)).not.toBeInTheDocument();
-    expect(screen.getAllByRole("progressbar")).toHaveLength(1);
+    // Nothing refuses a recording for being the tenth. What it costs is its
+    // length, and that is the bar above.
+    expect(screen.getByText(/9 meetings so far/)).toBeInTheDocument();
+    expect(screen.getAllByRole("progressbar")).toHaveLength(2);
   });
 
-  it("does not claim five meetings to an account that has no such limit", () => {
-    usage = { ...usage, plan: "PREMIUM", meetingsUsed: 21, meetingsLimit: -1 };
+  it("allows an old PREMIUM account exactly what it allows everyone else", () => {
+    usage = { ...usage, plan: "PREMIUM" };
     render(<PlansTab />);
 
-    // A dev account upgraded by the old checkout is still out there with 21
-    // meetings on it. "21 of -1" is what ships if nobody tests this.
-    expect(screen.getByText("21 used")).toBeInTheDocument();
+    // PREMIUM was unlimited and is a row left by an earlier build. Leaving it
+    // uncapped meant the account doing the most work was the one no limit
+    // applied to, which is the opposite of what a rate limit is for.
+    expect(screen.getByText("47 of 100")).toBeInTheDocument();
     expect(screen.queryByText(/-1/)).not.toBeInTheDocument();
-    expect(screen.getByText(/carries a/i)).toBeInTheDocument();
   });
 
   it("says nothing about usage until it knows", () => {

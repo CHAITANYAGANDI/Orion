@@ -144,8 +144,12 @@ public class MeetingService {
         Meeting meeting = meetings.findByObjectKeyAndUserId(req.objectKey(), userId)
                 .orElseThrow(() -> ApiException.notFound("No pending upload for that objectKey"));
 
-        // Quota is charged at confirmation (not at presign) so abandoned uploads are free.
-        usage.incrementMeetingsOrThrow(userId);
+        // Charged at confirmation (not at presign) so abandoned uploads are free.
+        // Two allowances, both for the life of the account: transcription
+        // minutes, and imports. `recordedHere` is what tells them apart — a
+        // browser recording spends minutes only, a file spends one of three
+        // imports as well. See UsageLimitService.
+        usage.chargeMeetingOrThrow(userId, req.recordedHere(), req.durationSeconds());
 
         // The title was set from the filename at presign. Only a client with a
         // better name overrides it — the recorder, whose files are timestamps.

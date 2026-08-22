@@ -12,8 +12,8 @@
  * from a named constant on the server — 500 terms from
  * `VocabularyService.MAX_TERMS_PER_USER`, 200 folders from
  * `ProjectService.MAX_PROJECTS`, 2,000 marks from `MomentService.MAX_PER_MEETING`
- * — and the monthly meeting count comes from `Plan.FREE`, which is the only one
- * of them a user can actually hit.
+ * — and the two a user can actually hit are `UsageLimitService.MINUTES_ALLOWANCE`
+ * and `IMPORT_ALLOWANCE`.
  *
  * {@link NOT_INCLUDED} is the half of a plans page that is normally missing.
  * Somebody comparing Recallix to Otter will assume a bot joins their calls,
@@ -71,9 +71,14 @@ export const INCLUDED: FeatureGroup[] = [
       },
       { label: "Importing an audio or video file you already have" },
       {
-        label: "Five meetings a month",
+        label: "100 minutes of transcription",
         detail:
-          "Recorded and imported ones together. The sixth is refused until the month turns over; nothing already processed is taken away.",
+          "For the life of the account, not per month: there is no date it comes back. Recording and importing both spend it, the length of the recording is what it costs, and nothing already transcribed is taken away once it runs out.",
+      },
+      {
+        label: "Three imported files",
+        detail:
+          "Counted separately from the minutes, and only files: recording in your own browser is not an import, however many times you do it.",
       },
     ],
   },
@@ -186,9 +191,10 @@ export function quotaCount(used: number, limit: number): string {
  * What to call the plan somebody is on.
  *
  * FREE is {@link PLAN_NAME}, because that is the word the product uses. The
- * other two are named as the server names them: an account still carrying PRO
- * or PREMIUM from an earlier build of Recallix has different limits, and
- * calling it Basic would explain neither the plan nor the numbers beside it.
+ * other two are named as the server names them — an account still carrying PRO
+ * or PREMIUM from an earlier build says so rather than claiming to be Basic.
+ * The allowance is the same either way now: one pair of numbers for every
+ * account, so the name is a label and not a promise about limits.
  */
 export function planLabel(plan: string): string {
   if (plan === "FREE") return PLAN_NAME;

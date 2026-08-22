@@ -1,29 +1,26 @@
 "use client";
 
 /**
- * What is left of the month, at the foot of the rail.
+ * What is left of the allowance, at the foot of the rail.
  *
  * <p>The shape is Otter's — the plan's name, a track beside it, and a bold
- * count under it — because it is the right shape: a quota is only useful where
- * somebody sees it before they start something, not on a settings tab they open
- * once.
+ * count under it — because it is the right shape: an allowance is only useful
+ * where somebody sees it before they start something, not on a settings tab
+ * they open once.
  *
- * <p><strong>The bar is meetings, not minutes.</strong> Otter meters minutes
- * because minutes are what Otter sells. Recallix enforces one number and it is
- * the meeting count: `UsageLimitService.incrementMeetingsOrThrow` refuses the
- * sixth recording of the month with a 429. Minutes are added up after a meeting
- * finishes by `addAiMinutes`, which checks them against nothing — so `Plan.FREE`
- * carries an `aiMinutesLimit` of 60 that nothing in the codebase reads.
+ * <p><strong>The bar is minutes.</strong> It used to be the meeting count,
+ * because that was the only number the server enforced; minutes were added up
+ * and checked against nothing, so drawing them as a fraction would have
+ * invented a ceiling. Both halves of that have changed. The allowance is now
+ * 100 transcribed minutes and 3 imports for the life of the account
+ * (`UsageLimitService`), the meeting count is capped by nothing at all, and the
+ * bar is on the number that actually runs out.
  *
- * <p>Drawing that 60 as a ceiling would be worse than leaving it out. The two
- * numbers contradict each other — five meetings a month at any ordinary length
- * is well past sixty minutes — so the bar would fill and stay full while
- * nothing was wrong, and the first person to believe it would stop recording
- * meetings they were entitled to record. Account Settings → Plans made the same
- * call for the same reason; this is the same decision in a smaller space.
- *
- * <p>So minutes are shown as what they are: a number that went up, with no
- * track around it.
+ * <p><strong>And there is no reset date.</strong> This said "None left until
+ * 1 September" when the month was spent, which was the useful thing to say
+ * about a monthly quota and would be a lie about this one. Nothing arrives on
+ * the 1st. What it says instead is what is true: the allowance is the account's
+ * whole allowance, and nothing already transcribed is taken away.
  */
 
 import * as React from "react";
@@ -31,7 +28,6 @@ import Link from "next/link";
 import { useGetUsageQuery } from "@/lib/api";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatDate } from "@/lib/format";
 import { planLabel, quotaCount, usageFraction } from "@/lib/plan";
 
 export function PlanUsage({ onNavigate }: { onNavigate?: () => void }) {
@@ -47,7 +43,7 @@ export function PlanUsage({ onNavigate }: { onNavigate?: () => void }) {
   // somebody was reaching for it.
   if (!data) return <Skeleton className="mx-3 mb-3 h-[4.75rem] rounded-lg" />;
 
-  const { meetingsUsed: used, meetingsLimit: limit } = data;
+  const { minutesUsed: used, minutesLimit: limit } = data;
   const spent = limit >= 0 && used >= limit;
 
   return (
@@ -71,19 +67,22 @@ export function PlanUsage({ onNavigate }: { onNavigate?: () => void }) {
 
       <p className="mt-2 text-xs text-muted-foreground">
         <span className="font-semibold text-foreground">{quotaCount(used, limit)}</span>{" "}
-        {/* An unlimited plan says so, because otherwise the track above it is
-            unreadable: it sits at a token sliver forever, which looks like a
-            month barely started rather than one that cannot run out. */}
-        monthly meetings used{limit < 0 ? " — no limit" : ""}
+        {/* An account with no ceiling says so, because otherwise the track above
+            it is unreadable: it sits at a token sliver forever, which looks
+            like an allowance barely touched rather than one that cannot run
+            out. No plan has that any more, and the branch stays because -1 is
+            still what the field means and a row can still carry it. */}
+        minutes transcribed{limit < 0 ? " — no limit" : ""}
       </p>
 
       <p className="mt-0.5 text-[11px] text-muted-foreground">
         {spent
-          ? // What to do about it, rather than a statistic, at the one moment
-            // there is something to do about it. Nothing already processed is
-            // taken away when the month turns over.
-            `None left until ${formatDate(data.periodEnd)}`
-          : `${data.aiMinutesUsed} minutes transcribed`}
+          ? // What it means, rather than a statistic, at the one moment it
+            // means something. There is no date to wait for — this is the
+            // account's whole allowance — and nothing already transcribed goes
+            // away now that it is spent.
+            "That is the whole allowance. Nothing already transcribed is removed."
+          : `${quotaCount(data.importsUsed, data.importsLimit)} imports used`}
       </p>
     </Link>
   );
