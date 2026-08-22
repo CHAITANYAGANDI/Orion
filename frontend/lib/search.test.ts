@@ -1,16 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  DATE_PRESETS,
   EMPTY_SEARCH,
-  GROUPS,
-  activeFilterCount,
-  clearFilters,
-  decodeState,
-  encodeState,
   highlight,
-  isBlank,
-  MEANING_FLOOR,
-  meaningWorthShowing,
   meetingHref,
   presetFrom,
   snippet,
@@ -18,7 +9,7 @@ import {
   totalResults,
   type SearchState,
 } from "@/lib/search";
-import type { SearchMentionHit, SearchResponse, SemanticSearchHit } from "@/lib/types";
+import type { SearchResponse } from "@/lib/types";
 
 /**
  * The rules behind the search page.
@@ -60,60 +51,19 @@ describe("date presets", () => {
     expect(presetFrom("any", NOW)).toBe("");
   });
 
-  it("offers a preset for every value the state can hold", () => {
-    for (const preset of DATE_PRESETS) {
-      expect(() => presetFrom(preset.value, NOW)).not.toThrow();
-    }
-  });
-});
-
-describe("filter counting", () => {
-  it("counts nothing when nothing is set", () => {
-    expect(activeFilterCount(EMPTY_SEARCH)).toBe(0);
-    expect(isBlank(EMPTY_SEARCH)).toBe(true);
-  });
-
-  it("does not count the search term as a filter", () => {
-    expect(activeFilterCount(state({ q: "stripe" }))).toBe(0);
-    expect(isBlank(state({ q: "stripe" }))).toBe(false);
-  });
-
-  it("counts each filter once", () => {
-    expect(
-      activeFilterCount(state({ date: "week", tag: "finance", project: "prj_1" })),
-    ).toBe(3);
-  });
-
-  it("counts only what the bar can show and clear", () => {
-    // Four filters, four dropdowns. A fifth in the state would be a search
-    // narrowed by something with nothing on screen saying so, and no way off.
-    expect(activeFilterCount(state({ date: "week", type: "standup", tag: "q4", project: "p" })))
-      .toBe(4);
-  });
-
-  it("treats a filter with no search term as a real search", () => {
-    // "Everything tagged finance, last week" is a question.
-    expect(isBlank(state({ tag: "finance" }))).toBe(false);
-  });
-
-  it("clears the filters and leaves the search alone", () => {
-    const cleared = clearFilters(state({ q: "stripe", group: "mentions", tag: "finance" }));
-
-    expect(activeFilterCount(cleared)).toBe(0);
-    expect(cleared.q).toBe("stripe");
-    expect(cleared.group).toBe("mentions");
-  });
 });
 
 describe("request arguments", () => {
-  it("asks for a preview of both groups on the overview", () => {
+  it("asks for both groups, and for enough of each to be the whole answer", () => {
     const args = toQueryArgs(state({ q: "stripe" }), NOW);
 
     // Named rather than omitted. Absent means every group the server has, and
     // four of those are no longer rendered — asking for them buys four more
     // searches whose answers are dropped on arrival.
     expect(args.groups).toEqual(["meetings", "mentions"]);
-    expect(args.limit).toBe(5);
+    // Five was a preview, with "See all results" opening a page that fetched
+    // fifty. There is no page: this list is what the search found.
+    expect(args.limit).toBe(25);
   });
 
   it("never asks for a group the page cannot draw", () => {
@@ -151,41 +101,6 @@ describe("request arguments", () => {
     expect(args.tag).toBe("finance");
     expect(args.project).toBe("prj_1");
     expect(args.from).toBe(presetFrom("week", NOW));
-  });
-});
-
-describe("the URL", () => {
-  it("writes only what differs from the default", () => {
-    // Eight empty parameters are unreadable, and imply choices nobody made.
-    expect(encodeState(state({ q: "stripe" }))).toBe("?q=stripe");
-    expect(encodeState(EMPTY_SEARCH)).toBe("");
-  });
-
-  it("survives a round trip with everything set", () => {
-    const full = state({
-      q: "stripe migration",
-      group: "mentions",
-      date: "quarter",
-      type: "one-on-one",
-      tag: "finance",
-      project: "prj_1",
-    });
-
-    expect(decodeState(encodeState(full))).toEqual(full);
-  });
-
-  it("ignores values it does not recognise", () => {
-    // A stale or hand-edited link should open the search it can.
-    const decoded = decodeState("?q=stripe&group=widgets&date=fortnight");
-
-    expect(decoded.q).toBe("stripe");
-    expect(decoded.group).toBe("all");
-    expect(decoded.date).toBe("any");
-  });
-
-  it("reads an empty URL as the resting state", () => {
-    expect(decodeState("")).toEqual(EMPTY_SEARCH);
-    expect(decodeState("?")).toEqual(EMPTY_SEARCH);
   });
 });
 
@@ -287,118 +202,4 @@ describe("totals", () => {
     expect(totalResults(undefined)).toBe(0);
   });
 
-  it("has a label and a hint for every group", () => {
-    // The counts are the interface; "27 results" is ambiguous where "27
-    // utterances" is not.
-    expect(GROUPS.map((g) => g.key)).toEqual(["meetings", "mentions"]);
-    for (const g of GROUPS) {
-      expect(g.label).not.toBe("");
-      expect(g.hint).not.toBe("");
-    }
-  });
-});
-
-/**
- * Which semantic hits are worth calling results.
- *
- * <p>The failure this prevents is specific and was on screen: nearest-neighbour
- * search has no idea of "no match". Ask it for ten and it returns ten, so a
- * search for "hello" listed the two sentences the word search had already shown
- * — at the top, because a passage containing a word is the nearest thing to it —
- * followed by whatever else the index had. The same sentence twice on one page
- * reads as the page having lost count; three unrelated passages under a heading
- * saying they are about your question reads as it having stopped understanding
- * one.
- */
-function hit(over: Partial<SemanticSearchHit> = {}): SemanticSearchHit {
-  return {
-    meetingId: "mtg_1",
-    meetingTitle: "Finance review",
-    meetingStatus: "READY",
-    meetingCreatedAt: "2026-08-01T10:00:00Z",
-    chunkIndex: 0,
-    snippet: "They pushed back hard on the numbers for next quarter.",
-    start: 120,
-    score: 0.8,
-    ...over,
-  };
-}
-
-function mention(over: Partial<SearchMentionHit> = {}): SearchMentionHit {
-  return {
-    segmentId: "seg_1",
-    meetingId: "mtg_1",
-    meetingTitle: "Finance review",
-    meetingCreatedAt: "2026-08-01T10:00:00Z",
-    speaker: "Priya",
-    start: 120,
-    text: "They pushed back hard on the numbers.",
-    ...over,
-  } as SearchMentionHit;
-}
-
-describe("what counts as close in meaning", () => {
-  it("keeps a passage that says the thing without using the words", () => {
-    const kept = meaningWorthShowing([hit()], "budget pushback");
-
-    // The whole reason the section exists.
-    expect(kept).toHaveLength(1);
-  });
-
-  it("drops a passage the words already found", () => {
-    // The exact search ANDs its terms, so a passage containing all of them is
-    // one it matched — and it is already on the page above.
-    const kept = meaningWorthShowing([hit({ snippet: "Hello. Hi. How are you?" })], "hello");
-
-    expect(kept).toEqual([]);
-  });
-
-  it("does not treat one shared common word as an exact match", () => {
-    // "the" is a term. Dropping everything containing it would empty the
-    // section for every multi-word search.
-    const kept = meaningWorthShowing([hit()], "the budget pushback");
-
-    expect(kept).toHaveLength(1);
-  });
-
-  it("drops a moment already listed as a transcript mention", () => {
-    // The same utterance arrives twice: once as the segment that matched, once
-    // as the chunk of the passage around it.
-    const kept = meaningWorthShowing([hit({ snippet: "Something else entirely." })], "budget", [
-      mention({ meetingId: "mtg_1", start: 120.4 }),
-    ]);
-
-    expect(kept).toEqual([]);
-  });
-
-  it("keeps a different moment in the same meeting", () => {
-    const kept = meaningWorthShowing(
-      [hit({ snippet: "Something else entirely.", start: 900 })],
-      "budget",
-      [mention({ meetingId: "mtg_1", start: 120 })],
-    );
-
-    expect(kept).toHaveLength(1);
-  });
-
-  it("drops everything for a query nothing in the archive is about", () => {
-    // Measured: three unrelated nouns come back with six hits, the best of them
-    // at 0.21. Without a floor the page answers a question nobody can answer.
-    const noise = [0.21, 0.18, 0.14, 0.11].map((score) =>
-      hit({ score, snippet: "Unrelated chatter." }),
-    );
-
-    expect(meaningWorthShowing(noise, "zebra quantum banana")).toEqual([]);
-  });
-
-  it("puts the floor between noise and a real match", () => {
-    // Sitting the boundary on measured numbers rather than a feeling: nonsense
-    // peaks at 0.21 here and a real paraphrase scores 0.39 and up.
-    expect(MEANING_FLOOR).toBeGreaterThan(0.21);
-    expect(MEANING_FLOOR).toBeLessThan(0.39);
-  });
-
-  it("has nothing to filter before anything has come back", () => {
-    expect(meaningWorthShowing([], "budget")).toEqual([]);
-  });
 });

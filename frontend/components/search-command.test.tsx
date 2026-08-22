@@ -13,9 +13,14 @@ import { rememberSearch, readRecentSearches } from "@/lib/recent-searches";
  * search box that displays nothing while you type reads as broken, and the
  * tests below are mostly about it not being able to become that again.
  *
- * <p>The rest is the grammar. It reaches every filter the results page still
- * has and no more — a prefix that page cannot show or clear would be a way of
- * typing an invisible search. And a half-typed filter never becomes one:
+ * <p>And it is the only search there is. There used to be a /search page behind
+ * it, reached by pressing Enter — which is where the second failure lived:
+ * Enter, and a click on a remembered search, both left this box for a page that
+ * showed nothing. Enter opens a result now, and a remembered search runs here.
+ * Both are asserted below, and so is the absence of anything that navigates to
+ * a results page.
+ *
+ * <p>The rest is the grammar. And a half-typed filter never becomes a search:
  * `tag:bil` submitted as free text returns nothing and blames the archive.
  */
 const { push, searchQuery } = vi.hoisted(() => ({ push: vi.fn(), searchQuery: vi.fn() }));
@@ -132,14 +137,18 @@ describe("opening", () => {
     expect(screen.getByText("tag:q4 budget")).toBeInTheDocument();
   });
 
-  it("runs a remembered search on one click, filters and all", async () => {
+  it("runs a remembered search here, in the box it was typed into", async () => {
     rememberSearch("usr_1", "tag:q4 budget");
     render(<SearchCommand open onOpenChange={vi.fn()} />);
 
     await userEvent.click(screen.getByText("tag:q4 budget"));
 
-    expect(push).toHaveBeenCalled();
-    expect(String(push.mock.calls[0][0])).toContain("/search");
+    // It used to navigate to /search with the query in the URL, which is how
+    // clicking a recent search came to show nothing at all.
+    expect(push).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Search")).toHaveValue("tag:q4 budget");
+    // Straight away, without waiting out the settle: it was typed once already.
+    expect(await screen.findByText(/marketing weekly/)).toBeInTheDocument();
   });
 
   it("gets out of the way the moment anything is typed", async () => {
@@ -170,9 +179,10 @@ describe("opening", () => {
     expect(screen.queryByText(/Search everything at once/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/tag:q4 budget/)).not.toBeInTheDocument();
     expect(screen.queryByText(/^Try$/)).not.toBeInTheDocument();
-    // The way in and the way to run it both survive.
+    // The box survives. What is gone with it now is the button that used to
+    // sit at the foot and hand the query to /search.
     expect(screen.getByLabelText("Search")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Search everything/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Search everything/ })).not.toBeInTheDocument();
   });
 
   it("says what it searches, which is more than conversations", () => {
@@ -299,12 +309,14 @@ describe("answering", () => {
     await user.type(screen.getByLabelText("Search"), "product");
     await screen.findByText(/marketing weekly/);
 
+    // Down from the first result, which is where the selection starts, onto the
+    // sentence underneath it — opened at the second it was said.
     await user.keyboard("{ArrowDown}{Enter}");
 
-    expect(push).toHaveBeenCalledWith("/meetings/mtg_1");
+    expect(push).toHaveBeenCalledWith("/meetings/mtg_2?t=942");
   });
 
-  it("searches everything on Enter while nothing is selected", async () => {
+  it("opens the first result on Enter, without the arrows being touched", async () => {
     const user = userEvent.setup();
     render(<SearchCommand open onOpenChange={vi.fn()} />);
     await user.type(screen.getByLabelText("Search"), "product");
@@ -312,8 +324,26 @@ describe("answering", () => {
 
     await user.keyboard("{Enter}");
 
-    // Nothing highlighted means the whole search, which is the results page.
-    expect(String(push.mock.calls[0][0])).toContain("/search?q=product");
+    // This used to go to /search, and /search showed nothing for it. The best
+    // answer is already on screen and selected; Enter takes it.
+    expect(push).toHaveBeenCalledWith("/meetings/mtg_1");
+  });
+
+  it("does nothing on Enter before any result has arrived", async () => {
+    const user = userEvent.setup();
+    fetching = true;
+    results = NOTHING;
+    render(<SearchCommand open onOpenChange={vi.fn()} />);
+    const onOpenChange = vi.fn();
+    await user.type(screen.getByLabelText("Search"), "product");
+
+    await user.keyboard("{Enter}");
+
+    // Enter on a list that is not there should leave the box open rather than
+    // close it on nothing, which is what made this feel broken.
+    expect(push).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Search")).toBeInTheDocument();
   });
 
   it("remembers a search that ended in a click, not only one that reached the page", async () => {
@@ -326,26 +356,30 @@ describe("answering", () => {
     expect(readRecentSearches("usr_1")).toEqual(["product"]);
   });
 
-  it("hands the rest to the page that can do more", async () => {
+  it("says how much of the archive it is not showing, and offers no page for it", async () => {
     results = response({ mentions: { total: 40, hits: response().mentions.hits } });
     render(<SearchCommand open onOpenChange={vi.fn()} />);
     await userEvent.type(screen.getByLabelText("Search"), "product");
+    await screen.findByText(/marketing weekly/);
 
-    await userEvent.click(await screen.findByRole("button", { name: /See all 41 results/ }));
-
-    expect(String(push.mock.calls[0][0])).toContain("/search?q=product");
+    // Two of forty-one drawn. "See all results" opened a page that could show
+    // them; with the page gone, saying so and saying what to do about it beats
+    // a button that goes nowhere.
+    expect(screen.getByText(/Showing 2 of 41/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /See all/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Search everything/ })).not.toBeInTheDocument();
   });
 
-  it("says nothing matched, and points at the search that also reads meaning", async () => {
+  it("says nothing matched, and what to try instead", async () => {
     results = NOTHING;
     render(<SearchCommand open onOpenChange={vi.fn()} />);
     await userEvent.type(screen.getByLabelText("Search"), "product");
 
-    // This overlay does not pay for an embedding. The page does, and somebody
-    // whose wording was wrong has to be told where to go.
-    expect(
-      await screen.findByText(/No conversation or transcript contains those words/),
-    ).toBeInTheDocument();
+    // It used to point at /search, which paid for an embedding and could find a
+    // passage that meant this. With the page gone there is nowhere to send
+    // somebody whose wording was wrong, so the advice has to be usable here.
+    expect(await screen.findByText(/Nothing in your conversations/)).toBeInTheDocument();
+    expect(screen.queryByText(/open it below/i)).not.toBeInTheDocument();
   });
 
   it("does not search the archive before there is anything to search for", () => {
@@ -396,18 +430,20 @@ describe("showing what is narrowed", () => {
 });
 
 describe("searching", () => {
-  it("carries the filters into the results page's URL", async () => {
+  it("carries the filters into the request, not into a URL", async () => {
     const user = userEvent.setup();
     render(<SearchCommand open onOpenChange={vi.fn()} />);
 
     await user.type(screen.getByLabelText("Search"), "tag:q4 stripe");
-    await user.click(screen.getByRole("button", { name: /See all|Search everything/ }));
 
-    await waitFor(() => expect(push).toHaveBeenCalled());
-    const url = push.mock.calls[0][0] as string;
-    expect(url).toContain("/search?");
-    expect(url).toContain("tag=q4");
-    expect(url).toContain("q=stripe");
+    // The filter is applied to the search this box runs. It used to be encoded
+    // into /search?tag=q4&q=stripe and handed to a page.
+    await waitFor(() =>
+      expect(searchQuery).toHaveBeenCalledWith(
+        expect.objectContaining({ q: "stripe", tag: "q4" }),
+      ),
+    );
+    expect(push).not.toHaveBeenCalled();
   });
 
   it("completes a half-typed filter on Enter instead of searching for it", async () => {
@@ -424,14 +460,15 @@ describe("searching", () => {
     await waitFor(() => expect(input.value).toBe("tag:q4 "));
   });
 
-  it("searches on Enter once there is nothing left to complete", async () => {
+  it("opens a result on Enter once there is nothing left to complete", async () => {
     const user = userEvent.setup();
     render(<SearchCommand open onOpenChange={vi.fn()} />);
 
     await user.type(screen.getByLabelText("Search"), "stripe");
+    await screen.findByText(/marketing weekly/);
     await user.keyboard("{Enter}");
 
-    await waitFor(() => expect(push).toHaveBeenCalled());
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/meetings/mtg_1"));
   });
 
   it("closes on Escape without searching", async () => {

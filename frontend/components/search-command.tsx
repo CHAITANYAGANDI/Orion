@@ -1,35 +1,39 @@
 "use client";
 
 /**
- * The search overlay: a box that answers.
+ * The search overlay: the search.
  *
- * <p>It used to be a way of composing a query and handing it to /search. Which
- * meant that typing an ordinary word into it — the thing everybody does —
- * showed a blank panel, because the only thing it had to offer was completions
- * for filter prefixes. A search box that displays nothing while you type reads
- * as broken, and it was: the work was real and none of it was visible.
+ * <p>There were two search boxes. This one, in the header, which found things
+ * as you typed — and a /search page behind it, which the box handed the query
+ * to on Enter. The page is gone, and this is what is left.
  *
- * <p>So it searches. Results appear under the box as the term settles, matched
- * conversations first and then the sentences that matched inside them, with the
- * term marked in both. Most searches end here, on the page you were already on,
- * which is the point of a search box in a header.
+ * <p><b>Why the page went.</b> Two boxes, one of which was reached by pressing
+ * Enter in the other, and the one you landed on could not do the thing you had
+ * just been doing: the URL it was given carried the parsed state, and typing a
+ * word and pressing Enter arrived at a page showing nothing. Recent searches
+ * had the same route and the same ending. What the page had that this does not
+ * — filter dropdowns and a meaning search — is not worth a second surface
+ * that answers differently from the first: the four filters are typed here as
+ * `when:`, `type:`, `tag:` and `in:`, completed from what the workspace
+ * actually has.
  *
- * <p><b>What it deliberately does not do.</b> No semantic search: that costs an
- * embedding per query and belongs on the page that can afford to be slower and
- * has room to label the results. No filter dropdowns: the four filters are
- * reachable as `when:`, `type:`, `tag:` and `in:`, and the box completes them
- * from what your workspace actually has. Anything more than a first page of
- * hits is what "See all results" is for — /search renders the same hits from
- * the same query, with the filters and the meaning search alongside.
+ * <p><b>So Enter opens things now.</b> The first result is selected the moment
+ * results arrive, the arrows move that selection, and Enter opens whatever it
+ * is on. There is nowhere else for Enter to go, which is the point: a search
+ * box whose Enter key leads somewhere worse than where you already are is the
+ * bug this had.
  *
- * <p>The grammar is in `lib/search-query.ts`; the marking, the request and the
- * URL are all in `lib/search.ts`, shared with the results page. Two surfaces,
- * one search.
+ * <p>Still deliberately absent: semantic search. It costs an embedding per
+ * query, and running one on every settled keystroke in a header box is not the
+ * shape of it. `POST /search/semantic` is untouched and unused.
+ *
+ * <p>The grammar is in `lib/search-query.ts`; the marking and the request are
+ * in `lib/search.ts`.
  */
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Search, CornerDownLeft, X, Clock, Quote, ArrowRight } from "lucide-react";
+import { Search, X, Clock, Quote } from "lucide-react";
 import {
   useGetSearchFacetsQuery,
   useGetProjectsQuery,
@@ -50,13 +54,7 @@ import {
   wordAt,
   type Suggestion,
 } from "@/lib/search-query";
-import {
-  encodeState,
-  meetingHref,
-  snippet,
-  toQueryArgs,
-  totalResults,
-} from "@/lib/search";
+import { meetingHref, snippet, toQueryArgs, totalResults } from "@/lib/search";
 import { formatDateTime, formatDuration, timecode } from "@/lib/format";
 import { Marked } from "@/components/marked-text";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -88,8 +86,14 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
   const [recent, setRecent] = React.useState<string[]>([]);
   /** The text the results belong to, which lags the text being typed. */
   const [settled, setSettled] = React.useState(initial);
-  /** Which result the arrow keys are on; -1 is "none, Enter opens the page". */
-  const [active, setActive] = React.useState(-1);
+  /**
+   * Which result the arrow keys are on.
+   *
+   * The first one, until they move it. It used to start at nothing, because
+   * nothing selected meant "Enter goes to the results page" — and with no
+   * results page that is a key that does nothing on a list of answers.
+   */
+  const [active, setActive] = React.useState(0);
 
   // Only fetched while the box is open. The facets are a workspace-wide
   // aggregate and there is no reason for every page in the app to pay for one.
@@ -102,7 +106,7 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
       setSettled(initial);
       setCursor(initial.length);
       setHighlighted(0);
-      setActive(-1);
+      setActive(0);
       // Read on open rather than on mount: this component is mounted by the
       // shell for the life of the tab, so a value read once would be the list
       // as it stood before every search made since.
@@ -132,7 +136,7 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
 
   // A fresh list is a fresh selection. Leaving the highlight on row three while
   // the rows underneath it change would open whatever happened to land there.
-  React.useEffect(() => setActive(-1), [settled]);
+  React.useEffect(() => setActive(0), [settled]);
 
   const term = settled.trim();
   const searchState = React.useMemo(
@@ -193,16 +197,27 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
     router.push(href);
   }
 
-  function run(query: string = text) {
-    const parsed = parseQuery(query);
-    // Resolved here rather than on the results page so a value that matches
-    // nothing is dropped now, while the box that produced it is still open.
-    const state = toSearchState(parsed, catalog);
-    // Recorded as typed, filters and all, so `from:priya budget` comes back as
-    // the search it was rather than as the word "budget".
-    setRecent(rememberSearch(userId, query));
-    onOpenChange(false);
-    router.push(`/search${encodeState(state)}`);
+  /**
+   * Run a remembered search, here, in the box it was typed into.
+   *
+   * It used to navigate to /search with the query encoded in the URL, which is
+   * how clicking a recent search came to show nothing at all. There is nowhere
+   * to navigate to now and there does not need to be: this is the search, so
+   * the words go back in the input and the results appear underneath.
+   *
+   * `settled` is set directly rather than waited for — the query has been typed
+   * once already, and a quarter-second of nothing after a click reads as a
+   * click that missed.
+   */
+  function recall(query: string) {
+    setText(query);
+    setSettled(query);
+    setCursor(query.length);
+    setActive(0);
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(query.length, query.length);
+    });
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -244,13 +259,12 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
         choose(suggestions[highlighted]);
         return;
       }
-      // Then it opens whatever is selected. Nothing selected means the whole
-      // search, which is the results page.
-      if (active >= 0 && rows[active]) {
-        openResult(rows[active].href);
-        return;
-      }
-      run();
+      // Then it opens what is selected, which is the first result unless the
+      // arrows moved it. No row means the results have not arrived yet — and
+      // Enter on a list that is not there should leave the box open rather
+      // than close it on nothing, which is what makes it feel broken.
+      const row = rows[active];
+      if (row) openResult(row.href);
     }
   }
 
@@ -339,7 +353,7 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
                   <li key={q}>
                     <button
                       type="button"
-                      onClick={() => run(q)}
+                      onClick={() => recall(q)}
                       className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm hover:bg-accent/60"
                     >
                       <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -376,8 +390,10 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
                 </div>
               ) : rows.length === 0 ? (
                 <p className="px-4 pb-4 text-sm text-muted-foreground">
-                  No conversation or transcript contains those words. The full search also
-                  looks for passages that <em>mean</em> this — open it below.
+                  Nothing in your conversations or their transcripts contains those
+                  words. Fewer of them usually helps — <code>tag:</code>,{" "}
+                  <code>type:</code>, <code>in:</code> and <code>when:</code> narrow a
+                  search rather than widen it.
                 </p>
               ) : (
                 <ul className="max-h-[45vh] overflow-y-auto pb-1">
@@ -466,27 +482,20 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
             </ul>
           )}
 
-          {/* The way out to the page that can do more: every hit rather than the
-              first few, the four filters as dropdowns, and the meaning search
-              this overlay does not pay for. */}
+          {/* Keys on the left, and on the right the one thing this cannot show
+              you. There is no "See all results" any more because there is
+              nowhere for it to go: the list above is the answer, so when the
+              archive holds more than fits, say so and say what to do about it
+              rather than offering a page that showed less. */}
           <div className="flex items-center justify-between gap-3 border-t px-4 py-2 text-xs text-muted-foreground">
             <span className="hidden sm:inline">
-              {rows.length > 0 ? "↑↓ to choose · ⏎ to open" : "⏎ to search everything"}
+              {rows.length > 0 ? "↑↓ to choose · ⏎ to open · Esc to close" : "Esc to close"}
             </span>
-            <button
-              type="button"
-              onClick={() => run()}
-              className="flex items-center gap-1.5 font-medium text-foreground hover:text-primary"
-            >
-              {total > rows.length && rows.length > 0
-                ? `See all ${total} results`
-                : "Search everything"}
-              {rows.length > 0 ? (
-                <ArrowRight className="h-3.5 w-3.5" />
-              ) : (
-                <CornerDownLeft className="h-3.5 w-3.5" />
-              )}
-            </button>
+            {total > rows.length && (
+              <span className="tabular-nums">
+                Showing {rows.length} of {total} — narrow it with a filter
+              </span>
+            )}
           </div>
         </div>
       </div>

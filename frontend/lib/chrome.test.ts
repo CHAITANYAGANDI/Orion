@@ -23,7 +23,6 @@ const WORKING_PAGES = [
   "/home",
   "/folder/prj_1",
   "/action-items",
-  "/search",
   "/upload",
 ];
 

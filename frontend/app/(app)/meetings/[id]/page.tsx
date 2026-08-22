@@ -97,6 +97,7 @@ import { InsightsPanel } from "@/components/insights-panel";
 import { ExportDialog } from "@/components/export-dialog";
 import { copySummary, copyTranscript } from "@/lib/minutes";
 import { subscribeMeetingStatus } from "@/lib/ws";
+import { HOME } from "@/lib/routes";
 import {
   formatDate,
   formatDateTime,
@@ -482,7 +483,7 @@ export default function MeetingDetailPage() {
     try {
       await remove(id).unwrap();
       toast.success("Meeting deleted.");
-      router.push("/search");
+      router.push(HOME);
     } catch {
       toast.error("Could not delete.");
     }
@@ -494,7 +495,7 @@ export default function MeetingDetailPage() {
       <div className="text-center">
         <p className="text-lg font-medium">Meeting not found</p>
         <Button className="mt-4" variant="outline" asChild>
-          <Link href="/search">Back to meetings</Link>
+          <Link href={HOME}>Back to your conversations</Link>
         </Button>
       </div>
     );

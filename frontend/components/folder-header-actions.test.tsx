@@ -48,9 +48,17 @@ vi.mock("@/components/folder-dialog", () => ({
 }));
 
 import { FolderHeaderActions } from "@/components/folder-header-actions";
+import { resetSearchOverlay, useSearchOverlay } from "@/lib/search-overlay";
+
+/** Reads the store the menu writes to, so a test can see what it opened with. */
+function Overlay() {
+  const overlay = useSearchOverlay();
+  return <p data-testid="overlay">{overlay.open ? overlay.initial : "closed"}</p>;
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetSearchOverlay();
   vi.spyOn(window, "confirm").mockReturnValue(true);
   folder = { id: "prj_1", name: "Client ABC", description: "", meetingCount: 3 } as Project;
 });
@@ -85,13 +93,16 @@ describe("the menu", () => {
     expect(await screen.findByTestId("folder-dialog")).toBeInTheDocument();
   });
 
-  it("links to a search already narrowed to this folder", async () => {
+  it("opens the search box already narrowed to this folder", async () => {
+    render(<Overlay />);
     await openMenu();
 
-    expect(screen.getByRole("menuitem", { name: /Search in folder/ })).toHaveAttribute(
-      "href",
-      "/search?project=prj_1",
-    );
+    await userEvent.click(screen.getByRole("menuitem", { name: /Search in folder/ }));
+
+    // It used to be a link to /search?project=prj_1. There is no /search: the
+    // box is the search, and `in:"…"` is the grammar it parses. The trailing
+    // space puts the cursor past the filter, so the next keystroke is the term.
+    expect(screen.getByTestId("overlay")).toHaveTextContent('in:"Client ABC"');
   });
 });
 

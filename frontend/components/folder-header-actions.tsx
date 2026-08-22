@@ -20,13 +20,13 @@
  */
 
 import * as React from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { MoreHorizontal, Pencil, Trash2, Search as SearchIcon } from "lucide-react";
 import { useGetProjectQuery, useDeleteProjectMutation } from "@/lib/api";
 import { FolderDialog } from "@/components/folder-dialog";
 import { FOLDERS } from "@/lib/routes";
+import { openSearch } from "@/lib/search-overlay";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -91,13 +91,14 @@ export function FolderHeaderActions({ folderId }: { folderId: string }) {
           <DropdownMenuItem onSelect={() => setRenaming(true)}>
             <Pencil className="mr-2 h-4 w-4" /> Rename folder
           </DropdownMenuItem>
-          {/* Kept from the menu this replaces. The folder as a search filter —
-              the same grouping applied to decisions and transcripts rather than
-              to meetings — and this is the only place it is offered. */}
-          <DropdownMenuItem asChild>
-            <Link href={`/search?project=${folderId}`}>
-              <SearchIcon className="mr-2 h-4 w-4" /> Search in folder
-            </Link>
+          {/* The folder as a search filter, which is the only place it is
+              offered. It used to be a link to /search?project=… — there is no
+              /search now, so it opens the search box with the filter already
+              typed. `in:"Name"` is the grammar the box parses (lib/search-query)
+              and the trailing space puts the cursor past it, so the next
+              keystroke is the term rather than more of the folder's name. */}
+          <DropdownMenuItem onSelect={() => openSearch(`in:"${folder.name}" `)}>
+            <SearchIcon className="mr-2 h-4 w-4" /> Search in folder
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={removing}

@@ -499,7 +499,7 @@ describe("RecordingBar saving", () => {
   });
 
   it("files it nowhere when Record was pressed somewhere that is not a folder", async () => {
-    renderBar({ state: "stopped", result: aResult() }, { returnTo: "/search?q=budget" });
+    renderBar({ state: "stopped", result: aResult() }, { returnTo: "/folders" });
 
     await userEvent.click(screen.getByRole("button", { name: /Save & process/ }));
 

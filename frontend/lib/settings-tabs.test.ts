@@ -133,7 +133,7 @@ describe("where the search bar is hidden", () => {
   });
 
   it("leaves the search bar on every page that has meetings behind it", () => {
-    for (const path of ["/home", "/ask", "/meetings/mtg_1", "/folders", "/search", "/record"]) {
+    for (const path of ["/home", "/ask", "/meetings/mtg_1", "/folders", "/record"]) {
       expect(isSettingsPath(path)).toBe(false);
     }
   });

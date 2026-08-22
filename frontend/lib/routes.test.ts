@@ -42,7 +42,7 @@ describe("a folder's path", () => {
   });
 
   it("is nothing for a path that is not a folder", () => {
-    for (const path of ["/home", "/meetings/mtg_1", "/search", "/record", "/"]) {
+    for (const path of ["/home", "/meetings/mtg_1", "/folders", "/record", "/"]) {
       expect(folderIdFrom(path)).toBeNull();
     }
     expect(folderIdFrom(null)).toBeNull();
@@ -87,9 +87,9 @@ describe("where a recording came from", () => {
   });
 
   it("keeps any other page of the app, whole", () => {
-    // Record is pressed from search results and from meetings too, and the way
-    // back is that page, not the nearest folder.
-    expect(returnPath("/search?q=budget")).toBe("/search?q=budget");
+    // Record is pressed from the folder list and from meetings too, and the
+    // way back is that page, query and all, not the nearest folder.
+    expect(returnPath("/folders?sort=name")).toBe("/folders?sort=name");
     expect(returnPath("/meetings/mtg_1")).toBe("/meetings/mtg_1");
   });
 });

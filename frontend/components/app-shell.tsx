@@ -68,6 +68,7 @@ import { useRecordingStartedMutation } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { NotificationBell } from "@/components/notification-bell";
 import { SearchCommand } from "@/components/search-command";
+import { closeSearch, openSearch, useSearchOverlay } from "@/lib/search-overlay";
 import { ImportDialog } from "@/components/import-dialog";
 import { RecordingBar } from "@/components/recording-bar";
 import { AccountMenu } from "@/components/account-menu";
@@ -118,7 +119,10 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const recorder = useRecording();
   const [mobileOpen, setMobileOpen] = React.useState(false);
-  const [searching, setSearching] = React.useState(false);
+  // A store rather than local state: the box is the only search in the app, and
+  // "Search in folder" opens it from a menu three components deep with a query
+  // already in it. See lib/search-overlay.
+  const searching = useSearchOverlay();
   const [importing, setImporting] = React.useState(false);
   const [newFolder, setNewFolder] = React.useState(false);
   const fullBleed = pathname === "/home" || pathname === "/ask";
@@ -162,7 +166,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        setSearching(true);
+        openSearch();
       }
     }
     window.addEventListener("keydown", onKey);
@@ -324,7 +328,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
             {chrome.search && (
               <button
                 type="button"
-                onClick={() => setSearching(true)}
+                onClick={() => openSearch()}
                 className="flex h-9 max-w-sm flex-1 items-center gap-2 rounded-full border bg-card px-4 text-sm text-muted-foreground transition-colors hover:bg-accent"
               >
                 <Search className="h-4 w-4 shrink-0" />
@@ -491,7 +495,11 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
         </aside>
       </div>
 
-      <SearchCommand open={searching} onOpenChange={setSearching} />
+      <SearchCommand
+        open={searching.open}
+        initial={searching.initial}
+        onOpenChange={(next) => (next ? openSearch() : closeSearch())}
+      />
       {/* Same rule as Record, by a shorter route: the dialog is opened from
           the header of the page it will file into, and it is finished with
           before anybody navigates away. */}
