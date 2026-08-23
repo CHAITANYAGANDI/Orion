@@ -19,8 +19,7 @@ public record PrivacyOverviewResponse(
         Held held,
         Retention retention,
         StorageFacts storage,
-        SignIn signIn,
-        List<LiveLinkResponse> liveLinks
+        SignIn signIn
 ) {
 
     /**

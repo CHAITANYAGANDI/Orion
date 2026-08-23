@@ -1,7 +1,6 @@
 package com.recallix.controller;
 
 import com.recallix.dto.AccountCloseRequest;
-import com.recallix.dto.LiveLinkResponse;
 import com.recallix.dto.PrivacyOverviewResponse;
 import com.recallix.dto.RetentionUpdateRequest;
 import com.recallix.security.SecurityUtils;
@@ -22,10 +21,14 @@ import java.util.Map;
  * The three things somebody asks when they stop and think about what a
  * meeting recorder has of theirs.
  *
- * <p>What do you have — {@code GET /}. Who else can see it — the links in that
- * same response, and {@code POST /links/revoke-all} to end all of it at once.
- * How long will you keep it — {@code PATCH /retention}, and
- * {@code DELETE /account} when the answer is "not at all".
+ * <p>What do you have — {@code GET /}. How long will you keep it —
+ * {@code PATCH /retention}, and {@code DELETE /account} when the answer is
+ * "not at all".
+ *
+ * <p>"Who else can see it" used to be the third, answered by a list of live
+ * share links and {@code POST /links/revoke-all} to end them at once. Sharing is
+ * gone, so the answer is nobody: nothing this account holds is reachable without
+ * its own credentials, and there is no longer a question to ask.
  *
  * <p>There was a fourth, {@code GET /export}: the whole account as a zip, meant
  * to be downloaded before pressing the button underneath it. It is gone, and
@@ -50,17 +53,6 @@ public class PrivacyController {
     @GetMapping
     public PrivacyOverviewResponse overview() {
         return privacy.overview(SecurityUtils.currentUserId(), PrivacyService.todayUtc());
-    }
-
-    /** Every link a stranger holding the URL could open right now. */
-    @GetMapping("/links")
-    public List<LiveLinkResponse> links() {
-        return privacy.links(SecurityUtils.currentUserId());
-    }
-
-    @PostMapping("/links/revoke-all")
-    public Map<String, Integer> revokeAll() {
-        return Map.of("revoked", privacy.revokeAllLinks(SecurityUtils.currentUserId()));
     }
 
     /**

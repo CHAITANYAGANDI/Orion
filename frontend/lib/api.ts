@@ -12,9 +12,6 @@ import type {
   TranscriptMoment,
   ChatMessage,
   KnownSpeaker,
-  ShareCreateRequest,
-  ShareEmailRequest,
-  ShareResponse,
   SpeakerRematch,
   VocabularyTerm,
   VocabularyTermInput,
@@ -112,7 +109,6 @@ export const api = createApi({
     "Transcript",
     "Summary",
     "SummaryTemplates",
-    "Share",
     "Vocabulary",
     "KnownSpeakers",
     "Insights",
@@ -947,7 +943,6 @@ export const api = createApi({
       invalidatesTags: (_r, _e, id) => [
         { type: "Meeting", id },
         { type: "Meetings", id: "LIST" },
-        { type: "Share", id },
         { type: "Privacy", id: "ME" },
       ],
     }),
@@ -963,7 +958,6 @@ export const api = createApi({
         // Chat answered out of those embeddings a moment ago and cannot any
         // more; a cached answer citing text that is gone is the worst of both.
         { type: "Chat", id },
-        { type: "Share", id },
         { type: "Search", id: "RESULTS" },
         { type: "Privacy", id: "ME" },
       ],
@@ -981,7 +975,6 @@ export const api = createApi({
 
     revokeAllLinks: builder.mutation<{ revoked: number }, void>({
       query: () => ({ url: "/privacy/links/revoke-all", method: "POST" }),
-      invalidatesTags: [{ type: "Privacy", id: "ME" }, { type: "Share", id: "LIST" }],
     }),
 
     /**
@@ -1091,55 +1084,6 @@ export const api = createApi({
     }),
 
     // ---- Sharing ----
-    getShare: builder.query<ShareResponse | null, string>({
-      // 204 (never shared) arrives as an empty body; normalise it to null.
-      query: (id) => ({
-        url: `/meetings/${id}/share`,
-        responseHandler: async (r) => (r.status === 204 ? null : r.json()),
-      }),
-      providesTags: (_r, _e, id) => [{ type: "Share", id }],
-    }),
-
-    createShare: builder.mutation<
-      ShareResponse,
-      { id: string; body?: ShareCreateRequest }
-    >({
-      query: ({ id, body }) => ({
-        url: `/meetings/${id}/share`,
-        method: "POST",
-        body: body ?? {},
-      }),
-      invalidatesTags: (_r, _e, arg) => [{ type: "Share", id: arg.id }],
-    }),
-
-    revokeShare: builder.mutation<void, string>({
-      query: (id) => ({ url: `/meetings/${id}/share`, method: "DELETE" }),
-      invalidatesTags: (_r, _e, id) => [{ type: "Share", id }],
-    }),
-
-    /** Every live link for the meeting, its moment links included. */
-    getShareLinks: builder.query<ShareResponse[], string>({
-      query: (id) => `/meetings/${id}/share/links`,
-      providesTags: (_r, _e, id) => [{ type: "Share", id }],
-    }),
-
-    /** Withdraw one link — how a single moment link is taken back. */
-    revokeShareLink: builder.mutation<void, { shareId: string; meetingId: string }>({
-      query: ({ shareId }) => ({ url: `/shares/${shareId}`, method: "DELETE" }),
-      invalidatesTags: (_r, _e, arg) => [{ type: "Share", id: arg.meetingId }],
-    }),
-
-    emailShare: builder.mutation<
-      { sent: number },
-      { id: string; body: ShareEmailRequest }
-    >({
-      query: ({ id, body }) => ({
-        url: `/meetings/${id}/share/email`,
-        method: "POST",
-        body,
-      }),
-    }),
-
     // ---- Usage ----
 
     getUsage: builder.query<UsageResponse, void>({
@@ -1240,11 +1184,5 @@ export const {
   useGetActionItemCommentsQuery,
   useAddActionItemCommentMutation,
   useDeleteActionItemCommentMutation,
-  useGetShareQuery,
-  useGetShareLinksQuery,
-  useCreateShareMutation,
-  useRevokeShareMutation,
-  useRevokeShareLinkMutation,
-  useEmailShareMutation,
   useGetUsageQuery,
 } = api;

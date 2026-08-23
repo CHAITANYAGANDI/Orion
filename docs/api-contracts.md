@@ -109,15 +109,9 @@ and travels on `meeting.uploaded` as `language`, the same as `vocabulary` and fo
 the same reason: the worker runs as a system context with no user to read it in.
 The account setting wins over the deployment-wide `ASSEMBLYAI_LANGUAGE`.
 
-**Share and chat defaults (V39).** `shareIncludeSummary` /
-`shareIncludeActionItems` / `shareIncludeTranscript` / `shareIncludeAudio` and
-`shareExpiryDays` are what a **new** share link starts from — they were constants
-in `ShareService` and are now the account's. `ShareService.applyAccountDefaults`
-runs in `newShare` only, before the request is applied, so anything the caller
-asked for still wins and a link already sent is never rewritten: changing a
-default must not revoke access nobody asked to revoke. The four flags default to
-summary and action items on, transcript and recording off, because a transcript
-is every word somebody said and a recording is their voice.
+**Chat defaults (V39).** `chatHistoryDays` is how far back the workspace chat
+reads. V39 also added five share-link defaults beside it; those went with
+sharing in V50, along with the `ck_users_share_expiry_days` constraint.
 
 `chatHistoryDays` bounds how far back the **workspace** chat retrieves
 transcripts. It travels as `historyDays` on `POST /ai/workspace-chat` and becomes
@@ -293,60 +287,26 @@ nobody spoke. The reading view says where to go to edit.
 
 ### Sharing
 
-| Method | Endpoint | Body | Response |
-|---|---|---|---|
-| POST | `/api/v1/meetings/{id}/share` | `ShareCreateRequest` | `ShareResponse` |
-| GET | `/api/v1/meetings/{id}/share` | — | `ShareResponse` or `204` |
-| GET | `/api/v1/meetings/{id}/share/links` | — | `ShareResponse[]` |
-| DELETE | `/api/v1/meetings/{id}/share` | — | `204` |
-| DELETE | `/api/v1/shares/{shareId}` | — | `204` (one link) |
-| POST | `/api/v1/meetings/{id}/share/email` | `{ "to": [], "message"? }` | `{ "sent": n }` |
-| GET | `/public/shared/{token}` | header `X-Share-Password` | `SharedMeetingResponse` |
+**Removed (V50).** A share link was a token in `meeting_shares` that made one
+meeting readable at `/public/shared/{token}`, optionally password-protected,
+optionally expiring, with four flags choosing how much it revealed. All of it is
+gone: seven endpoints, the public page, the four account-level defaults, the
+`SHARE_VIEWED` notification and the "conversation shared" email.
 
-**There are no roles, and there cannot be.** Viewer, commenter and editor
-describe what a *person* may do, which presumes an account to attribute the
-writing to and to check on the next request. Everyone holding a link is the same
-anonymous reader. So what varies is not permission but **content**: four
-switches (`includeSummary`, `includeActionItems`, `includeTranscript`,
-`includeAudio`) saying what is visible. Summary and action items default on; the
-transcript and the recording default off, and the recording more firmly — a
-summary is a written account somebody can stand behind, the recording is
-everyone's unedited voice.
+**The table was dropped rather than orphaned**, for the same reason as the
+calendar token in V48: the token *was* the access check, and a route that no
+longer exists revokes nothing. Rows left behind would be unreachable but not
+withdrawn, and any future read path over them would silently republish every
+meeting anybody ever shared. Deleting them is the revocation, and it is
+irreversible on purpose — restoring the table would not restore the links,
+because what somebody holds is a URL and the only thing that made it work was
+the row.
 
-**Omitted means "leave it alone".** `neverExpires` and `removePassword` exist
-because an absent value and an explicit empty one arrive identically, and one
-means "don't touch it" while the other means "take it off" — the same problem as
-unfiling a meeting from a project.
-
-**Password** (V31) is a bcrypt hash and is never returned; `passwordProtected` is
-a boolean. It is the second factor for a link that has leaked but not been
-noticed — the only control that helps *after* a URL is somewhere it should not
-be, since revoking requires knowing. The work factor is also the rate limit. It
-travels in a header rather than the query string, because a URL is written to
-server logs, browser history and every proxy in between. A wrong password is not
-counted as a view.
-
-**Moment links** carry `startSeconds`/`endSeconds` and clip the transcript to
-that range **in the query**, not in the browser — sending the whole hour and
-hiding all but ten seconds is not sharing a moment. They are always new rather
-than idempotent: folding the second into the first would silently re-point a URL
-somebody already holds. `quote` is denormalised so a link keeps showing what was
-shared after a reprocess replaces the segments underneath it. At most one live
-whole-meeting link per meeting; as many moment links as there are moments.
-
-**Audio** is a short-lived presigned URL, generated only when the dial is on —
-not merely filtered out of the payload, so there is no signed URL in a log for
-anyone to lift.
-
-**Email is delivery, not access control.** Naming an address grants it nothing;
-the link works for whoever ends up holding it. The endpoint sends an existing
-link and refuses to create one, because an endpoint that both publishes a meeting
-and posts the URL to arbitrary addresses is one mistaken click from a leak. The
-mail says a password will be needed and never carries the password.
-
-Resolution failures stay indistinguishable: an invalid token, a revoked one and
-an expired one are all the same 404. Only "this link wants a password" is
-admitted, and only as a 401 — anyone holding the token knows that much already.
+**What this takes with it.** `GET /privacy/links` and
+`POST /privacy/links/revoke-all` are gone, and `PrivacyOverviewResponse` no
+longer carries `liveLinks`: "who else can see it" was a question about share
+links, and the answer is now nobody. `ErasureService` no longer narrows a live
+link when audio or a transcript is erased — there is no link to narrow.
 
 ### Exports
 
@@ -600,7 +560,7 @@ about Priya with Priyanka's lines and nothing on screen would reveal it.
 
 **Recallix had the architecture and none of the controls.** Row-level security
 means one account cannot read another's rows; the audio is in a private bucket
-reachable only through a URL we sign for fifteen minutes; a share link is opt-in,
+reachable only through a URL we sign for fifteen minutes;
 per meeting, and revocable. All true, all invisible, and the settings page's
 "Danger zone" popped a toast saying deletion was not implemented. A privacy claim
 nobody can check from inside the product is marketing.

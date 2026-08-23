@@ -43,18 +43,15 @@ import { Label } from "@/components/ui/label";
 import { settingsError } from "@/components/settings/shared";
 import { BUILD_LINE, LEGAL_LINKS } from "@/lib/build-info";
 import { cn } from "@/lib/utils";
+import { VocabularyCard } from "@/components/vocabulary-card";
+import { KnownSpeakersCard } from "@/components/known-speakers-card";
 
 export function GeneralTab() {
   return (
     <div className="space-y-1">
       <IdentityBlock />
       <LanguageRow />
-      <SettingRow
-        icon={<SpellCheck className="h-4 w-4" />}
-        title="Manage Vocabulary"
-        description="Names of people, and custom vocabulary"
-        href="/settings/meetings#vocabulary"
-      />
+      <TranscriptionSection />
       <Footer />
     </div>
   );
@@ -269,6 +266,42 @@ function LanguageRow() {
 }
 
 /** A row that navigates somewhere else — the shape of Manage Vocabulary. */
+/**
+ * What Recallix is told before it listens.
+ *
+ * <p>Here rather than behind a link. It lived on a Meetings tab, and this page
+ * carried a row that navigated to it — which was already one click of
+ * indirection around two small cards. That tab is gone, so the choice was to
+ * move these or to lose them, and losing them would take a working feature off
+ * the product to tidy a settings page.
+ *
+ * <p>Both apply to meetings processed from now on. An existing transcript has to
+ * be reprocessed to pick them up, and the copy says so, because the alternative
+ * is somebody adding a name and wondering why last week's meeting still spells
+ * it wrong.
+ */
+function TranscriptionSection() {
+  return (
+    <section id="vocabulary" aria-labelledby="transcription-heading" className="space-y-4 py-4">
+      <div>
+        <h2
+          id="transcription-heading"
+          className="flex items-center gap-2 text-lg font-semibold"
+        >
+          <SpellCheck className="h-4 w-4 text-muted-foreground" /> Words and speakers
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          What Recallix is told before it listens. Both apply to meetings
+          processed from now on — an existing transcript has to be reprocessed
+          to pick them up.
+        </p>
+      </div>
+      <VocabularyCard />
+      <KnownSpeakersCard />
+    </section>
+  );
+}
+
 function SettingRow({
   icon,
   title,

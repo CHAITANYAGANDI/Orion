@@ -30,12 +30,7 @@ public record PreferencesResponse(
         /** ISO-639-1 spoken language, or null for auto-detect. */
         String defaultLanguage,
         /** What a NEW share link is set to. Existing links keep their own. */
-        boolean shareIncludeSummary,
-        boolean shareIncludeActionItems,
-        boolean shareIncludeTranscript,
-        boolean shareIncludeAudio,
         /** Days until a new link expires, or null for never. */
-        Integer shareExpiryDays,
         /** How far back workspace chat reads transcripts; null is everything. */
         Integer chatHistoryDays,
         /** "Event reminder": every morning, what is overdue or due soon. */
@@ -47,7 +42,6 @@ public record PreferencesResponse(
         /** Recap for meetings imported as a file or link; autoEmailRecap covers recorded ones. */
         boolean recapForImports,
         /** "Conversation shared": somebody outside opened a link you published. */
-        boolean shareOpenedEmail,
         /** "Comments": a comment landed on an action item. At most one a day (V43). */
         boolean commentEmail,
         /** "Highlights": a highlight was added to a transcript. At most one a day (V43). */
@@ -65,17 +59,11 @@ public record PreferencesResponse(
                 user.getDepartment(),
                 user.getJobRole(),
                 user.getDefaultLanguage(),
-                user.isShareIncludeSummary(),
-                user.isShareIncludeActionItems(),
-                user.isShareIncludeTranscript(),
-                user.isShareIncludeAudio(),
-                user.getShareExpiryDays(),
                 user.getChatHistoryDays(),
                 user.isTaskReminders(),
                 user.isWeeklyDigest(),
                 user.isEmailsEnabled(),
                 user.isRecapForImports(),
-                user.isShareOpenedEmail(),
                 user.isCommentEmail(),
                 user.isHighlightEmail(),
                 user.getMutedNotifications());

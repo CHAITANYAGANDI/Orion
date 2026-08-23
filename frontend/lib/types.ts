@@ -177,13 +177,7 @@ export interface PreferencesResponse {
   jobRole: string | null;
   /** ISO-639-1 spoken language for transcription; null means auto-detect. */
   defaultLanguage: string | null;
-  /** What a NEW share link is set to. Existing links keep their own (V39). */
-  shareIncludeSummary: boolean;
-  shareIncludeActionItems: boolean;
-  shareIncludeTranscript: boolean;
-  shareIncludeAudio: boolean;
   /** Days until a new link expires, or null for never. */
-  shareExpiryDays: number | null;
   /** How far back workspace chat reads transcripts; null is every meeting. */
   chatHistoryDays: number | null;
   /** "Event reminder": every morning, what is overdue or due soon. */
@@ -200,8 +194,6 @@ export interface PreferencesResponse {
   emailsEnabled: boolean;
   /** Recap for imported meetings; `autoEmailRecap` covers recorded ones. */
   recapForImports: boolean;
-  /** "Conversation shared": somebody outside opened a link you published. */
-  shareOpenedEmail: boolean;
   /** "Comments": a comment landed on an action item. At most one a day (V43). */
   commentEmail: boolean;
   /** "Highlights": a highlight was added to a transcript. At most one a day (V43). */
@@ -219,13 +211,6 @@ export interface PreferencesUpdateRequest {
   jobRole?: string;
   /** ISO-639-1 code; blank restores auto-detect. */
   defaultLanguage?: string;
-  shareIncludeSummary?: boolean;
-  shareIncludeActionItems?: boolean;
-  shareIncludeTranscript?: boolean;
-  shareIncludeAudio?: boolean;
-  /** Omitted leaves the expiry; `shareNeverExpires` is how "never" is sent. */
-  shareExpiryDays?: number;
-  shareNeverExpires?: boolean;
   /** Omitted leaves the window; `chatReadsEverything` clears it. */
   chatHistoryDays?: number;
   chatReadsEverything?: boolean;
@@ -234,7 +219,6 @@ export interface PreferencesUpdateRequest {
   /** The master. Never rewrites the switches underneath it. */
   emailsEnabled?: boolean;
   recapForImports?: boolean;
-  shareOpenedEmail?: boolean;
   commentEmail?: boolean;
   highlightEmail?: boolean;
   /** The whole set, not a delta — the settings page holds every switch at once. */

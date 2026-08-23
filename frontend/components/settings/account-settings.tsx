@@ -3,15 +3,14 @@
 /**
  * Account Settings.
  *
- * One page with five tabs, where there used to be several separate routes in
- * three different places — Settings in the sidebar, Billing in the sidebar,
- * Privacy in the sidebar. That arrangement made every "where do I change…"
- * question a hunt, and put "close my account" and "which recap address" at the
- * same level of the navigation.
+ * One page, two tabs. There used to be several separate routes in three
+ * different places — Settings in the sidebar, Billing in the sidebar, Privacy
+ * in the sidebar — which made every "where do I change…" question a hunt.
+ * Four of the six tabs that replaced them have since gone with the features
+ * they configured.
  *
  * The tab is in the URL rather than in state, so a tab can be linked to, opened
- * in a new window and bookmarked — which matters most for Security, the one
- * somebody is sent to by a notification about their own data.
+ * in a new window and bookmarked.
  *
  * There is no Templates tab. A summary template is chosen per meeting — on the
  * upload page as a recording arrives, and from a meeting's own summary
@@ -19,8 +18,8 @@
  * one click from where the choice is never made.
  *
  * Each tab is its own component and fetches its own data. Nothing is loaded for
- * a tab that is not open: Security counts every row a workspace owns, and that
- * should not be paid for by somebody changing their recap address.
+ * a tab that is not open: Plans reads usage, and that should not be paid for by
+ * somebody changing their name.
  */
 
 import * as React from "react";
@@ -28,10 +27,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { SETTINGS_TABS, pathForTab, tabFromPath, type SettingsTab } from "@/lib/settings-tabs";
 import { GeneralTab } from "@/components/settings/general-tab";
-import { MeetingsTab } from "@/components/settings/meetings-tab";
 import { PlansTab } from "@/components/settings/plans-tab";
-import { EmailsTab } from "@/components/settings/emails-tab";
-import { SecurityTab } from "@/components/settings/security-tab";
 import { cn } from "@/lib/utils";
 
 export function AccountSettings() {
@@ -75,14 +71,8 @@ export function AccountSettings() {
 
 function TabBody({ tab }: { tab: SettingsTab }) {
   switch (tab) {
-    case "meetings":
-      return <MeetingsTab />;
     case "plans":
       return <PlansTab />;
-    case "emails":
-      return <EmailsTab />;
-    case "security":
-      return <SecurityTab />;
     case "general":
     default:
       return <GeneralTab />;

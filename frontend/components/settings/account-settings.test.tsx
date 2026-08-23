@@ -7,13 +7,17 @@ import { render, screen } from "@testing-library/react";
  * What matters here is the frame rather than the contents — each tab has its own
  * tests. Two things:
  *
- * The whole tab bar is always visible, whichever tab is open. Six tabs that
- * appeared and disappeared depending on where you were would make "where do I
- * change…" a hunt again, which is the thing this page exists to end.
+ * The whole tab bar is always visible, whichever tab is open. Tabs that appeared
+ * and disappeared depending on where you were would make "where do I change…" a
+ * hunt again, which is the thing this page exists to end.
  *
- * And only the open tab is mounted. Security counts every row a workspace owns
- * and Plans reads the usage period; somebody changing their recap address
- * should pay for neither.
+ * And only the open tab is mounted. Plans reads usage; somebody changing their
+ * name should not pay for it.
+ *
+ * There were six tabs and there are two. Four went with the features they
+ * configured, and the URLs of all four still have to resolve — a settings link
+ * somebody bookmarked should show them settings rather than a blank pane, which
+ * is what a catch-all route renders for a path it does not recognise.
  */
 const { rendered } = vi.hoisted(() => ({ rendered: vi.fn() }));
 
@@ -29,10 +33,7 @@ function stub(name: string) {
 }
 
 vi.mock("@/components/settings/general-tab", () => ({ GeneralTab: stub("general") }));
-vi.mock("@/components/settings/meetings-tab", () => ({ MeetingsTab: stub("meetings") }));
 vi.mock("@/components/settings/plans-tab", () => ({ PlansTab: stub("plans") }));
-vi.mock("@/components/settings/emails-tab", () => ({ EmailsTab: stub("emails") }));
-vi.mock("@/components/settings/security-tab", () => ({ SecurityTab: stub("security") }));
 
 import { AccountSettings } from "@/components/settings/account-settings";
 
@@ -47,21 +48,23 @@ describe("the frame", () => {
     expect(screen.getByRole("heading", { name: "Account Settings" })).toBeInTheDocument();
   });
 
-  it("shows all five tabs, whichever one is open", () => {
-    pathname = "/settings/security";
+  it("shows both tabs, whichever one is open", () => {
+    pathname = "/settings/plans";
     render(<AccountSettings />);
 
-    for (const label of ["General", "Meetings", "Plans", "Emails", "Security"]) {
+    for (const label of ["General", "Plans"]) {
       expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
     }
   });
 
-  it("has no Integrations tab", () => {
+  it("offers none of the four tabs that were removed", () => {
     render(<AccountSettings />);
 
-    // It held one thing, a calendar feed of deadlines, and that is gone. A tab
-    // whose only content was removed is a tab that opens onto nothing.
-    expect(screen.queryByRole("link", { name: "Integrations" })).not.toBeInTheDocument();
+    // Each opened onto a feature that no longer exists, except Meetings, whose
+    // two surviving sections moved onto General.
+    for (const gone of ["Integrations", "Meetings", "Emails", "Security"]) {
+      expect(screen.queryByRole("link", { name: gone })).not.toBeInTheDocument();
+    }
   });
 
   it("has no Templates tab", () => {
@@ -82,9 +85,9 @@ describe("the frame", () => {
   it("links each tab to its own URL, so one can be bookmarked or sent", () => {
     render(<AccountSettings />);
 
-    expect(screen.getByRole("link", { name: "Security" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "General" })).toHaveAttribute(
       "href",
-      "/settings/security",
+      "/settings/general",
     );
     expect(screen.getByRole("link", { name: "Plans" })).toHaveAttribute(
       "href",
@@ -93,10 +96,10 @@ describe("the frame", () => {
   });
 
   it("marks the open tab for a screen reader, not only with a colour", () => {
-    pathname = "/settings/emails";
+    pathname = "/settings/plans";
     render(<AccountSettings />);
 
-    expect(screen.getByRole("link", { name: "Emails" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Plans" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "General" })).not.toHaveAttribute("aria-current");
   });
 });
@@ -108,9 +111,9 @@ describe("which tab is open", () => {
   });
 
   it("opens the one the URL names", () => {
-    pathname = "/settings/meetings";
+    pathname = "/settings/plans";
     render(<AccountSettings />);
-    expect(screen.getByTestId("tab-meetings")).toBeInTheDocument();
+    expect(screen.getByTestId("tab-plans")).toBeInTheDocument();
   });
 
   it("shows General rather than a blank pane under the old Integrations URL", () => {
@@ -124,18 +127,21 @@ describe("which tab is open", () => {
   it("mounts only that one", () => {
     // Security counts every row the workspace owns, and Plans reads usage.
     // Neither is paid for by somebody opening Emails.
-    pathname = "/settings/emails";
+    pathname = "/settings/plans";
     render(<AccountSettings />);
 
     expect(rendered).toHaveBeenCalledTimes(1);
-    expect(rendered).toHaveBeenCalledWith("emails");
+    expect(rendered).toHaveBeenCalledWith("plans");
   });
 
-  it("opens Security under the old /privacy URL", () => {
-    // Notifications written before this restructuring still link there.
+  it("still opens settings under the old /privacy URL", () => {
+    // RETENTION_APPLIED notifications still link there and those rows cannot be
+    // rewritten. Security is gone, so it lands on General — which is settings,
+    // rather than the blank pane a catch-all renders for a path it does not
+    // recognise.
     pathname = "/privacy";
     render(<AccountSettings />);
-    expect(screen.getByTestId("tab-security")).toBeInTheDocument();
+    expect(screen.getByTestId("tab-general")).toBeInTheDocument();
   });
 
   it("opens Plans under the old /billing URL", () => {

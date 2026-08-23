@@ -72,32 +72,6 @@ public class UserEntity {
     private String defaultLanguage;
 
     /**
-     * What a new share link reveals before anybody touches it, and when it
-     * expires.
-     *
-     * <p>These were constants in {@code ShareService}: good defaults, and
-     * somebody else's opinion. Every link still carries its own four flags and
-     * its own expiry — this is only what the boxes are set to. Changing them
-     * never rewrites a link already sent, because that would revoke access
-     * nobody asked to revoke. See V39.
-     */
-    @Column(name = "share_include_summary", nullable = false)
-    private boolean shareIncludeSummary = true;
-
-    @Column(name = "share_include_action_items", nullable = false)
-    private boolean shareIncludeActionItems = true;
-
-    @Column(name = "share_include_transcript", nullable = false)
-    private boolean shareIncludeTranscript = false;
-
-    @Column(name = "share_include_audio", nullable = false)
-    private boolean shareIncludeAudio = false;
-
-    /** Days until a new link expires, or null for never. */
-    @Column(name = "share_expiry_days")
-    private Integer shareExpiryDays;
-
-    /**
      * How far back the workspace chat retrieves transcripts, or null for all.
      *
      * <p>A scope control, not a privacy boundary: nothing is hidden or deleted,
@@ -196,8 +170,6 @@ public class UserEntity {
      * sent to a mailing list can be opened fifty times in an afternoon, and the
      * bell absorbs that where an inbox does not.
      */
-    @Column(name = "share_opened_email", nullable = false)
-    private boolean shareOpenedEmail = false;
 
     /**
      * Notification kinds switched off.
@@ -256,21 +228,6 @@ public class UserEntity {
     public String getDefaultLanguage() { return defaultLanguage; }
     public void setDefaultLanguage(String defaultLanguage) { this.defaultLanguage = defaultLanguage; }
 
-    public boolean isShareIncludeSummary() { return shareIncludeSummary; }
-    public void setShareIncludeSummary(boolean v) { this.shareIncludeSummary = v; }
-
-    public boolean isShareIncludeActionItems() { return shareIncludeActionItems; }
-    public void setShareIncludeActionItems(boolean v) { this.shareIncludeActionItems = v; }
-
-    public boolean isShareIncludeTranscript() { return shareIncludeTranscript; }
-    public void setShareIncludeTranscript(boolean v) { this.shareIncludeTranscript = v; }
-
-    public boolean isShareIncludeAudio() { return shareIncludeAudio; }
-    public void setShareIncludeAudio(boolean v) { this.shareIncludeAudio = v; }
-
-    public Integer getShareExpiryDays() { return shareExpiryDays; }
-    public void setShareExpiryDays(Integer shareExpiryDays) { this.shareExpiryDays = shareExpiryDays; }
-
     public Integer getChatHistoryDays() { return chatHistoryDays; }
     public void setChatHistoryDays(Integer chatHistoryDays) { this.chatHistoryDays = chatHistoryDays; }
 
@@ -297,9 +254,6 @@ public class UserEntity {
 
     public boolean isRecapForImports() { return recapForImports; }
     public void setRecapForImports(boolean recapForImports) { this.recapForImports = recapForImports; }
-
-    public boolean isShareOpenedEmail() { return shareOpenedEmail; }
-    public void setShareOpenedEmail(boolean shareOpenedEmail) { this.shareOpenedEmail = shareOpenedEmail; }
 
     public LocalDate getTaskReminderSentOn() { return taskReminderSentOn; }
     public void setTaskReminderSentOn(LocalDate taskReminderSentOn) { this.taskReminderSentOn = taskReminderSentOn; }

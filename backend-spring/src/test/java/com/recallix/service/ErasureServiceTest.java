@@ -2,11 +2,9 @@ package com.recallix.service;
 
 import com.recallix.common.ApiException;
 import com.recallix.entity.Meeting;
-import com.recallix.entity.MeetingShare;
 import com.recallix.entity.UserEntity;
 import com.recallix.repository.MeetingActionItemRepository;
 import com.recallix.repository.MeetingRepository;
-import com.recallix.repository.MeetingShareRepository;
 import com.recallix.repository.MeetingSummaryRepository;
 import com.recallix.repository.MeetingTranscriptRepository;
 import com.recallix.repository.MeetingTranslationRepository;
@@ -60,7 +58,6 @@ class ErasureServiceTest {
     @Mock private MeetingTranslationRepository translations;
     @Mock private TranscriptMomentRepository moments;
     @Mock private TranscriptChunkRepository chunks;
-    @Mock private MeetingShareRepository shares;
     @Mock private UserRepository users;
     @Mock private StorageService storage;
     @Mock private AuditService audit;
@@ -71,25 +68,13 @@ class ErasureServiceTest {
     @BeforeEach
     void setUp() {
         service = new ErasureService(meetings, transcripts, segments, summaries, actionItems,
-                translations, moments, chunks, shares, users, storage, audit);
+                translations, moments, chunks, users, storage, audit);
         meeting = new Meeting();
         meeting.setId(MEETING);
         meeting.setUserId(USER);
         meeting.setTitle("Sprint planning");
         meeting.setObjectKey("meetings/usr_1/mtg_1/audio.mp3");
         when(meetings.findByIdAndUserId(MEETING, USER)).thenReturn(Optional.of(meeting));
-        when(shares.findByMeetingIdAndRevokedFalseOrderByCreatedAtDesc(MEETING)).thenReturn(List.of());
-    }
-
-    private static MeetingShare liveShare() {
-        MeetingShare share = new MeetingShare();
-        share.setId("shr_1");
-        share.setMeetingId(MEETING);
-        share.setUserId(USER);
-        share.setToken("tok");
-        share.setIncludeAudio(true);
-        share.setIncludeTranscript(true);
-        return share;
     }
 
     @Nested
@@ -116,22 +101,6 @@ class ErasureServiceTest {
             verify(summaries, never()).deleteByMeetingId(anyString());
             verify(actionItems, never()).deleteByMeetingId(anyString());
             assertThat(meeting.getTranscriptDeletedAt()).isNull();
-        }
-
-        @Test
-        @DisplayName("narrows a live link that promised the recording")
-        void narrowsLinks() {
-            MeetingShare share = liveShare();
-            when(shares.findByMeetingIdAndRevokedFalseOrderByCreatedAtDesc(MEETING))
-                    .thenReturn(List.of(share));
-
-            service.eraseAudio(USER, MEETING);
-
-            assertThat(share.isIncludeAudio()).isFalse();
-            // Narrowed, not revoked: whoever holds it was also given the notes,
-            // and taking those back is a different decision.
-            assertThat(share.isRevoked()).isFalse();
-            assertThat(share.isIncludeTranscript()).isTrue();
         }
 
         @Test
@@ -201,18 +170,6 @@ class ErasureServiceTest {
             verify(segments).deleteByMeetingId(MEETING);
         }
 
-        @Test
-        @DisplayName("narrows a live link that promised the transcript")
-        void narrowsLinks() {
-            MeetingShare share = liveShare();
-            when(shares.findByMeetingIdAndRevokedFalseOrderByCreatedAtDesc(MEETING))
-                    .thenReturn(List.of(share));
-
-            service.eraseTranscript(USER, MEETING);
-
-            assertThat(share.isIncludeTranscript()).isFalse();
-            assertThat(share.isIncludeAudio()).isTrue();
-        }
     }
 
     @Nested

@@ -20,6 +20,11 @@ import { cn } from "@/lib/utils";
  * A prompt ending in a space is an opening rather than a question — "Find every
  * discussion about " — so it is put in the input for the user to finish instead
  * of being sent. Sending it as-is would ask the model to search for nothing.
+ *
+ * <p>The chip used to append " …" to those, on top of labels that already ended
+ * in one — so they rendered "Find every mention of… …". Both are gone. A chip
+ * is a short phrase and nothing on it should look like text that ran out of
+ * room; where an ellipsis is doing work it is in the label itself, once.
  */
 export function ChatSuggestions({
   prompts,
@@ -60,7 +65,6 @@ export function ChatSuggestions({
               )}
             >
               {p.label}
-              {unfinished && <span aria-hidden="true"> …</span>}
             </button>
           );
         })}

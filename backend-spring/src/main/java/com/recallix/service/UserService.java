@@ -74,26 +74,6 @@ public class UserService {
         if (patch.defaultLanguage() != null) {
             user.setDefaultLanguage(resolveLanguage(patch.defaultLanguage()));
         }
-        if (patch.shareIncludeSummary() != null) {
-            user.setShareIncludeSummary(patch.shareIncludeSummary());
-        }
-        if (patch.shareIncludeActionItems() != null) {
-            user.setShareIncludeActionItems(patch.shareIncludeActionItems());
-        }
-        if (patch.shareIncludeTranscript() != null) {
-            user.setShareIncludeTranscript(patch.shareIncludeTranscript());
-        }
-        if (patch.shareIncludeAudio() != null) {
-            user.setShareIncludeAudio(patch.shareIncludeAudio());
-        }
-        // "Never" and "unchanged" are both an absent number, so the flag is
-        // what distinguishes them — the same problem, and the same answer, as
-        // removing a password from a share link.
-        if (Boolean.TRUE.equals(patch.shareNeverExpires())) {
-            user.setShareExpiryDays(null);
-        } else if (patch.shareExpiryDays() != null) {
-            user.setShareExpiryDays(patch.shareExpiryDays());
-        }
         if (Boolean.TRUE.equals(patch.chatReadsEverything())) {
             user.setChatHistoryDays(null);
         } else if (patch.chatHistoryDays() != null) {
@@ -123,9 +103,6 @@ public class UserService {
         }
         if (patch.recapForImports() != null) {
             user.setRecapForImports(patch.recapForImports());
-        }
-        if (patch.shareOpenedEmail() != null) {
-            user.setShareOpenedEmail(patch.shareOpenedEmail());
         }
         // The daily stamps are not cleared on switch-on, unlike the digest's.
         // These two mail about something that just happened rather than about a
@@ -184,13 +161,6 @@ public class UserService {
             String department,
             String jobRole,
             String defaultLanguage,
-            Boolean shareIncludeSummary,
-            Boolean shareIncludeActionItems,
-            Boolean shareIncludeTranscript,
-            Boolean shareIncludeAudio,
-            /** Null leaves the expiry; {@code shareNeverExpires} clears it. */
-            Integer shareExpiryDays,
-            Boolean shareNeverExpires,
             /** Null leaves the window; {@code chatReadsEverything} clears it. */
             Integer chatHistoryDays,
             Boolean chatReadsEverything,
@@ -202,8 +172,6 @@ public class UserService {
             Boolean emailsEnabled,
             /** Recap for imported meetings; {@code autoEmailRecap} covers recorded ones. */
             Boolean recapForImports,
-            /** "Conversation shared": email the owner when a published link is opened. */
-            Boolean shareOpenedEmail,
             /** "Comments": email when a comment lands on an action item (V43). */
             Boolean commentEmail,
             /** "Highlights": email when a highlight is added (V43). */

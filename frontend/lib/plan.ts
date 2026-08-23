@@ -115,7 +115,6 @@ export const INCLUDED: FeatureGroup[] = [
     heading: "Getting things out",
     features: [
       { label: "Exporting a meeting as PDF, Word, Markdown or plain text" },
-      { label: "Share links, with a password and an expiry" },
       { label: "Email recaps and a daily digest of what is due" },
     ],
   },
@@ -147,7 +146,7 @@ export const NOT_INCLUDED: Feature[] = [
   {
     label: "One account, not a team",
     detail:
-      "There are no seats, no shared workspace and no invitations. Everything you record is yours alone until you publish a link.",
+      "There are no seats, no shared workspace, no invitations and no share links. Everything you record is yours alone, and there is no way to let anybody else see it.",
   },
   {
     label: "Nothing to upgrade to",

@@ -22,20 +22,19 @@ import {
  */
 
 describe("the tabs themselves", () => {
-  it("are the five the page offers, in reading order", () => {
-    expect(SETTINGS_TABS.map((t) => t.id)).toEqual([
-      "general",
-      "meetings",
-      "plans",
-      "emails",
-      "security",
-    ]);
+  it("are the two the page offers, in reading order", () => {
+    expect(SETTINGS_TABS.map((t) => t.id)).toEqual(["general", "plans"]);
   });
 
-  it("does not offer Integrations", () => {
-    // The tab held one thing, a calendar feed of action item deadlines, and
-    // that is gone. What is left is a tab that opens onto nothing.
-    expect(SETTINGS_TABS.map((t) => t.id)).not.toContain("integrations");
+  it("offers none of the four that were removed", () => {
+    // Each went with the thing it configured: Integrations with the calendar
+    // feed, Meetings with sharing (its other two sections moved to General),
+    // and Emails and Security with the settings they held. A tab that opens
+    // onto nothing is worse than no tab.
+    const ids = SETTINGS_TABS.map((t) => t.id);
+    for (const gone of ["integrations", "meetings", "emails", "security"]) {
+      expect(ids).not.toContain(gone);
+    }
   });
 
   it("does not offer Templates", () => {
@@ -46,11 +45,8 @@ describe("the tabs themselves", () => {
     expect(tabFromPath("/settings/templates")).toBe(DEFAULT_TAB);
   });
 
-  it("open on General and end on Security", () => {
-    // Security last on purpose: it holds the irreversible things, and a tab bar
-    // is read left to right.
+  it("open on General, which is where somebody lands", () => {
     expect(SETTINGS_TABS[0].id).toBe(DEFAULT_TAB);
-    expect(SETTINGS_TABS[SETTINGS_TABS.length - 1].id).toBe("security");
   });
 });
 
@@ -66,12 +62,12 @@ describe("reading a path", () => {
   });
 
   it("ignores a trailing slash, which a pasted URL often carries", () => {
-    expect(tabFromPath("/settings/security/")).toBe("security");
+    expect(tabFromPath("/settings/plans/")).toBe("plans");
     expect(tabFromPath("/settings/")).toBe("general");
   });
 
   it("ignores case, since a hand-typed URL will not match ours", () => {
-    expect(tabFromPath("/settings/Security")).toBe("security");
+    expect(tabFromPath("/settings/Plans")).toBe("plans");
   });
 
   it("falls back to General rather than rendering nothing", () => {
@@ -81,22 +77,20 @@ describe("reading a path", () => {
 });
 
 describe("the paths that used to be pages", () => {
-  it("still land on the tab that replaced them", () => {
-    expect(tabFromPath("/privacy")).toBe("security");
+  it("still land somewhere rather than nowhere", () => {
     expect(tabFromPath("/billing")).toBe("plans");
+    // Security is gone, so this lands on General. It has to keep resolving:
+    // RETENTION_APPLIED notification rows carry /privacy in their link column,
+    // and those rows are a record of something that already happened.
+    expect(tabFromPath("/privacy")).toBe("general");
+    expect(LEGACY_PATHS["/privacy"]).toBe("general");
   });
 
-  it("sends the Integrations URLs to General rather than nowhere", () => {
-    // Both the tab and the page that preceded it are gone. A bookmark for
-    // either should show settings, not a blank pane.
-    expect(tabFromPath("/settings/integrations")).toBe("general");
+  it("sends every removed tab's URL to General rather than to a blank pane", () => {
+    for (const gone of ["integrations", "meetings", "emails", "security"]) {
+      expect(tabFromPath(`/settings/${gone}`)).toBe("general");
+    }
     expect(tabFromPath("/integrations")).toBe("general");
-  });
-
-  it("keeps /privacy working, because notifications already point at it", () => {
-    // RETENTION_APPLIED rows carry this link. Breaking it would break a record
-    // of something that already happened.
-    expect(LEGACY_PATHS["/privacy"]).toBe("security");
   });
 
   it("survives a trailing slash on the old form too", () => {
@@ -141,6 +135,7 @@ describe("where the search bar is hidden", () => {
   it("is not fooled by a trailing slash", () => {
     expect(isSettingsPath("/settings/")).toBe(true);
     expect(isSettingsPath("/privacy/")).toBe(true);
+    expect(isSettingsPath("/billing/")).toBe(true);
   });
 
   it("leaves the search bar on every page that has meetings behind it", () => {

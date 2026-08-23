@@ -247,23 +247,6 @@ public class NotificationService {
     }
 
     /**
-     * Somebody outside the workspace opened a link.
-     *
-     * <p>Deduped to one a day per link. A meeting shared with a room of forty
-     * people is opened forty times in five minutes, and forty notifications
-     * about one act of sharing is the definition of noise.
-     */
-    @Transactional
-    public void shareViewed(String userId, Meeting meeting, String shareId, LocalDate today) {
-        emit(userId, NotificationKind.SHARE_VIEWED,
-                meeting == null ? "A link you shared was opened" : meeting.getTitle(),
-                "Someone opened the link you shared.",
-                meeting == null ? null : meeting.getId(), null,
-                meeting == null ? "/meetings" : link(meeting),
-                "share:" + shareId + ":" + today);
-    }
-
-    /**
      * A retention rule deleted something.
      *
      * <p>One notification for the whole night's work rather than one per

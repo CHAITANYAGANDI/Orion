@@ -89,7 +89,6 @@ import { NewActionItemDialog } from "@/components/new-action-item-dialog";
 import { TranslationDialog, ReadingIn, ORIGINAL } from "@/components/translation-dialog";
 import { TranslatedTranscript } from "@/components/translated-transcript";
 import { AudioPlayer, useAudioController } from "@/components/audio-player";
-import { ShareDialog } from "@/components/share-dialog";
 import { MeetingTitle, MeetingTags } from "@/components/meeting-title";
 import { OutlineNav } from "@/components/outline-nav";
 import { MeetingMenu } from "@/components/meeting-menu";
@@ -638,7 +637,6 @@ export default function MeetingDetailPage() {
         <div className="flex items-center gap-2 no-print">
           {ready && (
             <>
-              <ShareDialog meetingId={id} />
               {/* A button, not a menu. Everything that used to hang off it —
                   copying, erasing — moved onto the one menu that holds every
                   other operation, so a control named Export now does exactly

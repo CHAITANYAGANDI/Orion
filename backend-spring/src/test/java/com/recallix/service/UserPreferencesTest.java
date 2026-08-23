@@ -50,56 +50,46 @@ class UserPreferencesTest {
     /**
      * A patch of nulls, so each test names only the fields it is about.
      *
-     * <p>Twenty positional nulls at every call site is how a transposition gets
-     * written and never noticed — the record exists to be named, and these five
-     * helpers are where the naming happens for tests.
+     * <p>Positional nulls at every call site is how a transposition gets written
+     * and never noticed — the record exists to be named, and these helpers are
+     * where the naming happens for tests. There were five; `sharing` went with
+     * the share links it configured.
      */
     private static UserService.PreferencesPatch profile(String displayName, String department,
                                                         String jobRole, String language) {
         return new UserService.PreferencesPatch(
                 null, null, displayName, department, jobRole, language,
-                null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, null);
-    }
-
-    private static UserService.PreferencesPatch sharing(Boolean summary, Boolean actionItems,
-                                                       Boolean transcript, Boolean audio,
-                                                       Integer expiryDays, Boolean neverExpires) {
-        return new UserService.PreferencesPatch(
-                null, null, null, null, null, null,
-                summary, actionItems, transcript, audio, expiryDays, neverExpires,
-                null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null);
     }
 
     private static UserService.PreferencesPatch chatWindow(Integer days, Boolean everything) {
         return new UserService.PreferencesPatch(
-                null, null, null, null, null, null,
                 null, null, null, null, null, null, days, everything,
-                null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null);
     }
 
     private static UserService.PreferencesPatch muting(List<String> kinds) {
         return new UserService.PreferencesPatch(
-                null, null, null, null, null, null,
                 null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, null, kinds);
+                null, null, null, null, null, null, kinds);
     }
 
     /**
-     * The seven email switches, in the order the settings page lists them.
+     * The six email switches, in the order the settings page listed them.
      *
-     * <p>Seven positional booleans is past the point where a call site can be
+     * <p>Six positional booleans is past the point where a call site can be
      * read, so every test below passes them by name through this one helper and
      * a transposition shows up here rather than in each test.
+     *
+     * <p>There were seven. "Conversation shared" mailed the owner when somebody
+     * opened a published link, and there are no links to open.
      */
     private static UserService.PreferencesPatch email(Boolean taskReminders, Boolean weeklyDigest,
                                                       Boolean emailsEnabled, Boolean recapForImports,
-                                                      Boolean shareOpenedEmail,
                                                       Boolean commentEmail, Boolean highlightEmail) {
         return new UserService.PreferencesPatch(
-                null, null, null, null, null, null,
                 null, null, null, null, null, null, null, null,
-                taskReminders, weeklyDigest, emailsEnabled, recapForImports, shareOpenedEmail,
+                taskReminders, weeklyDigest, emailsEnabled, recapForImports,
                 commentEmail, highlightEmail, null);
     }
 
@@ -214,64 +204,6 @@ class UserPreferencesTest {
     }
 
     @Nested
-    class ShareDefaults {
-
-        @Test
-        @DisplayName("a new account shares notes and not the recording")
-        void safeOutOfTheBox() {
-            // The same defaults that were constants in ShareService. A
-            // transcript is every word somebody said and a recording is their
-            // voice; neither leaves an account because a box was pre-ticked.
-            assertThat(user.isShareIncludeSummary()).isTrue();
-            assertThat(user.isShareIncludeActionItems()).isTrue();
-            assertThat(user.isShareIncludeTranscript()).isFalse();
-            assertThat(user.isShareIncludeAudio()).isFalse();
-            assertThat(user.getShareExpiryDays()).isNull();
-        }
-
-        @Test
-        @DisplayName("each flag is set on its own")
-        void flagsAreIndependent() {
-            service.updatePreferences(USER, sharing(null, null, true, null, null, null));
-
-            assertThat(user.isShareIncludeTranscript()).isTrue();
-            assertThat(user.isShareIncludeSummary()).isTrue();
-            assertThat(user.isShareIncludeAudio()).isFalse();
-        }
-
-        @Test
-        @DisplayName("an expiry is stored in days")
-        void expiryIsStored() {
-            service.updatePreferences(USER, sharing(null, null, null, null, 30, null));
-
-            assertThat(user.getShareExpiryDays()).isEqualTo(30);
-        }
-
-        @Test
-        @DisplayName("never-expires needs its own flag, since absent means unchanged")
-        void neverExpiresClears() {
-            service.updatePreferences(USER, sharing(null, null, null, null, 30, null));
-
-            service.updatePreferences(USER, sharing(null, null, null, null, null, true));
-
-            // The same problem as removing a share password: an absent number
-            // and an explicit "no expiry" arrive identically over JSON.
-            assertThat(user.getShareExpiryDays()).isNull();
-        }
-
-        @Test
-        @DisplayName("changing the flags leaves the expiry alone")
-        void independentOfEachOther() {
-            service.updatePreferences(USER, sharing(null, null, null, null, 7, null));
-
-            service.updatePreferences(USER, sharing(false, null, null, null, null, null));
-
-            assertThat(user.getShareExpiryDays()).isEqualTo(7);
-            assertThat(user.isShareIncludeSummary()).isFalse();
-        }
-    }
-
-    @Nested
     class ChatWindow {
 
         @Test
@@ -356,18 +288,16 @@ class UserPreferencesTest {
             user.setAutoEmailRecap(true);
             user.setRecapForImports(true);
             user.setTaskReminders(true);
-            user.setShareOpenedEmail(true);
             user.setCommentEmail(true);
             user.setHighlightEmail(true);
 
             service.updatePreferences(USER,
-                    email(null, null, false, null, null, null, null));
+                    email(null, null, false, null, null, null));
 
             assertThat(user.isEmailsEnabled()).isFalse();
             assertThat(user.isAutoEmailRecap()).isTrue();
             assertThat(user.isRecapForImports()).isTrue();
             assertThat(user.isTaskReminders()).isTrue();
-            assertThat(user.isShareOpenedEmail()).isTrue();
             assertThat(user.isCommentEmail()).isTrue();
             assertThat(user.isHighlightEmail()).isTrue();
         }
@@ -376,11 +306,10 @@ class UserPreferencesTest {
         @DisplayName("each switch moves on its own")
         void switchesAreIndependent() {
             service.updatePreferences(USER,
-                    email(null, true, null, true, true, null, null));
+                    email(null, true, null, true, null, null));
 
             assertThat(user.isWeeklyDigest()).isTrue();
             assertThat(user.isRecapForImports()).isTrue();
-            assertThat(user.isShareOpenedEmail()).isTrue();
             // Untouched by a patch that did not mention them.
             assertThat(user.isTaskReminders()).isFalse();
             assertThat(user.isCommentEmail()).isFalse();
@@ -394,12 +323,12 @@ class UserPreferencesTest {
             // wire in the controller shows up as the wrong field moving rather
             // than as a value that happens to agree.
             service.updatePreferences(USER,
-                    email(null, null, null, null, null, true, false));
+                    email(null, null, null, null, true, false));
             assertThat(user.isCommentEmail()).isTrue();
             assertThat(user.isHighlightEmail()).isFalse();
 
             service.updatePreferences(USER,
-                    email(null, null, null, null, null, false, true));
+                    email(null, null, null, null, false, true));
             assertThat(user.isCommentEmail()).isFalse();
             assertThat(user.isHighlightEmail()).isTrue();
         }
@@ -407,15 +336,13 @@ class UserPreferencesTest {
         @Test
         @DisplayName("an omitted switch is not a switch set to false")
         void omittedMeansUnchanged() {
-            user.setShareOpenedEmail(true);
             user.setWeeklyDigest(true);
             user.setHighlightEmail(true);
 
             service.updatePreferences(USER,
-                    email(true, null, null, null, null, null, null));
+                    email(true, null, null, null, null, null));
 
             assertThat(user.isTaskReminders()).isTrue();
-            assertThat(user.isShareOpenedEmail()).isTrue();
             assertThat(user.isWeeklyDigest()).isTrue();
             assertThat(user.isHighlightEmail()).isTrue();
         }
@@ -429,7 +356,7 @@ class UserPreferencesTest {
             user.setTaskReminderSentOn(LocalDate.of(2026, 8, 17));
 
             service.updatePreferences(USER,
-                    email(null, true, null, null, null, null, null));
+                    email(null, true, null, null, null, null));
 
             assertThat(user.getTaskReminderSentOn()).isNull();
         }
@@ -446,7 +373,7 @@ class UserPreferencesTest {
             user.setHighlightEmailedOn(today);
 
             service.updatePreferences(USER,
-                    email(null, null, null, null, null, true, true));
+                    email(null, null, null, null, true, true));
 
             assertThat(user.getCommentEmailedOn()).isEqualTo(today);
             assertThat(user.getHighlightEmailedOn()).isEqualTo(today);

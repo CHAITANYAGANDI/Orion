@@ -1,15 +1,12 @@
 package com.recallix.service;
 
 import com.recallix.common.ApiException;
-import com.recallix.dto.LiveLinkResponse;
 import com.recallix.dto.PrivacyOverviewResponse;
 import com.recallix.entity.Meeting;
-import com.recallix.entity.MeetingShare;
 import com.recallix.entity.UserEntity;
 import com.recallix.repository.ChatConversationRepository;
 import com.recallix.repository.MeetingActionItemRepository;
 import com.recallix.repository.MeetingRepository;
-import com.recallix.repository.MeetingShareRepository;
 import com.recallix.repository.ProjectRepository;
 import com.recallix.repository.TranscriptMomentRepository;
 import com.recallix.repository.UserRepository;
@@ -67,7 +64,6 @@ public class PrivacyService {
     public static final String DELETE_PHRASE = "delete everything";
 
     private final MeetingRepository meetings;
-    private final MeetingShareRepository shares;
     private final MeetingActionItemRepository actionItems;
     private final TranscriptMomentRepository moments;
     private final ProjectRepository projects;
@@ -80,7 +76,6 @@ public class PrivacyService {
     private final String frontendUrl;
 
     public PrivacyService(MeetingRepository meetings,
-                          MeetingShareRepository shares,
                           MeetingActionItemRepository actionItems,
                           TranscriptMomentRepository moments,
                           ProjectRepository projects,
@@ -92,7 +87,6 @@ public class PrivacyService {
                           AuditService audit,
                           @Value("${app.frontend-url:http://localhost:3000}") String frontendUrl) {
         this.meetings = meetings;
-        this.shares = shares;
         this.actionItems = actionItems;
         this.moments = moments;
         this.projects = projects;
@@ -119,8 +113,7 @@ public class PrivacyService {
                 held(userId, owned),
                 retentionOf(user, userId, today),
                 storageFacts(),
-                signIn(),
-                liveLinks(userId, owned));
+                signIn());
     }
 
     private PrivacyOverviewResponse.Held held(String userId, List<Meeting> owned) {
@@ -185,52 +178,6 @@ public class PrivacyService {
                 // every table and forces it on, so this is a property of the
                 // schema the application is running against.
                 true);
-    }
-
-    /* -------------------------------- links --------------------------------- */
-
-    /**
-     * Every link in the workspace that a stranger holding the URL could open
-     * right now.
-     *
-     * <p>Expired links are filtered out here rather than shown greyed: the
-     * question this list answers is what is readable now, and an expired link is
-     * not readable. Revoked ones never load — the query excludes them — but the
-     * rows stay in the table so the history remains answerable.
-     */
-    @Transactional(readOnly = true)
-    public List<LiveLinkResponse> links(String userId) {
-        return liveLinks(userId, meetings.findByUserIdOrderByCreatedAtDesc(userId));
-    }
-
-    private List<LiveLinkResponse> liveLinks(String userId, List<Meeting> owned) {
-        Map<String, String> titles = owned.stream()
-                .collect(Collectors.toMap(Meeting::getId, Meeting::getTitle, (a, b) -> a));
-        return shares.findByUserIdAndRevokedFalseOrderByCreatedAtDesc(userId).stream()
-                .filter(MeetingShare::isActive)
-                .map(s -> LiveLinkResponse.from(s, titles.get(s.getMeetingId()), frontendUrl))
-                .toList();
-    }
-
-    /**
-     * Withdraw every live link at once.
-     *
-     * <p>The button somebody reaches for after realising a link went somewhere
-     * it should not have, when they cannot remember which of thirty meetings it
-     * was. Revoking one too many costs a click to re-share; hunting for the
-     * right one while it is being read costs the thing this page is for.
-     *
-     * @return how many links were withdrawn
-     */
-    @Transactional
-    public int revokeAllLinks(String userId) {
-        List<MeetingShare> live = shares.findByUserIdAndRevokedFalseOrderByCreatedAtDesc(userId);
-        live.forEach(s -> s.setRevoked(true));
-        if (!live.isEmpty()) {
-            audit.record(userId, "SHARE_REVOKED_ALL", "user", userId);
-            log.info("Revoked {} live link(s) for {}", live.size(), userId);
-        }
-        return live.size();
     }
 
     /* ------------------------------- retention ------------------------------ */

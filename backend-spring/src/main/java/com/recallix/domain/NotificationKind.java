@@ -20,7 +20,6 @@ import java.util.Optional;
  * counterparts and are here under honest names: {@link #MENTIONED_IN_MEETING} is
  * a meeting that assigned work to you by name, which is what "mentioned you"
  * means when the mention comes from a transcript rather than a colleague, and
- * {@link #SHARE_VIEWED} is somebody outside opening a link you published, which
  * is the only genuinely other-party event the product has. The third — a comment
  * from another person — has no counterpart, because action item notes are a
  * private working log.
@@ -64,7 +63,6 @@ public enum NotificationKind {
     MENTIONED_IN_MEETING("Mentioned in a meeting", "when a meeting assigns work to you by name"),
 
     /** A link you published was opened by somebody outside the workspace. */
-    SHARE_VIEWED("Shared link opened", "when someone opens a link you shared"),
 
     /**
      * Your retention policy erased something. Cannot be switched off.

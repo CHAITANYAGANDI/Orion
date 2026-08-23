@@ -707,7 +707,13 @@ class OpenAiLlmAdapter(LlmPort):
     # Longest a chip can be before it wraps and stops being scannable. Enforced
     # in the prompt and again on the way out, because the model treats a length
     # limit as advice.
-    _SUGGESTION_MAX_CHARS = 80
+    #
+    # Was 80, which is a sentence rather than a chip: at that width two of them
+    # fill a row, each wraps onto a second line, and the row stops being
+    # something the eye skims. The hand-written prompts these sit beside are all
+    # under 30 characters, so 48 is roughly "as long as the longest one somebody
+    # wrote by hand, plus room to name a thing".
+    _SUGGESTION_MAX_CHARS = 48
 
     _SUGGEST_RULES = (
         "Rules:\n"
@@ -719,7 +725,9 @@ class OpenAiLlmAdapter(LlmPort):
         "meeting ever recorded, and a chip that could sit on any meeting will "
         "stop being read after the second one.\n"
         f"- Under {_SUGGESTION_MAX_CHARS} characters each. They render as "
-        "chips.\n"
+        "chips in a single row, not as sentences. Write the shortest form "
+        "that still names the thing: \"Acme's pricing objection?\" not "
+        "\"What was the objection Acme raised about our pricing?\"\n"
         "- No two questions about the same thing.\n"
         "- Return fewer, or none, if the material is too thin to ask anything "
         "specific about. An empty list is a valid answer.\n"

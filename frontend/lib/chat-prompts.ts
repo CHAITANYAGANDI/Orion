@@ -59,7 +59,18 @@ export const SUGGESTION_ROW = 3;
  * actual meeting, and the hand-written ones behind them because they would sit
  * on any meeting ever recorded. Deduplicated case-insensitively, since a
  * generated "What did we decide?" and the static one are the same chip twice.
+ *
+ * <p>Over-long generated ones are **dropped, not shortened**. A chip is a phrase
+ * you skim, and both ways of shortening one are worse than not showing it:
+ * cutting the label leaves an ellipsis that reads as text which ran out of room,
+ * and cutting the prompt with it would send the model half a question. The
+ * ai-service already refuses anything over its own limit; this is the same rule
+ * on this side of the wire, so a change there cannot quietly put a paragraph in
+ * a chip.
  */
+
+/** Longest a chip may be. Every hand-written label below is inside it. */
+export const MAX_LABEL = 48;
 export function toPrompts(
   generated: string[] | undefined | null,
   fallback: ChatPrompt[],
@@ -68,7 +79,10 @@ export function toPrompts(
   const seen = new Set<string>();
 
   for (const p of [
-    ...(generated ?? []).map((q) => q.trim()).filter(Boolean).map((q) => ({ label: q, prompt: q })),
+    ...(generated ?? [])
+      .map((q) => q.trim())
+      .filter((q) => q.length > 0 && q.length <= MAX_LABEL)
+      .map((q) => ({ label: q, prompt: q })),
     ...fallback,
   ]) {
     const key = p.label.toLowerCase().replace(/[?.\s]+$/, "");
@@ -172,14 +186,14 @@ export const WORKSPACE_PROMPTS: ChatPrompt[] = [
       "Compare the meetings I have selected: where do they agree, where do they differ, and what changed between them?",
   },
   {
-    label: "Find every mention of…",
+    label: "Find a mention",
     // Left deliberately incomplete: the user finishes it. A concrete example
     // ("Stripe") would be wrong for most workspaces and gets sent as-is by
     // anyone clicking without reading.
     prompt: "Find every discussion about ",
   },
   {
-    label: "What did someone say about…",
+    label: "What someone said",
     prompt: "What did ",
   },
   {

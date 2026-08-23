@@ -2,10 +2,8 @@ package com.recallix.service;
 
 import com.recallix.common.ApiException;
 import com.recallix.entity.Meeting;
-import com.recallix.entity.MeetingShare;
 import com.recallix.repository.MeetingActionItemRepository;
 import com.recallix.repository.MeetingRepository;
-import com.recallix.repository.MeetingShareRepository;
 import com.recallix.repository.MeetingSummaryRepository;
 import com.recallix.repository.MeetingTranscriptRepository;
 import com.recallix.repository.MeetingTranslationRepository;
@@ -66,7 +64,6 @@ public class ErasureService {
     private final MeetingTranslationRepository translations;
     private final TranscriptMomentRepository moments;
     private final TranscriptChunkRepository chunks;
-    private final MeetingShareRepository shares;
     private final UserRepository users;
     private final StorageService storage;
     private final AuditService audit;
@@ -79,7 +76,6 @@ public class ErasureService {
                           MeetingTranslationRepository translations,
                           TranscriptMomentRepository moments,
                           TranscriptChunkRepository chunks,
-                          MeetingShareRepository shares,
                           UserRepository users,
                           StorageService storage,
                           AuditService audit) {
@@ -91,7 +87,6 @@ public class ErasureService {
         this.translations = translations;
         this.moments = moments;
         this.chunks = chunks;
-        this.shares = shares;
         this.users = users;
         this.storage = storage;
         this.audit = audit;
@@ -126,17 +121,6 @@ public class ErasureService {
         meeting.setAudioUrl(null);
         meeting.setAudioDeletedAt(Instant.now());
 
-        // A live link promising audio would now hand its reader a signed URL for
-        // an object that is not there. Narrowed rather than revoked: whoever
-        // holds it was given the notes as well, and taking those back is a
-        // different decision from erasing a recording.
-        withdraw(meeting.getId(), share -> {
-            if (share.isIncludeAudio()) {
-                share.setIncludeAudio(false);
-                return true;
-            }
-            return false;
-        });
         return meeting.getAudioDeletedAt();
     }
 
@@ -184,13 +168,6 @@ public class ErasureService {
         }
         meeting.setTranscriptDeletedAt(Instant.now());
 
-        withdraw(meetingId, share -> {
-            if (share.isIncludeTranscript()) {
-                share.setIncludeTranscript(false);
-                return true;
-            }
-            return false;
-        });
         return meeting.getTranscriptDeletedAt();
     }
 
@@ -262,20 +239,6 @@ public class ErasureService {
     }
 
     /* ------------------------------- helpers -------------------------------- */
-
-    /**
-     * Narrow every live link for a meeting.
-     *
-     * @param narrow returns true when it changed the share, so the log line
-     *               reports links actually altered rather than links looked at
-     */
-    private void withdraw(String meetingId, java.util.function.Predicate<MeetingShare> narrow) {
-        List<MeetingShare> live = shares.findByMeetingIdAndRevokedFalseOrderByCreatedAtDesc(meetingId);
-        long changed = live.stream().filter(narrow).count();
-        if (changed > 0) {
-            log.info("Erasure narrowed {} live link(s) on meeting {}", changed, meetingId);
-        }
-    }
 
     private Meeting require(String userId, String meetingId) {
         return meetings.findByIdAndUserId(meetingId, userId)

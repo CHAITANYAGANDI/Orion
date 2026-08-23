@@ -1,5 +1,5 @@
 /**
- * The five tabs of Account Settings, and how a URL maps onto one.
+ * The two tabs of Account Settings, and how a URL maps onto one.
  *
  * Pure, and separate from the page, for two reasons. The routing is a
  * catch-all — `/settings`, `/settings/security`, and anything anybody types
@@ -8,18 +8,19 @@
  * still land here: `/privacy` and `/billing` were pages before they were tabs,
  * and notifications written months ago still link to the first of them.
  *
- * There was a sixth tab, Integrations, holding one thing: a subscribable
- * calendar feed of action item deadlines. Both are gone. `/settings/integrations`
- * is not special-cased on the way out — it falls to General like any other
- * unrecognised settings URL, which is the behaviour a stale bookmark wants.
+ * There were six. Integrations held a calendar feed that no longer exists.
+ * Meetings held sharing defaults, a chat window, and vocabulary and known
+ * speakers; sharing is gone and the other two moved onto General, which is
+ * where the page already advertised them. Emails held seven switches and
+ * Security showed sign-in facts and a privacy inventory.
+ *
+ * <p>None of the removed URLs is special-cased on the way out. They fall to
+ * General like any other unrecognised settings path, which is the behaviour a
+ * stale bookmark wants: a settings URL somebody saved should show them
+ * settings, not a blank pane that reads as a page which failed to load.
  */
 
-export type SettingsTab =
-  | "general"
-  | "meetings"
-  | "plans"
-  | "emails"
-  | "security";
+export type SettingsTab = "general" | "plans";
 
 export interface TabSpec {
   id: SettingsTab;
@@ -29,15 +30,11 @@ export interface TabSpec {
 /**
  * In the order they are shown.
  *
- * General first because it is where somebody lands, Security last because it is
- * where the irreversible things are and a tab bar is read left to right.
+ * General first because it is where somebody lands.
  */
 export const SETTINGS_TABS: TabSpec[] = [
   { id: "general", label: "General" },
-  { id: "meetings", label: "Meetings" },
   { id: "plans", label: "Plans" },
-  { id: "emails", label: "Emails" },
-  { id: "security", label: "Security" },
 ];
 
 export const DEFAULT_TAB: SettingsTab = "general";
@@ -51,7 +48,10 @@ export const DEFAULT_TAB: SettingsTab = "general";
  * has to keep working for as long as they do.
  */
 export const LEGACY_PATHS: Record<string, SettingsTab> = {
-  "/privacy": "security",
+  // Security is gone, so this lands on General rather than nowhere. The row it
+  // is written into is still a record of something that happened, and a link
+  // that 404s is a worse answer than the settings page.
+  "/privacy": "general",
   "/billing": "plans",
 };
 
@@ -86,9 +86,9 @@ export function pathForTab(tab: SettingsTab): string {
  *
  * <p>The legacy URLs count, and that is the whole reason this is a function
  * rather than a `startsWith` at the call site. `/billing` and `/privacy` render
- * exactly the same component as `/settings/plans` and `/settings/security`, so
- * treating them differently would show the bar or hide it depending on which
- * link somebody happened to follow.
+ * the same component as `/settings/plans` and `/settings/general`, so treating
+ * them differently would show the bar or hide it depending on which link
+ * somebody happened to follow.
  *
  * <p>`hasOwnProperty` rather than `in`: a pathname of `/toString` is reachable
  * by typing it, and `in` would say yes.

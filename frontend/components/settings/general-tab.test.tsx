@@ -38,6 +38,16 @@ vi.mock("next/navigation", () => ({ usePathname: () => "/settings" }));
 vi.mock("@/lib/auth", () => ({ useAuth: () => ({ userId: "usr_dev", mode }) }));
 
 vi.mock("@/lib/api", () => ({
+  // Vocabulary and known speakers moved onto this tab when the Meetings tab was
+  // removed, so General now mounts both cards. Empty rather than absent: an
+  // undefined `data` is a different render path from an empty list, and the one
+  // these tests care about is the ordinary one.
+  useGetVocabularyQuery: () => ({ data: [], isLoading: false }),
+  useCreateVocabularyTermMutation: () => [vi.fn(), { isLoading: false }],
+  useUpdateVocabularyTermMutation: () => [vi.fn()],
+  useDeleteVocabularyTermMutation: () => [vi.fn()],
+  useGetKnownSpeakersQuery: () => ({ data: [], isLoading: false }),
+  useDeleteKnownSpeakerMutation: () => [vi.fn()],
   useGetPreferencesQuery: () => ({ data: prefs, isLoading: false }),
   useGetLanguagesQuery: () => ({
     data: [
@@ -71,17 +81,11 @@ beforeEach(() => {
     department: "IT",
     jobRole: "Individual contributor",
     defaultLanguage: null,
-    shareIncludeSummary: true,
-    shareIncludeActionItems: true,
-    shareIncludeTranscript: false,
-    shareIncludeAudio: false,
-    shareExpiryDays: null,
     chatHistoryDays: null,
     taskReminders: false,
     weeklyDigest: false,
     emailsEnabled: true,
     recapForImports: false,
-    shareOpenedEmail: false,
     commentEmail: false,
     highlightEmail: false,
     mutedNotifications: [],
@@ -221,13 +225,16 @@ describe("language", () => {
 });
 
 describe("the rest of the page", () => {
-  it("sends vocabulary to where vocabulary is managed", () => {
+  it("manages vocabulary and speakers here, rather than linking to them", () => {
     render(<GeneralTab />);
 
-    expect(screen.getByRole("link", { name: /Manage Vocabulary/ })).toHaveAttribute(
-      "href",
-      "/settings/meetings#vocabulary",
-    );
+    // This was a row that navigated to /settings/meetings#vocabulary. That tab
+    // is gone, so the two cards moved here rather than being lost with it — a
+    // link to a page that no longer exists is the failure this replaces.
+    expect(screen.getByRole("heading", { name: /Words and speakers/ })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /Manage Vocabulary/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("offers no route to closing an account, because there is nowhere to send it", () => {

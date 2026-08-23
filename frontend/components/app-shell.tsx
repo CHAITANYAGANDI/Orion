@@ -48,7 +48,6 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   Home,
   Sparkles,
-  Plug,
   Menu,
   Mic,
   Search,
@@ -83,15 +82,16 @@ import { HEADER_SLOT_ID } from "@/components/header-slot";
 /**
  * The places.
  *
- * Three, and the shortness is the point: Record, Import and Search were nav
- * items and are now buttons in the top bar, because they are things you do
- * rather than places you are. Action items left the rail entirely — they live
- * beside the chat on Home, where they are read.
+ * Two, and the shortness is the point: Record, Import and Search were nav items
+ * and are now buttons in the top bar, because they are things you do rather than
+ * places you are. Action items left the rail entirely — they live beside the
+ * chat on Home, where they are read. Integrations was the third until there were
+ * none to show: the calendar feed was the only one and it is gone, so the link
+ * led to a tab that led to nothing.
  */
 const NAV = [
   { href: "/home", label: "Home", icon: Home },
   { href: "/ask", label: "AI Chat", icon: Sparkles },
-  { href: "/settings/integrations", label: "Integrations", icon: Plug },
 ];
 
 /*

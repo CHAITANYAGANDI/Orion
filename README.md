@@ -129,11 +129,10 @@ so it takes a fourth upload to see.
 | **Filter Home by a stretch of time** | ✅ |
 | Search & filters | ✅ |
 
-### Sharing, telling and settling up
+### Telling and settling up
 
 | Feature | Status |
 |---|---|
-| Read-only public share links (revocable, expiring, password-optional) | ✅ |
 | **Seven email switches under one select-all** | ✅ |
 | **In-app notifications, in the left rail** | ✅ |
 | Clerk auth (+ dev bypass), two-factor via the account portal | ✅ |

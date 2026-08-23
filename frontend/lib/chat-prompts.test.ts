@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { MEETING_PROMPTS, WORKSPACE_PROMPTS, toPrompts } from "@/lib/chat-prompts";
+import { MEETING_PROMPTS, WORKSPACE_PROMPTS, toPrompts, MAX_LABEL } from "@/lib/chat-prompts";
 
 /**
  * The starter prompts.
@@ -131,9 +131,28 @@ describe("unfinished prompts", () => {
     // anyone who clicks without reading.
     const unfinished = WORKSPACE_PROMPTS.filter((p) => p.prompt.endsWith(" "));
     expect(unfinished.map((p) => p.label).sort()).toEqual([
-      "Find every mention of…",
-      "What did someone say about…",
+      "Find a mention",
+      "What someone said",
     ]);
+  });
+
+  it("carries no ellipsis in the label", () => {
+    // These read "Find every mention of…" and the chip appended another " …"
+    // on top, so they rendered "Find every mention of… …". Nothing on a chip
+    // should look like text that ran out of room.
+    for (const p of ALL) {
+      expect(p.label).not.toContain("…");
+      expect(p.label).not.toContain("...");
+    }
+  });
+
+  it("keeps every label short enough to sit on one line", () => {
+    // A chip is a phrase you skim. Generated ones over MAX_LABEL are dropped
+    // rather than cut, so the hand-written ones had better be inside it too —
+    // otherwise the rule only applies to half the row.
+    for (const p of ALL) {
+      expect(p.label.length).toBeLessThanOrEqual(MAX_LABEL);
+    }
   });
 
   it("ends a complete prompt with punctuation, not a space", () => {

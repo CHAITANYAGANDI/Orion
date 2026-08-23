@@ -1,15 +1,12 @@
 package com.recallix.service;
 
 import com.recallix.common.ApiException;
-import com.recallix.dto.LiveLinkResponse;
 import com.recallix.dto.PrivacyOverviewResponse;
 import com.recallix.entity.Meeting;
-import com.recallix.entity.MeetingShare;
 import com.recallix.entity.UserEntity;
 import com.recallix.repository.ChatConversationRepository;
 import com.recallix.repository.MeetingActionItemRepository;
 import com.recallix.repository.MeetingRepository;
-import com.recallix.repository.MeetingShareRepository;
 import com.recallix.repository.ProjectRepository;
 import com.recallix.repository.TranscriptMomentRepository;
 import com.recallix.repository.UserRepository;
@@ -54,7 +51,6 @@ class PrivacyServiceTest {
     private static final LocalDate TODAY = LocalDate.of(2026, 8, 16);
 
     @Mock private MeetingRepository meetings;
-    @Mock private MeetingShareRepository shares;
     @Mock private MeetingActionItemRepository actionItems;
     @Mock private TranscriptMomentRepository moments;
     @Mock private ProjectRepository projects;
@@ -70,13 +66,12 @@ class PrivacyServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new PrivacyService(meetings, shares, actionItems, moments, projects, conversations,
+        service = new PrivacyService(meetings, actionItems, moments, projects, conversations,
                 users, retention, erasure, storage, audit, "https://recallix.test/");
         user = new UserEntity();
         user.setId(USER);
         when(users.findById(USER)).thenReturn(Optional.of(user));
         when(meetings.findByUserIdOrderByCreatedAtDesc(USER)).thenReturn(List.of());
-        when(shares.findByUserIdAndRevokedFalseOrderByCreatedAtDesc(USER)).thenReturn(List.of());
         when(retention.preview(anyString(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
                 .thenReturn(new RetentionService.Due(0, 0));
@@ -92,15 +87,6 @@ class PrivacyServiceTest {
         meeting.setObjectKey("meetings/usr_1/" + id + "/audio.mp3");
         meeting.setCreatedAt(Instant.parse("2026-01-01T09:00:00Z"));
         return meeting;
-    }
-
-    private static MeetingShare share(String id, String meetingId) {
-        MeetingShare share = new MeetingShare();
-        share.setId(id);
-        share.setMeetingId(meetingId);
-        share.setUserId(USER);
-        share.setToken("tok-" + id);
-        return share;
     }
 
     @Nested
@@ -172,69 +158,6 @@ class PrivacyServiceTest {
             assertThat(facts.encryptionAtRest()).isEqualTo("AES256");
             assertThat(facts.signedUrlSeconds()).isEqualTo(900L);
             assertThat(facts.rowLevelSecurity()).isTrue();
-        }
-    }
-
-    @Nested
-    @DisplayName("who else can see it")
-    class Links {
-
-        @Test
-        @DisplayName("names the meeting and what the link reveals, in words")
-        void describesEachLink() {
-            MeetingShare live = share("shr_1", "mtg_1");
-            live.setIncludeTranscript(true);
-            live.setIncludeAudio(true);
-            when(meetings.findByUserIdOrderByCreatedAtDesc(USER))
-                    .thenReturn(List.of(meeting("mtg_1", "Sprint planning")));
-            when(shares.findByUserIdAndRevokedFalseOrderByCreatedAtDesc(USER)).thenReturn(List.of(live));
-
-            LiveLinkResponse row = service.links(USER).get(0);
-
-            assertThat(row.meetingTitle()).isEqualTo("Sprint planning");
-            assertThat(row.reveals()).containsExactly("summary", "action items", "transcript", "recording");
-            assertThat(row.url()).isEqualTo("https://recallix.test/shared/tok-shr_1");
-        }
-
-        @Test
-        @DisplayName("says so when a link reveals nothing but the title")
-        void namesTheEmptyLink() {
-            MeetingShare bare = share("shr_1", "mtg_1");
-            bare.setIncludeSummary(false);
-            bare.setIncludeActionItems(false);
-            when(shares.findByUserIdAndRevokedFalseOrderByCreatedAtDesc(USER)).thenReturn(List.of(bare));
-
-            assertThat(service.links(USER).get(0).reveals()).containsExactly("the title only");
-        }
-
-        @Test
-        @DisplayName("leaves out a link that has already expired")
-        void hidesExpiredLinks() {
-            MeetingShare expired = share("shr_1", "mtg_1");
-            expired.setExpiresAt(Instant.now().minus(1, ChronoUnit.DAYS));
-            when(shares.findByUserIdAndRevokedFalseOrderByCreatedAtDesc(USER)).thenReturn(List.of(expired));
-
-            assertThat(service.links(USER)).isEmpty();
-        }
-
-        @Test
-        @DisplayName("revoking everything withdraws every live link at once")
-        void revokesAll() {
-            MeetingShare one = share("shr_1", "mtg_1");
-            MeetingShare two = share("shr_2", "mtg_2");
-            when(shares.findByUserIdAndRevokedFalseOrderByCreatedAtDesc(USER)).thenReturn(List.of(one, two));
-
-            assertThat(service.revokeAllLinks(USER)).isEqualTo(2);
-            assertThat(one.isRevoked()).isTrue();
-            assertThat(two.isRevoked()).isTrue();
-            verify(audit).record(USER, "SHARE_REVOKED_ALL", "user", USER);
-        }
-
-        @Test
-        @DisplayName("revoking nothing is not an event worth recording")
-        void quietWhenThereIsNothingToRevoke() {
-            assertThat(service.revokeAllLinks(USER)).isZero();
-            verify(audit, never()).record(anyString(), anyString(), anyString(), anyString());
         }
     }
 

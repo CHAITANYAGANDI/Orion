@@ -33,21 +33,11 @@ public record PreferencesUpdateRequest(
         String defaultLanguage,
 
         /** Defaults for new share links; each one is left alone when omitted. */
-        Boolean shareIncludeSummary,
-        Boolean shareIncludeActionItems,
-        Boolean shareIncludeTranscript,
-        Boolean shareIncludeAudio,
         /**
          * Days until a new link expires. The same bound as the per-link field,
          * so a default cannot be set that creating a link would then refuse.
-         * {@code shareNeverExpires} is how "never" is expressed, for the reason
-         * in {@link ShareCreateRequest}: an absent number and an explicit null
-         * arrive identically.
-         */
         @Min(value = 1, message = "A link has to last at least a day")
         @Max(value = 365, message = "A link can last at most a year")
-        Integer shareExpiryDays,
-        Boolean shareNeverExpires,
 
         /** How far back workspace chat reads. {@code chatReadsEverything} clears it. */
         @Min(value = 1, message = "Chat has to be able to read at least a day")
@@ -78,7 +68,6 @@ public record PreferencesUpdateRequest(
         /** Recap for imported meetings; {@code autoEmailRecap} covers recorded ones. */
         Boolean recapForImports,
         /** "Conversation shared": email the owner when a published link is opened. */
-        Boolean shareOpenedEmail,
 
         /** "Comments": email when a comment lands on an action item (V43). */
         Boolean commentEmail,
