@@ -150,6 +150,11 @@ public class MeetingService {
         if (override != null) {
             meeting.setTitle(override);
         }
+        // A recording's name is a date, which is a placeholder rather than a
+        // name: a dozen of them in a list cannot be told apart. The worker
+        // writes a real one from the transcript, and this is the permission to
+        // use it. An upload keeps its filename — dull is still chosen. See V52.
+        meeting.setAutoTitle(req.recordedHere());
         meeting.setTags(req.tagsOrEmpty());
         if (req.durationSeconds() != null) {
             meeting.setDurationSeconds(req.durationSeconds());
@@ -204,6 +209,11 @@ public class MeetingService {
         String title = req.titleOrNull();
         if (title != null) {
             meeting.setTitle(title);
+            // Named by a person now, so the worker must not rename it. This
+            // matters most in the minute it is easiest to forget: somebody can
+            // type a name while the recording is still being transcribed, and
+            // the model's title arrives after theirs.
+            meeting.setAutoTitle(false);
         }
         List<String> tags = req.tagsOrNull();
         if (tags != null) {

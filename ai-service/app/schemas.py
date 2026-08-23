@@ -269,6 +269,17 @@ class SummarizeRequest(CamelModel):
 
 
 class SummaryResponse(CamelModel):
+    # A name for the meeting, read off the same transcript as the notes.
+    #
+    # Only useful to a recording, which arrives called "Recording — 20/08/2026,
+    # 05:03": a date is not a name, and a list of them cannot be scanned. An
+    # uploaded file already has a name its owner chose, and Spring will not
+    # overwrite one -- see `auto_title` there.
+    #
+    # None or empty is a real answer and the expected one for a recording with
+    # nothing in it. A title invented over silence would be worse than the
+    # timestamp, because it would look like a meeting happened.
+    title: str | None = None
     short_summary: str
     detailed_summary: str
     key_points: list[str] = Field(default_factory=list)

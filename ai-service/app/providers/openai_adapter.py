@@ -269,6 +269,83 @@ def _recording_facts(duration_seconds: float | None, speaker_count: int | None) 
     )
 
 
+#: How long a name may be before it stops being one.
+#:
+#: Far below the 500 the column takes. This is a label in a list and a tab in a
+#: browser, and something that has to be truncated to be read is a sentence
+#: wearing a title's clothes.
+TITLE_MAX_CHARS = 80
+
+#: What the model is asked for, in the same call that writes the notes.
+#:
+#: In that call rather than its own, because the transcript has already been
+#: read and paid for there; a second round trip to produce six words would
+#: double the latency of the slowest step for the least of its output.
+#:
+#: The instruction to return "" is the important half. A recording of a silent
+#: room, a test of the microphone, ninety seconds of somebody's commute — these
+#: exist and reach this prompt, and a model asked for a title will always find
+#: one. "Team Sync Discussion" over an empty room is worse than the timestamp it
+#: replaced, because the timestamp never claimed a meeting had happened.
+TITLE_SPEC = (
+    '- "title" -> a short name for this meeting, as a person would write it in '
+    "a calendar. Name what it was actually about, using the words the "
+    "transcript uses: the project, the customer, the decision, the topic. "
+    f"Three to eight words, at most {TITLE_MAX_CHARS} characters, in the "
+    "language of the transcript. No date, no time, no quotation marks, no "
+    "trailing full stop, and not the word Recording. Do not pad it with "
+    "Meeting, Discussion, Call or Session unless the transcript names it that "
+    'way. Return "" if the transcript is empty, inaudible, or says too little '
+    "to name honestly — an invented title is worse than none."
+)
+
+
+def clean_title(raw: Any) -> str | None:
+    """The model's title, or None if it did not really give one.
+
+    Everything here is a defence against something seen from a model asked for
+    a short string: markdown emphasis, wrapping quotes, a trailing full stop, a
+    "Title: " prefix echoed back from the instruction, and the polite refusal
+    ("N/A", "Untitled") that is a sentence where an empty string was asked for.
+    """
+    text = re.sub(r"\s+", " ", str(raw or "")).strip()
+    if not text:
+        return None
+    text = re.sub(r"^(title|meeting title)\s*[:\-]\s*", "", text, flags=re.IGNORECASE)
+    # Everywhere, not just at the ends: "Q4 Pricing **Decision**" arrives with
+    # the emphasis in the middle, and stripping only the edges leaves "Q4
+    # Pricing **Decision" \u2014 worse than either the marked-up version or the
+    # clean one.
+    text = re.sub(r"[*_`#]", "", text)
+    text = text.strip('"\u201c\u201d\u2018\u2019\'').strip()
+    text = text.rstrip(".").strip()
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        return None
+    # The refusals. Checked after stripping, because they arrive decorated.
+    if text.casefold() in {
+        "n/a",
+        "na",
+        "none",
+        "untitled",
+        "untitled meeting",
+        "no title",
+        "unknown",
+        "recording",
+        "meeting",
+    }:
+        return None
+    if len(text) > TITLE_MAX_CHARS:
+        # Cut on a word, so a name is never half a word long. `rsplit` returns
+        # the whole string when there is no space in it, which is why the hard
+        # cap follows: one unbroken 200-character token is not a title, but it
+        # is also not a reason to hand the column something oversized.
+        head = text[: TITLE_MAX_CHARS + 1]
+        cut = head.rsplit(" ", 1)[0] if " " in head else head[:TITLE_MAX_CHARS]
+        text = cut.rstrip(",;:-").strip()
+    return text or None
+
+
 def _assemble(tpl: SummaryTemplate, data: dict[str, Any]) -> SummaryResponse:
     """Map a template reply onto sections, and back onto the legacy fields.
 
@@ -325,6 +402,7 @@ def _assemble(tpl: SummaryTemplate, data: dict[str, Any]) -> SummaryResponse:
     detailed = "\n\n".join(_flatten(s) for s in sections if _flatten(s))
 
     return SummaryResponse(
+        title=clean_title(data.get("title")),
         short_summary=(overview.text if overview else "") or (detailed.split("\n\n")[0] if detailed else ""),
         detailed_summary=detailed,
         key_points=list(key_points.bullets) if key_points else [],
@@ -533,8 +611,10 @@ class OpenAiLlmAdapter(LlmPort):
             system = (
                 "You write meeting notes for someone who was not there and now "
                 "has to act. Return a JSON object whose keys are exactly: "
-                + ", ".join(f'"{sec.key}"' for sec in tpl.sections)
+                + ", ".join(['"title"', *(f'"{sec.key}"' for sec in tpl.sections)])
                 + ".\n\n"
+                + TITLE_SPEC
+                + "\n"
                 + spec
                 + "\n\n"
                 "Keep every concrete detail the transcript states: product and "

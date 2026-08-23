@@ -70,6 +70,23 @@ public class Meeting {
     @Column(name = "recorded", nullable = false)
     private boolean recorded = false;
 
+    /**
+     * The title is ours, not theirs, and the worker may replace it (V52).
+     *
+     * <p>True for a browser recording, which is saved as
+     * {@code Recording — 20/08/2026, 05:03:43} because at that moment the date
+     * is all anybody knows. False for an uploaded file, which arrives with a
+     * name its owner chose — and a filename, however dull, is still a decision
+     * somebody made.
+     *
+     * <p>Cleared by {@code MeetingService.updateMeeting} on any rename, so a
+     * name typed while the transcript is still processing wins over the one the
+     * model writes a minute later. Whoever last named this meeting on purpose
+     * should be the one whose name it keeps.
+     */
+    @Column(name = "auto_title", nullable = false)
+    private boolean autoTitle = false;
+
     @Column(name = "duration_seconds")
     private Integer durationSeconds;
 
@@ -197,6 +214,9 @@ public class Meeting {
 
     public boolean isRecorded() { return recorded; }
     public void setRecorded(boolean recorded) { this.recorded = recorded; }
+
+    public boolean isAutoTitle() { return autoTitle; }
+    public void setAutoTitle(boolean autoTitle) { this.autoTitle = autoTitle; }
 
     public Integer getDurationSeconds() { return durationSeconds; }
     public void setDurationSeconds(Integer durationSeconds) { this.durationSeconds = durationSeconds; }

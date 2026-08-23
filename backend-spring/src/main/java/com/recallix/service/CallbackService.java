@@ -134,11 +134,8 @@ public class CallbackService {
             meeting.setLanguage(result.language().trim());
         }
 
-        // The worker no longer names anything. It used to, for URL imports,
-        // whose title was a placeholder until the video had been fetched — and
-        // URL imports are gone. Every meeting now arrives as a file, and a file
-        // has a name before it is uploaded, so overwriting it here could only
-        // ever replace something the user already chose.
+        applySuggestedTitle(meeting, result.title());
+
         if (result.durationSeconds() != null && result.durationSeconds() > 0
                 && meeting.getDurationSeconds() == null) {
             meeting.setDurationSeconds(result.durationSeconds());
@@ -149,6 +146,51 @@ public class CallbackService {
         }
         announce(meeting, result);
         log.info("Persisted brief for meeting {} ({} actions).", meetingId, result.actionItemsOrEmpty().size());
+    }
+
+    /**
+     * Name a recording after what was said in it.
+     *
+     * <p>A browser recording is saved as {@code Recording — 20/08/2026, 05:03},
+     * because when it is saved the date is all anybody knows. The summarizer has
+     * since read the whole transcript, so it returns a name from the same pass
+     * — no second model call — and this is where that name is allowed to land.
+     *
+     * <p><strong>Three gates, and each one is a way this could go wrong.</strong>
+     *
+     * <p>{@code autoTitle} is the permission. Only a recording sets it, so an
+     * uploaded file keeps the filename its owner chose, and any manual rename
+     * clears it — including one typed while this meeting was still processing.
+     * The alternative, matching the placeholder's text, would tie this to a
+     * string built in the browser from {@code toLocaleString()}; see V52.
+     *
+     * <p>A blank title is the expected answer for a recording with nothing in
+     * it, and it is left alone. The model is instructed to return {@code ""}
+     * rather than name a silent room, because a meeting called "Team Sync" that
+     * was ninety seconds of nobody talking is worse than the timestamp: the
+     * timestamp never claimed a meeting had happened.
+     *
+     * <p>The flag is cleared only on success. A meeting that produced no title
+     * stays eligible, which costs nothing and means a later re-summarize can
+     * still name it.
+     */
+    private void applySuggestedTitle(Meeting meeting, String suggested) {
+        if (!meeting.isAutoTitle()) {
+            return;
+        }
+        String title = suggested == null ? "" : suggested.trim();
+        if (title.isEmpty()) {
+            return;
+        }
+        // The column takes 500 and the API refuses more; the worker caps at 80
+        // and this is the belt to that pair of braces, since a title is
+        // whatever the model returned and nothing here has validated it.
+        if (title.length() > 200) {
+            title = title.substring(0, 200).trim();
+        }
+        log.info("Naming meeting {} from its transcript: {}", meeting.getId(), title);
+        meeting.setTitle(title);
+        meeting.setAutoTitle(false);
     }
 
     /**

@@ -283,16 +283,23 @@ class Pipeline:
         # the chat costs nothing: they are derived from a summary that will not
         # change, so generating per page view would buy an identical answer
         # every time. Never fatal — a brief without chips is a working brief.
-        # The title is deliberately absent: it lives in Spring, not here, and
-        # the pipeline has only ever seen the audio. The action items it does
-        # have, and they are the half a summary cannot supply.
+        #
+        # The title used to be left out of the material on the grounds that it
+        # lived in Spring and the pipeline had only ever seen the audio. Half of
+        # that is no longer true: the summarizer now writes one from the same
+        # transcript, so the chips can use the meeting's own subject.
         suggestions = await self._suggest(
             meeting_id, summary.short_summary, kept_sections,
+            title=summary.title or "",
             action_items=[i.task_title for i in action_items],
         )
 
         return MeetingBriefResult(
             meeting_id=meeting_id,
+            # Read off the transcript, and only ever applied by Spring to a
+            # meeting still carrying the recorder's timestamp. None when there
+            # was nothing worth naming, which leaves that timestamp alone.
+            title=summary.title,
             transcript=transcript.transcript,
             language=transcript.language,
             segments=transcript.segments,
