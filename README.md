@@ -135,10 +135,8 @@ so it takes a fourth upload to see.
 | Feature | Status |
 |---|---|
 | Read-only public share links (revocable, expiring, password-optional) | ✅ |
-| AI-drafted follow-up email | ✅ |
 | **Seven email switches under one select-all** | ✅ |
 | **In-app notifications, in the left rail** | ✅ |
-| **Deadlines as a calendar subscription (ICS)** | ✅ |
 | Stripe billing (checkout + webhook) | ✅ (test mode) |
 | Clerk auth (+ dev bypass), two-factor via the account portal | ✅ |
 | **Retention policy — erase audio and meetings on a schedule** | ✅ (no UI) |

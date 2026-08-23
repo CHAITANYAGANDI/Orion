@@ -8,13 +8,18 @@
  * live, the retention dials, the account archive and the close-account control.
  * All of it was removed on request, leaving sign-in.
  *
- * <p>What went with it is worth writing down, because none of it was removed
- * from the server. {@code GET /privacy}, {@code PATCH /privacy/retention},
- * {@code POST /privacy/links/revoke-all}, {@code GET /privacy/export} and
- * {@code DELETE /privacy/account} all still exist and still work; the retention
- * job still runs each night against whatever policy is stored. They have no
- * control in the interface now, so retention can only be changed, and an
- * account can only be exported or closed, by calling the API directly.
+ * <p>What went with it is worth writing down, because most of it was not
+ * removed from the server. {@code GET /privacy}, {@code PATCH /privacy/retention},
+ * {@code POST /privacy/links/revoke-all} and {@code DELETE /privacy/account}
+ * all still exist and still work; the retention job still runs each night
+ * against whatever policy is stored. They have no control in the interface now,
+ * so retention can only be changed, and an account can only be closed, by
+ * calling the API directly.
+ *
+ * <p>The exception is {@code GET /privacy/export}, the whole account as a zip.
+ * That one is gone from the server too, so there is no longer an API call to
+ * fall back to: a meeting still exports in four formats from the meeting page,
+ * and there is nothing that exports all of them at once.
  */
 
 import { Lock, ExternalLink } from "lucide-react";

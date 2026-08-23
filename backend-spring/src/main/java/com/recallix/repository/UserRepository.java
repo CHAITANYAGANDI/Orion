@@ -14,17 +14,6 @@ public interface UserRepository extends JpaRepository<UserEntity, String> {
     Optional<UserEntity> findByClerkUserId(String clerkUserId);
 
     /**
-     * Resolve a calendar feed token.
-     *
-     * <p>The only lookup in the product keyed on a secret rather than on an
-     * identity, because the caller is a calendar server that cannot present
-     * one. Runs in system context — see {@code TenantFilter} — so the token's
-     * 192 bits are the whole access check, which is why V36 makes it unique
-     * and why rotating it is the revoke button.
-     */
-    Optional<UserEntity> findByCalendarToken(String calendarToken);
-
-    /**
      * Who is owed a reminder digest today.
      *
      * <p>The date check is in the query rather than in the loop so that a

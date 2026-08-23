@@ -624,23 +624,6 @@ export interface ChatModeOption {
   isDefault: boolean;
 }
 
-/**
- * The deadline calendar feed — the one integration Recallix actually has.
- *
- * `url` is the https form to paste into Google Calendar; `webcalUrl` is the
- * clickable form desktop calendars subscribe to. Both are null until a feed
- * exists, and both are secrets: the URL is the only credential a calendar
- * server can present.
- */
-export interface CalendarFeed {
-  enabled: boolean;
-  url: string | null;
-  webcalUrl: string | null;
-  createdAt: string | null;
-  /** How many dated, unfinished items the feed currently publishes. */
-  deadlines: number;
-}
-
 export interface SemanticSearchRequest {
   query: string;
   limit?: number;

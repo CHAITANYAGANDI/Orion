@@ -223,21 +223,6 @@ public class UserEntity {
     @Column(name = "meeting_retention_days")
     private Integer meetingRetentionDays;
 
-    /**
-     * Secret path segment of the deadline calendar feed, or null when none has
-     * been created.
-     *
-     * <p>The feed is fetched by Google's or Apple's servers with no session and
-     * no header we could add, so the URL is the credential. Null by default: an
-     * account that never asked for a feed should not have a live secret sitting
-     * on it, and rotating this revokes every copy of the old URL at once.
-     */
-    @Column(name = "calendar_token")
-    private String calendarToken;
-
-    @Column(name = "calendar_token_created_at")
-    private Instant calendarTokenCreatedAt;
-
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -332,12 +317,6 @@ public class UserEntity {
 
     public Integer getMeetingRetentionDays() { return meetingRetentionDays; }
     public void setMeetingRetentionDays(Integer meetingRetentionDays) { this.meetingRetentionDays = meetingRetentionDays; }
-
-    public String getCalendarToken() { return calendarToken; }
-    public void setCalendarToken(String calendarToken) { this.calendarToken = calendarToken; }
-
-    public Instant getCalendarTokenCreatedAt() { return calendarTokenCreatedAt; }
-    public void setCalendarTokenCreatedAt(Instant at) { this.calendarTokenCreatedAt = at; }
 
     /** Whether either dial is set — the one question the settings page asks. */
     public boolean hasRetentionPolicy() {

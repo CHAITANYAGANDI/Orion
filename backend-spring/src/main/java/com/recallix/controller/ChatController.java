@@ -7,12 +7,10 @@ import com.recallix.dto.ChatMessageResponse;
 import com.recallix.dto.ChatModeResponse;
 import com.recallix.dto.ConversationRenameRequest;
 import com.recallix.dto.ConversationResponse;
-import com.recallix.dto.EmailDraftResponse;
 import com.recallix.dto.ExchangeDeleteResponse;
 import com.recallix.dto.WorkspaceAskRequest;
 import com.recallix.security.SecurityUtils;
 import com.recallix.service.ChatService;
-import com.recallix.service.FollowUpService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -41,11 +39,8 @@ import java.util.List;
 public class ChatController {
 
     private final ChatService chat;
-    private final FollowUpService followUp;
-
-    public ChatController(ChatService chat, FollowUpService followUp) {
+    public ChatController(ChatService chat) {
         this.chat = chat;
-        this.followUp = followUp;
     }
 
     // --- one meeting -------------------------------------------------------- //
@@ -186,13 +181,5 @@ public class ChatController {
     @DeleteMapping("/api/v1/chat/messages/{messageId}")
     public ExchangeDeleteResponse deleteExchange(@PathVariable String messageId) {
         return chat.deleteExchange(SecurityUtils.currentUserId(), messageId);
-    }
-
-    // --- other per-meeting AI actions --------------------------------------- //
-
-    /** Draft the recap email for this meeting, grounded in its brief. */
-    @PostMapping("/api/v1/meetings/{id}/follow-up-email")
-    public EmailDraftResponse followUpEmail(@PathVariable String id) {
-        return followUp.draft(SecurityUtils.currentUserId(), id);
     }
 }

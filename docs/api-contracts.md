@@ -502,17 +502,13 @@ dedupe-key collision, which is what forty simultaneous readers produce.
 swallows everything and logs — a meeting that processed correctly must not be
 reported as failed because the sentence about it could not be written down.
 
-### Home, action items and integrations (V36)
+### Home and action items (V36)
 
 | Method | Endpoint | Body / Query | Response |
 |---|---|---|---|
 | POST | `/api/v1/action-items` | `{ title, ownerName?, dueDate?, priority? }` | `ActionItemResponse` |
 | GET | `/api/v1/chat/modes` | — | `ChatModeResponse[]` |
 | POST | `/api/v1/chat` | `{ question, meetingIds?, conversationId?, mode? }` | `ChatMessageResponse` |
-| GET | `/api/v1/integrations/calendar` | — | `Feed` |
-| POST | `/api/v1/integrations/calendar` | — | `Feed` (creates or rotates) |
-| DELETE | `/api/v1/integrations/calendar` | — | `204` |
-| GET | `/public/calendar/{token}.ics` | — | `text/calendar` |
 
 **An action item no longer needs a meeting.** Every one used to be a fact
 extracted from a transcript, which is why it hung off `meeting_id` and inherited
@@ -546,38 +542,28 @@ right answer; the picker takes one folder at a time because React forbids a hook
 per selection, and the limit is enforced in the control rather than ignored
 later.
 
-**The calendar feed is the one integration, and it is outbound.** V8 added a
-table for *reading* somebody's calendar and nothing ever used it, because the
-only useful thing to do with a list of upcoming meetings is join them to record —
-and Recallix has no bot. The other direction works today and asks nothing of
-anybody: action items already carry resolved dates, every calendar application
-subscribes to an ICS URL, and there is no OAuth client to register or
-third-party credential to store. `users.calendar_token` is 192 bits from
-`SecureRandom`, unique, and null until asked for; the URL **is** the credential,
-because Google's servers fetch it with no session and no header we could add, so
-rotating the token is the only revoke a published URL can have. Served under
-`/public/**` so it inherits the existing tenant exemption.
+**There are no integrations, and the removal is V48.** V36 added an outbound
+ICS feed of action item deadlines: `users.calendar_token`, 192 bits from
+`SecureRandom`, served at `/public/calendar/{token}.ics` under the tenant
+exemption. It was the one integration Recallix had, and it is gone — the
+controller, the service and the column. The column matters most: the URL **was**
+the credential, because Google's servers fetch it with no session and no header
+we could add, so a token left in the table after the route stopped existing would
+be a live secret nothing could honour. Dropping it is the revocation. V8 and V17
+added the inbound direction — *reading* somebody's calendar over OAuth — and
+V18 removed that; this is the same round trip in the other direction.
 
-Deadlines become all-day `VEVENT`s — not timed ones, because the deadline
-Recallix knows is a date ("Friday") and inventing 09:00 would put false
-precision in somebody's calendar in whatever zone the server thinks in.
-`TRANSP:TRANSPARENT` so a deadline does not make you busy, a stable `UID` so a
-refresh does not delete and recreate every event, and folding by **octet** with a
-character-boundary check — a line split through a UTF-8 sequence is how a
-calendar full of names in Hindi or Japanese gets rejected wholesale by a reader
-that was happy with the ASCII one.
-
-**Settings became one page with seven tabs.** `/settings/<tab>` —
-General, Meetings, Plans, Integrations, Emails, Templates, Security — replacing
-four routes in three places (Settings, Billing and Privacy were all sidebar
-items; Integrations was nowhere). The tab is in the URL rather than in state so
-it can be linked, and `/privacy`, `/billing` and `/integrations` still render
-their tab under their old paths rather than redirecting: `RETENTION_APPLIED`
+**Settings is one page with five tabs.** `/settings/<tab>` —
+General, Meetings, Plans, Emails, Security — replacing four routes in three
+places (Settings, Billing and Privacy were all sidebar items). Integrations was a
+sixth tab until its only content, the feed above, was removed. The tab is in the
+URL rather than in state so it can be linked, and `/privacy` and `/billing` still
+render their tab under their old paths rather than redirecting: `RETENTION_APPLIED`
 notification rows carry `/privacy` in their link column, and those rows are a
-record of something that happened. Only the open tab mounts — Templates costs a
-round trip to the ai-service and Security counts every row a workspace owns, and
-neither should be paid for by somebody changing their recap address. An
-unrecognised path falls back to General, because a blank pane under a tab bar
+record of something that happened. Only the open tab mounts — Security counts
+every row a workspace owns, and that should not be paid for by somebody changing
+their recap address. An unrecognised path falls back to General, which is also
+what `/settings/integrations` now gets, because a blank pane under a tab bar
 reads as a page that failed to load rather than a URL that was mistyped. Mapping
 lives in `lib/settings-tabs.ts`.
 
@@ -600,7 +586,6 @@ about Priya with Priyanka's lines and nothing on screen would reveal it.
 | GET | `/api/v1/privacy/links` | — | `LiveLinkResponse[]` |
 | POST | `/api/v1/privacy/links/revoke-all` | — | `{ revoked }` |
 | PATCH | `/api/v1/privacy/retention` | `{ audioDays?, meetingDays? }` | `Retention` |
-| GET | `/api/v1/privacy/export` | `tz?` | `application/zip` |
 | DELETE | `/api/v1/privacy/account` | `{ confirm }` | `{ meetings, storedObjects }` |
 | DELETE | `/api/v1/meetings/{id}/audio` | — | `{ audioDeletedAt }` |
 | DELETE | `/api/v1/meetings/{id}/transcript` | — | `{ transcriptDeletedAt }` |
@@ -611,6 +596,14 @@ reachable only through a URL we sign for fifteen minutes; a share link is opt-in
 per meeting, and revocable. All true, all invisible, and the settings page's
 "Danger zone" popped a toast saying deletion was not implemented. A privacy claim
 nobody can check from inside the product is marketing.
+
+**There is no bulk export.** `GET /privacy/export` built the whole account as a
+zip — every meeting in JSON another system could read, plus readable copies —
+and it is gone, along with `AccountExportService`. It was the largest response
+the API could produce and the only one that read every row a workspace owns in a
+single request. A meeting still exports in four formats from
+`GET /meetings/{id}/export`; nothing exports all of them at once, so leaving is
+now `DELETE /privacy/account` with no download in front of it.
 
 **Erasure has grains, because "delete the meeting" is the wrong unit.** The
 recording is the sensitive artefact — somebody's voice, the largest object, the
@@ -1336,11 +1329,17 @@ summary (re-summarize, reprocess) clears it.
 
 ### UsageResponse
 ```jsonc
-{ "plan": "FREE", "periodStart": "...", "periodEnd": "...",
-  "meetingsUsed": 3, "meetingsLimit": 5,
-  "aiMinutesUsed": 42, "aiMinutesLimit": 60 }
+{ "plan": "FREE",
+  "minutesUsed": 42, "minutesLimit": 100,
+  "importsUsed": 2, "importsLimit": 3,
+  "meetingsUsed": 9 }
 ```
-Plan limits: FREE {meetings:5, minutes:60}, PRO {50, 600}, PREMIUM {unlimited=-1}.
+One allowance, every account, for the life of the account: 100 transcribed
+minutes and 3 imports (`UsageLimitService.MINUTES_ALLOWANCE` / `IMPORT_ALLOWANCE`).
+There is no period, so no reset date — the monthly `periodStart`/`periodEnd` pair
+went with it in V47. `plan` is a name only and carries no limits: FREE, PRO and
+PREMIUM are allowed the same. `meetingsUsed` is a figure with no ceiling; what is
+capped is minutes and imports.
 
 ---
 

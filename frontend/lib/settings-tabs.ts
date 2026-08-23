@@ -1,20 +1,23 @@
 /**
- * The six tabs of Account Settings, and how a URL maps onto one.
+ * The five tabs of Account Settings, and how a URL maps onto one.
  *
  * Pure, and separate from the page, for two reasons. The routing is a
- * catch-all — `/settings`, `/settings/integrations`, and anything anybody types
+ * catch-all — `/settings`, `/settings/security`, and anything anybody types
  * or a stale bookmark points at — so "which tab is this" is a real decision with
- * a wrong answer (a blank page) that is easy to ship. And three older routes
- * still land here: `/privacy`, `/billing` and `/integrations` were pages before
- * they were tabs, and notifications written months ago still link to the first
- * of them.
+ * a wrong answer (a blank page) that is easy to ship. And two older routes
+ * still land here: `/privacy` and `/billing` were pages before they were tabs,
+ * and notifications written months ago still link to the first of them.
+ *
+ * There was a sixth tab, Integrations, holding one thing: a subscribable
+ * calendar feed of action item deadlines. Both are gone. `/settings/integrations`
+ * is not special-cased on the way out — it falls to General like any other
+ * unrecognised settings URL, which is the behaviour a stale bookmark wants.
  */
 
 export type SettingsTab =
   | "general"
   | "meetings"
   | "plans"
-  | "integrations"
   | "emails"
   | "security";
 
@@ -33,7 +36,6 @@ export const SETTINGS_TABS: TabSpec[] = [
   { id: "general", label: "General" },
   { id: "meetings", label: "Meetings" },
   { id: "plans", label: "Plans" },
-  { id: "integrations", label: "Integrations" },
   { id: "emails", label: "Emails" },
   { id: "security", label: "Security" },
 ];
@@ -51,7 +53,6 @@ export const DEFAULT_TAB: SettingsTab = "general";
 export const LEGACY_PATHS: Record<string, SettingsTab> = {
   "/privacy": "security",
   "/billing": "plans",
-  "/integrations": "integrations",
 };
 
 /**
@@ -81,14 +82,13 @@ export function pathForTab(tab: SettingsTab): string {
  *
  * <p>Exists so the shell can drop the search bar here. Searching is for finding
  * a meeting; nothing on these pages is a meeting, so the widest control in the
- * header is one that cannot help — and on the Integrations tab it sits directly
- * above a list of connections it does not search.
+ * header is one that cannot help.
  *
  * <p>The legacy URLs count, and that is the whole reason this is a function
- * rather than a `startsWith` at the call site. `/integrations`, `/billing` and
- * `/privacy` render exactly the same component as `/settings/integrations` and
- * friends, so treating them differently would show the bar or hide it depending
- * on which link somebody happened to follow.
+ * rather than a `startsWith` at the call site. `/billing` and `/privacy` render
+ * exactly the same component as `/settings/plans` and `/settings/security`, so
+ * treating them differently would show the bar or hide it depending on which
+ * link somebody happened to follow.
  *
  * <p>`hasOwnProperty` rather than `in`: a pathname of `/toString` is reachable
  * by typing it, and `in` would say yes.

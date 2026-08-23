@@ -1,5 +1,5 @@
 /**
- * Downloading a meeting, or the whole account.
+ * Downloading a meeting.
  *
  * <p>The file is built by the server — see the export renderers — so this module
  * only has to ask for it and get it onto the disk. That is less trivial than it
@@ -142,23 +142,6 @@ export async function downloadExport(
   options: ExportOptions = {},
 ): Promise<void> {
   return fetchAndSave(exportPath(meetingId, format, options), `meeting.${format}`);
-}
-
-/**
- * The whole account, as a zip.
- *
- * <p>The same mechanism as a single meeting and a different promise: this is the
- * thing somebody downloads before pressing the button underneath it, so it goes
- * through the same authenticated fetch rather than a link that could be shared
- * by accident.
- */
-export async function downloadAccountArchive(
-  zone: string | null = timeZone(),
-): Promise<void> {
-  const params = new URLSearchParams();
-  if (zone) params.set("tz", zone);
-  const query = params.toString();
-  return fetchAndSave(`/privacy/export${query ? `?${query}` : ""}`, "recallix-export.zip");
 }
 
 /**

@@ -31,7 +31,6 @@ function stub(name: string) {
 vi.mock("@/components/settings/general-tab", () => ({ GeneralTab: stub("general") }));
 vi.mock("@/components/settings/meetings-tab", () => ({ MeetingsTab: stub("meetings") }));
 vi.mock("@/components/settings/plans-tab", () => ({ PlansTab: stub("plans") }));
-vi.mock("@/components/settings/integrations-tab", () => ({ IntegrationsTab: stub("integrations") }));
 vi.mock("@/components/settings/emails-tab", () => ({ EmailsTab: stub("emails") }));
 vi.mock("@/components/settings/security-tab", () => ({ SecurityTab: stub("security") }));
 
@@ -48,20 +47,21 @@ describe("the frame", () => {
     expect(screen.getByRole("heading", { name: "Account Settings" })).toBeInTheDocument();
   });
 
-  it("shows all six tabs, whichever one is open", () => {
-    pathname = "/settings/integrations";
+  it("shows all five tabs, whichever one is open", () => {
+    pathname = "/settings/security";
     render(<AccountSettings />);
 
-    for (const label of [
-      "General",
-      "Meetings",
-      "Plans",
-      "Integrations",
-      "Emails",
-      "Security",
-    ]) {
+    for (const label of ["General", "Meetings", "Plans", "Emails", "Security"]) {
       expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
     }
+  });
+
+  it("has no Integrations tab", () => {
+    render(<AccountSettings />);
+
+    // It held one thing, a calendar feed of deadlines, and that is gone. A tab
+    // whose only content was removed is a tab that opens onto nothing.
+    expect(screen.queryByRole("link", { name: "Integrations" })).not.toBeInTheDocument();
   });
 
   it("has no Templates tab", () => {
@@ -86,9 +86,9 @@ describe("the frame", () => {
       "href",
       "/settings/security",
     );
-    expect(screen.getByRole("link", { name: "Integrations" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Plans" })).toHaveAttribute(
       "href",
-      "/settings/integrations",
+      "/settings/plans",
     );
   });
 
@@ -108,9 +108,17 @@ describe("which tab is open", () => {
   });
 
   it("opens the one the URL names", () => {
+    pathname = "/settings/meetings";
+    render(<AccountSettings />);
+    expect(screen.getByTestId("tab-meetings")).toBeInTheDocument();
+  });
+
+  it("shows General rather than a blank pane under the old Integrations URL", () => {
+    // A bookmark from when the tab existed. It falls through to the default
+    // like any other unrecognised settings path, rather than rendering nothing.
     pathname = "/settings/integrations";
     render(<AccountSettings />);
-    expect(screen.getByTestId("tab-integrations")).toBeInTheDocument();
+    expect(screen.getByTestId("tab-general")).toBeInTheDocument();
   });
 
   it("mounts only that one", () => {

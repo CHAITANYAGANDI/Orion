@@ -13,11 +13,17 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 
 /**
- * Drafts the recap email for a meeting.
+ * Writes the recap email for a meeting.
  *
- * <p>Assembles the brief here rather than sending the transcript, so the draft is
- * grounded in what was already extracted and reviewed. A follow-up that invents a
- * commitment is worse than none — the sender forwards it without re-reading.
+ * <p>Not called by any endpoint. It used to back
+ * {@code POST /meetings/{id}/follow-up-email} — draft me the email, on
+ * demand — and that is gone; {@link RecapEmailService} is the only caller
+ * left, which is the one place a draft is actually sent rather than handed back
+ * for somebody to paste.
+ *
+ * <p>Grounded in what was already extracted and reviewed. A follow-up that
+ * invents a commitment is worse than no follow-up at all, because the user
+ * forwards it.
  */
 @Service
 public class FollowUpService {

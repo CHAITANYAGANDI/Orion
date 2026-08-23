@@ -56,11 +56,6 @@ vi.mock("@/lib/api", () => ({
 
 vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
 
-vi.mock("@/lib/hooks", () => ({
-  useAppDispatch: () => vi.fn(),
-  useAppSelector: () => ({ notifyProcessingDone: false }),
-}));
-
 import { GeneralTab } from "@/components/settings/general-tab";
 
 beforeEach(() => {

@@ -104,11 +104,6 @@ export const MEETING_PROMPTS: ChatPrompt[] = [
       "List the questions raised in this meeting that were not answered or resolved.",
   },
   {
-    label: "Draft a follow-up email",
-    prompt:
-      "Draft a follow-up email summarizing this meeting and its action items, ready to send to the participants.",
-  },
-  {
     label: "Agenda for next time",
     prompt:
       "Based on what was left open in this meeting, draft an agenda for the next one.",

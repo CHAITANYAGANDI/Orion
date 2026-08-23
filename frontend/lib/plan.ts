@@ -102,7 +102,8 @@ export const INCLUDED: FeatureGroup[] = [
       { label: "Folders", detail: "Up to 200." },
       {
         label: "Search across every meeting",
-        detail: "Narrowed by speaker, date range, folder, status or tag.",
+        detail:
+          "Titles, tags and every sentence anyone said. Narrowed as you type with tag:, type:, in: a folder and when: a date range, completed from what your workspace actually has.",
       },
       {
         label: "AI Chat, on one meeting or across all of them",
@@ -114,9 +115,7 @@ export const INCLUDED: FeatureGroup[] = [
     heading: "Getting things out",
     features: [
       { label: "Exporting a meeting as PDF, Word, Markdown or plain text" },
-      { label: "Exporting the whole account as a zip, with JSON another system can read" },
       { label: "Share links, with a password and an expiry" },
-      { label: "A calendar feed of your deadlines", detail: "Read-only, and one way." },
       { label: "Email recaps and a daily digest of what is due" },
     ],
   },

@@ -48,7 +48,6 @@ import type {
   NotificationCount,
   NotificationKindOption,
   AccountClosed,
-  CalendarFeed,
   ChatMode,
   ChatModeOption,
   PrivacyOverview,
@@ -126,7 +125,6 @@ export const api = createApi({
     "Translations",
     "Notifications",
     "Privacy",
-    "Integrations",
   ],
   endpoints: (builder) => ({
     // ---- Meetings ----
@@ -345,28 +343,12 @@ export const api = createApi({
       ],
     }),
 
-    // ---- Chat modes & integrations ----
+    // ---- Chat modes ----
 
     getChatModes: builder.query<ChatModeOption[], void>({
       query: () => "/chat/modes",
       // Changes when the code does, so there is nothing to revalidate.
       keepUnusedDataFor: 3600,
-    }),
-
-    getCalendarFeed: builder.query<CalendarFeed, void>({
-      query: () => "/integrations/calendar",
-      providesTags: [{ type: "Integrations", id: "ME" }],
-    }),
-
-    /** Creates the feed, or rotates the URL of one that exists. */
-    enableCalendarFeed: builder.mutation<CalendarFeed, void>({
-      query: () => ({ url: "/integrations/calendar", method: "POST" }),
-      invalidatesTags: [{ type: "Integrations", id: "ME" }],
-    }),
-
-    disableCalendarFeed: builder.mutation<void, void>({
-      query: () => ({ url: "/integrations/calendar", method: "DELETE" }),
-      invalidatesTags: [{ type: "Integrations", id: "ME" }],
     }),
 
     // ---- Transcript moments ----
@@ -1193,9 +1175,6 @@ export const {
   useCreateActionItemMutation,
   useCreateStandaloneActionItemMutation,
   useGetChatModesQuery,
-  useGetCalendarFeedQuery,
-  useEnableCalendarFeedMutation,
-  useDisableCalendarFeedMutation,
   useGetMomentsQuery,
   useCreateMomentMutation,
   useUpdateMomentMutation,

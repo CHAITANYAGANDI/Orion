@@ -32,8 +32,6 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
-import { useAppDispatch, useAppSelector } from "@/lib/hooks";
-import { setNotifyProcessingDone } from "@/lib/uiSlice";
 import {
   useGetPreferencesQuery,
   useUpdatePreferencesMutation,
@@ -42,7 +40,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { settingsError, ToggleRow } from "@/components/settings/shared";
+import { settingsError } from "@/components/settings/shared";
 import { BUILD_LINE, LEGAL_LINKS } from "@/lib/build-info";
 import { cn } from "@/lib/utils";
 
@@ -57,7 +55,6 @@ export function GeneralTab() {
         description="Names of people, and custom vocabulary"
         href="/settings/meetings#vocabulary"
       />
-      <BrowserRow />
       <Footer />
     </div>
   );
@@ -268,26 +265,6 @@ function LanguageRow() {
         </select>
       }
     />
-  );
-}
-
-function BrowserRow() {
-  const dispatch = useAppDispatch();
-  const ui = useAppSelector((s) => s.ui);
-
-  return (
-    <div className="border-b py-4">
-      <ToggleRow
-        label="Show a desktop notification when a brief is ready"
-        checked={ui.notifyProcessingDone}
-        onChange={(v) => dispatch(setNotifyProcessingDone(v))}
-      />
-      <p className="mt-1.5 text-xs text-muted-foreground">
-        Stored in this browser rather than on your account, so it applies here
-        and not on your phone. Recallix sets no tracking cookies — this is the
-        whole of what it keeps locally.
-      </p>
-    </div>
   );
 }
 

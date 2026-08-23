@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 vi.mock("@/lib/api", () => ({ API_BASE: "http://api.test" }));
 vi.mock("@/lib/auth-store", () => ({ buildAuthHeaders: async () => ({}) }));
 
-import { exportPath, filenameFrom, downloadAccountArchive } from "@/lib/exports";
+import { exportPath, filenameFrom } from "@/lib/exports";
 
 /**
  * Asking for a file, and knowing what it is called when it arrives.
@@ -75,61 +75,5 @@ describe("filenameFrom", () => {
 
   it("falls back when there is nothing usable at all", () => {
     expect(filenameFrom("attachment; filename*=UTF-8''%E5%9B%", "b.md")).toBe("b.md");
-  });
-});
-
-describe("downloadAccountArchive", () => {
-  /**
-   * The whole account rather than one meeting, and the one download somebody
-   * takes before pressing the button that deletes everything. It goes through
-   * the same authenticated fetch as a single export — not a bare link — because
-   * a URL that produces an entire archive is one that must not be shareable by
-   * accident.
-   */
-  function stubObjectUrls() {
-    URL.createObjectURL = vi.fn(() => "blob:x");
-    URL.revokeObjectURL = vi.fn();
-  }
-
-  function mockFetch(response: Partial<Response>) {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      headers: new Headers({ "Content-Disposition": 'attachment; filename="recallix-export-2026-08-16.zip"' }),
-      blob: async () => new Blob(["zip"]),
-      json: async () => ({}),
-      ...response,
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    return fetchMock;
-  }
-
-  it("asks the privacy endpoint, carrying the reader's time zone", async () => {
-    const fetchMock = mockFetch({});
-    // jsdom implements neither of these; the URL asked for is the part that
-    // decides which archive arrives, and the anchor click is not worth faking.
-    stubObjectUrls();
-
-    await downloadAccountArchive("Asia/Tokyo");
-
-    expect(fetchMock.mock.calls[0][0]).toBe(
-      "http://api.test/api/v1/privacy/export?tz=Asia%2FTokyo",
-    );
-  });
-
-  it("omits the parameter entirely when the zone is unknown", async () => {
-    const fetchMock = mockFetch({});
-    stubObjectUrls();
-
-    await downloadAccountArchive(null);
-
-    expect(fetchMock.mock.calls[0][0]).toBe("http://api.test/api/v1/privacy/export");
-  });
-
-  it("surfaces the API's own explanation rather than a status code", async () => {
-    mockFetch({ ok: false, status: 500, json: async () => ({ message: "Could not build the export archive" }) });
-
-    await expect(downloadAccountArchive(null)).rejects.toThrow(
-      "Could not build the export archive",
-    );
   });
 });

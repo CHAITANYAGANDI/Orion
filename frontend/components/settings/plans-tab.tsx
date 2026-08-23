@@ -78,8 +78,9 @@ function PlanCard() {
           </div>
 
           <p className="mt-4 border-t pt-4 text-sm text-muted-foreground">
-            Nothing on this page is a trial and nothing expires. The one number
-            that binds is five meetings a month, and it is shown below against
+            Nothing on this page is a trial and nothing expires. Two numbers
+            bind — 100 transcribed minutes and 3 imports, for the life of the
+            account rather than per month — and both are shown below against
             what you have used.
           </p>
         </CardContent>
