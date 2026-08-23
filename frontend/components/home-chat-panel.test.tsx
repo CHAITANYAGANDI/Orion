@@ -75,6 +75,7 @@ const api = vi.hoisted(() => {
     reject: null as null | ((reason?: unknown) => void),
     asked: [] as string[],
     deleted: [] as string[],
+    deletedExchanges: [] as string[],
     conversationsCreated: 0,
   };
 });
@@ -174,7 +175,16 @@ vi.mock("@/lib/api", () => {
       },
       { isLoading: false },
     ],
-    useDeleteChatExchangeMutation: noop,
+    useDeleteChatExchangeMutation: () => [
+      ({ messageId }: { messageId: string }) => {
+        api.deletedExchanges.push(messageId);
+        return {
+          unwrap: () =>
+            Promise.resolve({ deletedMessages: 2, conversationDeleted: false }),
+        };
+      },
+      { isLoading: false },
+    ],
     useGetChatModesQuery: () => ({ data: [] }),
     useGetMeetingsQuery: empty,
     useGetProjectsQuery: empty,
@@ -228,6 +238,7 @@ beforeEach(() => {
   api.reject = null;
   api.asked = [];
   api.deleted = [];
+  api.deletedExchanges = [];
   api.conversationsCreated = 0;
 });
 
@@ -513,5 +524,57 @@ describe("a starter chip that is an opening rather than a question", () => {
     await waitFor(() => expect(api.asked).toHaveLength(1));
     expect(api.asked[0]).toMatch(/^Compare the meetings I have selected/);
     expect(screen.getByLabelText("Ask a question")).toHaveValue("");
+  });
+});
+
+describe("withdrawing a question from the rail", () => {
+  /**
+   * Two things were wrong with where the bin was.
+   *
+   * It was drawn under the *answer* on the two surfaces that had it, and
+   * deleting an answer is not something the API can do -- the server removes the
+   * pair. So the control read as "clear this bad reply" and quietly took the
+   * question with it.
+   *
+   * And this rail had no bin at all. It was on the list of things a
+   * four-hundred-pixel column drops, which was the wrong call: it is an icon
+   * that appears on hover under your own question and costs no width, and
+   * without it a question asked here could only be withdrawn by opening
+   * another screen.
+   */
+  async function askAndPersist() {
+    render(<HomeChatPanel />);
+    await ask();
+    await act(async () => {
+      api.persist(persistedExchange(QUESTION, "The transcript has no link."));
+      api.listConversation("cnv_1", QUESTION);
+      api.settle!();
+    });
+    await screen.findByText("The transcript has no link.");
+  }
+
+  it("offers a bin under the question", async () => {
+    await askAndPersist();
+
+    expect(
+      screen.getByRole("button", { name: /delete this exchange/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("offers exactly one, not one per turn", async () => {
+    await askAndPersist();
+
+    // Two bubbles are on screen. Only the question carries the control, so a
+    // bin never sits under an answer promising something it cannot do.
+    expect(screen.getAllByRole("button", { name: /delete this exchange/i })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Copy answer" })).toBeInTheDocument();
+  });
+
+  it("sends the question's id, which is what the server pairs from", async () => {
+    await askAndPersist();
+
+    await userEvent.click(screen.getByRole("button", { name: /delete this exchange/i }));
+
+    await waitFor(() => expect(api.deletedExchanges).toEqual(["msg_u"]));
   });
 });

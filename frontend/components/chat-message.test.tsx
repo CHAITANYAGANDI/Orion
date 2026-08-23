@@ -17,7 +17,16 @@ import { ChatMessageBubble } from "@/components/chat-message";
  * "copy what I asked" from "copy what it said", both buttons look identical,
  * and getting it backwards is invisible until somebody pastes the wrong half
  * into a ticket.
+ *
+ * Delete is pinned to the question for a related reason. It removes the pair,
+ * and under an answer that reads as "delete this answer" — so people pressed
+ * it to clear a bad reply and lost the question they had typed with it.
  */
+
+/** The user's turn. Everything about delete is asserted on this one. */
+function prompt(over: Partial<ChatMessage> = {}): ChatMessage {
+  return message({ id: "msg_1", role: "user", content: "When was it signed?", ...over });
+}
 function message(over: Partial<ChatMessage> = {}): ChatMessage {
   return {
     id: "msg_1",
@@ -105,7 +114,7 @@ describe("ChatMessageBubble", () => {
 
   it("deletes by message id", async () => {
     const onDelete = vi.fn(() => Promise.resolve());
-    render(<ChatMessageBubble message={message()} onDelete={onDelete} />);
+    render(<ChatMessageBubble message={prompt()} onDelete={onDelete} />);
 
     await userEvent.click(screen.getByRole("button", { name: /delete this exchange/i }));
 
@@ -114,7 +123,7 @@ describe("ChatMessageBubble", () => {
 
   it("says it deletes the exchange, not the message", () => {
     const onDelete = vi.fn(() => Promise.resolve());
-    render(<ChatMessageBubble message={message()} onDelete={onDelete} />);
+    render(<ChatMessageBubble message={prompt()} onDelete={onDelete} />);
 
     // The server removes the question with its answer. A button that promised
     // to delete only this turn would be lying about what it does.
@@ -122,14 +131,25 @@ describe("ChatMessageBubble", () => {
       .toHaveAttribute("title", "Delete this question and its answer");
   });
 
+  it("puts no bin under an answer, even where the chat supports deleting", () => {
+    // The bug this replaces. A bin under a reply reads as "delete this reply",
+    // which the API cannot do and nobody meant: it took the question with it.
+    render(<ChatMessageBubble message={message()} onDelete={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: /delete/i })).not.toBeInTheDocument();
+    // Copy stays. Reading an answer and taking it somewhere else is the whole
+    // point of the surface.
+    expect(screen.getByRole("button", { name: "Copy answer" })).toBeInTheDocument();
+  });
+
   it("offers no delete when the chat does not support it", () => {
-    render(<ChatMessageBubble message={message()} />);
+    render(<ChatMessageBubble message={prompt()} />);
     expect(screen.queryByRole("button", { name: /delete/i })).not.toBeInTheDocument();
   });
 
   it("cannot be deleted twice while one is in flight", async () => {
     const onDelete = vi.fn(() => Promise.resolve());
-    render(<ChatMessageBubble message={message()} onDelete={onDelete} deleting />);
+    render(<ChatMessageBubble message={prompt()} onDelete={onDelete} deleting />);
 
     await userEvent.click(screen.getByRole("button", { name: /delete this exchange/i }));
 
@@ -138,7 +158,7 @@ describe("ChatMessageBubble", () => {
 
   it("reports a failed delete rather than looking like it worked", async () => {
     const onDelete = vi.fn(() => Promise.reject(new Error("nope")));
-    render(<ChatMessageBubble message={message()} onDelete={onDelete} />);
+    render(<ChatMessageBubble message={prompt()} onDelete={onDelete} />);
 
     await userEvent.click(screen.getByRole("button", { name: /delete this exchange/i }));
 

@@ -20,10 +20,15 @@
  * and the full page use: a header that does not scroll, a thread that does, and
  * a dock that stays put.
  *
- * What it still drops relative to the full page: renaming from the header,
- * deleting an exchange. A four-hundred-pixel column is for asking and reading,
- * and every control that is not those two competes with them for width. The
- * maximise icon is what covers the rest.
+ * What it still drops relative to the full page: renaming from the header. A
+ * four-hundred-pixel column is for asking and reading, and every control that
+ * is not those two competes with them for width. The maximise icon is what
+ * covers the rest.
+ *
+ * Deleting an exchange was on that list and is not any more. It is a bin under
+ * your own question, appearing on hover, costing no width at all — and leaving
+ * it out meant a question asked in this rail could only be withdrawn by opening
+ * a different screen to do it.
  */
 
 import * as React from "react";
@@ -115,7 +120,18 @@ export function HomeChatPanel() {
           </>
         ) : (
           chat.messages?.map((msg) => (
-            <ChatMessageBubble key={msg.id} message={msg}>
+            // Deleting an exchange works here too now. It was left off as one
+            // of the things a four-hundred-pixel rail drops, on the reasoning
+            // that the maximise button covers the rest — but the control is a
+            // bin under your own question, costs no width, and its absence
+            // meant a question asked here could only be withdrawn by opening
+            // another screen.
+            <ChatMessageBubble
+              key={msg.id}
+              message={msg}
+              deleting={chat.deleting}
+              onDelete={chat.removeExchange}
+            >
               <SourceList citations={msg.citations} />
             </ChatMessageBubble>
           ))

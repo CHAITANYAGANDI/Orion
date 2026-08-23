@@ -13,6 +13,17 @@
  * citation chips. Delete removes the whole exchange, not the single turn — see
  * `ChatService.deleteExchange` for why half of one is worse than none.
  *
+ * ## Delete belongs to the question
+ *
+ * It used to be drawn under both halves, which put a bin under every answer —
+ * and a bin under an answer reads as "delete this answer", which is not what it
+ * does and not something the API can do. People pressed it expecting to clear a
+ * bad reply and lost the question they had typed with it.
+ *
+ * On the question it is the same control saying the true thing: this is my
+ * turn, remove it and what came back. The server pairs from either half, so
+ * nothing about the request changed — only which bubble offers it.
+ *
  * ## The two sides are not the same object
  *
  * They were, and it cost the answers. A question is short, belongs to the
@@ -123,7 +134,10 @@ export function ChatMessageBubble({
               <Copy className="h-3.5 w-3.5" />
             )}
           </button>
-          {onDelete && (
+          {/* The question only. See the note at the top: under an answer this
+              same button reads as "delete this answer", which is neither what
+              it does nor something the API offers. */}
+          {onDelete && isUser && (
             <button
               type="button"
               disabled={deleting}
