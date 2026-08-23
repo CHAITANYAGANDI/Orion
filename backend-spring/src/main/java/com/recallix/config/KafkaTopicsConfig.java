@@ -18,7 +18,6 @@ public class KafkaTopicsConfig {
     public static final String SUMMARY_GENERATED = "summary_generated";
     public static final String ACTION_ITEMS_EXTRACTED = "action_items_extracted";
     public static final String MEETING_PROCESSING_FAILED = "meeting_processing_failed";
-    public static final String PAYMENT_SUCCESSFUL = "payment_successful";
     public static final String USAGE_LIMIT_REACHED = "usage_limit_reached";
 
     /**
@@ -41,6 +40,5 @@ public class KafkaTopicsConfig {
     @Bean NewTopic summaryGeneratedTopic() { return topic(SUMMARY_GENERATED); }
     @Bean NewTopic actionItemsExtractedTopic() { return topic(ACTION_ITEMS_EXTRACTED); }
     @Bean NewTopic meetingProcessingFailedTopic() { return topic(MEETING_PROCESSING_FAILED); }
-    @Bean NewTopic paymentSuccessfulTopic() { return topic(PAYMENT_SUCCESSFUL); }
     @Bean NewTopic usageLimitReachedTopic() { return topic(USAGE_LIMIT_REACHED); }
 }

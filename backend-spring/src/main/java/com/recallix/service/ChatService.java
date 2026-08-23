@@ -45,6 +45,7 @@ public class ChatService {
     private final ProjectRepository projects;
     private final AiClient ai;
     private final UserService users;
+    private final UsageLimitService usage;
     private final ObjectMapper mapper;
 
     public ChatService(ChatMessageRepository messages,
@@ -53,6 +54,7 @@ public class ChatService {
                        ProjectRepository projects,
                        AiClient ai,
                        UserService users,
+                       UsageLimitService usage,
                        ObjectMapper mapper) {
         this.messages = messages;
         this.conversations = conversations;
@@ -60,6 +62,7 @@ public class ChatService {
         this.projects = projects;
         this.ai = ai;
         this.users = users;
+        this.usage = usage;
         this.mapper = mapper;
     }
 
@@ -146,10 +149,16 @@ public class ChatService {
     }
 
     // --- asking ------------------------------------------------------------- //
+    //
+    // All three check the allowance first, before the question is persisted.
+    // Ordering matters: a turn written and then refused leaves a conversation
+    // whose last line is a question nobody answered, which reads as the model
+    // having failed rather than as the account being out.
 
     @Transactional
     public ChatMessageResponse ask(String userId, String meetingId, String question,
                                    String conversationId, ChatMode mode) {
+        usage.requireAiOrThrow(userId);
         requireOwnedMeeting(userId, meetingId);
         ChatScope scope = ChatScope.meeting(meetingId);
         ChatConversation conversation = resolveForAsk(userId, scope, conversationId);
@@ -182,6 +191,7 @@ public class ChatService {
     @Transactional
     public ChatMessageResponse askProject(String userId, String projectId, String question,
                                           String conversationId) {
+        usage.requireAiOrThrow(userId);
         ChatScope scope = ChatScope.project(projectId);
         requireOwnedScope(userId, scope);
         ChatConversation conversation = resolveForAsk(userId, scope, conversationId);
@@ -220,6 +230,7 @@ public class ChatService {
     public ChatMessageResponse askWorkspace(String userId, String question,
                                             List<String> meetingIds, String conversationId,
                                             ChatMode mode) {
+        usage.requireAiOrThrow(userId);
         // If the caller narrowed the search, verify they own what they named.
         // This is also the check behind the composer's "Add context": the ids
         // arrive from a picker, and a picker is a client-side control.

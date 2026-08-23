@@ -126,7 +126,7 @@ services:
       SPRING_DATASOURCE_USERNAME: ${APP_DB_USER:-recallix_app}
       SPRING_DATASOURCE_PASSWORD: ${APP_DB_PASSWORD:-recallix_app}
       # System pool: BYPASSRLS, used only for worker callbacks, the outbox
-      # relay, Stripe webhooks, share links and provisioning. Routed to by
+      # relay, worker callbacks, share links and provisioning. Routed to by
       # connection, so no statement can grant itself this privilege.
       RECALLIX_DATASOURCE_SYSTEM_USERNAME: ${SYS_DB_USER:-recallix_sys}
       RECALLIX_DATASOURCE_SYSTEM_PASSWORD: ${SYS_DB_PASSWORD:-recallix_sys}
@@ -165,10 +165,6 @@ services:
       S3_ACCESS_KEY: minioadmin
       S3_SECRET_KEY: minioadmin
       S3_BUCKET: recallix
-      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
-      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
-      STRIPE_PRICE_PRO: ${STRIPE_PRICE_PRO:-}
-      STRIPE_PRICE_PREMIUM: ${STRIPE_PRICE_PREMIUM:-}
       APP_FRONTEND_URL: http://localhost:3000
       # Mailpit in dev; point these at a real relay to send for real.
       SPRING_MAIL_HOST: ${SMTP_HOST:-mailpit}

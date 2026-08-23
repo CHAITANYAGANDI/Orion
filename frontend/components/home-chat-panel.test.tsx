@@ -56,6 +56,26 @@ const api = vi.hoisted(() => {
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
+/**
+ * The allowance the composer reads. Full, so these stay about chat.
+ * `lib/allowance.test.ts` and `chat-composer.test.tsx` cover the spent case.
+ */
+vi.mock("@/lib/allowance", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/allowance")>();
+  return {
+    ...real,
+    useAllowance: () => ({
+      loading: false,
+      unknown: false,
+      minutesLeft: 100,
+      importsLeft: 3,
+      secondsLeft: 6000,
+      canRecord: true,
+      canImport: true,
+    }),
+  };
+});
+
 vi.mock("@/lib/api", () => {
   const React_ = require("react") as typeof import("react");
 

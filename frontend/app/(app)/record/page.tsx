@@ -45,6 +45,8 @@ import type { LiveTurn } from "@/lib/use-live-transcript";
 import { Button } from "@/components/ui/button";
 import { stopwatch } from "@/lib/format";
 import { folderHref, folderIdFrom, returnPath } from "@/lib/routes";
+import { useAllowance, recordRefusal } from "@/lib/allowance";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 export default function RecordPage() {
@@ -52,8 +54,37 @@ export default function RecordPage() {
   const session = useRecordingSession();
   const job = useRecordingJob();
   const [announceRecording] = useRecordingStartedMutation();
+  const allowance = useAllowance();
+  const refusal = recordRefusal(allowance);
 
   const started = recorder.state !== "idle";
+
+  /**
+   * Stop at the edge of the allowance.
+   *
+   * <p>`elapsed` is a whole-second counter and is exactly what is sent as the
+   * recording's duration, so stopping the moment it reaches the balance lands
+   * on a duration the server rounds to precisely the minutes that are left.
+   * A second either way would be the difference between a meeting that saves
+   * and one refused for being a minute over.
+   *
+   * <p>Stopping rather than refusing at save time is the entire point. The
+   * meeting still exists, it is still transcribed, and what is lost is the part
+   * that was never affordable — instead of the whole recording, which is what
+   * a server-side refusal would cost somebody who had already sat through it.
+   */
+  const cutOff = React.useRef(false);
+  React.useEffect(() => {
+    if (recorder.state !== "recording") return;
+    if (!Number.isFinite(allowance.secondsLeft)) return;
+    if (recorder.elapsed < allowance.secondsLeft) return;
+    if (cutOff.current) return;
+    cutOff.current = true;
+    recorder.stop();
+    toast.warning(
+      "That is the last of your 100 minutes, so the recording has been stopped here. What was recorded is safe — save it as usual.",
+    );
+  }, [recorder, recorder.state, recorder.elapsed, allowance.secondsLeft]);
 
   /**
    * The save has taken the audio, and the route is on its way out.
@@ -89,9 +120,17 @@ export default function RecordPage() {
    * could not be written must never be the reason a recording did not start.
    */
   async function onStart() {
+    if (recordRefusal(allowanceRef.current)) return;
     await recorder.start();
     void announceRecording();
   }
+
+  // Read inside onStart rather than closed over, because the mount effect below
+  // runs once and would otherwise capture the allowance as it was before the
+  // first fetch resolved -- which is "unknown", and would refuse every
+  // recording.
+  const allowanceRef = React.useRef(allowance);
+  allowanceRef.current = allowance;
 
   /**
    * Open the microphone on arrival.
@@ -110,8 +149,12 @@ export default function RecordPage() {
   const opened = React.useRef(false);
   React.useEffect(() => {
     if (opened.current) return;
+    // Wait for the balance before opening the microphone. Asking for it and
+    // then refusing to record is a permission prompt spent on nothing.
+    if (allowance.loading) return;
     opened.current = true;
     if (!recorder.supported) return;
+    if (refusal) return;
     // Anything but idle means there is already a recording to show — running,
     // paused, or stopped and waiting to be saved. Which also means the header's
     // Record button started it, and has already said where it came from.
@@ -124,15 +167,23 @@ export default function RecordPage() {
     // app/(app)/search/page.tsx.
     session.setReturnTo(returnPath(new URLSearchParams(window.location.search).get("r")));
     void onStart();
-    // Mount only: the whole point is that this does not react to state.
+    // Runs when the allowance settles, then never again -- `opened` is set on
+    // the first pass that gets past `loading`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [allowance.loading]);
 
   return (
     // Clearance for the docked control bar is added by the shell, which knows
     // whether one is showing; adding it again here would leave a gap under the
     // setup, where there is no bar.
     <div className="mx-auto max-w-3xl space-y-6">
+      {!started && refusal && !allowance.loading && (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+          <p className="font-medium">There is nothing left to record with</p>
+          <p className="mt-1 text-sm text-muted-foreground">{refusal}</p>
+        </div>
+      )}
+
       {!recorder.supported && (
         <Notice tone="error" icon={AlertTriangle}>
           This browser can&apos;t record audio.{" "}

@@ -40,7 +40,22 @@ vi.mock("@/lib/uploads", async (orig) => ({
   },
 }));
 
+/**
+ * The allowance, as the gate reads it. Generous by default so every test that
+ * is not about the limit behaves as it did before there was one; the ones that
+ * are about it narrow this in place.
+ */
+let usage = {
+  plan: "FREE",
+  minutesUsed: 0,
+  minutesLimit: 100,
+  importsUsed: 0,
+  importsLimit: 3,
+  meetingsUsed: 0,
+};
+
 vi.mock("@/lib/api", () => ({
+  useGetUsageQuery: () => ({ data: usage, isLoading: false, isError: false }),
   useCreateUploadUrlMutation: () => [
     (arg: unknown) => {
       createUploadUrl(arg);

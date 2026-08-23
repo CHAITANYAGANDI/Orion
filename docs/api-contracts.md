@@ -1162,12 +1162,33 @@ nothing is due, and `users.task_reminder_sent_on` is stamped only on a successfu
 send, so a redeploy at the wrong minute cannot mail the same digest twice and an
 SMTP outage costs a day rather than being silently swallowed.
 
-### Billing & usage
+### Usage
 | Method | Endpoint | Body | Response |
 |---|---|---|---|
-| POST | `/api/v1/billing/checkout` | `{ "plan": "PRO"\|"PREMIUM" }` | `{ "checkoutUrl" }` |
-| POST | `/api/v1/billing/webhook` | Stripe event (raw) | `200` |
 | GET  | `/api/v1/usage` | — | `UsageResponse` |
+
+**Billing is gone, and so is the way past the allowance (V48/V49).** Stripe
+checkout and its public webhook were removed: every account gets the same 100
+minutes and 3 imports for its lifetime, so there was nothing for a payment to
+buy. `users.plan` survives as a label on rows an earlier build created — no
+code writes it and no limit reads it.
+
+**The allowance is now enforced against both ways of making a meeting.** A
+recording used to be exempt from the length check, because refusing one at save
+time destroys audio somebody sat through; that exemption *was* the overrun. It
+is gone, and what makes it safe is `frontend/lib/allowance.ts`: the browser
+refuses to start a recording with no balance and stops one that reaches the
+edge, so what arrives at `chargeMeetingOrThrow` always fits. The client fails
+*closed* — an unreadable balance refuses to start rather than risking a
+recording the server cannot accept.
+
+**AI Chat closes with it.** All three ask paths — meeting, folder and workspace
+— call `UsageLimitService.requireAiOrThrow` before the question is persisted.
+Chat spends no transcription minutes, so this is a product decision rather than
+an accounting one: 100 minutes is the whole of what an account gets, and an AI
+feature still answering afterwards would make the limit a limit on recording
+rather than on Recallix. Reads are untouched — existing conversations stay
+readable.
 
 ### Internal callback (FastAPI -> Spring, `X-Internal-Token`)
 | Method | Endpoint | Body | Purpose |

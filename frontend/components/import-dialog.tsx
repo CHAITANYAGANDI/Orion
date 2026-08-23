@@ -10,10 +10,16 @@
  *
  * What is deliberately absent is the quota upsell. Every product puts "3 of 3
  * imports left — upgrade for unlimited" under this dropzone, and Recallix has
- * one free plan with nothing to upgrade to, so that line would be an
- * advertisement for a product that does not exist. The limit is real and is on
- * the Plans tab; a refusal, if one comes, arrives as the server's own sentence
- * rather than as a banner shown to everybody in advance.
+ * one plan with nothing to upgrade to, so that line would be an advertisement
+ * for a product that does not exist. Nothing is shown to somebody with room
+ * left.
+ *
+ * A refusal, when there is one, is shown *here* rather than after the transfer.
+ * That is a change: the limit used to be the server's alone, so a file was
+ * uploaded in full and then rejected at the last step. The allowance is final
+ * now — there is no reset date and nothing to buy — so spending somebody's
+ * upload on an answer that was knowable before it started is simply waste. The
+ * server still refuses; it just no longer has to.
  *
  * The language picker sets the account default rather than a per-file override,
  * and the copy says so. Recallix resolves the language once, when a meeting is
@@ -26,6 +32,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { UploadCloud, FileAudio, Loader2, X, Folder } from "lucide-react";
+import { useAllowance, importRefusal, lengthRefusal } from "@/lib/allowance";
 import {
   useGetProjectQuery,
   useCreateUploadUrlMutation,
@@ -75,6 +82,7 @@ export function ImportDialog({
   const router = useRouter();
   const [createUploadUrl] = useCreateUploadUrlMutation();
   const [createMeeting] = useCreateMeetingMutation();
+  const allowance = useAllowance();
 
   const [file, setFile] = React.useState<File | null>(null);
   const [duration, setDuration] = React.useState<number | null>(null);
@@ -85,6 +93,14 @@ export function ImportDialog({
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   const busy = phase !== "idle";
+
+  // Two separate refusals, and the order matters: "you have no imports left" is
+  // the wrong sentence for somebody who has imports but no minutes, and vice
+  // versa. The length check only applies once a file has been chosen and
+  // measured, and says nothing while the duration is still being probed.
+  const blocked = importRefusal(allowance);
+  const tooLong = blocked ? null : lengthRefusal(allowance, duration);
+  const refusal = blocked ?? tooLong;
 
   function reset() {
     setFile(null);
@@ -106,6 +122,13 @@ export function ImportDialog({
 
   async function start() {
     if (!file) return;
+    // Belt and braces with the disabled button: a dialog left open while the
+    // last import was spent in another tab would otherwise present a live
+    // control over a balance that is gone.
+    if (refusal) {
+      toast.error(refusal);
+      return;
+    }
     try {
       setPhase("uploading");
       setProgress(5);
@@ -136,9 +159,10 @@ export function ImportDialog({
     } catch (err) {
       setPhase("idle");
       setProgress(0);
-      // Left open, with the file still chosen: the commonest failure here is
-      // the monthly limit, and closing the dialog would make the message
-      // vanish along with the thing it was about.
+      // Left open, with the file still chosen. The allowance is checked before
+      // the upload now, so what reaches here is a transfer that failed or a
+      // balance that changed underneath it -- and closing the dialog would make
+      // the message vanish along with the thing it was about.
       toast.error(uploadError(err));
     }
   }
@@ -265,7 +289,17 @@ export function ImportDialog({
           </div>
         )}
 
-        <Button className="w-full" disabled={busy || !file} onClick={() => void start()}>
+        {refusal && (
+          <p className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-muted-foreground">
+            {refusal}
+          </p>
+        )}
+
+        <Button
+          className="w-full"
+          disabled={busy || !file || refusal !== null}
+          onClick={() => void start()}
+        >
           {busy ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (

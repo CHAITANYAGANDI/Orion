@@ -32,9 +32,24 @@ const { announceRecording, push } = vi.hoisted(() => ({
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }));
+
+/**
+ * The allowance, as the gate reads it. Generous by default so every test that
+ * is not about the limit behaves as it did before there was one; the ones that
+ * are about it narrow this in place.
+ */
+let usage = {
+  plan: "FREE",
+  minutesUsed: 0,
+  minutesLimit: 100,
+  importsUsed: 0,
+  importsLimit: 3,
+  meetingsUsed: 0,
+};
 
 vi.mock("@/lib/api", () => ({
+  useGetUsageQuery: () => ({ data: usage, isLoading: false, isError: false }),
   useRecordingStartedMutation: () => [
     () => {
       announceRecording();
@@ -150,6 +165,7 @@ function renderPage(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  usage = { ...usage, minutesUsed: 0, importsUsed: 0 };
   // The address bar is shared state in jsdom, and half of these arrive at
   // /record with something on it.
   window.history.replaceState({}, "", "/record");
@@ -635,5 +651,83 @@ describe("RecordPage after stopping", () => {
     });
 
     expect(screen.queryByRole("button", { name: /^Start recording/ })).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * The allowance, at the point it stops being theoretical.
+ *
+ * <p>There is no reset date and nothing to buy, so "you are out of minutes" is
+ * permanent. Two failures matter and neither would raise anything:
+ *
+ * <ul>
+ *   <li>opening the microphone for somebody who cannot record — a permission
+ *       prompt spent on a refusal;</li>
+ *   <li>letting a recording run past the balance, which the server then refuses
+ *       at save time, destroying audio somebody sat through.</li>
+ * </ul>
+ */
+describe("what is left of the allowance", () => {
+  it("does not open the microphone with no minutes left", async () => {
+    usage = { ...usage, minutesUsed: 100 };
+
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByText(/There is nothing left to record with/)).toBeInTheDocument(),
+    );
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it("says what is gone and what is not", async () => {
+    usage = { ...usage, minutesUsed: 100 };
+
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByText(/already transcribed is still here/)).toBeInTheDocument(),
+    );
+  });
+
+  it("opens the microphone normally while a minute remains", async () => {
+    usage = { ...usage, minutesUsed: 99 };
+
+    renderPage();
+
+    await waitFor(() => expect(start).toHaveBeenCalled());
+    expect(screen.queryByText(/nothing left to record with/)).not.toBeInTheDocument();
+  });
+
+  it("stops the recording when it reaches the balance", async () => {
+    usage = { ...usage, minutesUsed: 95 };
+    const stop = vi.fn();
+
+    // Five minutes left is 300 seconds, and `elapsed` is the whole-second
+    // counter that becomes the saved duration. At 300 it is spent.
+    renderPage({ state: "recording", elapsed: 300, stop });
+
+    await waitFor(() => expect(stop).toHaveBeenCalled());
+  });
+
+  it("leaves a recording alone one second short of it", async () => {
+    usage = { ...usage, minutesUsed: 95 };
+    const stop = vi.fn();
+
+    // 299 rounds to five minutes and fits. Stopping here would cut a meeting
+    // short to defend a limit it had not reached.
+    renderPage({ state: "recording", elapsed: 299, stop });
+
+    await waitFor(() => expect(start).not.toHaveBeenCalled());
+    expect(stop).not.toHaveBeenCalled();
+  });
+
+  it("does not stop a recording that is already stopped", async () => {
+    usage = { ...usage, minutesUsed: 100 };
+    const stop = vi.fn();
+
+    renderPage({ state: "stopped", elapsed: 9000, stop });
+
+    await waitFor(() => expect(start).not.toHaveBeenCalled());
+    expect(stop).not.toHaveBeenCalled();
   });
 });

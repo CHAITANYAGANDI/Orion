@@ -2,6 +2,30 @@ import * as React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+/**
+ * The allowance, stubbed rather than the API behind it.
+ *
+ * The composer reads it itself - deliberately, so that no surface mounting one
+ * can forget to pass it - which would otherwise drag a Redux store into every
+ * test here. `lib/allowance.test.ts` covers what the refusals actually say.
+ */
+let minutesLeft = 100;
+vi.mock("@/lib/allowance", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/allowance")>();
+  return {
+    ...real,
+    useAllowance: () => ({
+      loading: false,
+      unknown: false,
+      minutesLeft,
+      importsLeft: 3,
+      secondsLeft: minutesLeft * 60,
+      canRecord: minutesLeft > 0,
+      canImport: minutesLeft > 0,
+    }),
+  };
+});
+
 import { ChatComposer, NO_CONTEXT, type ChatContext } from "@/components/chat-composer";
 import type { ChatModeOption, MeetingResponse, Project } from "@/lib/types";
 
@@ -51,7 +75,10 @@ function Harness({
   );
 }
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  minutesLeft = 100;
+});
 
 describe("asking", () => {
   it("sends on Enter, because a chat box that needs a mouse stops being used", async () => {
@@ -395,5 +422,47 @@ describe("the box", () => {
 
     await userEvent.tab();
     expect(box()).toHaveFocus();
+  });
+});
+
+/**
+ * What the composer does once the account is out of minutes.
+ *
+ * <p>The allowance is final - no reset date, nothing to buy - and AI Chat is
+ * closed with it. The failure this guards is the quiet one: a box that still
+ * accepts a question, sends it, and shows the server's 429 as though the answer
+ * had failed. Refusing before the send is the difference between "this is
+ * closed" and "this is broken".
+ */
+describe("once the allowance is spent", () => {
+  it("will not send, on Enter or on the button", async () => {
+    minutesLeft = 0;
+    const onSend = vi.fn();
+    render(<ChatComposer onSend={onSend} />);
+
+    const box = screen.getByLabelText("Ask a question");
+    await userEvent.type(box, "What did we decide?{Enter}");
+
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("says why, rather than going quiet", async () => {
+    minutesLeft = 0;
+    render(<ChatComposer onSend={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText(/AI Chat is closed/)).toBeInTheDocument());
+    // And it does not read as the account being gone.
+    expect(screen.getByText(/answers you already have are still here/)).toBeInTheDocument();
+  });
+
+  it("is untouched while a minute remains", async () => {
+    minutesLeft = 1;
+    const onSend = vi.fn();
+    render(<ChatComposer onSend={onSend} />);
+
+    await userEvent.type(screen.getByLabelText("Ask a question"), "Still working?{Enter}");
+
+    expect(onSend).toHaveBeenCalledWith("Still working?");
+    expect(screen.queryByText(/AI Chat is closed/)).not.toBeInTheDocument();
   });
 });

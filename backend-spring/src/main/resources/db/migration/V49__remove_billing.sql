@@ -1,0 +1,21 @@
+-- Remove Stripe billing.
+--
+-- There is nothing to sell. Every account gets the same allowance -- 100
+-- transcribed minutes and 3 imports, for the life of the account (V47) -- so
+-- checkout led to a plan that bought nothing, and the `PRO`/`PREMIUM` rows an
+-- earlier build created are already treated exactly like `FREE`.
+--
+-- `subscriptions` held the Stripe customer and subscription ids. It is dropped
+-- rather than kept for history: those ids are only meaningful against a Stripe
+-- account, nothing in the product reads them, and a table of external
+-- identifiers for a payment processor no longer wired up is a liability rather
+-- than a record. Stripe itself holds the authoritative copy of anything that
+-- was ever charged.
+--
+-- `users.plan` is deliberately NOT dropped. It is what `UsageResponse.plan`
+-- reports and what the Plans tab names, and an account still carrying `PREMIUM`
+-- says so rather than claiming to be Basic. It is now a label with nothing
+-- behind it: no code writes it (`UserService.updatePlan` went with the billing
+-- service) and no limit reads it.
+
+DROP TABLE IF EXISTS subscriptions;

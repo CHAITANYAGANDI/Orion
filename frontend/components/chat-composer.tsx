@@ -26,6 +26,7 @@ import { AtSign, ArrowUp, ChevronDown, Loader2, X, Folder, FileAudio, Search } f
 import type { ChatMode, ChatModeOption, MeetingResponse, Project } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useAllowance, chatRefusal } from "@/lib/allowance";
 
 /** How tall the box is allowed to grow before it scrolls instead. */
 const MAX_ROWS = 8;
@@ -191,10 +192,17 @@ export function ChatComposer({
 
   function submit() {
     const question = text.trim();
-    if (!question || busy) return;
+    if (!question || busy || shut) return;
     setText("");
     void onSend(question);
   }
+
+  const allowance = useAllowance();
+  // Read here rather than passed in by each of the four surfaces that mount a
+  // composer. "Disable every AI chat" has to mean every one, and a prop is a
+  // thing the fifth caller forgets.
+  const refusal = chatRefusal(allowance);
+  const shut = refusal !== null;
 
   const chosen = modes?.find((m) => m.mode === mode);
   const selectedCount = context.meetingIds.length + context.projectIds.length;
@@ -285,7 +293,7 @@ export function ChatComposer({
         ref={areaRef}
         rows={1}
         value={text}
-        disabled={busy}
+        disabled={busy || shut}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) {
@@ -293,7 +301,7 @@ export function ChatComposer({
             submit();
           }
         }}
-        placeholder={placeholder}
+        placeholder={shut ? "AI Chat is closed" : placeholder}
         aria-label="Ask a question"
         // `leading-6` and `py-1.5` are the two numbers MAX_HEIGHT is built
         // from; changing either without the other moves the ceiling off a
@@ -304,6 +312,10 @@ export function ChatComposer({
         // is measuring, and the caret already says where you are.
         className="scrollbar-none block w-full resize-none overflow-y-auto bg-transparent px-3.5 py-1.5 text-sm leading-6 outline-none placeholder:text-muted-foreground disabled:opacity-60"
       />
+
+      {refusal && (
+        <p className="px-3.5 pb-1 pt-0.5 text-xs text-muted-foreground">{refusal}</p>
+      )}
 
       <div className="flex items-center justify-between gap-2 px-3.5 pb-3 pt-0.5">
         {modes && modes.length > 0 ? (
@@ -321,7 +333,7 @@ export function ChatComposer({
           type="button"
           size="icon"
           className="h-8 w-8 shrink-0 rounded-full"
-          disabled={busy || !text.trim()}
+          disabled={busy || shut || !text.trim()}
           onClick={submit}
           aria-label="Send"
         >

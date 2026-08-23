@@ -72,6 +72,7 @@ class ChatConversationTest {
     @Mock private ProjectRepository projects;
     @Mock private AiClient ai;
     @Mock private UserService users;
+    @Mock private UsageLimitService usage;
 
     private ChatService service;
     private final List<ChatConversation> stored = new ArrayList<>();
@@ -79,7 +80,7 @@ class ChatConversationTest {
 
     @BeforeEach
     void setUp() {
-        service = new ChatService(messages, conversations, meetings, projects, ai, users,
+        service = new ChatService(messages, conversations, meetings, projects, ai, users, usage,
                 new ObjectMapper());
         when(users.require(anyString())).thenReturn(new com.recallix.entity.UserEntity());
         stored.clear();

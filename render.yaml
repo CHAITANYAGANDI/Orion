@@ -113,16 +113,6 @@ services:
           name: recallix-frontend
           property: host
 
-      # --- Stripe -----------------------------------------------------------
-      - key: STRIPE_SECRET_KEY
-        sync: false
-      - key: STRIPE_WEBHOOK_SECRET
-        sync: false
-      - key: STRIPE_PRICE_PRO
-        sync: false
-      - key: STRIPE_PRICE_PREMIUM
-        sync: false
-
       # --- Mail -------------------------------------------------------------
       # No SMTP relay is provisioned. Left disabled so the recap job logs and
       # moves on instead of throwing on every completed meeting; set the host

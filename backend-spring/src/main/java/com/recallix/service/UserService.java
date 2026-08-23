@@ -47,12 +47,6 @@ public class UserService {
                 .orElseThrow(() -> ApiException.unauthorized("Unknown user"));
     }
 
-    @Transactional
-    public void updatePlan(String userId, String plan) {
-        UserEntity user = require(userId);
-        user.setPlan(plan);
-    }
-
     /**
      * Apply a partial preferences update. A null field is left alone; a blank
      * {@code recapEmail} or {@code displayName} clears it — recaps then fall

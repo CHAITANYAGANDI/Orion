@@ -13,7 +13,6 @@ tracks commitments and decision drift *across* meetings.
 ```
 Next.js Frontend ──Clerk JWT──▶ Spring Boot API ──┬── PostgreSQL + pgvector
    ▲  (STOMP/WS status)                            ├── Redis (status/rate limit)
-   │                                               ├── Stripe (billing)
    └───────────────── WebSocket ◀──────────────────┤── S3 / MinIO (audio)
                                                     │
                                     Kafka: meeting_uploaded
@@ -137,7 +136,6 @@ so it takes a fourth upload to see.
 | Read-only public share links (revocable, expiring, password-optional) | ✅ |
 | **Seven email switches under one select-all** | ✅ |
 | **In-app notifications, in the left rail** | ✅ |
-| Stripe billing (checkout + webhook) | ✅ (test mode) |
 | Clerk auth (+ dev bypass), two-factor via the account portal | ✅ |
 | **Retention policy — erase audio and meetings on a schedule** | ✅ (no UI) |
 

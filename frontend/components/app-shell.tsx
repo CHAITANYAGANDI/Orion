@@ -60,6 +60,8 @@ import {
 import { cn } from "@/lib/utils";
 import { headerChrome } from "@/lib/chrome";
 import { recordHref, returnPath } from "@/lib/routes";
+import { useAllowance, recordRefusal } from "@/lib/allowance";
+import { toast } from "sonner";
 import { usePaneWidth, type PaneBounds } from "@/lib/pane-size";
 import { PaneResizer } from "@/components/pane-resizer";
 import { SIDE_PANE_ID, toggleSidePane, useSidePane } from "@/components/side-pane";
@@ -539,8 +541,18 @@ function RecordButton({ from }: { from: string }) {
   const session = useRecordingSession();
   const router = useRouter();
   const [announceRecording] = useRecordingStartedMutation();
+  const allowance = useAllowance();
+  const refusal = recordRefusal(allowance);
 
   function onRecord() {
+    // Checked here as well as on /record, because this is where the microphone
+    // is actually opened. Navigating first and refusing on arrival would put
+    // the browser's permission prompt in front of somebody who is about to be
+    // told they cannot record anyway.
+    if (refusal) {
+      toast.error(refusal);
+      return;
+    }
     // /record?r=%2Ffolder%2Fprj_1 — the page this was pressed on, on the URL,
     // so that a reload of /record still knows where the recording came from.
     router.push(recordHref(from));
@@ -560,7 +572,15 @@ function RecordButton({ from }: { from: string }) {
   }
 
   return (
-    <Button size="sm" className="gap-2" onClick={onRecord}>
+    <Button
+      size="sm"
+      className="gap-2"
+      onClick={onRecord}
+      // Not disabled: a dead button explains nothing, and the reason is the
+      // whole of what somebody needs here. It stays pressable and answers.
+      aria-describedby={refusal ? "record-refusal" : undefined}
+      title={refusal ?? undefined}
+    >
       <Mic className="h-4 w-4" />
       <span className="hidden sm:inline">Record</span>
     </Button>

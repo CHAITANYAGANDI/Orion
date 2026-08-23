@@ -22,7 +22,6 @@
         <aws.sdk.version>2.28.16</aws.sdk.version>
         <springdoc.version>2.6.0</springdoc.version>
         <resilience4j.version>2.2.0</resilience4j.version>
-        <stripe.version>26.12.0</stripe.version>
         <openpdf.version>3.0.5</openpdf.version>
         <testcontainers.version>1.20.3</testcontainers.version>
     </properties>
@@ -124,13 +123,6 @@
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>s3</artifactId>
-        </dependency>
-
-        <!-- Stripe -->
-        <dependency>
-            <groupId>com.stripe</groupId>
-            <artifactId>stripe-java</artifactId>
-            <version>${stripe.version}</version>
         </dependency>
 
         <!--

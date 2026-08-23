@@ -33,6 +33,13 @@ import static org.mockito.Mockito.when;
  *   <li>Imports are counted separately, and a browser recording is not one.</li>
  *   <li>A file whose length is known and does not fit is refused now, rather
  *       than accepted and discovered to be over afterwards.</li>
+ *   <li>So is a recording. That is a second change: a recording used to be
+ *       exempt from the length check, because refusing one at save time
+ *       destroys audio somebody sat through. The exemption *was* the overrun,
+ *       and the allowance is meant to be final -- so it is gone, and the
+ *       browser stops the recorder at the balance instead
+ *       (`frontend/lib/allowance.ts`) so nothing reaches here that cannot be
+ *       saved.</li>
  * </ul>
  */
 @ExtendWith(MockitoExtension.class)
@@ -85,6 +92,21 @@ class UsageAllowanceTest {
                 // and a working microphone. A refusal that does not say so
                 // reads as the account being finished.
                 .hasMessageContaining("Recording in the browser still works");
+    }
+
+    @Test
+    @DisplayName("the fourth import says nothing about recording when there is none left either")
+    void refusalDoesNotOfferARecordingThatIsAlsoRefused() {
+        row.setImportsUsed(3);
+        row.setAiMinutesUsed(UsageLimitService.MINUTES_ALLOWANCE);
+
+        // Out of both. "Recording in the browser still works" would send them
+        // to a second refusal, which reads as the product being broken rather
+        // than the account being spent.
+        assertThatThrownBy(() -> service.chargeMeetingOrThrow(USER, false, 60))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("all 3 imports")
+                .hasMessageNotContaining("Recording in the browser");
     }
 
     @Test
@@ -143,19 +165,38 @@ class UsageAllowanceTest {
     }
 
     @Test
-    @DisplayName("a recording is never refused for its length, only for an empty balance")
-    void recordingIsNotMeasuredAgainstTheBalance() {
+    @DisplayName("a recording is measured against the balance too, exactly like an import")
+    void recordingIsMeasuredAgainstTheBalance() {
         row.setAiMinutesUsed(95);
 
-        // Half an hour into a five-minute balance. The meeting already happened
-        // -- somebody sat through it -- and refusing it at save time destroys
-        // the audio to defend the number. An import in the same position is
-        // refused, because the file is still on their disk.
-        service.chargeMeetingOrThrow(USER, true, 1800);
-
-        assertThat(row.getMeetingsUsed()).isEqualTo(1);
+        // Half an hour into a five-minute balance, both ways. This used to be
+        // allowed for a recording and is not any more: an allowance that one of
+        // the two ways of making a meeting can walk past is not a limit.
+        //
+        // What makes it safe to refuse is that the browser does not let a
+        // recording get here -- it stops at the balance -- so this fires only
+        // for a client that ignored that, and never for somebody who has just
+        // sat through a meeting.
+        assertThatThrownBy(() -> service.chargeMeetingOrThrow(USER, true, 1800))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("30 minutes and you have 5 left");
         assertThatThrownBy(() -> service.chargeMeetingOrThrow(USER, false, 1800))
                 .isInstanceOf(ApiException.class);
+        assertThat(row.getMeetingsUsed()).isZero();
+    }
+
+    @Test
+    @DisplayName("a recording that stopped at the balance is saved, to the last second")
+    void recordingThatFitsExactlyIsSaved() {
+        row.setAiMinutesUsed(95);
+
+        // What the recorder's cut-off produces: `elapsed` is a whole-second
+        // counter, so five minutes left becomes exactly 300 seconds. One second
+        // more would round to six and be refused, which is why the client stops
+        // on the count rather than on the media element's duration.
+        service.chargeMeetingOrThrow(USER, true, 300);
+
+        assertThat(row.getMeetingsUsed()).isEqualTo(1);
     }
 
     @Test

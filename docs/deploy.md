@@ -70,7 +70,7 @@ FLYWAY_URL=jdbc:postgresql://ep-xxx.region.aws.neon.tech/neondb?sslmode=require
 `infra/postgres-init/01-app-role.sql` runs automatically only on a fresh Docker
 volume. On Neon, run it **once by hand as `neondb_owner`**, against the direct
 endpoint. It creates `recallix_app` (no bypass — every user request) and
-`recallix_sys` (`BYPASSRLS` — outbox relay, worker callbacks, Stripe webhooks,
+`recallix_sys` (`BYPASSRLS` — outbox relay, worker callbacks,
 share links, provisioning).
 
 Change the two passwords from the development defaults first; they are what
@@ -245,20 +245,15 @@ password and TLS from it and ignores the `SPRING_DATA_REDIS_HOST`/`PORT` pair.
 
 ---
 
-## 6. Stripe
+## 6. Billing
 
-Point a webhook at `https://<backend-host>/api/v1/billing/webhook` and set
-`STRIPE_WEBHOOK_SECRET` to that endpoint's signing secret. The route is
-deliberately public and unauthenticated — it verifies the Stripe signature
-instead.
+There is none. Stripe checkout and its webhook were removed in V49: every
+account gets the same allowance — 100 transcribed minutes and 3 imports, for the
+life of the account — so there was nothing for a payment to buy.
 
-> **Stripe must be configured before real users, not after.** All four
-> `STRIPE_*` values are currently empty, and `BillingService.createCheckout()`
-> treats an unconfigured Stripe as a *dev fallback*: it applies the requested
-> plan immediately and returns a local success URL, charging nothing. Deployed
-> with these blank, any user can call the upgrade endpoint and grant themselves
-> Premium for free. Empty keys are not "billing disabled" — they are "billing
-> bypassed".
+Nothing to configure, and one fewer public unauthenticated route to reason
+about. `users.plan` survives as a label on rows an earlier build created; no
+code writes it and no limit reads it.
 
 ---
 

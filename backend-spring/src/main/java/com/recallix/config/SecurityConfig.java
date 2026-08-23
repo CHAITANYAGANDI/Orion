@@ -61,7 +61,6 @@ public class SecurityConfig {
                                 // credential, so these resolve without a session.
                                 "/public/**"
                         ).permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/v1/billing/webhook").permitAll()
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(internalTokenFilter, UsernamePasswordAuthenticationFilter.class)

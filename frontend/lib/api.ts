@@ -11,8 +11,6 @@ import type {
   MomentCreateRequest,
   TranscriptMoment,
   ChatMessage,
-  CheckoutRequest,
-  CheckoutResponse,
   KnownSpeaker,
   ShareCreateRequest,
   ShareEmailRequest,
@@ -1141,10 +1139,7 @@ export const api = createApi({
       }),
     }),
 
-    // ---- Billing & usage ----
-    checkout: builder.mutation<CheckoutResponse, CheckoutRequest>({
-      query: (body) => ({ url: "/billing/checkout", method: "POST", body }),
-    }),
+    // ---- Usage ----
 
     getUsage: builder.query<UsageResponse, void>({
       query: () => "/usage",
@@ -1250,6 +1245,5 @@ export const {
   useRevokeShareMutation,
   useRevokeShareLinkMutation,
   useEmailShareMutation,
-  useCheckoutMutation,
   useGetUsageQuery,
 } = api;

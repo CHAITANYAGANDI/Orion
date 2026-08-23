@@ -131,12 +131,6 @@ s3:
   default-encryption: ${S3_DEFAULT_ENCRYPTION:}
   kms-key-id: ${S3_KMS_KEY_ID:}
 
-stripe:
-  secret-key: ${STRIPE_SECRET_KEY:}
-  webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
-  price-pro: ${STRIPE_PRICE_PRO:}
-  price-premium: ${STRIPE_PRICE_PREMIUM:}
-
 management:
   endpoints:
     web:

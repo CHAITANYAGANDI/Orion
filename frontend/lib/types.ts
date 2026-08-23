@@ -1181,14 +1181,6 @@ export interface AccountClosed {
 }
 
 // ---- Billing & usage ----
-export interface CheckoutRequest {
-  plan: "PRO" | "PREMIUM";
-}
-
-export interface CheckoutResponse {
-  checkoutUrl: string;
-}
-
 /**
  * What this account has used, and what it is allowed.
  *

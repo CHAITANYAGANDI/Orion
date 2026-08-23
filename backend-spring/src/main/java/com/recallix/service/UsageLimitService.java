@@ -36,13 +36,18 @@ import org.springframework.transaction.annotation.Transactional;
  * minutes themselves are added later by {@link #addAiMinutes}, when processing
  * finishes and the true duration is known.
  *
- * <p><b>Why a recording can overrun and an import cannot.</b> An import is
- * refused if its stated length will not fit in what is left — the file is still
- * on the user's disk and nothing is lost by saying no. A recording only needs
- * some balance to exist: it has already happened, and refusing it at save time
- * would delete a meeting somebody sat through in order to defend a number. The
- * overrun that allows is bounded by one recording, and it is recorded rather
- * than hidden.
+ * <p><b>Neither can overrun.</b> A meeting is refused if its length will not
+ * fit in what is left, whether it was recorded here or imported. For an import
+ * that is easy: the file is on the user's disk and nothing is lost by saying no.
+ *
+ * <p>For a recording it is only safe because the browser does not let one reach
+ * this point. `lib/allowance.ts` refuses to start a recording with no balance
+ * and stops one that reaches the edge of it, so what arrives here always fits.
+ * This check is the authority rather than the mechanism — it is what makes
+ * the limit real for a client that did not do that, and the reason the client
+ * fails closed when it cannot read the balance. Enforcing it here *alone* would
+ * mean the only way to hold the line against a recording is to destroy a
+ * meeting somebody sat through, which is why the two halves exist together.
  *
  * <p>{@link RateLimitService} is a different thing and still separate: it is
  * requests per minute, to stop a loop, not an allowance.
@@ -110,26 +115,30 @@ public class UsageLimitService {
     public void chargeMeetingOrThrow(String userId, boolean recordedHere, Integer durationSeconds) {
         UsageLimit u = forUser(userId);
 
+        int left = Math.max(0, MINUTES_ALLOWANCE - u.getAiMinutesUsed());
+
         if (!recordedHere && u.getImportsUsed() >= IMPORT_ALLOWANCE) {
+            // "Recording still works" only when it does. Somebody who is out of
+            // imports *and* out of minutes is out, and telling them to go and
+            // record instead sends them to a second refusal -- which reads as
+            // the product being broken rather than the account being spent.
             throw ApiException.usageLimitReached(
-                    "You have used all " + IMPORT_ALLOWANCE + " imports on this account. "
-                            + "Recording in the browser still works.");
+                    "You have used all " + IMPORT_ALLOWANCE + " imports on this account."
+                            + (left > 0 ? " Recording in the browser still works." : ""));
         }
 
-        int left = Math.max(0, MINUTES_ALLOWANCE - u.getAiMinutesUsed());
         if (left == 0) {
             throw ApiException.usageLimitReached(
                     "You have used all " + MINUTES_ALLOWANCE
                             + " transcription minutes on this account.");
         }
-        // Only an import is measured against the balance, and the asymmetry is
-        // deliberate. A file that does not fit is refused while it is still on
-        // the user's disk, and nothing is lost by saying no. A recording is
-        // already made -- somebody sat through the meeting -- and refusing it
-        // at save time deletes an hour of their afternoon to defend a number.
-        // So a recording only needs *some* balance, and the overrun it causes
-        // is bounded by one meeting and recorded honestly by addAiMinutes.
-        if (!recordedHere && durationSeconds != null && durationSeconds > 0) {
+        // Measured against the balance whichever way it arrived. A recording
+        // used to be exempt, because refusing one at save time destroys audio
+        // somebody sat through -- but that exemption *was* the overrun, and the
+        // limit is meant to be final. It is safe now because the recorder stops
+        // itself at the balance (lib/allowance.ts), so a recording that reaches
+        // here already fits and this only fires for a client that ignored it.
+        if (durationSeconds != null && durationSeconds > 0) {
             // Rounded up: a 61-second clip spends two minutes of the allowance,
             // because the alternative is a file that fits by arithmetic and does
             // not fit by the time it has been transcribed.
@@ -144,6 +153,32 @@ public class UsageLimitService {
         u.setMeetingsUsed(u.getMeetingsUsed() + 1);
         if (!recordedHere) {
             u.setImportsUsed(u.getImportsUsed() + 1);
+        }
+    }
+
+    /**
+     * Refuse anything that asks a model, once the minutes are gone.
+     *
+     * <p>Chat does not spend transcription minutes — it spends context and a
+     * completion — so on the arithmetic alone it could run forever on an
+     * account that can no longer record. It does not, and the reason is what the
+     * allowance is for rather than what it counts: 100 minutes is the whole of
+     * what an account gets, and an AI feature still answering afterwards would
+     * make the limit a limit on recording rather than on the product.
+     *
+     * <p>Reads are left alone. Somebody out of minutes keeps every conversation
+     * they have already had, because those are theirs and hiding them would be
+     * taking something away rather than declining to do more work.
+     */
+    @Transactional(readOnly = true)
+    public void requireAiOrThrow(String userId) {
+        UsageLimit u = usage.findByUserId(userId).orElse(null);
+        int used = u == null ? 0 : u.getAiMinutesUsed();
+        if (used >= MINUTES_ALLOWANCE) {
+            throw ApiException.usageLimitReached(
+                    "You have used all " + MINUTES_ALLOWANCE
+                            + " transcription minutes on this account, so AI Chat is closed. "
+                            + "Your meetings and the answers you already have are still here.");
         }
     }
 
