@@ -105,8 +105,9 @@ spoke, the summary is written in it, and nothing downstream repairs that. The
 code is validated against `Language` (the eighteen transcription supports) and
 refused with a 400 rather than dropped, because a silently ignored setting leaves
 the page showing a choice the pipeline never received. It is resolved at enqueue
-and travels on `meeting.uploaded` as `language`, the same as `vocabulary` and for
-the same reason: the worker runs as a system context with no user to read it in.
+and travels on `meeting.uploaded` as `language`, because the worker runs as a
+system context with no user to read it in. A `vocabulary` list travelled beside
+it for the same reason until V51 removed the feature.
 The account setting wins over the deployment-wide `ASSEMBLYAI_LANGUAGE`.
 
 **Chat defaults (V39).** `chatHistoryDays` is how far back the workspace chat
@@ -171,32 +172,34 @@ the speaker prefix and chat and the export read them.
 
 ### Custom vocabulary & known speakers
 
-| Method | Path | Body | Response |
-| --- | --- | --- | --- |
-| GET | `/api/v1/vocabulary` | — | `VocabularyTerm[]` |
-| POST | `/api/v1/vocabulary` | `{ "term", "category", "expansion"?, "active"? }` | `201 VocabularyTerm` |
-| PUT | `/api/v1/vocabulary/{id}` | same as POST | `VocabularyTerm` |
-| DELETE | `/api/v1/vocabulary/{id}` | — | `204` |
-| GET | `/api/v1/speakers` | — | `KnownSpeaker[]` |
-| DELETE | `/api/v1/speakers/{id}` | — | `204` |
+**Removed (V51).** Six endpoints under `/api/v1/vocabulary` and
+`/api/v1/speakers`, two tables, and everything downstream of them.
 
-`category` is `KEYWORD | NAME | JARGON | ACRONYM`. All four become the same
-boosting list on the transcription request — the category is what the user is
-telling us, not a different mechanism — and `expansion` is stored for `ACRONYM`
-only. Terms are hints, not rules: they raise the probability of a term being
-recognised without forcing it. Duplicates (case-insensitive) and exceeding the
-per-user cap are both `400` with a message worth showing verbatim.
+Custom vocabulary was a per-user list of terms — names, jargon, acronyms —
+resolved by Spring at enqueue and sent to the transcriber as boosting hints,
+expressed differently by each provider (`keyterm` on Deepgram nova-3+,
+`keywords` before it, `keyterms_prompt`/`word_boost` on AssemblyAI, and
+Whisper's decoding `prompt`, which has no boosting parameter of its own).
+Known speakers was a per-user list of names, written by renaming or rematching
+a speaker rather than by a create endpoint, which filled the rename box and
+travelled on the event as `context.participants`.
 
-Vocabulary is resolved by Spring when a job is enqueued and travels on the
-`meeting_uploaded` event, so it applies to meetings processed **after** a term
-is added — an existing transcript must be reprocessed to benefit. Each provider
-expresses boosting differently: Deepgram nova-3+ takes `keyterm`, nova-2 and
-earlier take `keywords`, AssemblyAI takes `word_boost`, and Whisper has no
-boosting parameter so the terms go in its decoding `prompt`.
+**Both tables were dropped rather than left standing.** Nothing wrote to them
+once renaming stopped recording names, and nothing could read them once the
+endpoints went. Rows left behind would be personal data — colleagues' names, in
+the second case — held by a product with no feature that justifies holding them
+and no screen that could show anybody what was in them.
 
-`/api/v1/speakers` has no create endpoint on purpose: the list is written by
-renaming or rematching a speaker, so it reflects names actually in use rather
-than a separate address book that would drift from the transcripts.
+**What this takes with it.** `MeetingUploadedEvent.vocabulary` and
+`MeetingContext.participants` are gone from the event contract; the ai-service
+declares neither, so a backlog published before the change still validates and
+processes. The `vocabulary` argument on `TranscriptionPort.transcribe` went with
+them rather than being threaded through four adapters as a permanent `None`.
+`build_keyterms` survives with one remaining source, `organisations`, which the
+enqueue path sends empty — so no boosting field reaches any provider, which is
+exactly what happened for every account that never added a term. The prose
+`prompt` channel is unaffected and still carries the meeting's title, project
+and type.
 
 ### Chat, semantic search & translation
 
@@ -609,6 +612,22 @@ back to it. `RetentionJob` runs at 03:00 UTC (`recallix.retention.cron`,
 `recallix.retention.enabled`) and shares `ErasureService` with the buttons, so the
 nightly pass and the menu item cannot come to disagree about what deleted means.
 
+**The interface offers three windows; the API still accepts 1..3650.** Never, a
+week and a month — `RETENTION_CHOICES` in `frontend/lib/privacy.ts`. The list was
+six until 90 days, six months and a year were dropped: all three are long enough
+that the decision they encode is "eventually", which is not a promise anybody can
+hold you to. A policy already set to one of them keeps working and is *named*
+rather than drawn as one of the three, because three unpressed buttons read as
+"nothing is deleted". Both dials are sent on every change — null means keep
+forever, not "leave this one alone" — and the pair the server refuses is disabled
+in the UI rather than offered and rejected.
+
+**These controls had no interface for months.** Retention could only be set, and
+an account only closed, by calling the API by hand: the tab that held them was
+removed and the endpoints were not. A deletion schedule that fires unattended
+every night and cannot be seen from inside the product is the worst version of
+this feature, and both now live on Account Settings → General.
+
 **`RETENTION_APPLIED` joins `PROCESSING_FAILED` as unmutable.** They are the two
 whose silence is indistinguishable from nothing having happened — one is "something
 broke", the other is "something is gone for good" — and the retention one is the
@@ -626,14 +645,13 @@ applied to the bucket rather than per upload, because uploads are presigned PUTs
 performed by a browser and an encryption header signed into one must be echoed
 byte-identically or the signature fails.
 
-**The account export is a zip, and deliberately excludes the audio.**
-`account.json` (profile, preferences, retention, projects, vocabulary, speakers,
-live links), `meetings.json` (every meeting complete: summary, tasks, insights,
-marks, every segment), `action-items.csv`, and `meetings/<slug>-<id>/notes.md`
-rendered by the **same** Markdown renderer as the per-meeting export so the two
-cannot drift. Recordings would be gigabytes through a request thread — the README
-inside says so and points at the per-meeting audio download. Zip entry times are
-fixed at epoch, so two exports of an unchanged account are byte-identical. The one
+**The account export is removed.** `GET /privacy/export` returned the whole
+account as a zip — `account.json`, `meetings.json`, `action-items.csv` and a
+rendered `notes.md` per meeting — deliberately without the audio, which would
+have been gigabytes through a request thread. It is gone from the server, so
+unlike retention and account closure there is no API call to fall back on: a
+meeting still exports in four formats from its own page, and nothing exports all
+of them at once. The one
 field mapped by hand rather than serialised is `meeting_shares.password_hash`: a
 credential is worth nothing to the person downloading their own data and something
 to whoever later finds the zip.
@@ -762,7 +780,7 @@ is what "see all 27" does rather than re-running four queries it will not show.
 | Group | Read from |
 |---|---|
 | meetings | `meetings.title`, its tags, **and** matching utterances inside it |
-| people | `transcript_segments.speaker` ∪ `meeting_action_items.owner_name` ∪ `known_speakers` |
+| people | `transcript_segments.speaker` ∪ `meeting_action_items.owner_name` |
 | decisions / risks | `meeting_insights`, by `kind` |
 | commitments | `meeting_action_items` |
 | mentions | `transcript_segments.text` |
@@ -1336,7 +1354,7 @@ capped is minutes and imports.
 
 | Topic | Produced by | Consumed by | Payload |
 |---|---|---|---|
-| `meeting_uploaded` | Spring | FastAPI | `{ meetingId, userId, audioUrl, objectKey, sourceType, sourceUrl, summaryTemplate, vocabulary, language }` |
+| `meeting_uploaded` | Spring | FastAPI | `{ meetingId, userId, audioUrl, objectKey, sourceType, sourceUrl, summaryTemplate, language, context, speakers }` |
 | `transcription_started` | FastAPI | Spring | `StatusEvent` |
 | `transcription_completed` | FastAPI | Spring | `StatusEvent` |
 | `summary_generated` | FastAPI | Spring | `StatusEvent` |

@@ -1,0 +1,35 @@
+-- --------------------------------------------------------------------------
+-- V51 — remove custom vocabulary and known speakers
+-- --------------------------------------------------------------------------
+--
+-- Both arrived in V20 as inputs to transcription rather than settings about it:
+-- a per-user list of terms that were sent to the speech model as boosting hints,
+-- and a per-user list of names that filled the rename box and travelled on the
+-- transcription event as expected participants. Both were removed from the
+-- product, so both stop being collected here.
+--
+-- DROP rather than leave standing. These tables were only ever read on the
+-- upload path — `VocabularyService.boostTermsFor` at enqueue, `KnownSpeakerService.list`
+-- for the prompt — and nothing writes to them now that renaming a speaker no
+-- longer records the name. Rows left behind would be personal data (names of
+-- colleagues, in the second case) held by a product that has no feature to
+-- justify holding them, and no screen anywhere that could show a user what is
+-- in them. That is the worst of both: retained and invisible.
+--
+-- This is not reversible, and it should not be. Restoring the tables would not
+-- restore the lists — the vocabulary was somebody's typing and the speaker names
+-- accumulated from renames they made — but it would restore the *shape* of a
+-- feature nobody can reach, which is how dead schema outlives the code that
+-- explained it.
+--
+-- Nothing else references either table. `SearchRepository.people` unioned
+-- `known_speakers` in as a third source of names; that branch went with this
+-- migration, and the facet now lists who spoke and who owes something, which
+-- were always the other two.
+--
+-- The indexes, the check constraints and the V20 row-level-security policies go
+-- with the tables; Postgres drops all three as dependents, so naming them here
+-- would only risk naming one wrong.
+
+DROP TABLE IF EXISTS vocabulary_terms;
+DROP TABLE IF EXISTS known_speakers;

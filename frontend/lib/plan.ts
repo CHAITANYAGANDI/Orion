@@ -9,8 +9,7 @@
  *
  * Kept as data rather than markup so the claims can be read in one place and
  * checked against the services that back them. Where a number appears it comes
- * from a named constant on the server — 500 terms from
- * `VocabularyService.MAX_TERMS_PER_USER`, 200 folders from
+ * from a named constant on the server — 200 folders from
  * `ProjectService.MAX_PROJECTS`, 2,000 marks from `MomentService.MAX_PER_MEETING`
  * — and the two a user can actually hit are `UsageLimitService.MINUTES_ALLOWANCE`
  * and `IMPORT_ALLOWANCE`.
@@ -45,7 +44,9 @@ export const INCLUDED: FeatureGroup[] = [
           "Detected from the audio, or fixed to one language under General so a quiet opening cannot mislead it.",
       },
       {
-        label: "Speakers separated, and named once you have taught it a voice",
+        label: "Speakers separated, and yours to name",
+        detail:
+          "Diarization tells the voices apart and numbers them by who spoke first. Naming them is a rename you make, not a voice Recallix recognises.",
       },
       {
         label: "A summary with decisions, risks and action items",
@@ -54,10 +55,6 @@ export const INCLUDED: FeatureGroup[] = [
       {
         label: "Translation of the brief, the tasks and the transcript",
         detail: "Kept once translated, so reading it again costs nothing.",
-      },
-      {
-        label: "Custom vocabulary",
-        detail: "Up to 500 names, acronyms and product words. Applies to meetings processed from then on.",
       },
       { label: "Summary templates, to choose what a summary is built to say" },
     ],

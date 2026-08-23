@@ -64,8 +64,6 @@ class MeetingLanguageTest {
     @Mock private AuditService audit;
     @Mock private AiClient ai;
     @Mock private SummaryTemplateService templates;
-    @Mock private KnownSpeakerService knownSpeakers;
-    @Mock private VocabularyService vocabulary;
     @Mock private ProjectRepository projects;
     @Mock private MeetingTranslationRepository translations;
     @Mock private NotificationService notifications;
@@ -79,8 +77,7 @@ class MeetingLanguageTest {
     @BeforeEach
     void setUp() {
         service = new MeetingService(meetings, transcripts, segments, summaries,
-                insights, storage, usage, outbox, audit, ai, templates, knownSpeakers,
-                vocabulary, projects, translations, notifications, erasure, users);
+                insights, storage, usage, outbox, audit, ai, templates, projects, translations, notifications, erasure, users);
 
         meeting = new Meeting();
         meeting.setId(MEETING);

@@ -11,10 +11,7 @@ import type {
   MomentCreateRequest,
   TranscriptMoment,
   ChatMessage,
-  KnownSpeaker,
   SpeakerRematch,
-  VocabularyTerm,
-  VocabularyTermInput,
   Insight,
   MeetingCreateRequest,
   MeetingUpdateRequest,
@@ -109,8 +106,6 @@ export const api = createApi({
     "Transcript",
     "Summary",
     "SummaryTemplates",
-    "Vocabulary",
-    "KnownSpeakers",
     "Insights",
     "Moments",
     "Conversations",
@@ -845,12 +840,7 @@ export const api = createApi({
         method: "PATCH",
         body: { mapping },
       }),
-      // KnownSpeakers too: a rename records the names for next time, so the
-      // suggestion list is stale the moment this succeeds.
-      invalidatesTags: (_r, _e, arg) => [
-        { type: "Transcript", id: arg.id },
-        { type: "KnownSpeakers", id: "LIST" },
-      ],
+      invalidatesTags: (_r, _e, arg) => [{ type: "Transcript", id: arg.id }],
     }),
 
     /**
@@ -873,47 +863,7 @@ export const api = createApi({
       invalidatesTags: (_r, _e, arg) => [
         { type: "Transcript", id: arg.id },
         { type: "Chat", id: arg.id },
-        { type: "KnownSpeakers", id: "LIST" },
       ],
-    }),
-
-    // ---- Known speakers ----
-    getKnownSpeakers: builder.query<KnownSpeaker[], void>({
-      query: () => ({ url: "/speakers" }),
-      providesTags: [{ type: "KnownSpeakers", id: "LIST" }],
-    }),
-
-    deleteKnownSpeaker: builder.mutation<void, string>({
-      query: (id) => ({ url: `/speakers/${id}`, method: "DELETE" }),
-      invalidatesTags: [{ type: "KnownSpeakers", id: "LIST" }],
-    }),
-
-    // ---- Custom vocabulary ----
-    getVocabulary: builder.query<VocabularyTerm[], void>({
-      query: () => ({ url: "/vocabulary" }),
-      providesTags: [{ type: "Vocabulary", id: "LIST" }],
-    }),
-
-    createVocabularyTerm: builder.mutation<VocabularyTerm, VocabularyTermInput>({
-      query: (body) => ({ url: "/vocabulary", method: "POST", body }),
-      invalidatesTags: [{ type: "Vocabulary", id: "LIST" }],
-    }),
-
-    updateVocabularyTerm: builder.mutation<
-      VocabularyTerm,
-      { id: string } & VocabularyTermInput
-    >({
-      query: ({ id, ...body }) => ({
-        url: `/vocabulary/${id}`,
-        method: "PUT",
-        body,
-      }),
-      invalidatesTags: [{ type: "Vocabulary", id: "LIST" }],
-    }),
-
-    deleteVocabularyTerm: builder.mutation<void, string>({
-      query: (id) => ({ url: `/vocabulary/${id}`, method: "DELETE" }),
-      invalidatesTags: [{ type: "Vocabulary", id: "LIST" }],
     }),
 
     deleteMeeting: builder.mutation<void, string>({
@@ -971,10 +921,6 @@ export const api = createApi({
     updateRetention: builder.mutation<RetentionPolicy, RetentionUpdateRequest>({
       query: (body) => ({ url: "/privacy/retention", method: "PATCH", body }),
       invalidatesTags: [{ type: "Privacy", id: "ME" }],
-    }),
-
-    revokeAllLinks: builder.mutation<{ revoked: number }, void>({
-      query: () => ({ url: "/privacy/links/revoke-all", method: "POST" }),
     }),
 
     /**
@@ -1167,16 +1113,9 @@ export const {
   useEraseTranscriptMutation,
   useGetPrivacyOverviewQuery,
   useUpdateRetentionMutation,
-  useRevokeAllLinksMutation,
   useCloseAccountMutation,
   useRenameSpeakersMutation,
   useRematchSpeakerMutation,
-  useGetKnownSpeakersQuery,
-  useDeleteKnownSpeakerMutation,
-  useGetVocabularyQuery,
-  useCreateVocabularyTermMutation,
-  useUpdateVocabularyTermMutation,
-  useDeleteVocabularyTermMutation,
   useEditSegmentsMutation,
   useGetActionItemsQuery,
   usePatchActionItemMutation,

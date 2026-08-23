@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { PreferencesResponse } from "@/lib/types";
+import type { PreferencesResponse, PrivacyOverview } from "@/lib/types";
 
 /**
  * Account Settings → General.
@@ -24,30 +24,49 @@ import type { PreferencesResponse } from "@/lib/types";
  * all unless somebody has supplied real URLs — Recallix ships no terms of
  * service of its own.
  */
-const { update, toastError } = vi.hoisted(() => ({
+const { update, setRetention, closeAccount, signOut, toastError } = vi.hoisted(() => ({
   update: vi.fn(),
+  setRetention: vi.fn(),
+  closeAccount: vi.fn(),
+  signOut: vi.fn(),
   toastError: vi.fn(),
 }));
 
 let prefs: PreferencesResponse;
+let overview: PrivacyOverview;
 let mode: "dev" | "clerk";
 let failure: unknown = null;
+let retentionFailure: unknown = null;
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/settings" }));
 
-vi.mock("@/lib/auth", () => ({ useAuth: () => ({ userId: "usr_dev", mode }) }));
+vi.mock("@/lib/auth", () => ({
+  useAuth: () => ({ userId: "usr_dev", mode, signOut }),
+}));
 
 vi.mock("@/lib/api", () => ({
-  // Vocabulary and known speakers moved onto this tab when the Meetings tab was
-  // removed, so General now mounts both cards. Empty rather than absent: an
-  // undefined `data` is a different render path from an empty list, and the one
-  // these tests care about is the ordinary one.
-  useGetVocabularyQuery: () => ({ data: [], isLoading: false }),
-  useCreateVocabularyTermMutation: () => [vi.fn(), { isLoading: false }],
-  useUpdateVocabularyTermMutation: () => [vi.fn()],
-  useDeleteVocabularyTermMutation: () => [vi.fn()],
-  useGetKnownSpeakersQuery: () => ({ data: [], isLoading: false }),
-  useDeleteKnownSpeakerMutation: () => [vi.fn()],
+  // Retention and closing the account are on this tab now. Both were server
+  // endpoints with no interface for months; the tests below are mostly about
+  // the two ways that can go wrong -- sending one dial and clearing the other,
+  // and a delete button that can be reached without typing the phrase.
+  useGetPrivacyOverviewQuery: () => ({ data: overview, isLoading: false }),
+  useUpdateRetentionMutation: () => [
+    (body: unknown) => {
+      setRetention(body);
+      return {
+        unwrap: () =>
+          retentionFailure ? Promise.reject(retentionFailure) : Promise.resolve({}),
+      };
+    },
+    { isLoading: false },
+  ],
+  useCloseAccountMutation: () => [
+    (body: unknown) => {
+      closeAccount(body);
+      return { unwrap: () => Promise.resolve({ meetings: 3, storedObjects: 2 }) };
+    },
+    { isLoading: false },
+  ],
   useGetPreferencesQuery: () => ({ data: prefs, isLoading: false }),
   useGetLanguagesQuery: () => ({
     data: [
@@ -71,7 +90,31 @@ import { GeneralTab } from "@/components/settings/general-tab";
 beforeEach(() => {
   vi.clearAllMocks();
   failure = null;
+  retentionFailure = null;
   mode = "dev";
+  overview = {
+    held: {
+      meetings: 12,
+      recordings: 9,
+      audioErased: 3,
+      transcripts: 12,
+      transcriptsErased: 0,
+      consentConfirmed: 7,
+      actionItems: 41,
+      marks: 6,
+      projects: 2,
+      chats: 5,
+      oldestMeetingAt: "2025-03-04T09:00:00Z",
+    },
+    retention: {
+      audioDays: null,
+      meetingDays: null,
+      recordingsDueNow: 0,
+      meetingsDueNow: 0,
+    },
+    storage: { encryptionAtRest: null, signedUrlSeconds: 900, rowLevelSecurity: true },
+    signIn: { mode: "dev", managedExternally: false, secondFactor: null },
+  };
   prefs = {
     email: "priya@example.com",
     autoEmailRecap: false,
@@ -225,26 +268,25 @@ describe("language", () => {
 });
 
 describe("the rest of the page", () => {
-  it("manages vocabulary and speakers here, rather than linking to them", () => {
+  it("no longer offers a vocabulary or a speaker list, which are gone", () => {
     render(<GeneralTab />);
 
-    // This was a row that navigated to /settings/meetings#vocabulary. That tab
-    // is gone, so the two cards moved here rather than being lost with it — a
-    // link to a page that no longer exists is the failure this replaces.
-    expect(screen.getByRole("heading", { name: /Words and speakers/ })).toBeInTheDocument();
-    expect(
-      screen.queryByRole("link", { name: /Manage Vocabulary/ }),
-    ).not.toBeInTheDocument();
+    // Both were mounted here when the Meetings tab was removed, and both have
+    // since been removed themselves — server, tables and all. The assertion is
+    // that nothing was left mounted against endpoints that now 404.
+    expect(screen.queryByRole("heading", { name: /Words and speakers/ })).toBeNull();
+    expect(screen.queryByText(/Custom vocabulary/)).toBeNull();
   });
 
-  it("offers no route to closing an account, because there is nowhere to send it", () => {
+  it("says outright that nothing here is used to train a model", () => {
     render(<GeneralTab />);
 
-    // The control this pointed at was removed from the Security tab. A link
-    // that still read "Delete account" and landed on two-factor status would be
-    // worse than its absence: it would look like the feature had broken rather
-    // than been withdrawn.
-    expect(screen.queryByRole("link", { name: "Delete account" })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: /Feedback and training/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/does not train on your meetings/)).toBeInTheDocument();
+    // The absence is the point: a toggle would imply a use to opt out of.
+    expect(screen.queryByRole("checkbox")).toBeNull();
   });
 
   it("names the build rather than inventing one", () => {
@@ -259,5 +301,135 @@ describe("the rest of the page", () => {
     // Recallix ships no terms of service of its own, and a link to a page that
     // does not exist is worse than no link.
     expect(screen.queryByText(/Terms of Service/)).not.toBeInTheDocument();
+  });
+});
+
+describe("how long things are kept", () => {
+  it("opens on Never, which is what an account with no policy has", () => {
+    render(<GeneralTab />);
+
+    const never = screen.getAllByRole("button", { name: "Never" });
+    expect(never).toHaveLength(2);
+    never.forEach((b) => expect(b).toHaveAttribute("aria-pressed", "true"));
+  });
+
+  it("sends both dials on every change, because null means keep and not leave alone", async () => {
+    overview = {
+      ...overview,
+      retention: { ...overview.retention, meetingDays: 30 },
+    };
+    render(<GeneralTab />);
+
+    // Changing the recording dial alone. If the meeting dial were omitted the
+    // API would read it as null and quietly clear a policy nobody touched.
+    await userEvent.click(screen.getAllByRole("button", { name: "After a week" })[0]);
+
+    await waitFor(() =>
+      expect(setRetention).toHaveBeenCalledWith({ audioDays: 7, meetingDays: 30 }),
+    );
+  });
+
+  it("refuses to offer the pair the server would reject", () => {
+    overview = {
+      ...overview,
+      retention: { ...overview.retention, audioDays: 30 },
+    };
+    render(<GeneralTab />);
+
+    // Deleting the meeting after a week while keeping its recording a month
+    // means the recording rule never runs. The server says so; the button
+    // should not be clickable in the first place.
+    expect(screen.getAllByRole("button", { name: "After a week" })[1]).toBeDisabled();
+  });
+
+  it("warns what the next pass would take of what is already there", () => {
+    overview = {
+      ...overview,
+      retention: { ...overview.retention, audioDays: 7, recordingsDueNow: 4 },
+    };
+    render(<GeneralTab />);
+
+    expect(screen.getByText(/deletes 4 recordings you already have/)).toBeInTheDocument();
+  });
+
+  it("names a window it no longer offers instead of drawing it as Never", () => {
+    overview = {
+      ...overview,
+      retention: { ...overview.retention, meetingDays: 90 },
+    };
+    render(<GeneralTab />);
+
+    // 90 days was on the list once and the API still accepts it. Showing the
+    // three buttons all unpressed would read as "nothing is deleted".
+    expect(screen.getByText(/after 90 days, which is not one of these/i)).toBeInTheDocument();
+  });
+
+  it("explains a refusal in the API's own words", async () => {
+    retentionFailure = {
+      data: { message: "Keep meetings at least as long as recordings." },
+    };
+    render(<GeneralTab />);
+
+    await userEvent.click(screen.getAllByRole("button", { name: "After a week" })[0]);
+
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(
+        "Keep meetings at least as long as recordings.",
+      ),
+    );
+  });
+});
+
+describe("closing the account", () => {
+  it("says the size of what goes, because the number is the warning", () => {
+    render(<GeneralTab />);
+
+    expect(screen.getByText(/Deletes 12 meetings, 9 recordings/)).toBeInTheDocument();
+  });
+
+  it("cannot be reached by one click", async () => {
+    render(<GeneralTab />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Delete account" }));
+
+    expect(screen.getByRole("button", { name: /Delete everything/ })).toBeDisabled();
+    expect(closeAccount).not.toHaveBeenCalled();
+  });
+
+  it("enables only on the phrase, and sends what was typed", async () => {
+    render(<GeneralTab />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Delete account" }));
+    await userEvent.type(screen.getByLabelText(/to confirm/), "delete");
+    expect(screen.getByRole("button", { name: /Delete everything/ })).toBeDisabled();
+
+    await userEvent.type(screen.getByLabelText(/to confirm/), " everything");
+    await userEvent.click(screen.getByRole("button", { name: /Delete everything/ }));
+
+    await waitFor(() =>
+      expect(closeAccount).toHaveBeenCalledWith({ confirm: "delete everything" }),
+    );
+  });
+
+  it("signs out afterwards, since the account it was signed into is gone", async () => {
+    render(<GeneralTab />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Delete account" }));
+    await userEvent.type(screen.getByLabelText(/to confirm/), "delete everything");
+    await userEvent.click(screen.getByRole("button", { name: /Delete everything/ }));
+
+    await waitFor(() => expect(signOut).toHaveBeenCalled());
+  });
+
+  it("backs out and forgets what was typed", async () => {
+    render(<GeneralTab />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Delete account" }));
+    await userEvent.type(screen.getByLabelText(/to confirm/), "delete everything");
+    await userEvent.click(screen.getByRole("button", { name: "Keep my account" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "Delete account" }));
+    expect(screen.getByLabelText(/to confirm/)).toHaveValue("");
+    expect(closeAccount).not.toHaveBeenCalled();
   });
 });

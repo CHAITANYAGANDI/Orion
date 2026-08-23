@@ -43,7 +43,6 @@ import {
   useGetLanguagesQuery,
   useRenameSpeakersMutation,
   useRematchSpeakerMutation,
-  useGetKnownSpeakersQuery,
   useEditSegmentsMutation,
   useGetSummaryTemplatesQuery,
   useResummarizeMutation,
@@ -1769,7 +1768,6 @@ function TranscriptPanel({
   // Names this user has used before. Offered as autocomplete rather than a
   // forced choice: a new person in the meeting must not be harder to name than
   // a familiar one.
-  const knownSpeakers = useGetKnownSpeakersQuery();
 
   const [editSegments, { isLoading: savingText }] = useEditSegmentsMutation();
   // Which line is open for editing, and the text as typed. Held by segment id
@@ -2297,20 +2295,11 @@ function TranscriptPanel({
                       <Input
                         className="h-8"
                         placeholder="New name"
-                        // A plain datalist rather than a combobox: the field
-                        // still accepts anything typed, so someone new to this
-                        // workspace is no harder to name than a regular.
-                        list="recallix-known-speakers"
                         value={draft[sp] ?? ""}
                         onChange={(e) => setDraft((d) => ({ ...d, [sp]: e.target.value }))}
                       />
                     </div>
                   ))}
-                  <datalist id="recallix-known-speakers">
-                    {(knownSpeakers.data ?? []).map((k) => (
-                      <option key={k.id} value={k.displayName} />
-                    ))}
-                  </datalist>
                   <Button size="sm" onClick={saveNames} disabled={renaming}>
                     {renaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save
                   </Button>

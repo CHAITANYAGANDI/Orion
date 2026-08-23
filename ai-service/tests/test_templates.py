@@ -73,7 +73,6 @@ class _StubTranscription:
         self,
         audio: bytes,
         filename: str,
-        vocabulary: list[str] | None = None,
         language: str | None = None,
         **_,
     ) -> TranscriptResponse:

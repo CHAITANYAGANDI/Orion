@@ -1,11 +1,11 @@
 "use client";
 
 /**
- * General — who you are, how you are transcribed, and the way out.
+ * General — who you are, what is done with it, and the way out.
  *
  * Five things, in the order somebody needs them: the identity block, the
- * language your meetings are held in, the words Recallix keeps getting wrong,
- * and what this browser stores.
+ * language your meetings are held in, what Recallix does and does not do with a
+ * recording, how long it keeps one, and the button that ends the account.
  *
  * Two of the fields here are descriptive and two are not, and the difference is
  * worth stating. Department and Role are yours to record and nothing reads them
@@ -18,24 +18,35 @@
  * Email and password are shown and not editable, because neither is Recallix's
  * to change — they belong to the sign-in provider, and a development session has
  * no provider at all.
+ *
+ * The last two sections are the ones that delete things, and they are on this
+ * page rather than behind a tab of their own because there is no longer a tab of
+ * their own. Both endpoints have existed and worked for months with nothing in
+ * the interface able to reach them: retention could only be set, and an account
+ * only closed, by calling the API by hand. A deletion schedule that runs every
+ * night and cannot be seen from inside the product is the worst version of this
+ * feature, so it is now visible.
  */
 
 import * as React from "react";
 import { toast } from "sonner";
 import {
-  ChevronRight,
+  AlertTriangle,
+  Clock,
   Globe,
+  Lightbulb,
   Loader2,
   Pencil,
-  ShieldAlert,
-  SpellCheck,
+  Trash2,
 } from "lucide-react";
-import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 import {
   useGetPreferencesQuery,
   useUpdatePreferencesMutation,
   useGetLanguagesQuery,
+  useGetPrivacyOverviewQuery,
+  useUpdateRetentionMutation,
+  useCloseAccountMutation,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,15 +54,21 @@ import { Label } from "@/components/ui/label";
 import { settingsError } from "@/components/settings/shared";
 import { BUILD_LINE, LEGAL_LINKS } from "@/lib/build-info";
 import { cn } from "@/lib/utils";
-import { VocabularyCard } from "@/components/vocabulary-card";
-import { KnownSpeakersCard } from "@/components/known-speakers-card";
+import {
+  RETENTION_CHOICES,
+  DELETE_PHRASE,
+  confirmsDeletion,
+  retentionLabel,
+} from "@/lib/privacy";
 
 export function GeneralTab() {
   return (
     <div className="space-y-1">
       <IdentityBlock />
       <LanguageRow />
-      <TranscriptionSection />
+      <TrainingSection />
+      <RetentionSection />
+      <CloseAccountSection />
       <Footer />
     </div>
   );
@@ -265,64 +282,341 @@ function LanguageRow() {
   );
 }
 
-/** A row that navigates somewhere else — the shape of Manage Vocabulary. */
 /**
- * What Recallix is told before it listens.
+ * The section with nothing to switch.
  *
- * <p>Here rather than behind a link. It lived on a Meetings tab, and this page
- * carried a row that navigated to it — which was already one click of
- * indirection around two small cards. That tab is gone, so the choice was to
- * move these or to lose them, and losing them would take a working feature off
- * the product to tidy a settings page.
+ * <p>Every competitor puts a toggle here, because they have something to ask
+ * permission for. Recallix does not train models, so the honest version of this
+ * section is a statement of who sees the data on the way to producing your
+ * notes — and no switch, because a switch would imply there is a use to opt out
+ * of.
  *
- * <p>Both apply to meetings processed from now on. An existing transcript has to
- * be reprocessed to pick them up, and the copy says so, because the alternative
- * is somebody adding a name and wondering why last week's meeting still spells
- * it wrong.
+ * <p>It links down the page rather than across to a Security tab. That tab is
+ * gone; what it used to promise — that you can see and delete what is held — is
+ * now the next two sections.
  */
-function TranscriptionSection() {
+function TrainingSection() {
   return (
-    <section id="vocabulary" aria-labelledby="transcription-heading" className="space-y-4 py-4">
-      <div>
-        <h2
-          id="transcription-heading"
-          className="flex items-center gap-2 text-lg font-semibold"
-        >
-          <SpellCheck className="h-4 w-4 text-muted-foreground" /> Words and speakers
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          What Recallix is told before it listens. Both apply to meetings
-          processed from now on — an existing transcript has to be reprocessed
-          to pick them up.
+    <section aria-labelledby="training-heading" className="space-y-1 pt-6">
+      <h2 id="training-heading" className="flex items-center gap-2 text-lg font-semibold">
+        <Lightbulb className="h-4 w-4 text-muted-foreground" /> Feedback and training
+      </h2>
+      <div className="space-y-2 border-b py-4 text-sm text-muted-foreground">
+        <p>
+          <strong className="text-foreground">
+            Recallix does not train on your meetings.
+          </strong>{" "}
+          Your recordings, transcripts and notes are not used to improve any
+          model, are not reviewed by people here, and are not pooled with anybody
+          else&apos;s.
+        </p>
+        <p>
+          Producing your notes does mean sending the audio to a speech-to-text
+          provider and the transcript to a language model. There is no switch on
+          this section because there is nothing to switch off — a toggle here
+          would imply a use that does not happen.
+        </p>
+        {/* Said here because it changed, and because it is the one part of
+            the path that is not "after you press Save". Somebody reading this
+            page is entitled to know that a meeting is being sent somewhere
+            while it is still happening, not only afterwards. */}
+        <p>
+          <strong className="text-foreground">
+            While you are recording, audio is streamed to that same speech-to-text
+            provider as you speak
+          </strong>{" "}
+          — that is what produces the live text on the recording page. It goes
+          from your browser to the provider directly, so the words appear without
+          waiting for the meeting to end. The recording itself is still
+          transcribed in full afterwards, and that fuller transcript is the one
+          that is kept.
+        </p>
+        <p>
+          How long any of it stays is <a href="#data" className="text-primary underline-offset-2 hover:underline">yours to set below</a>,
+          and you can delete the whole account from the same place.
         </p>
       </div>
-      <VocabularyCard />
-      <KnownSpeakersCard />
     </section>
   );
 }
 
-function SettingRow({
-  icon,
-  title,
-  description,
-  href,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-  href: string;
-}) {
+/**
+ * How long a recording is kept, and how long a meeting is.
+ *
+ * <p>Two dials because "how long do you keep the recording of my voice" and
+ * "how long do you keep the notes" are asked by different people. Everyone who
+ * was in the room can ask the first; only the account holder cares about the
+ * second. "A week for the recording, forever for the notes" is a coherent and
+ * common answer, and one number cannot say it.
+ *
+ * <p><strong>Both dials are sent on every change.</strong> The API reads a null
+ * as "keep forever" rather than "leave this one alone" — the opposite of every
+ * other patch in it — because the two constrain each other and a partial update
+ * from a stale render is how somebody ends up with a rule they did not set.
+ *
+ * <p>The choices that would break that constraint are disabled rather than
+ * offered and refused. The server's message is a good one, but a control that
+ * exists to be clicked and then rejected is a control that wasted a click.
+ */
+function RetentionSection() {
+  const overview = useGetPrivacyOverviewQuery();
+  const [update, { isLoading }] = useUpdateRetentionMutation();
+  const policy = overview.data?.retention;
+
+  async function choose(which: "audio" | "meeting", days: number | null) {
+    if (!policy) return;
+    try {
+      await update({
+        audioDays: which === "audio" ? days : policy.audioDays,
+        meetingDays: which === "meeting" ? days : policy.meetingDays,
+      }).unwrap();
+      toast.success("Saved.");
+    } catch (err) {
+      toast.error(settingsError(err));
+    }
+  }
+
   return (
-    <Link href={href} className="block border-b py-4 transition-colors hover:bg-accent/40">
-      <Row
-        icon={icon}
-        title={title}
-        description={description}
-        bare
-        action={<ChevronRight className="h-4 w-4 text-muted-foreground" />}
-      />
-    </Link>
+    <section id="data" aria-labelledby="retention-heading" className="space-y-1 pt-6">
+      <h2 id="retention-heading" className="flex items-center gap-2 text-lg font-semibold">
+        <Clock className="h-4 w-4 text-muted-foreground" /> How long things are kept
+      </h2>
+      <p className="pb-2 text-sm text-muted-foreground">
+        Nothing is deleted on a schedule until you choose one here. Both start at
+        Never.
+      </p>
+
+      <div className="space-y-6 border-b py-4">
+        {overview.isLoading || !policy ? (
+          <p className="text-sm text-muted-foreground">
+            {overview.isLoading
+              ? "Loading your policy…"
+              : "Couldn't load your retention policy. Reload the page to try again."}
+          </p>
+        ) : (
+          <>
+            <Dial
+              label="Delete the recording"
+              hint="The audio goes. The transcript, summary and action items stay."
+              value={policy.audioDays}
+              disabled={isLoading}
+              // Refused by the server, because a recording rule that the meeting
+              // rule deletes out from under is a rule that never runs.
+              blocked={(days) =>
+                policy.meetingDays !== null && days !== null && days > policy.meetingDays
+                  ? "Longer than the whole meeting is kept."
+                  : null
+              }
+              onChoose={(days) => void choose("audio", days)}
+              dueNow={policy.recordingsDueNow}
+              dueNoun="recording"
+            />
+            <Dial
+              label="Delete the whole meeting"
+              hint="Everything about it: the recording, the transcript, the notes and its action items."
+              value={policy.meetingDays}
+              disabled={isLoading}
+              blocked={(days) =>
+                policy.audioDays !== null && days !== null && days < policy.audioDays
+                  ? "Shorter than the recording is kept."
+                  : null
+              }
+              onChoose={(days) => void choose("meeting", days)}
+              dueNow={policy.meetingsDueNow}
+              dueNoun="meeting"
+            />
+            <p className="text-xs text-muted-foreground">
+              Age is counted from when a meeting was created, not from when you
+              last opened it — otherwise the recording of a sensitive
+              conversation survives longest precisely because people keep going
+              back to it. Recallix checks once a day and tells you what it took.
+              Deletion is immediate and cannot be undone.
+            </p>
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * One retention window, as three buttons.
+ *
+ * <p>Buttons rather than a select. There are three options and the current one
+ * is the answer to a question somebody is uneasy about — it should be readable
+ * without opening anything.
+ */
+function Dial({
+  label,
+  hint,
+  value,
+  disabled,
+  blocked,
+  onChoose,
+  dueNow,
+  dueNoun,
+}: {
+  label: string;
+  hint: string;
+  value: number | null;
+  disabled: boolean;
+  blocked: (days: number | null) => string | null;
+  onChoose: (days: number | null) => void;
+  dueNow: number;
+  dueNoun: string;
+}) {
+  const offList = !RETENTION_CHOICES.some((c) => c.days === value);
+
+  return (
+    <div>
+      <p className="text-sm font-medium">{label}</p>
+      <p className="mb-2 text-xs text-muted-foreground">{hint}</p>
+      <div className="flex flex-wrap gap-2">
+        {RETENTION_CHOICES.map((choice) => {
+          const reason = blocked(choice.days);
+          const off = disabled || reason !== null;
+          return (
+            <button
+              key={String(choice.days)}
+              type="button"
+              disabled={off}
+              title={reason ?? undefined}
+              aria-pressed={value === choice.days}
+              onClick={() => onChoose(choice.days)}
+              className={cn(
+                "rounded-full border px-3 py-1 text-xs transition-colors",
+                value === choice.days
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "hover:bg-accent",
+                off && "cursor-not-allowed opacity-50",
+              )}
+            >
+              {choice.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* A window set through the API, or left over from a longer list. Named
+          rather than drawn as none of the three, which would read as Never. */}
+      {offList && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Currently {retentionLabel(value).toLowerCase()}, which is not one of
+          these. Choosing one replaces it.
+        </p>
+      )}
+
+      {dueNow > 0 && (
+        <p className="mt-2 flex items-start gap-1.5 text-xs text-amber-500">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          This deletes {dueNow} {dueNoun}
+          {dueNow === 1 ? "" : "s"} you already have, at the next daily pass.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The end of the account.
+ *
+ * <p>Closed rather than hidden behind a support request, and it says the size of
+ * what goes first, because the number is the warning: "deletes 91 meetings" is
+ * read and "this is permanent" is not.
+ *
+ * <p>The phrase is checked here so the button can be disabled and again by the
+ * server so a client that skipped the check cannot delete an account with an
+ * empty body. The point is that it cannot be produced by a stray click.
+ */
+function CloseAccountSection() {
+  const { signOut } = useAuth();
+  const overview = useGetPrivacyOverviewQuery();
+  const [close, { isLoading }] = useCloseAccountMutation();
+  const [typed, setTyped] = React.useState("");
+  const [open, setOpen] = React.useState(false);
+
+  const held = overview.data?.held;
+
+  async function onClose() {
+    try {
+      const result = await close({ confirm: typed }).unwrap();
+      toast.success(
+        `Deleted ${result.meetings} meeting${result.meetings === 1 ? "" : "s"} and ` +
+          `${result.storedObjects} recording${result.storedObjects === 1 ? "" : "s"}.`,
+      );
+      setOpen(false);
+      setTyped("");
+      signOut?.();
+    } catch (err) {
+      toast.error(settingsError(err));
+    }
+  }
+
+  return (
+    <section aria-labelledby="close-heading" className="space-y-1 pt-6">
+      <h2
+        id="close-heading"
+        className="flex items-center gap-2 text-lg font-semibold text-destructive"
+      >
+        <Trash2 className="h-4 w-4" /> Delete this account
+      </h2>
+
+      <div className="space-y-3 border-b py-4">
+        <p className="text-sm text-muted-foreground">
+          {held
+            ? `Deletes ${held.meetings} meeting${held.meetings === 1 ? "" : "s"}, ` +
+              `${held.recordings} recording${held.recordings === 1 ? "" : "s"}, and every `
+            : "Deletes every meeting, every recording, and every "}
+          transcript, summary, action item, note, project and conversation with
+          them.{" "}
+          <strong className="text-foreground">
+            Immediately, and with no way back
+          </strong>{" "}
+          — nothing is held in a bin, so there is nothing anybody could restore.
+          Export anything you want to keep first.
+        </p>
+
+        {open ? (
+          <div className="space-y-3 rounded-md border border-destructive/40 bg-destructive/5 p-3">
+            <label className="block text-sm" htmlFor="confirm-delete">
+              Type <strong>{DELETE_PHRASE}</strong> to confirm.
+            </label>
+            <Input
+              id="confirm-delete"
+              value={typed}
+              autoComplete="off"
+              onChange={(e) => setTyped(e.target.value)}
+              placeholder={DELETE_PHRASE}
+            />
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setOpen(false);
+                  setTyped("");
+                }}
+              >
+                Keep my account
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                disabled={!confirmsDeletion(typed) || isLoading}
+                onClick={() => void onClose()}
+              >
+                {isLoading && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+                Delete everything
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Button variant="destructive" onClick={() => setOpen(true)}>
+            Delete account
+          </Button>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -387,9 +681,9 @@ function Footer() {
         </p>
       )}
       <p>
-        <Link href="/settings/security" className="underline-offset-2 hover:underline">
-          What Recallix holds of yours
-        </Link>
+        <a href="#data" className="underline-offset-2 hover:underline">
+          How long Recallix keeps what is yours
+        </a>
       </p>
     </div>
   );

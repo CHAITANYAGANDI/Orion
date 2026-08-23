@@ -16,15 +16,37 @@
  * policy is a promise made to other people about their voices, and "37 days" is
  * not a promise anybody can hold you to — it is a number somebody typed. Every
  * option here is one a person could say out loud in a meeting.
+ *
+ * Three, where there were six. 90 days, 6 months and a year are all long enough
+ * that nobody who picked one would notice the difference between them and
+ * keeping everything — the decision they actually encode is "eventually", which
+ * is not a promise either. Never, a week and a month are three genuinely
+ * different answers, and a shorter list is a list somebody reads.
+ *
+ * The server still accepts anything from 1 to 3650 days. These are the windows
+ * the interface offers, not the windows the API allows, and a policy set to 90
+ * by an older client keeps working — {@link retentionLabel} names it rather than
+ * pretending it is one of these.
  */
 export const RETENTION_CHOICES: { days: number | null; label: string }[] = [
-  { days: null, label: "Keep" },
-  { days: 7, label: "7 days" },
-  { days: 30, label: "30 days" },
-  { days: 90, label: "90 days" },
-  { days: 180, label: "6 months" },
-  { days: 365, label: "1 year" },
+  { days: null, label: "Never" },
+  { days: 7, label: "After a week" },
+  { days: 30, label: "After a month" },
 ];
+
+/**
+ * What a stored window is called.
+ *
+ * A value that is not on the list — set through the API, or left from a choice
+ * that has since been removed — is named rather than silently drawn as one of
+ * the three, which would be the page claiming a policy the account does not
+ * have.
+ */
+export function retentionLabel(days: number | null): string {
+  const known = RETENTION_CHOICES.find((c) => c.days === days);
+  if (known) return known.label;
+  return `After ${days} days`;
+}
 
 /**
  * What has to be typed to close an account.

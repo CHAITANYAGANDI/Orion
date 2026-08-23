@@ -7,7 +7,7 @@ import org.springframework.jdbc.datasource.lookup.AbstractRoutingDataSource;
  * Chooses which database role a request's connections come from.
  *
  * <p>System work — worker callbacks, the outbox relay, Stripe webhooks, public
- * share links, provisioning during authentication — connects as a role holding
+ * provisioning during authentication — connects as a role holding
  * BYPASSRLS. Everything else connects as a role that does not have it.
  *
  * <p>This is what makes the exemption unforgeable. When it was a session

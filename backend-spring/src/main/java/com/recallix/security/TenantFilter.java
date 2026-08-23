@@ -35,15 +35,17 @@ public class TenantFilter extends OncePerRequestFilter {
      * <ul>
      *   <li>{@code /internal/**} — worker callbacks, keyed by meeting rather
      *       than by user, and already guarded by {@link InternalTokenFilter}.</li>
-     *   <li>{@code /public/**} — share links, where the unguessable token in
-     *       the URL is the only credential.</li>
-     *   <li>the Stripe webhook — called by Stripe, verified by signature.</li>
      * </ul>
+     *
+     * <p>There were three. {@code /public/**} carried the calendar feed and then
+     * share links, where an unguessable token in the URL was the only
+     * credential; both features are gone (V48, V50) and the prefix is no longer
+     * exempt or even permitted — a path that resolves without a session should
+     * exist because something serves it, not because something used to. The
+     * Stripe webhook went with billing in V49.
      */
     private static boolean isSystemPath(String path) {
-        return path.startsWith("/internal/")
-                || path.startsWith("/public/")
-                || path.equals("/api/v1/billing/webhook");
+        return path.startsWith("/internal/");
     }
 
     @Override

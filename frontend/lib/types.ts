@@ -309,38 +309,6 @@ export interface SpeakerRematch {
   segmentIds?: string[];
 }
 
-export type VocabularyCategory = "KEYWORD" | "NAME" | "JARGON" | "ACRONYM";
-
-/**
- * A transcription boosting hint. Sent with the transcription job, so it applies
- * to meetings processed after it is added — an existing transcript has to be
- * reprocessed to benefit from it.
- */
-export interface VocabularyTerm {
-  id: string;
-  term: string;
-  category: VocabularyCategory;
-  /** What an acronym stands for. Empty for every other category. */
-  expansion: string;
-  active: boolean;
-  createdAt: string;
-}
-
-export interface VocabularyTermInput {
-  term: string;
-  category: VocabularyCategory;
-  expansion?: string;
-  active?: boolean;
-}
-
-/** A name this user has applied to a speaker before, offered when renaming. */
-export interface KnownSpeaker {
-  id: string;
-  displayName: string;
-  timesUsed: number;
-  lastUsedAt: string;
-}
-
 /** A heading with its bullets — the repeating unit of an `outline` section. */
 export interface OutlineGroup {
   heading: string;
@@ -1112,23 +1080,6 @@ export interface StorageFacts {
   rowLevelSecurity: boolean;
 }
 
-/** One live share link, seen from the privacy page rather than from its meeting. */
-export interface LiveLink {
-  id: string;
-  meetingId: string;
-  meetingTitle: string;
-  url: string;
-  label: string;
-  /** What it reveals, already collapsed into words a person can read. */
-  reveals: string[];
-  moment: boolean;
-  passwordProtected: boolean;
-  expiresAt: string | null;
-  viewCount: number;
-  lastViewedAt: string | null;
-  createdAt: string;
-}
-
 /**
  * How the caller signed in.
  *
@@ -1149,7 +1100,6 @@ export interface PrivacyOverview {
   retention: RetentionPolicy;
   storage: StorageFacts;
   signIn: SignInFacts;
-  liveLinks: LiveLink[];
 }
 
 /** Both dials every time: null means keep forever, not "leave this one alone". */

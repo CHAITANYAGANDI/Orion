@@ -1,10 +1,16 @@
 """What the transcriber is about to hear, in the words it accepts.
 
-Speech models guess. Given "sprint review", "pgvector" and three participant
-names beforehand, they guess differently — and the words a meeting app gets
-wrong are exactly the ones a generic language model has never seen: product
-names, colleagues, acronyms, the client. Recallix already knows all of them at
-the moment it queues a job and, before this module existed, sent none of them.
+Speech models guess. Given "sprint review" and the name of the project
+beforehand, they guess differently — and the words a meeting app gets wrong
+are exactly the ones a generic language model has never seen: product names,
+acronyms, the client. Recallix already knows some of them at the moment it
+queues a job and, before this module existed, sent none of them.
+
+This module once had two more sources: the account's custom vocabulary and its
+known speakers. Both features were removed, and with them the only inputs that
+named people or jargon. What is left is the meeting's own title, project and
+type, which is enough for the prose prompt and close to nothing for keyterms
+— see :func:`build_keyterms`.
 
 Two channels, because AssemblyAI has two and they do different jobs:
 
@@ -57,18 +63,17 @@ class MeetingContext:
     """What Recallix knows about a recording before it has heard it.
 
     Every field is optional and every one is routinely absent — an imported
-    file has no participants, a quick recording has no project. The builder is
-    written so that the empty case produces no prompt at all rather than a
-    sentence made of commas.
+    file has no project, a quick recording has no title. The builder is written
+    so that the empty case produces no prompt at all rather than a sentence made
+    of commas.
     """
 
     title: str | None = None
     project: str | None = None
     #: The summary template's human name — "Engineering sprint review", "1:1".
     meeting_type: str | None = None
-    participants: list[str] = field(default_factory=list)
-    #: Companies, clients, products. Distinct from participants because they
-    #: are phrased differently in the prompt sentence.
+    #: Companies, clients, products. Nothing populates this today: it is the
+    #: last remaining source of keyterms, and the enqueue path sends it empty.
     organisations: list[str] = field(default_factory=list)
 
 
@@ -129,7 +134,7 @@ def _series(items: list[str]) -> str:
     return f"{', '.join(items[:-1])} and {items[-1]}"
 
 
-def build_prompt(context: MeetingContext, vocabulary: list[str] | None = None) -> str | None:
+def build_prompt(context: MeetingContext) -> str | None:
     """One or two sentences of domain, or None when there is nothing to say.
 
     None rather than an empty string: the adapter omits the field entirely, and
@@ -146,16 +151,14 @@ def build_prompt(context: MeetingContext, vocabulary: list[str] | None = None) -
     if project:
         head = f"{head} (project {project})"
 
-    # Terms worth naming in prose. Organisations first — they set the domain —
-    # then the user's own vocabulary, which is where the jargon lives.
-    topics = _dedupe([*context.organisations, *(vocabulary or [])])[:8]
-    people = _dedupe(context.participants)[:8]
+    # Terms worth naming in prose. Organisations are what is left of this: the
+    # user's own vocabulary and the participant list both went with the
+    # features that filled them.
+    topics = _dedupe(context.organisations)[:8]
 
     parts = [f"{head}."]
     if topics:
         parts.append(f"Discussion involves {_series(topics)}.")
-    if people:
-        parts.append(f"Participants include {_series(people)}.")
 
     # Nothing but the bare default means nothing was known. "Meeting." as a
     # prompt is noise with a full stop on it.
@@ -178,8 +181,7 @@ def _dedupe(values: list[str]) -> list[str]:
     """Case-insensitive, first spelling wins, order preserved.
 
     First spelling rather than last because the earlier sources are the more
-    authoritative ones: a participant list beats a vocabulary entry for how a
-    person's name is capitalised.
+    authoritative ones.
     """
     out: list[str] = []
     seen: set[str] = set()
@@ -197,7 +199,6 @@ def _dedupe(values: list[str]) -> list[str]:
 
 def build_keyterms(
     context: MeetingContext,
-    vocabulary: list[str] | None = None,
     *,
     limit: int = KEYTERMS_MAX_UNIVERSAL_3,
 ) -> list[str]:
@@ -205,18 +206,20 @@ def build_keyterms(
 
     Ordered rather than merged arbitrarily, because the limit truncates: when
     there are more terms than the provider accepts, the ones that survive
-    should be the ones a wrong guess is most visible on. A colleague's name
-    spelled wrong is noticed immediately; the ninth acronym is not.
+    should be the ones a wrong guess is most visible on.
 
     Terms too long for the provider are **dropped rather than truncated**. Half
     a phrase is a different phrase, and biasing the model toward it is worse
     than not biasing it at all.
+
+    **This returns nothing today, and that is honest rather than broken.** Its
+    two real sources were the account's custom vocabulary and its known
+    speakers; both features are gone. ``organisations`` remains as the input a
+    future feature would fill, and the enqueue path sends it empty — so the
+    adapters below send no boosting field at all, which is what they already did
+    for every account that never added a term.
     """
-    ordered = _dedupe([
-        *context.participants,
-        *context.organisations,
-        *(vocabulary or []),
-    ])
+    ordered = _dedupe(list(context.organisations))
 
     out: list[str] = []
     for term in ordered:
@@ -243,13 +246,9 @@ class TranscriptionContextBuilder:
             raise ValueError("keyterms_limit cannot be negative")
         self._limit = keyterms_limit
 
-    def build(
-        self,
-        context: MeetingContext | None,
-        vocabulary: list[str] | None = None,
-    ) -> TranscriptionContext:
+    def build(self, context: MeetingContext | None) -> TranscriptionContext:
         ctx = context or MeetingContext()
         return TranscriptionContext(
-            prompt=build_prompt(ctx, vocabulary),
-            keyterms=build_keyterms(ctx, vocabulary, limit=self._limit),
+            prompt=build_prompt(ctx),
+            keyterms=build_keyterms(ctx, limit=self._limit),
         )

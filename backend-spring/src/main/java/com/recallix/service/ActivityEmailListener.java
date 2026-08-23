@@ -16,7 +16,7 @@ import java.time.ZoneOffset;
  * Runs the activity emails off the request thread.
  *
  * <p>Its own bean for the same three reasons as {@link RecapEmailListener} and
- * {@link ShareViewListener}. {@code @Async} means the work happens outside the
+ * {@code @Async} means the work happens outside the
  * publishing transaction, so {@link ActivityEmailService} has to be reached
  * through its Spring proxy for {@code @Transactional} to take effect at all —
  * a self-call would silently write the daily stamp outside any transaction.

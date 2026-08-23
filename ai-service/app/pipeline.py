@@ -79,13 +79,12 @@ class Pipeline:
         self,
         audio: bytes,
         filename: str,
-        vocabulary: list[str] | None = None,
         language: str | None = None,
         *,
         request=None,
     ) -> TranscriptResponse:
         return await self._transcription.transcribe(
-            audio, filename, vocabulary, language, request=request
+            audio, filename, language, request=request
         )
 
     async def summarize(
@@ -133,7 +132,6 @@ class Pipeline:
         progress_hook: ProgressHook | None = None,
         transcript_hook: TranscriptHook | None = None,
         template_slug: str | None = None,
-        vocabulary: list[str] | None = None,
         language: str | None = None,
         *,
         request=None,
@@ -159,7 +157,7 @@ class Pipeline:
         # 1) Transcription
         await emit(TOPIC_TRANSCRIPTION_STARTED, "TRANSCRIBING", 10, "Generating transcript from audio...")
         transcript = await self._transcription.transcribe(
-            audio, filename, vocabulary, language, request=request
+            audio, filename, language, request=request
         )
         # Providers report one language for the whole recording, which is wrong
         # for the meetings people actually notice: half in one language, half in

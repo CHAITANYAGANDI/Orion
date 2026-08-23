@@ -95,8 +95,7 @@ so it takes a fourth upload to see.
 | **In-browser recording — docked bar with live text, survives navigation** | ✅ |
 | Transcription (AssemblyAI · Deepgram · Whisper · mock) | ✅ |
 | **Speaker diarization** (AssemblyAI / Deepgram) | ✅ |
-| Speaker renaming, remembered across meetings | ✅ |
-| **Custom vocabulary — names and jargon the model keeps mishearing** | ✅ |
+| Speaker renaming | ✅ |
 | **Per-meeting spoken language, overriding the account default** | ✅ (no UI) |
 
 ### Reading one meeting
@@ -194,11 +193,12 @@ and did not.
   tests, but they cover response *mapping* — millisecond-to-second conversion,
   speaker-label normalisation — against recorded payloads. No test makes a real
   call to any provider, including OpenAI.
-- **Five capabilities have no interface.** The retention policy runs nightly
-  against whatever is stored, the account export and close-account endpoints
-  work, and the notification mute switches work — all with nothing in the app
-  able to reach them. See the file headers in `security-tab.tsx` and
-  `emails-tab.tsx`.
+- **Two capabilities have no interface.** The seven email switches and the
+  notification mute switches are settable only through `PATCH /preferences`:
+  recap mail, the weekly digest and task reminders still send on whatever is
+  stored, and nothing in the app can turn them off. There were five. Retention
+  and closing the account are now on Account Settings — General, and the
+  account export was removed from the server rather than left unreachable.
 - **Erasure has one grain in the UI, and three on the server.** `DELETE` of a
   meeting's audio and of its transcript both work, and the retention job calls
   them; the ⋯ menu offers only "Delete this meeting". A meeting can still turn

@@ -308,8 +308,10 @@ stored as JSONB, and rows written by the older shape read back with both null.
   alone would be wrong and overlapping timestamp ranges would be the place to
   start.
 - **`speakers_expected` cannot be set for a recording**, only for an import.
-- **Named speaker identification is not wired.** Known-speaker names feed
-  prompting and keyterms; the adapter will pass a provider-returned name
-  through as a label if one ever arrives.
+- **Named speaker identification is not wired.** It never was: known speakers
+  fed prompting and keyterms and were never a voiceprint, and that feature is
+  gone (V51). Speakers are numbered by who spoke first and renamed by hand. The
+  adapter will still pass a provider-returned name through as a label if one
+  ever arrives.
 - **Auto leaves a 30-speaker search space on recordings over ten minutes.** See
   section 7.

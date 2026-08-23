@@ -9,10 +9,12 @@
  * and notifications written months ago still link to the first of them.
  *
  * There were six. Integrations held a calendar feed that no longer exists.
- * Meetings held sharing defaults, a chat window, and vocabulary and known
- * speakers; sharing is gone and the other two moved onto General, which is
- * where the page already advertised them. Emails held seven switches and
- * Security showed sign-in facts and a privacy inventory.
+ * Meetings held sharing defaults, a chat window, and custom vocabulary and
+ * known speakers; sharing and both transcription lists are gone, and the chat
+ * window is now settable only through the API. Emails held seven switches and
+ * Security showed sign-in facts and a privacy inventory — of which the
+ * retention dials and the close-account control are now on General, because
+ * they delete things and a control that deletes things should be reachable.
  *
  * <p>None of the removed URLs is special-cased on the way out. They fall to
  * General like any other unrecognised settings path, which is the behaviour a

@@ -146,10 +146,12 @@ public class SearchRepository {
      * source and, alone, the wrong one: it lists everyone who talked and nobody
      * who was talked about. Search "Priya" in a workspace where Priya owes three
      * commitments and is named in nine sentences, and a speakers-only query
-     * answers "no such person". So the names are the union of who spoke, who
-     * owns a commitment, and the names this user has applied to speakers before
-     * ({@code known_speakers}). All three are people in the workspace; only one
-     * of them has to have attended anything.
+     * answers "no such person". So the names are the union of who spoke and who
+     * owns a commitment; only one of the two has to have attended anything.
+     *
+     * <p>There was a third source, {@code known_speakers}, which held the names
+     * this user had applied to speakers before. That table is gone, and with it
+     * the only names that came from neither a transcript nor a commitment.
      *
      * <p><b>Why three counts.</b> They answer different questions and one merged
      * number would blur them: how much someone spoke, how often anyone said
@@ -185,10 +187,6 @@ public class SearchRepository {
                           JOIN meetings m ON m.id = a.meeting_id
                          WHERE m.user_id = :userId
                 """ + MEETING_FILTER + """
-                        UNION
-                        SELECT k.display_name
-                          FROM known_speakers k
-                         WHERE k.user_id = :userId
                     ) n
                     WHERE name IS NOT NULL
                       AND btrim(name) <> ''

@@ -21,7 +21,7 @@ import java.util.List;
 
 /**
  * Stateless security. Public: landing, actuator, swagger, WS handshake, Stripe
- * webhook, share-link resolution under {@code /public/**} (guarded by an
+ * resolution of internal callbacks (guarded by an
  * unguessable token), and internal callbacks (guarded separately by
  * {@link InternalTokenFilter}).
  * Everything under {@code /api/v1/**} requires an authenticated user resolved by
@@ -56,10 +56,7 @@ public class SecurityConfig {
                                 "/swagger-ui/**", "/swagger-ui.html",
                                 "/v3/api-docs/**", "/v3/api-docs",
                                 "/ws/**",
-                                "/internal/**",
-                                // Share links: the token in the path is the only
-                                // credential, so these resolve without a session.
-                                "/public/**"
+                                "/internal/**"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )

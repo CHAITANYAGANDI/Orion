@@ -147,34 +147,6 @@ def _chunk_lines(lines: list[str]) -> list[list[str]]:
     return chunks
 
 
-def prompt_hint(vocabulary: list[str] | None, limit: int = 200) -> str:
-    """The user's vocabulary as a Whisper decoding prompt.
-
-    Whisper's prompt is capped at 224 tokens and silently truncates past it, so
-    the list is bounded here — a prompt that runs off the end would drop terms
-    without saying so. Kept well under the ceiling because the tail of the list
-    is worth less than a prompt that certainly fits.
-    """
-    if not vocabulary:
-        return ""
-    terms: list[str] = []
-    seen: set[str] = set()
-    for raw in vocabulary:
-        term = str(raw or "").strip()
-        if not term:
-            continue
-        key = term.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        terms.append(term)
-        if len(terms) >= limit:
-            break
-    if not terms:
-        return ""
-    return "Vocabulary used in this recording: " + ", ".join(terms) + "."
-
-
 class OpenAiTranscriptionAdapter(TranscriptionPort):
     """Whisper transcription via the OpenAI SDK."""
 
@@ -190,7 +162,6 @@ class OpenAiTranscriptionAdapter(TranscriptionPort):
         self,
         audio: bytes,
         filename: str,
-        vocabulary: list[str] | None = None,
         language: str | None = None,
         *,
         request=None,  # noqa: ARG002 - accepted for the port, unused here.
@@ -207,14 +178,10 @@ class OpenAiTranscriptionAdapter(TranscriptionPort):
             # it is absent, which is exactly this setting's contract.
             if (language or "").strip():
                 request["language"] = language.strip()
-            # Whisper has no boosting parameter. Its `prompt` is the documented
-            # stand-in: it biases decoding toward the style and spellings it
-            # contains. Comma-separated terms are the shape OpenAI's own
-            # guidance uses for exactly this — getting names and jargon spelled
-            # the way the user spells them.
-            hint = prompt_hint(vocabulary)
-            if hint:
-                request["prompt"] = hint
+            # Whisper has no boosting parameter, and its `prompt` stand-in was
+            # filled from the account's custom vocabulary. That feature is gone,
+            # so no prompt is sent — which is what happened for every account
+            # that never added a term.
             resp: Any = await self._client.audio.transcriptions.create(**request)
             text = getattr(resp, "text", "") or ""
             language = getattr(resp, "language", "en") or "en"

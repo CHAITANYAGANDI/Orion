@@ -35,9 +35,8 @@ import java.time.LocalDate;
  * marking it up is one activity, not fifteen events, and fifteen messages about
  * it is how somebody writes a filter rule and stops reading the sender for good.
  * So each mail carries the day it last went out on the user row and simply does
- * not send again until tomorrow — the same shape as
- * {@code meeting_shares.open_emailed_on}. The first one of the day wins, and it
- * says plainly that it is the only one coming.
+ * not send again until tomorrow. The first one of the day wins, and it says
+ * plainly that it is the only one coming.
  *
  * <p>Every send is stamped only on success, so a mail server that was down for a
  * minute does not cost the day's one message.

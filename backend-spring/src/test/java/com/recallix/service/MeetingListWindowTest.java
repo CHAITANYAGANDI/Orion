@@ -61,8 +61,6 @@ class MeetingListWindowTest {
     @Mock private AuditService audit;
     @Mock private AiClient ai;
     @Mock private SummaryTemplateService templates;
-    @Mock private KnownSpeakerService knownSpeakers;
-    @Mock private VocabularyService vocabulary;
     @Mock private ProjectRepository projects;
     @Mock private MeetingTranslationRepository translations;
     @Mock private NotificationService notifications;
@@ -74,8 +72,7 @@ class MeetingListWindowTest {
     @BeforeEach
     void setUp() {
         service = new MeetingService(meetings, transcripts, segments, summaries,
-                insights, storage, usage, outbox, audit, ai, templates, knownSpeakers,
-                vocabulary, projects, translations, notifications, erasure, users);
+                insights, storage, usage, outbox, audit, ai, templates, projects, translations, notifications, erasure, users);
 
         when(meetings.search(anyString(), any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new org.springframework.data.domain.PageImpl<>(List.<Meeting>of()));

@@ -280,14 +280,12 @@ class MockTranscriptionAdapter(TranscriptionPort):
         self,
         audio: bytes,
         filename: str,
-        vocabulary: list[str] | None = None,
         language: str | None = None,
         *,
         request=None,  # noqa: ARG002 - accepted for the port, unused here.
     ) -> TranscriptResponse:
-        # Vocabulary and language are accepted and ignored: the scripts are
-        # fixed English text, so there is nothing for a boosting hint to change
-        # and nothing a language code could change it into.
+        # Language is accepted and ignored: the scripts are fixed English text,
+        # so there is nothing a language code could change them into.
         script = select_script(filename, audio)
         return TranscriptResponse(
             transcript=script.transcript,

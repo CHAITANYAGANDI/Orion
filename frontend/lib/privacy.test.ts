@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   RETENTION_CHOICES,
+  retentionLabel,
   DELETE_PHRASE,
   confirmsDeletion,
   RECORDING_ANNOUNCEMENT,
@@ -40,17 +41,27 @@ describe("the confirmation phrase", () => {
 
 describe("the retention windows", () => {
   it("offers keeping forever first, which is the default and the safe answer", () => {
-    expect(RETENTION_CHOICES[0]).toEqual({ days: null, label: "Keep" });
+    expect(RETENTION_CHOICES[0]).toEqual({ days: null, label: "Never" });
   });
 
-  it("offers only windows a person could say out loud", () => {
-    expect(RETENTION_CHOICES.map((c) => c.days)).toEqual([null, 7, 30, 90, 180, 365]);
+  it("offers three genuinely different answers and no fourth", () => {
+    // 90 days, 6 months and a year were all on this list and all meant
+    // "eventually". Never, a week and a month are decisions.
+    expect(RETENTION_CHOICES.map((c) => c.days)).toEqual([null, 7, 30]);
   });
 
   it("stays inside the range the database will accept", () => {
     const days = RETENTION_CHOICES.map((c) => c.days).filter((d): d is number => d !== null);
     expect(Math.min(...days)).toBeGreaterThanOrEqual(1);
     expect(Math.max(...days)).toBeLessThanOrEqual(3650);
+  });
+
+  it("names a window the interface no longer offers rather than mislabelling it", () => {
+    // The API still takes 1..3650. A policy of 90 days set before this list
+    // shrank has to read as 90 days, not as "After a month".
+    expect(retentionLabel(90)).toBe("After 90 days");
+    expect(retentionLabel(null)).toBe("Never");
+    expect(retentionLabel(7)).toBe("After a week");
   });
 });
 

@@ -32,18 +32,16 @@ class TranscriptionPort(ABC):
         self,
         audio: bytes,
         filename: str,
-        vocabulary: list[str] | None = None,
         language: str | None = None,
         *,
         request: "TranscriptionRequest | Any | None" = None,
     ) -> TranscriptResponse:
         """Transcribe raw audio bytes into text + segments.
 
-        `vocabulary` carries the user's boosting hints — product names, people,
-        jargon, acronyms. They raise the probability of a term being recognised
-        without forcing it, so adding "Kubernetes" makes it more likely to be
-        heard and does not rewrite "coordinates" into it. Adapters whose
-        provider cannot express boosting ignore the argument.
+        There was a `vocabulary` argument here carrying the account's boosting
+        hints. Custom vocabulary was removed from the product, so nothing could
+        fill it; the parameter went with it rather than being threaded through
+        four adapters as a permanent None.
 
         `language` is the ISO-639-1 code the user says their meetings are held
         in. None means detect, which is right for a multilingual user and wrong
@@ -58,9 +56,9 @@ class TranscriptionPort(ABC):
         caller, adapter and test is unaffected — an adapter that ignores it
         behaves exactly as it did.
 
-        It **supersedes** `vocabulary` and `language` rather than duplicating
-        them; both are still accepted positionally because three adapters and
-        a dozen tests pass them that way.
+        It **supersedes** `language` rather than duplicating it; `language` is
+        still accepted positionally because three adapters and a dozen tests
+        pass it that way.
 
         Both are optional with defaults so existing callers and tests are
         unaffected.

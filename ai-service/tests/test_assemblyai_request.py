@@ -80,8 +80,15 @@ def test_the_deployment_default_is_used_when_the_account_says_nothing():
 
 
 # --- keyterms vs word_boost -------------------------------------------------- #
+#
+# The terms themselves used to come from the account's custom vocabulary. That
+# feature is gone, so `organisations` is the only remaining source and nothing
+# fills it on the enqueue path -- which makes "no boosting field at all" the
+# ordinary case rather than the empty one. Both channels are still exercised
+# here because which one is sent is a fact about the model, not about us, and
+# sending the wrong one fails silently.
 def test_universal_3_gets_keyterms_and_never_the_superseded_parameter():
-    body = build_request(URL, U3, _request(vocabulary=["pgvector"]))
+    body = build_request(URL, U3, _request(context=MeetingContext(organisations=["pgvector"])))
     assert body["keyterms_prompt"] == ["pgvector"]
     assert "word_boost" not in body
     assert "boost_param" not in body
@@ -90,13 +97,15 @@ def test_universal_3_gets_keyterms_and_never_the_superseded_parameter():
 def test_universal_2_alone_still_gets_word_boost():
     """Not because keyterms would be rejected -- the older model simply has the
     older channel, and the fallback exists for languages the primary cannot do."""
-    body = build_request(URL, U2_ONLY, _request(vocabulary=["pgvector"]))
+    body = build_request(
+        URL, U2_ONLY, _request(context=MeetingContext(organisations=["pgvector"]))
+    )
     assert body["word_boost"] == ["pgvector"]
     assert body["boost_param"] == "high"
     assert "keyterms_prompt" not in body
 
 
-def test_no_vocabulary_and_no_context_sends_no_boosting_field_at_all():
+def test_no_context_sends_no_boosting_field_at_all():
     body = build_request(URL, U3, _request())
     assert "keyterms_prompt" not in body
     assert "word_boost" not in body
@@ -112,11 +121,11 @@ def test_the_keyterm_ceiling_follows_the_weakest_model_in_the_chain():
 
 
 def test_the_terms_actually_sent_respect_that_ceiling():
-    many = [f"term{i}" for i in range(2000)]
-    body = build_request(URL, U3_ONLY, _request(vocabulary=many))
+    many = MeetingContext(organisations=[f"term{i}" for i in range(2000)])
+    body = build_request(URL, U3_ONLY, _request(context=many))
     assert len(body["keyterms_prompt"]) == KEYTERMS_MAX_UNIVERSAL_3
 
-    body = build_request(URL, U2_ONLY, _request(vocabulary=many))
+    body = build_request(URL, U2_ONLY, _request(context=many))
     assert len(body["word_boost"]) == KEYTERMS_MAX_UNIVERSAL_2
 
 
@@ -208,11 +217,10 @@ def test_multichannel_is_off_unless_asked_for():
 def test_the_event_shape_maps_onto_the_request():
     request = TranscriptionRequest.from_event(
         language="en",
-        vocabulary=["pgvector"],
         context=MeetingContextSchema(
             title="Sprint review", project="Recallix",
             meeting_type="Engineering sprint review",
-            participants=["Sarah"], organisations=["Acme"],
+            organisations=["Acme"],
         ),
         speakers=SpeakerExpectation(mode="range", minimum=2, maximum=3),
         multichannel=False,
@@ -220,7 +228,7 @@ def test_the_event_shape_maps_onto_the_request():
     )
     body = build_request(request.audio_url or "", U3, request)
     assert body["language_code"] == "en"
-    assert body["keyterms_prompt"][0] == "Sarah"
+    assert body["keyterms_prompt"] == ["Acme"]
     assert "Recallix" in body["prompt"]
     assert body["speaker_options"]["max_speakers_expected"] == 3
 
@@ -228,7 +236,7 @@ def test_the_event_shape_maps_onto_the_request():
 def test_an_event_with_no_context_at_all_still_builds():
     """Events published before these fields existed still have to process."""
     request = TranscriptionRequest.from_event(
-        language=None, vocabulary=None, context=None, speakers=None,
+        language=None, context=None, speakers=None,
     )
     body = build_request(URL, U3, request)
     assert body["language_detection"] is True
@@ -314,9 +322,12 @@ async def test_without_a_url_the_bytes_are_uploaded_as_before():
 
 
 @pytest.mark.asyncio
-async def test_positional_vocabulary_still_reaches_the_provider():
+async def test_a_positional_language_still_reaches_the_provider():
     """Three adapters and a dozen tests pass it positionally. It must not be
-    dropped in favour of an empty field on a default-constructed request."""
+    dropped in favour of an empty field on a default-constructed request.
+
+    There was a `vocabulary` argument beside it, asserted here for the same
+    reason. Custom vocabulary was removed, and so was the parameter."""
     bodies: list[dict] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -328,8 +339,7 @@ async def test_positional_vocabulary_still_reaches_the_provider():
             return httpx.Response(200, json={"id": "job_1"})
         return httpx.Response(200, json={"status": "completed", "text": "Hi."})
 
-    await _adapter(handler).transcribe(b"audio", "a.webm", ["pgvector"], "de")
-    assert bodies[0]["keyterms_prompt"] == ["pgvector"]
+    await _adapter(handler).transcribe(b"audio", "a.webm", "de")
     assert bodies[0]["language_code"] == "de"
 
 

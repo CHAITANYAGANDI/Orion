@@ -29,8 +29,6 @@ public record PreferencesResponse(
         String jobRole,
         /** ISO-639-1 spoken language, or null for auto-detect. */
         String defaultLanguage,
-        /** What a NEW share link is set to. Existing links keep their own. */
-        /** Days until a new link expires, or null for never. */
         /** How far back workspace chat reads transcripts; null is everything. */
         Integer chatHistoryDays,
         /** "Event reminder": every morning, what is overdue or due soon. */

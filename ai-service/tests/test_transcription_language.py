@@ -55,7 +55,7 @@ class _RecordingTranscriber:
     def __init__(self) -> None:
         self.language: str | None = "not called"
 
-    async def transcribe(self, audio, filename, vocabulary=None, language=None, **_):
+    async def transcribe(self, audio, filename, language=None, **_):
         self.language = language
         return TranscriptResponse(transcript="Acordamos usar S3.", language="es", segments=[])
 
@@ -65,7 +65,7 @@ async def test_the_pipeline_hands_the_language_to_the_provider():
     transcriber = _RecordingTranscriber()
     pipeline = Pipeline(transcriber, MockLlmAdapter())
 
-    await pipeline.process("mtg_1", b"audio", "call.wav", None, None, None, None, "es")
+    await pipeline.process("mtg_1", b"audio", "call.wav", None, None, None, "es")
 
     assert transcriber.language == "es"
 

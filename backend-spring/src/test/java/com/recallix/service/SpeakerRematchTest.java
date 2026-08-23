@@ -62,8 +62,6 @@ class SpeakerRematchTest {
     @Mock private AuditService audit;
     @Mock private AiClient ai;
     @Mock private SummaryTemplateService templates;
-    @Mock private KnownSpeakerService knownSpeakers;
-    @Mock private VocabularyService vocabulary;
 
     @Mock private ProjectRepository projects;
     @Mock private MeetingTranslationRepository translations;
@@ -80,8 +78,7 @@ class SpeakerRematchTest {
     @BeforeEach
     void setUp() {
         service = new MeetingService(meetings, transcripts, segments, summaries,
-                insights, storage, usage, outbox, audit, ai, templates,
-                knownSpeakers, vocabulary, projects, translations, notifications, erasure, userService);
+                insights, storage, usage, outbox, audit, ai, templates, projects, translations, notifications, erasure, userService);
 
         Meeting meeting = new Meeting();
         meeting.setId(MEETING);
@@ -206,15 +203,6 @@ class SpeakerRematchTest {
                 new SpeakerRematchRequest(null, "Speaker 2", List.of("seg_2")));
 
         verify(ai, never()).reindex(anyString(), anyString(), anyString(), any());
-    }
-
-    @Test
-    @DisplayName("the applied name is remembered for future renames")
-    void the_target_name_is_remembered() {
-        service.rematchSpeaker(USER, MEETING,
-                new SpeakerRematchRequest("Speaker 3", "Priya", null));
-
-        verify(knownSpeakers).remember(USER, List.of("Priya"));
     }
 
     private static TranscriptSegment segment(String id, String speaker, String text,

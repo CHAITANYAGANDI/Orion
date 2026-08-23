@@ -32,7 +32,6 @@ public record PreferencesUpdateRequest(
         @Size(max = 8, message = "That is not a language code")
         String defaultLanguage,
 
-        /** Defaults for new share links; each one is left alone when omitted. */
         /**
          * Days until a new link expires. The same bound as the per-link field,
          * so a default cannot be set that creating a link would then refuse.
@@ -67,7 +66,6 @@ public record PreferencesUpdateRequest(
         Boolean emailsEnabled,
         /** Recap for imported meetings; {@code autoEmailRecap} covers recorded ones. */
         Boolean recapForImports,
-        /** "Conversation shared": email the owner when a published link is opened. */
 
         /** "Comments": email when a comment lands on an action item (V43). */
         Boolean commentEmail,

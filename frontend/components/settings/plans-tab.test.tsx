@@ -139,9 +139,12 @@ describe("PlansTab, what it does and does not do", () => {
   it("quotes the limits the server actually enforces", () => {
     render(<PlansTab />);
 
-    expect(screen.getByText(/Up to 500 names/i)).toBeInTheDocument();
+    // There was a third: 500 custom vocabulary terms, from
+    // `VocabularyService.MAX_TERMS_PER_USER`. That feature is gone, and a
+    // plans page is the last place a withdrawn limit should still be quoted.
     expect(screen.getByText("Up to 200.")).toBeInTheDocument();
     expect(screen.getByText(/Up to 2,000 on a single meeting/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Up to 500 names/i)).toBeNull();
   });
 
   it("warns that nothing joins your calls", () => {

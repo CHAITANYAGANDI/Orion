@@ -18,7 +18,7 @@ import java.util.Map;
  *       request, and row-level security applies to it.</li>
  *   <li><b>system</b> — {@code recallix_sys}, BYPASSRLS. Serves only the paths
  *       with no user behind them: worker callbacks, the outbox relay, Stripe
- *       webhooks, public share links, and user provisioning.</li>
+ *       and user provisioning.</li>
  * </ul>
  *
  * <p>Splitting by role rather than by a session setting is the whole point. A

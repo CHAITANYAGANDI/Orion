@@ -122,7 +122,6 @@ class TranscriptionRequest:
     """
 
     language: str | None = None
-    vocabulary: list[str] = field(default_factory=list)
     context: MeetingContext | None = None
     speakers: SpeakerExpectation = field(default_factory=SpeakerExpectation)
     #: Only when the channels are known to be one speaker each.
@@ -136,7 +135,6 @@ class TranscriptionRequest:
         cls,
         *,
         language: str | None,
-        vocabulary: list[str] | None,
         context: MeetingContextSchema | None,
         speakers: SpeakerExpectation | None,
         multichannel: bool = False,
@@ -144,12 +142,10 @@ class TranscriptionRequest:
     ) -> "TranscriptionRequest":
         return cls(
             language=language,
-            vocabulary=list(vocabulary or []),
             context=MeetingContext(
                 title=context.title if context else None,
                 project=context.project if context else None,
                 meeting_type=context.meeting_type if context else None,
-                participants=list(context.participants) if context else [],
                 organisations=list(context.organisations) if context else [],
             ) if context else None,
             speakers=(speakers or SpeakerExpectation()).normalised(),
@@ -221,7 +217,7 @@ def build_request(
         body["language_detection"] = True
 
     builder = TranscriptionContextBuilder(keyterms_limit=keyterms_limit_for(models))
-    context = builder.build(request.context, request.vocabulary)
+    context = builder.build(request.context)
 
     if context.keyterms:
         if _uses_keyterms(models):
@@ -297,19 +293,14 @@ class AssemblyAiTranscriptionAdapter(TranscriptionPort):
         self,
         audio: bytes,
         filename: str,
-        vocabulary: list[str] | None = None,
         language: str | None = None,
         *,
         request: TranscriptionRequest | None = None,
     ) -> TranscriptResponse:
-        job = request or TranscriptionRequest(
-            language=language, vocabulary=list(vocabulary or [])
-        )
-        # The positional arguments still win when both are given: they are what
-        # the older call sites pass, and silently preferring an empty field on
-        # a default-constructed request would drop the user's vocabulary.
-        if vocabulary and not job.vocabulary:
-            job = TranscriptionRequest(**{**job.__dict__, "vocabulary": list(vocabulary)})
+        job = request or TranscriptionRequest(language=language)
+        # The positional argument still wins when both are given: it is what the
+        # older call sites pass, and silently preferring an empty field on a
+        # default-constructed request would drop it.
         if language and not job.language:
             job = TranscriptionRequest(**{**job.__dict__, "language": language})
 

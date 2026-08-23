@@ -556,19 +556,20 @@ class SpeakerExpectation(CamelModel):
 class MeetingContext(CamelModel):
     """What Recallix knows about a recording before transcribing it.
 
-    Carried on the event rather than looked up by the worker, for the same
-    reason the vocabulary is: the worker has no user context, and pinning the
-    values at enqueue keeps a rename mid-run from changing a transcript
-    halfway through.
+    Carried on the event rather than looked up by the worker: the worker has
+    no user context, and pinning the values at enqueue keeps a rename mid-run
+    from changing a transcript halfway through.
+
+    There was a ``participants`` list here, filled from the account's known
+    speakers and used for prompting and keyterms. Known speakers were removed
+    from the product, so nothing fills it and it is gone rather than sent empty
+    forever.
     """
 
     title: str | None = None
     project: str | None = None
     #: The summary template's human name, not its slug.
     meeting_type: str | None = None
-    #: People expected to be heard. Used for prompting and keyterms; never
-    #: used to infer how many speakers there are — see SpeakerExpectation.
-    participants: list[str] = []
     organisations: list[str] = []
 
 
@@ -585,16 +586,15 @@ class MeetingUploadedEvent(CamelModel):
     # Which summary shape the user picked. None means General, so an event
     # published before this field existed still processes.
     summary_template: str | None = None
-    # The user's transcription boosting hints, resolved by Spring when the job
-    # was queued. Sent with the event rather than fetched here: the worker runs
-    # without a user context, and pinning the list at enqueue time keeps a term
-    # added mid-run from changing a transcript halfway through. Defaults empty
-    # so events published before this field existed still validate.
-    vocabulary: list[str] = []
     # ISO-639-1 code the user says their meetings are held in, resolved by
-    # Spring at enqueue for the same reason as the vocabulary: the worker has
-    # no user context to read it in. None or empty means detect, which is what
-    # every job did before the setting existed.
+    # Spring at enqueue: the worker has no user context to read it in. None or
+    # empty means detect, which is what every job did before the setting
+    # existed.
+    #
+    # A `vocabulary` list sat beside this and carried the account's custom
+    # terms as boosting hints. That feature is gone. Events still in the topic
+    # may carry the field; Pydantic ignores what the model does not declare, so
+    # a backlog published before this change still processes.
     language: str | None = None
     # What the recording is about, for transcription prompting. Absent on
     # events published before this field existed, which read as "nothing

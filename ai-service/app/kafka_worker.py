@@ -201,11 +201,8 @@ class KafkaWorker:
         because it was already text — and both are gone: Recallix transcribes
         recordings, and a document was never a meeting anybody attended.
         """
-        # None rather than [] so adapters can distinguish "no hints" from an
-        # empty list without each of them re-checking for falsiness.
-        vocabulary = event.vocabulary or None
-        # Same shape as the vocabulary: None means "no preference", which is
-        # what the adapters read as detect-the-language.
+        # None means "no preference", which is what the adapters read as
+        # detect-the-language.
         language = (event.language or "").strip() or None
 
         # Meetings imported before those sources were withdrawn are still in
@@ -237,7 +234,6 @@ class KafkaWorker:
         def build(url: str | None) -> TranscriptionRequest:
             return TranscriptionRequest.from_event(
                 language=language,
-                vocabulary=vocabulary,
                 context=event.context,
                 speakers=event.speakers,
                 multichannel=event.multichannel,
@@ -247,7 +243,7 @@ class KafkaWorker:
         try:
             return await self._pipeline.process(
                 event.meeting_id, audio, filename, progress_hook, transcript_hook,
-                event.summary_template, vocabulary, language, request=build(direct),
+                event.summary_template, language, request=build(direct),
             )
         except AudioUnreachableError as exc:
             if not direct:
@@ -266,7 +262,7 @@ class KafkaWorker:
             )
             return await self._pipeline.process(
                 event.meeting_id, audio, filename, progress_hook, transcript_hook,
-                event.summary_template, vocabulary, language, request=build(None),
+                event.summary_template, language, request=build(None),
             )
 
     async def _handle(self, event: MeetingUploadedEvent) -> None:

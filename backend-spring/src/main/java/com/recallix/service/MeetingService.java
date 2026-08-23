@@ -28,7 +28,6 @@ import com.recallix.repository.MeetingRepository;
 import com.recallix.repository.MeetingSummaryRepository;
 import com.recallix.repository.MeetingTranslationRepository;
 import com.recallix.repository.MeetingTranscriptRepository;
-import com.recallix.dto.KnownSpeakerResponse;
 import com.recallix.repository.ProjectRepository;
 import com.recallix.repository.TranscriptSegmentRepository;
 import org.slf4j.Logger;
@@ -66,8 +65,6 @@ public class MeetingService {
     private final AuditService audit;
     private final AiClient ai;
     private final SummaryTemplateService templates;
-    private final KnownSpeakerService knownSpeakers;
-    private final VocabularyService vocabulary;
     private final NotificationService notifications;
     /** Only to verify a project id a client sent — see {@code createMeeting}. */
     private final ProjectRepository projects;
@@ -88,8 +85,6 @@ public class MeetingService {
                           AuditService audit,
                           AiClient ai,
                           SummaryTemplateService templates,
-                          KnownSpeakerService knownSpeakers,
-                          VocabularyService vocabulary,
                           ProjectRepository projects,
                           MeetingTranslationRepository translations,
                           NotificationService notifications,
@@ -111,8 +106,6 @@ public class MeetingService {
         this.audit = audit;
         this.ai = ai;
         this.templates = templates;
-        this.knownSpeakers = knownSpeakers;
-        this.vocabulary = vocabulary;
     }
 
     // --- upload + create ---------------------------------------------------- //
@@ -241,14 +234,9 @@ public class MeetingService {
         event.put("summaryTemplate", meeting.getSummaryTemplate() == null
                 ? SummaryTemplateService.DEFAULT_SLUG : meeting.getSummaryTemplate());
         // Read at enqueue rather than fetched by the worker: the worker runs as
-        // a system context with no user, and sending the list with the job
-        // keeps that boundary intact. It also pins the vocabulary to what it
-        // was when the job was queued, so a term added mid-run cannot change a
-        // transcript halfway through.
-        event.put("vocabulary", vocabulary.boostTermsFor(meeting.getUserId()));
-        // Same reasoning as the vocabulary, and the same read: the worker has
-        // no user context to look this up in. Blank means auto-detect, which is
-        // what every account did before the setting existed.
+        // a system context with no user, and sending the value with the job
+        // keeps that boundary intact. Blank means auto-detect, which is what
+        // every account did before the setting existed.
         event.put("language", language(meeting));
         // What the recording is about, for transcription prompting -- pinned at
         // enqueue for the same reason, so a rename mid-run cannot change a
@@ -263,21 +251,18 @@ public class MeetingService {
     /**
      * What Recallix already knows about this recording, for the transcriber.
      *
-     * <p>None of this is new information — the title, the project, the shape of
-     * meeting and the names this user has applied to speakers before were all
-     * sitting in the database while every transcription job was submitted
-     * without them. Speech models guess, and they guess differently when told
-     * the domain: "Kafka" over "coffee", a colleague's name over the common
-     * word it sounds like.
+     * <p>None of this is new information — the title, the project and the shape
+     * of meeting were all sitting in the database while every transcription job
+     * was submitted without them. Speech models guess, and they guess
+     * differently when told the domain: "Kafka" over "coffee".
      *
-     * <p>Names come from {@code known_speakers}, which is written by the rename
-     * feature — so it reflects people this user has actually labelled in
-     * meetings rather than an address book that would drift from them. They are
-     * used for prompting and for keyterms, and <em>never</em> to infer how many
-     * speakers there are; see {@link #speakerExpectation}.
+     * <p>It used to carry a participant list too, taken from
+     * {@code known_speakers} and used for prompting and keyterms. That feature
+     * is gone and so is the list; the field stays on the event contract at its
+     * empty default rather than being resent as something it is not.
      *
-     * <p>Never fatal. A profile or a project that cannot be read is not a
-     * reason to refuse to transcribe a recording somebody has already uploaded.
+     * <p>Never fatal. A project that cannot be read is not a reason to refuse to
+     * transcribe a recording somebody has already uploaded.
      */
     private Map<String, Object> transcriptionContext(Meeting meeting) {
         String project = "";
@@ -293,20 +278,6 @@ public class MeetingService {
             }
         }
 
-        List<String> participants = List.of();
-        try {
-            participants = knownSpeakers.list(meeting.getUserId()).stream()
-                    .map(KnownSpeakerResponse::displayName)
-                    .filter(name -> name != null && !name.isBlank())
-                    .distinct()
-                    // Bounded: a heavy user has hundreds of these and a prompt
-                    // listing all of them names nobody in particular.
-                    .limit(24)
-                    .toList();
-        } catch (RuntimeException e) {
-            // Prompting is an accuracy improvement, not a precondition.
-        }
-
         // A LinkedHashMap, not Map.of, and this is not a style preference:
         // Map.of throws on a null value, so a collaborator returning null --
         // which any of these three can, and which a mocked one certainly does
@@ -317,7 +288,6 @@ public class MeetingService {
         context.put("title", blank(meeting.getTitle()));
         context.put("project", blank(project));
         context.put("meetingType", blank(safeTemplateName(meeting)));
-        context.put("participants", participants);
         context.put("organisations", List.of());
         return context;
     }
@@ -552,10 +522,6 @@ public class MeetingService {
         // citing a name the transcript no longer shows anywhere.
         if (changed) {
             reindex(userId, meetingId, segs);
-            // Learned from the rename itself rather than a settings page, so
-            // the suggestion list fills from ordinary use instead of needing to
-            // be seeded by someone first.
-            knownSpeakers.remember(userId, mapping.values());
             // The outline names speakers by design, so it now refers to labels
             // the transcript no longer contains.
             markSummaryStale(meetingId);
@@ -640,7 +606,6 @@ public class MeetingService {
         transcripts.findFirstByMeetingIdOrderByCreatedAtDesc(meetingId)
                 .ifPresent(t -> t.setTranscriptText(joinSegments(segs)));
         reindex(userId, meetingId, segs);
-        knownSpeakers.remember(userId, List.of(target));
         markSummaryStale(meetingId);
         audit.record(userId, "SPEAKER_REMATCHED", "meeting", meetingId);
         return getTranscript(userId, meetingId);
