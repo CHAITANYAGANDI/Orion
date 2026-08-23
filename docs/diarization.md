@@ -297,7 +297,122 @@ stored as JSONB, and rows written by the older shape read back with both null.
 
 ---
 
-## 10. Known limitations
+## 10. When the provider merges two people
+
+Sections 1 and 2 were about Recallix mishandling what the provider said.
+This one is about the provider being wrong, which needs a different answer.
+
+### The report
+
+```
+Speaker 2 (00:22)  "Okay, you have a good day anyway. I'm going home.
+                    All right, Mr. Bob, I'll come see you when I get off.
+                    Just want to give y'all a little update on Mr. Bob..."
+```
+
+Two people. The first sentence ends one person's call; everything after it is
+the other one, starting a new thought.
+
+### Whose bug, measured
+
+The diagnostic in section 8 exists for exactly this question, and the answer was
+unambiguous. The audio was re-submitted to AssemblyAI four ways:
+
+| Request | Result at 22.00-32.26 |
+|---|---|
+| As Recallix sends it today | one utterance, speaker `B` |
+| `speakers_expected: 2` | one utterance, speaker `B` |
+| `speaker_options{min: 2, max: 2}` | one utterance, speaker `B` |
+| `universal-2` instead | one utterance, speaker `B` |
+
+**Every word was labelled `B`** in both the `utterances` array and the top-level
+`words` array. Recallix's parser was faithful; there was nothing in the response
+to recover, and `split_by_speaker` had nothing to split on.
+
+Speaker constraints did not help, and it is worth being clear why: the provider
+had already found exactly two speakers. It was not searching too wide (section
+7) — it put a boundary in the wrong place, which no count can express.
+
+### Why the obvious repairs are wrong
+
+**A pause.** The provider's own word timings put "home." ending at 25.14 and
+"All" starting at 25.14 — a gap of exactly zero. Silence would have missed this
+one, and section 6 rules pause length out anyway. This recording is the reason
+that rule is right rather than merely cautious.
+
+**The text.** "I'm going home." followed by "All right, Mr. Bob" reads like a
+handover to a person and like a continuation to a rule. Every text heuristic
+that gets this case right invents boundaries elsewhere, confidently.
+
+### What it does instead
+
+Since V53 Recallix has a speaker embedding model of its own (see
+[speaker-identification.md](./speaker-identification.md)). `app/rediarize.py`
+uses it to ask one question of each suspiciously long turn: *does the audio
+actually stay with one person?*
+
+Measured on the reported recording, through the real modules:
+
+```
+reference separation cos(A,B) = +0.2711   (the two voices are distinguishable)
+
+the disputed turn, 22.00-32.26, provider says B throughout:
+  22.00-25.14   cos(A)=+0.1271  cos(B)=+0.5625  -> B
+  25.14-32.26   cos(A)=+0.5687  cos(B)=+0.2213  -> A
+  cos(left, right) = +0.0652
+
+blind scan, 0.5s steps, told nothing about the answer:
+  best split at t=25.00        truth = 25.14
+```
+
+The scan has a clean unimodal peak at the right place, and a control turn the
+provider got right (32.26-39.16) scores both halves as the same speaker, so
+nothing is proposed there.
+
+End to end through the pipeline, the same audio now produces:
+
+```
+22.00-25.14  Speaker 2  Okay, you have a good day anyway. I'm going home.
+25.14-32.26  Speaker 1  All right, Mr. Bob, I'll come see you when I get off...
+```
+
+### The rules, and why they are all refusals
+
+A false split is a **new** failure mode, and worse than the bug it repairs: a
+missed boundary leaves two sentences under one name, which a reader can see and
+correct, while an invented boundary puts words in somebody's mouth in a
+transcript that now looks more carefully attributed than it is.
+
+- Only turns of **6 seconds or more** are examined.
+- References come from each speaker's **shortest** turns, capped — the opposite
+  of how a voice profile is built, and deliberately: a two-second turn cannot
+  conceal a ten-second one, so short turns are the *safe* evidence.
+- Both sides of a split must land on **different speakers who are already in the
+  meeting**, each clear of the runner-up by a margin, and the two sides must be
+  dissimilar to each other.
+- **No speaker can be invented.** Only labels the provider already used may be
+  assigned, so canonical numbering, colours, talk-time and voice profiles are
+  untouched by a repair.
+- If the meeting's own speakers are not far enough apart in the embedding space,
+  **nothing is attempted anywhere in that recording** — the model cannot tell
+  these voices apart, so every split would be a coin toss with a confident face.
+- Any failure — no model, no audio, an embedder that throws — leaves the
+  provider's segmentation exactly as it was.
+
+### The two thresholds are tied together
+
+A turn is either short enough to trust as reference audio or long enough to be
+suspected of hiding somebody, and nothing is both. Lowering the examine
+threshold therefore also shrinks the reference pool, and below about six seconds
+a two-person recording of this shape stops having enough safe audio for one of
+its speakers — at which point the feature correctly disables itself rather than
+guessing. That is the floor, and it is why a **4.85-second merged turn later in
+this same recording is left alone**: it is real, it is the same bug, and it is
+below the line where the evidence is good enough to act on.
+
+---
+
+## 11. Known limitations
 
 - **Live and final can disagree mid-meeting.** They are separate mappings by
   design. The final job renumbers from its own chronology and replaces the live
@@ -328,3 +443,8 @@ stored as JSONB, and rows written by the older shape read back with both null.
   still pass a provider-returned name through as a label if one ever arrives.
 - **Auto leaves a 30-speaker search space on recordings over ten minutes.** See
   section 7.
+- **A merged turn shorter than six seconds is not repaired.** Section 10 explains
+  why the floor is where it is: the same threshold that decides what to examine
+  decides what may serve as reference audio, and below it there is not reliably
+  enough safe audio to judge against. The reported recording contains one such
+  turn, at 57.34, and it is left as the provider gave it.

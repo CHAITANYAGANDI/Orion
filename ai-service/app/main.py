@@ -17,6 +17,7 @@ from app.kafka_worker import KafkaWorker
 from app.pipeline import Pipeline
 from app.providers.factory import AiProviderFactory
 from app.rag import RagService
+from app.rediarize import SpeakerRefiner
 from app.routers import ai as ai_router
 from app.schemas import HealthResponse
 from app.speaker_identity import SpeakerIdentityService
@@ -36,7 +37,12 @@ async def lifespan(app: FastAPI):
     transcription = AiProviderFactory.create_transcription(settings)
     llm = AiProviderFactory.create_llm(settings)
     embedder = AiProviderFactory.create_embedding(settings)
-    pipeline = Pipeline(transcription, llm)
+    # Second-guesses the provider's turn boundaries against the audio. Loads
+    # nothing until a meeting actually has a suspiciously long turn in it, and
+    # degrades to "leave the provider's segmentation alone" without the
+    # embedder.
+    refiner = SpeakerRefiner()
+    pipeline = Pipeline(transcription, llm, refiner)
     app.state.pipeline = pipeline
 
     # RAG service (pgvector). Indexes transcripts + answers grounded questions.
@@ -60,10 +66,11 @@ async def lifespan(app: FastAPI):
     app.state.kafka_worker = worker
 
     logger.info(
-        "ai-service started (provider=%s, rag=%s, speaker-id=%s).",
+        "ai-service started (provider=%s, rag=%s, speaker-id=%s, refine=%s).",
         settings.ai_provider,
         rag.enabled,
         "off" if speakers.unavailable_reason() else "ready",
+        "ready" if refiner.available else "off",
     )
     try:
         yield

@@ -240,10 +240,23 @@ class KafkaWorker:
                 audio_url=url,
             )
 
+        # Speaker refinement needs the bytes, and the whole point of `direct` is
+        # that they were never downloaded. A callable rather than a download:
+        # most meetings have no turn long enough to examine, and those pay
+        # nothing.
+        async def load_audio() -> bytes:
+            if audio:
+                return audio
+            fetched, _ = await fetch_audio(
+                self._settings, audio_url=event.audio_url, object_key=event.object_key
+            )
+            return fetched
+
         try:
             return await self._pipeline.process(
                 event.meeting_id, audio, filename, progress_hook, transcript_hook,
                 event.summary_template, language, request=build(direct),
+                audio_loader=load_audio,
             )
         except AudioUnreachableError as exc:
             if not direct:
@@ -263,6 +276,7 @@ class KafkaWorker:
             return await self._pipeline.process(
                 event.meeting_id, audio, filename, progress_hook, transcript_hook,
                 event.summary_template, language, request=build(None),
+                audio_loader=load_audio,
             )
 
     async def _handle(self, event: MeetingUploadedEvent) -> None:

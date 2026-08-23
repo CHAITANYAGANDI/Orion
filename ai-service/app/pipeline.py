@@ -25,6 +25,7 @@ from app.language import annotate_segments
 from app.quotes import anchor_outline, verify_quotes
 from app.suggestions import meeting_material
 from app.providers.ports import LlmPort, TranscriptionPort
+from app.rediarize import SpeakerRefiner
 from app.schemas import (
     DraftEmailRequest,
     DraftEmailResponse,
@@ -50,6 +51,20 @@ TOPIC_SUMMARY_GENERATED = "summary_generated"
 TOPIC_ACTION_ITEMS_EXTRACTED = "action_items_extracted"
 
 
+def _joined(segments) -> str:
+    """The flat transcript, rebuilt from the turns.
+
+    Same shape the adapters produce, and deliberately so: the speaker prefix is
+    read by the summarizer, and a transcript whose prefixes disagree with the
+    segments beside it is worse than either version alone.
+    """
+    return "\n".join(
+        f"{s.speaker}: {s.text}" if s.speaker else s.text
+        for s in segments
+        if s.text and s.text.strip()
+    ).strip()
+
+
 def _duration_of(transcript: TranscriptResponse) -> float | None:
     """How long the recording ran, taken from the last segment that ends.
 
@@ -70,8 +85,10 @@ def _speaker_count_of(transcript: TranscriptResponse) -> int | None:
 class Pipeline:
     """Coordinates the transcription + LLM ports into a MeetingBriefResult."""
 
-    def __init__(self, transcription: TranscriptionPort, llm: LlmPort) -> None:
+    def __init__(self, transcription: TranscriptionPort, llm: LlmPort,
+                 refiner: "SpeakerRefiner | None" = None) -> None:
         self._transcription = transcription
+        self._refiner = refiner
         self._llm = llm
 
     # --- individual stages (used directly by HTTP endpoints) ---------------- #
@@ -135,6 +152,7 @@ class Pipeline:
         language: str | None = None,
         *,
         request=None,
+        audio_loader=None,
     ) -> MeetingBriefResult:
         """Run the full pipeline, emitting stage events through the hook.
 
@@ -142,6 +160,12 @@ class Pipeline:
         the meeting's own context, how many speakers to expect, and a URL the
         provider may fetch the audio from. Optional, so the HTTP endpoints and
         every existing test call this exactly as they did.
+
+        `audio_loader` returns the recording's bytes, and is separate from
+        `audio` because the two are usually not both wanted: when the provider
+        fetches the file itself, `audio` is empty on purpose and nothing here
+        has ever needed it. Speaker refinement does need it, so it is a callable
+        — nothing is downloaded unless there is a turn worth examining.
         """
 
         async def emit(topic: str, status: str, progress: int, message: str) -> None:
@@ -159,6 +183,29 @@ class Pipeline:
         transcript = await self._transcription.transcribe(
             audio, filename, language, request=request
         )
+
+        # Check the provider's turn boundaries against the audio before anything
+        # downstream reads them. A missed boundary is not cosmetic: the summary,
+        # the retrieval passages and the exports all carry the speaker prefix,
+        # so two people merged into one label propagate as a quotation from
+        # somebody who never said it. See app/rediarize.py.
+        #
+        # Before `annotate_segments` because a split creates segments, and every
+        # one of them needs its language decided.
+        if self._refiner is not None:
+            loader = audio_loader
+            if loader is None and audio:
+                async def loader():  # noqa: E306 - the bytes are already here
+                    return audio
+            transcript.segments, refinement = await self._refiner.refine(
+                list(transcript.segments), loader
+            )
+            if refinement.changed:
+                # The flat text carries the speaker prefixes and is what the
+                # summarizer reads, so it has to be rebuilt from the corrected
+                # turns rather than left describing the old ones.
+                transcript.transcript = _joined(transcript.segments) or transcript.transcript
+
         # Providers report one language for the whole recording, which is wrong
         # for the meetings people actually notice: half in one language, half in
         # another. This marks the utterances that differ, leaving the rest None.
