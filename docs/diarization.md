@@ -307,7 +307,14 @@ stored as JSONB, and rows written by the older shape read back with both null.
   preserved; if renaming during a recording is ever added, matching by number
   alone would be wrong and overlapping timestamp ranges would be the place to
   start.
-- **`speakers_expected` cannot be set for a recording**, only for an import.
+- **`speakers_expected` can no longer be set by anybody.** The import dialog was
+  the only control that offered it, and it was removed: the value reaches the
+  provider as a hard constraint, so a wrong guess merges two people into one or
+  splits one across two, and its own help text recommended leaving it on "work
+  it out". A control whose best answer is "do not touch me" is not a control.
+  `expectedSpeakersMin`/`Max` are still accepted by `POST /meetings` and still
+  travel on the event; nothing sends them, so every job now runs on the
+  duration-based defaults in section 7.
 - **Named speaker identification is not wired.** It never was: known speakers
   fed prompting and keyterms and were never a voiceprint, and that feature is
   gone (V51). Speakers are numbered by who spoke first and renamed by hand. The

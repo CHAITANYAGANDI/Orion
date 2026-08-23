@@ -230,95 +230,63 @@ describe("ImportDialog", () => {
   });
 });
 
-describe("ImportDialog transcript language", () => {
-  it("counts the languages the server actually supports", () => {
-    render(<ImportDialog open onOpenChange={vi.fn()} />);
-
-    expect(screen.getByText("3 languages supported")).toBeInTheDocument();
-  });
-
-  it("offers auto-detect first", () => {
-    render(<ImportDialog open onOpenChange={vi.fn()} />);
-
-    expect(screen.getByRole("combobox", { name: /Select transcript language/ })).toHaveValue("");
-    expect(screen.getByRole("option", { name: "Detect automatically" })).toBeInTheDocument();
-  });
-
-  it("saves it as the account default", async () => {
-    render(<ImportDialog open onOpenChange={vi.fn()} />);
-
-    await userEvent.selectOptions(
-      screen.getByRole("combobox", { name: /Select transcript language/ }),
-      "es",
-    );
-
-    await waitFor(() => expect(update).toHaveBeenCalledWith({ defaultLanguage: "es" }));
-  });
-
-  it("says it does not apply to the file in the dropzone", () => {
-    render(<ImportDialog open onOpenChange={vi.fn()} />);
-
-    // The language is resolved at enqueue time from the account, so a picker
-    // that read as per-file would do nothing to the file being dropped.
-    expect(screen.getByText(/not to a file already dropped above/i)).toBeInTheDocument();
-  });
-});
-
 /**
- * Expected speakers.
+ * The two controls this dialog used to carry, and no longer does.
  *
- * These reach AssemblyAI as hard constraints, so the assertions worth having
- * are about restraint: nothing is sent unless a human chose, and the default
- * is the one that constrains nothing.
+ * **A language picker**, which set the *account* default. The language is
+ * resolved once, at enqueue, so it never applied to the file in the dropzone --
+ * the copy had to spend two sentences saying so. A setting that cannot affect
+ * what you are looking at belongs on the settings page, and Account Settings --
+ * General still has it.
+ *
+ * **A speaker count**, offered as a hint and sent to AssemblyAI as a hard
+ * constraint. Tell it two about a four-person call and two people are merged
+ * into one; tell it four about a conversation and one person is split in half.
+ * Its default was "work it out" and its own help text recommended leaving it
+ * there, which is a control whose best answer is "do not touch me".
+ *
+ * Asserted rather than simply deleted, because both are the kind of thing that
+ * comes back: the request must stay minimal, and the dialog must not start
+ * writing to preferences again as a side effect of somebody importing a file.
  */
-describe("how many people are speaking", () => {
-  async function uploadWith(choice?: string) {
+describe("what the dialog no longer asks", () => {
+  it("offers no language picker", () => {
     render(<ImportDialog open onOpenChange={vi.fn()} />);
-    if (choice) {
-      await userEvent.selectOptions(
-        screen.getByLabelText(/How many people are speaking/i), choice);
-    }
+
+    expect(screen.queryByText(/languages supported/i)).toBeNull();
+    expect(screen.queryByRole("combobox", { name: /Select transcript language/ })).toBeNull();
+    expect(screen.queryByText(/not to a file already dropped above/i)).toBeNull();
+  });
+
+  it("offers no speaker count", () => {
+    render(<ImportDialog open onOpenChange={vi.fn()} />);
+
+    expect(screen.queryByLabelText(/How many people are speaking/i)).toBeNull();
+    expect(screen.queryByText(/a wrong answer/i)).toBeNull();
+  });
+
+  it("never writes to preferences, which importing a file has no business doing", async () => {
+    render(<ImportDialog open onOpenChange={vi.fn()} />);
+
+    await userEvent.upload(screen.getByTestId("import-file-input"), anAudioFile());
+    await userEvent.click(screen.getByRole("button", { name: /Upload & process/ }));
+
+    await waitFor(() => expect(createMeeting).toHaveBeenCalled());
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("sends no speaker constraint, so the provider decides", async () => {
+    render(<ImportDialog open onOpenChange={vi.fn()} />);
+
     await userEvent.upload(screen.getByTestId("import-file-input"), anAudioFile());
     await userEvent.click(screen.getByRole("button", { name: /Upload & process/ }));
     await waitFor(() => expect(createMeeting).toHaveBeenCalled());
-    return createMeeting.mock.calls[0][0];
-  }
 
-  it("defaults to letting the provider work it out", () => {
-    render(<ImportDialog open onOpenChange={vi.fn()} />);
-
-    expect(screen.getByLabelText(/How many people are speaking/i)).toHaveValue("auto");
-  });
-
-  it("sends no constraint at all on the default", async () => {
-    const body = await uploadWith();
-
-    // Not `min: null` or `min: 0`. An absent field is what the worker reads as
-    // automatic; a zero would be a constraint of zero speakers.
+    // Absent, not zero. The API still accepts these fields; nothing sends them,
+    // and an absent field is what the worker reads as automatic.
+    const body = createMeeting.mock.calls[0][0];
     expect(body).not.toHaveProperty("expectedSpeakersMin");
     expect(body).not.toHaveProperty("expectedSpeakersMax");
-  });
-
-  it("sends an exact count as a range of one value", async () => {
-    expect(await uploadWith("2")).toMatchObject({
-      expectedSpeakersMin: 2,
-      expectedSpeakersMax: 2,
-    });
-  });
-
-  it("sends a range when the user only knows roughly", async () => {
-    expect(await uploadWith("2-4")).toMatchObject({
-      expectedSpeakersMin: 2,
-      expectedSpeakersMax: 4,
-    });
-  });
-
-  it("warns that a wrong answer is worse than no answer", () => {
-    // The asymmetry is the whole reason "work it out" is the default: too few
-    // merges two people into one, too many splits one person in half.
-    render(<ImportDialog open onOpenChange={vi.fn()} />);
-
-    expect(screen.getByText(/a wrong answer/i)).toBeInTheDocument();
   });
 });
 
