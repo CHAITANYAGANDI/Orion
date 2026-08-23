@@ -17,7 +17,7 @@ import logging
 
 from app.callback import SpringCallbackClient
 from app.config import Settings
-from app.pipeline import TOPIC_TRANSCRIPTION_STARTED, Pipeline
+from app.pipeline import PROGRESS_DONE, TOPIC_TRANSCRIPTION_STARTED, Pipeline
 from app.schemas import (
     MeetingUploadedEvent,
     ProcessingFailedEvent,
@@ -314,7 +314,8 @@ class KafkaWorker:
             if index_task is not None:
                 await index_task
             ready = StatusEvent(
-                meeting_id=meeting_id, status="READY", progress=100, message="Meeting brief ready."
+                meeting_id=meeting_id, status="READY", progress=PROGRESS_DONE,
+                message="Meeting brief ready.",
             )
             await self._callback.post_status(meeting_id, ready)
             logger.info("Finished processing meeting %s.", meeting_id)
@@ -326,5 +327,12 @@ class KafkaWorker:
             await self._emit(TOPIC_PROCESSING_FAILED, meeting_id, failed.model_dump(by_alias=True))
             await self._callback.post_status(
                 meeting_id,
-                StatusEvent(meeting_id=meeting_id, status="FAILED", progress=0, message=str(exc)),
+                # 100, not 0. A failure is where this meeting's progress ends,
+                # and sending 0 asked the bar to rewind to empty and sit there
+                # looking like a job that had not started — next to a card
+                # saying it had failed.
+                StatusEvent(
+                    meeting_id=meeting_id, status="FAILED", progress=PROGRESS_DONE,
+                    message=str(exc),
+                ),
             )

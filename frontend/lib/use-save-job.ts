@@ -36,6 +36,7 @@ import { useAppDispatch } from "@/lib/hooks";
 import { subscribeMeetingStatus } from "@/lib/ws";
 import { putWithProgress, uploadError } from "@/lib/uploads";
 import { statusProgress } from "@/lib/format";
+import { clampToStage } from "@/lib/progress";
 import type { MeetingStatus } from "@/lib/types";
 import type { RecorderResult, UseRecorder } from "@/lib/use-recorder";
 
@@ -119,7 +120,21 @@ export function useSaveJob(recorder: UseRecorder): UseSaveJob {
 
   const observe = React.useCallback(
     (status: MeetingStatus, progress: number, message: string) => {
-      setJob((current) => (current ? { ...current, status, progress, message } : current));
+      setJob((current) =>
+        current
+          ? {
+              ...current,
+              status,
+              // The higher of the two, never simply the newer. The socket and
+              // the poll below answer different questions — an event says how
+              // far into a stage the worker is, a poll only which stage it is
+              // in — so a poll landing between two events would otherwise walk
+              // the number back to the stage floor. See lib/progress.
+              progress: Math.max(current.progress, clampToStage(status, progress)),
+              message,
+            }
+          : current,
+      );
       if (status === "READY") setPhase("done");
       else if (status === "FAILED") setPhase("failed");
     },

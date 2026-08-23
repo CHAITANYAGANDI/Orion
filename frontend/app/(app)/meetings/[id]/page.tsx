@@ -107,6 +107,7 @@ import {
   isTerminal,
   timecode,
 } from "@/lib/format";
+import { useMeetingProgress } from "@/lib/progress";
 import { languageName } from "@/lib/language";
 // Shared with the transcript editor, so reading and correcting agree about
 // where the paragraphs are and the page does not reflow when you switch modes.
@@ -265,6 +266,15 @@ export default function MeetingDetailPage() {
   const ready = status === "READY";
   const failed = status === "FAILED";
   const terminal = isTerminal(status);
+
+  /**
+   * The percentage on the card, from the socket and the poll together.
+   *
+   * <p>Called here rather than beside the card because the card is conditional
+   * and this is not: the number has to keep being computed while the meeting
+   * runs, or every stage it spent hidden would be forgotten. See lib/progress.
+   */
+  const percent = useMeetingProgress(id, status, live?.progress ?? statusProgress(status));
 
   const audio = useAudioController();
 
@@ -518,6 +528,12 @@ export default function MeetingDetailPage() {
     if (!window.confirm(warning)) return;
     try {
       await reprocessMeeting(id).unwrap();
+      // The last event this page heard said READY, and `status` prefers the
+      // socket over the refetched meeting — so leaving it there would keep the
+      // whole page in its finished state, showing the summary about to be
+      // replaced, until the worker's first event arrived minutes later. The
+      // meeting is QUEUED as of this line; forget what it used to be.
+      setLive(null);
       toast.success("Reprocessing started.", {
         description: "The transcript and summary are being rebuilt.",
       });
@@ -811,7 +827,7 @@ export default function MeetingDetailPage() {
       {!terminal && (
         <ProcessingCard
           status={status}
-          progress={live?.progress ?? statusProgress(status)}
+          progress={percent}
           message={live?.message}
           onStop={stoppable ? () => void stopProcessing() : undefined}
           stopping={recordingJob.stopping}

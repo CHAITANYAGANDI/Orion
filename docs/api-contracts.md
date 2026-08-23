@@ -1424,9 +1424,37 @@ capped is minutes and imports.
 
 `StatusEvent`:
 ```jsonc
-{ "meetingId": "mtg_123", "status": "TRANSCRIBING", "progress": 45,
+{ "meetingId": "mtg_123", "status": "TRANSCRIBING", "progress": 5,
   "message": "Generating transcript from audio..." }
 ```
+
+**`progress` is one ladder shared by two codebases, and it has to stay that
+way.** The browser cannot rely on these events alone — a proxy that drops the
+WebSocket would leave the bar frozen over a meeting that finished minutes ago —
+so it also polls the meeting's *status* and converts that to a percentage
+itself. Two sources, one number. When the two disagreed (the worker opened at 10
+while the browser's table read 25 for `QUEUED`) every meeting's bar visibly went
+backwards the moment work began.
+
+So each value below is the **floor** of its status. A stage may report higher as
+it goes; a poll arriving afterwards answers with the floor again, which is why
+the browser also refuses to let the number fall.
+
+| Reported by | Status | `progress` | Constant |
+|---|---|---|---|
+| Spring, on create | `CREATED` / `UPLOADED` / `QUEUED` | 1 / 2 / 3 | `statusProgress` |
+| `transcription_started` | `TRANSCRIBING` | 5 | `PROGRESS_TRANSCRIBING` |
+| `transcription_completed` | `TRANSCRIBING` | 55 | `PROGRESS_TRANSCRIBED` |
+| `summary_generated` | `SUMMARIZING` | 60 | `PROGRESS_SUMMARIZING` |
+| `action_items_extracted` | `EXTRACTING` | 90 | `PROGRESS_EXTRACTING` |
+| final status callback | `READY` / `FAILED` | 100 | `PROGRESS_DONE` |
+
+`FAILED` reports 100, not 0: it is where this meeting's progress ended, and an
+empty bar beside a "Processing failed" card reads as a job that never started.
+
+Definitions live in `ai-service/app/pipeline.py` and `frontend/lib/format.ts`;
+`frontend/lib/progress.ts` enforces the rest, and `progress.test.ts` reads the
+Python constants directly so the two halves cannot drift apart unnoticed.
 
 ---
 

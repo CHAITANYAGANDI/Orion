@@ -67,22 +67,47 @@ export const STATUS_ORDER: MeetingStatus[] = [
   "READY",
 ];
 
+/**
+ * Where a stage *starts*, as a percentage. The floor, not the middle.
+ *
+ * <p><b>These numbers are half of a contract</b> — the other half is
+ * `PROGRESS_*` in ai-service/app/pipeline.py, and the two must agree.
+ *
+ * <p>The worker pushes a percentage over the socket. This converts a polled
+ * status into one. Both feed the same bar, because a dropped socket would
+ * otherwise leave it frozen over a meeting that finished minutes ago. When the
+ * two disagreed — the worker opening at 10 while this table read 25 for QUEUED
+ * — the first event of every meeting sent the bar from 25% *down* to 10%, which
+ * is what a failed retry looks like.
+ *
+ * <p>So a status maps to the lowest percentage that status can honestly mean. A
+ * stage may report higher as it goes (TRANSCRIBING does, once the transcript
+ * lands) and a poll arriving afterwards will answer with the floor again — so
+ * whoever draws this must also refuse to let the number fall. See
+ * lib/progress.ts, which is the only thing that should be reading this.
+ *
+ * <p>The ladder opens at 1 rather than 25. A meeting that was accepted a moment
+ * ago has had essentially nothing done to it, and a bar already a quarter full
+ * promises a wait four times shorter than the one about to happen.
+ */
 export function statusProgress(status: MeetingStatus): number {
   switch (status) {
     case "CREATED":
-      return 5;
+      return 1;
     case "UPLOADED":
-      return 15;
+      return 2;
     case "QUEUED":
-      return 25;
+      return 3;
     case "TRANSCRIBING":
-      return 45;
+      return 5;
     case "SUMMARIZING":
-      return 65;
+      return 60;
     case "EXTRACTING":
-      return 85;
+      return 90;
     case "READY":
       return 100;
+    // Not 0. This is where the meeting's progress ended, and an empty bar
+    // beside a "Processing failed" card reads as a job that never started.
     case "FAILED":
       return 100;
     default:

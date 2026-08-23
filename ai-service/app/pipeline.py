@@ -50,6 +50,29 @@ TOPIC_TRANSCRIPTION_COMPLETED = "transcription_completed"
 TOPIC_SUMMARY_GENERATED = "summary_generated"
 TOPIC_ACTION_ITEMS_EXTRACTED = "action_items_extracted"
 
+# The percentage each stage reports, and one half of a contract.
+#
+# The browser cannot only listen to these. A dropped WebSocket would leave the
+# bar frozen over a meeting that finished minutes ago, so it also polls the
+# meeting's *status* and converts that to a percentage itself. Two sources, one
+# number — which means the two ladders have to be the same ladder.
+#
+# They were not. This module used to send 10/40/60/95 while the browser's status
+# table read 25 for QUEUED, so the first event of every meeting moved the number
+# from 25% down to 10%: a bar that visibly went backwards the moment work
+# actually started.
+#
+# So each value below is the *floor* of its status, and the browser's table
+# holds the same floors. A stage may report a higher number as it progresses
+# (TRANSCRIBING does, twice) and a poll arriving in between simply repeats the
+# floor, which is why the browser also refuses to let the number fall. Change a
+# number here and change it in frontend/lib/format.ts.
+PROGRESS_TRANSCRIBING = 5
+PROGRESS_TRANSCRIBED = 55
+PROGRESS_SUMMARIZING = 60
+PROGRESS_EXTRACTING = 90
+PROGRESS_DONE = 100
+
 
 def _joined(segments) -> str:
     """The flat transcript, rebuilt from the turns.
@@ -179,7 +202,10 @@ class Pipeline:
         started = time.perf_counter()
 
         # 1) Transcription
-        await emit(TOPIC_TRANSCRIPTION_STARTED, "TRANSCRIBING", 10, "Generating transcript from audio...")
+        await emit(
+            TOPIC_TRANSCRIPTION_STARTED, "TRANSCRIBING", PROGRESS_TRANSCRIBING,
+            "Generating transcript from audio...",
+        )
         transcript = await self._transcription.transcribe(
             audio, filename, language, request=request
         )
@@ -211,8 +237,13 @@ class Pipeline:
         # another. This marks the utterances that differ, leaving the rest None.
         annotate_segments(transcript.segments, transcript.language)
         transcribed_at = time.perf_counter()
+        # Still TRANSCRIBING, deliberately: the status has not moved on, but the
+        # long part of it is over. This is the one place a stage reports above
+        # its own floor, and the reason the browser clamps rather than trusts
+        # whichever of the socket and the poll spoke last.
         await emit(
-            TOPIC_TRANSCRIPTION_COMPLETED, "TRANSCRIBING", 40, "Transcript ready; preparing summary..."
+            TOPIC_TRANSCRIPTION_COMPLETED, "TRANSCRIBING", PROGRESS_TRANSCRIBED,
+            "Transcript ready; preparing summary...",
         )
 
         result = await self._analyze(meeting_id, transcript, emit, transcript_hook, template_slug)
@@ -251,7 +282,10 @@ class Pipeline:
             )
 
         started = time.perf_counter()
-        await emit(TOPIC_TRANSCRIPTION_COMPLETED, "TRANSCRIBING", 40, "Document read; preparing summary...")
+        await emit(
+            TOPIC_TRANSCRIPTION_COMPLETED, "TRANSCRIBING", PROGRESS_TRANSCRIBED,
+            "Document read; preparing summary...",
+        )
         transcript = TranscriptResponse(transcript=text, language=language, segments=[])
         result = await self._analyze(meeting_id, transcript, emit, transcript_hook, template_slug)
         logger.info(
@@ -280,7 +314,10 @@ class Pipeline:
         # they run concurrently: cost is the slower call, not the sum.
         # The detected language rides along so the brief comes back in the
         # language the meeting was actually held in.
-        await emit(TOPIC_SUMMARY_GENERATED, "SUMMARIZING", 60, "Summarizing and extracting insights...")
+        await emit(
+            TOPIC_SUMMARY_GENERATED, "SUMMARIZING", PROGRESS_SUMMARIZING,
+            "Summarizing and extracting insights...",
+        )
         text = transcript.transcript
         language = transcript.language or "en"
         # Resolved here rather than passed as a slug so an unknown one falls
@@ -297,7 +334,10 @@ class Pipeline:
             ),
             self._llm.extract_action_items(text, language),
         )
-        await emit(TOPIC_ACTION_ITEMS_EXTRACTED, "EXTRACTING", 95, "Insights extracted; finalizing brief...")
+        await emit(
+            TOPIC_ACTION_ITEMS_EXTRACTED, "EXTRACTING", PROGRESS_EXTRACTING,
+            "Insights extracted; finalizing brief...",
+        )
 
         logger.info(
             "Analysis for %s: %d action item(s).", meeting_id, len(action_items),
