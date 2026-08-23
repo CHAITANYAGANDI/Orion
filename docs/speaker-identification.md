@@ -25,7 +25,10 @@ Meanwhile the menu item labelled "Rematch speakers" did not call any endpoint at
 all. It switched to the Transcript tab, opened the rename form, and scrolled to
 it. The endpoint that *was* called `rematch` — `PATCH /speakers/rematch` — did
 something else again: merge one label into another, or move selected turns.
-Useful, necessary, and not what any other product means by the word.
+Not what any other product means by the word. That capability has since been
+removed outright — the answer to a diarization that came out wrong is now
+**Reprocess meeting**, which re-runs the clustering, rather than asking a reader
+to repair it turn by turn.
 
 So there were three things wearing two names, and the acoustic capability that
 would have justified the third did not exist.
@@ -308,3 +311,11 @@ directly.
   The margin check will refuse both of them for ever, and the manual rename is
   the answer.
 - **The 1.91 GB image.** Stated here rather than discovered at deploy time.
+- **A reprocess resets every name in that meeting.** The transcript is rebuilt
+  from the audio, so the labels go back to *Speaker N*. The profiles survive —
+  they belong to the account — so one press of Rematch puts the names back,
+  which is the main reason reprocessing is a reasonable thing to offer at all.
+  The meeting's cached voiceprints are deliberately dropped at the same time:
+  they are filed under meeting-local speaker keys, a reprocess re-derives those
+  keys by first appearance, and a stale entry would hand the previous occupant's
+  voice to whoever inherits the key.

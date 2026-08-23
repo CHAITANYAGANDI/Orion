@@ -8,7 +8,6 @@ import com.recallix.dto.MeetingUpdateRequest;
 import com.recallix.dto.PageResponse;
 import com.recallix.dto.ReprocessResponse;
 import com.recallix.dto.ResummarizeRequest;
-import com.recallix.dto.SpeakerRematchRequest;
 import com.recallix.dto.SpeakerRematchResponse;
 import com.recallix.dto.SpeakerRenameRequest;
 import com.recallix.dto.SummaryResponse;
@@ -129,27 +128,6 @@ public class MeetingController {
     public TranscriptResponse renameSpeakers(@PathVariable String id,
                                              @Valid @RequestBody SpeakerRenameRequest req) {
         return meetings.renameSpeakers(SecurityUtils.currentUserId(), id, req.mapping());
-    }
-
-    /**
-     * Fix diarization: merge a label that was split across two speakers, or
-     * move individual turns to the person who actually said them.
-     *
-     * <p>Distinct from the rename above, which only changes what a label is
-     * called, and from the rematch below, which is not manual at all. This
-     * endpoint used to live at {@code /speakers/rematch} and was moved, because
-     * that name has to mean the automatic operation — every other product uses
-     * it that way, and a menu item called "Rematch speakers" that opened a pair
-     * of merge dropdowns was answering a question nobody had asked.
-     *
-     * <p>The capability itself is unchanged and still needed: diarization
-     * splitting one person across two labels is a different problem from not
-     * knowing who they are, and no amount of voice matching fixes it.
-     */
-    @PatchMapping("/{id}/speakers/merge")
-    public TranscriptResponse fixDiarization(@PathVariable String id,
-                                             @Valid @RequestBody SpeakerRematchRequest req) {
-        return meetings.fixDiarization(SecurityUtils.currentUserId(), id, req);
     }
 
     /**

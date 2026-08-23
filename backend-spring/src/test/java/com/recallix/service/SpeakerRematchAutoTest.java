@@ -34,6 +34,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -483,43 +484,37 @@ class SpeakerRematchAutoTest {
 
     // ================================================================== //
     @Nested
-    @DisplayName("11. the manual repair still exists")
-    class FixDiarizationStillWorks {
+    @DisplayName("11. reprocessing throws the cached voices away")
+    class Reprocessing {
 
         @Test
-        @DisplayName("merging one label into another still folds every turn across")
-        void mergeStillWorks() {
-            var req = new com.recallix.dto.SpeakerRematchRequest("Speaker 2", "Speaker 1", null);
+        @DisplayName("drops this meeting's voiceprints, because the keys are about to move")
+        void voiceprintsAreInvalidated() {
+            when(storage.presignDownload(anyString())).thenReturn("https://example/audio");
 
-            service.fixDiarization(USER, MEETING, req);
+            service.reprocess(USER, MEETING);
 
-            assertThat(segs).extracting(TranscriptSegment::getSpeaker)
-                    .containsExactly("Speaker 1", "Speaker 1", "Speaker 1");
+            // The audio does not change, but who ends up as spk_1 can: the keys
+            // are re-derived by first appearance, and a re-clustering that
+            // splits an early interjection differently is enough to move them.
+            // A stale cache would hand the previous occupant's voice to the new
+            // one, and the next rematch would confidently name somebody after
+            // a different person.
+            verify(ai).forgetSpeakers(eq(USER), isNull(), eq(MEETING));
         }
 
         @Test
-        @DisplayName("moving individual turns still works")
-        void reassignStillWorks() {
-            var req = new com.recallix.dto.SpeakerRematchRequest(null, "Speaker 1",
-                    List.of("seg_2"));
+        @DisplayName("keeps the named profiles, which belong to the account")
+        void profilesSurvive() {
+            when(storage.presignDownload(anyString())).thenReturn("https://example/audio");
 
-            service.fixDiarization(USER, MEETING, req);
+            service.reprocess(USER, MEETING);
 
-            assertThat(segs.get(1).getSpeaker()).isEqualTo("Speaker 1");
-        }
-
-        @Test
-        @DisplayName("it is a different operation from Rematch and solves a different problem")
-        void theTwoAreNotInterchangeable() {
-            // Rematch cannot fix one person split across two labels: both are
-            // unresolved, and the matcher would have to claim one profile twice
-            // to merge them — which it refuses to do, correctly.
-            aiMatchesNobody(2);
-            assertThat(service.rematchSpeakers(USER, MEETING).matched()).isZero();
-
-            service.fixDiarization(USER, MEETING,
-                    new com.recallix.dto.SpeakerRematchRequest("Speaker 2", "Speaker 1", null));
-            assertThat(segs).extracting(TranscriptSegment::getSpeaker).containsOnly("Speaker 1");
+            // This is what makes a reprocess recoverable rather than merely
+            // destructive: the names are gone from the transcript, and one
+            // rematch can put them back.
+            verify(profiles, never()).deleteByUserId(anyString());
+            verify(ai, never()).forgetSpeakers(eq(USER), isNull(), isNull());
         }
     }
 

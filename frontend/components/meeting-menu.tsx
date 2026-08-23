@@ -43,13 +43,18 @@
  * — their data (the summary, the segments, the erasure timestamps, the language
  * being read in) lives on the page.
  *
- * <p>What is deliberately not here: re-running the transcriber. "Transcribe
- * again" bought the same pipeline over the same audio at the price of every
- * hand correction and every speaker rename anybody had made, one confirm deep
- * in a menu people open to copy a link. POST /meetings/:id/reprocess is
- * untouched and `useReprocessMeetingMutation` is still exported, but nothing in
- * the app calls either — a meeting that failed to process is deleted and
- * uploaded again rather than retried in place.
+ * <p>"Reprocess meeting" re-runs the whole pipeline over the same audio. It was
+ * absent for a long time, under the name "Transcribe again", and the objection
+ * to it was real: it bought the same pipeline over the same audio at the price
+ * of every hand correction and every speaker rename anybody had made, one
+ * confirm deep in a menu people open to copy a link.
+ *
+ * <p>Two things changed. The confirm now says what is lost instead of asking
+ * "are you sure?", and speaker names are no longer among the things that are
+ * lost for good — voice profiles belong to the account rather than the meeting,
+ * so one press of Rematch afterwards puts them back. Hand-typed corrections are
+ * still destroyed, and the confirm says so in those words. It sits beside
+ * Delete rather than beside the copy items, which is where its cost puts it.
  *
  * <p>"Change language" translates. It does not tell the transcriber it heard
  * the wrong language: that was a *different* item with the same name, it
@@ -72,9 +77,9 @@ import {
   Link2,
   Loader2,
   MoreHorizontal,
+  RefreshCw,
   Sparkles,
   Trash2,
-  SplitSquareHorizontal,
   Users,
 } from "lucide-react";
 import {
@@ -143,13 +148,13 @@ export interface MeetingMenuProps {
    */
   onRematchSpeakers: () => void;
   /**
-   * Open the manual repair: merge two labels, or move a turn.
+   * Run the whole pipeline again over the same audio.
    *
-   * A different problem from the one above, which is why both are on the menu.
-   * Rematch answers "who is this?"; this answers "the transcriber split one
-   * person in two". Neither can do the other's job.
+   * Destructive: the transcript is rebuilt, so hand corrections and speaker
+   * names go. The page owns the confirm, because the page knows whether this
+   * meeting has anything worth losing — a failed one has neither.
    */
-  onFixDiarization: () => void;
+  onReprocess: () => void;
   onDelete: () => void;
 
   /**
@@ -161,6 +166,9 @@ export interface MeetingMenuProps {
    * click missed.
    */
   rematching?: boolean;
+
+  /** A reprocess request is in flight. Only until it is queued, not until it finishes. */
+  reprocessing?: boolean;
 
   /** Greys the whole menu while something it started is in flight. */
   busy?: boolean;
@@ -220,12 +228,6 @@ export function MeetingMenu(props: MeetingMenuProps) {
             {props.rematching ? "Rematching speakers…" : "Rematch speakers"}
           </DropdownMenuItem>
           <DropdownMenuItem
-            disabled={!props.hasTranscript || props.working}
-            onSelect={props.onFixDiarization}
-          >
-            <SplitSquareHorizontal /> Fix diarization
-          </DropdownMenuItem>
-          <DropdownMenuItem
             disabled={!props.canTranslate || props.working}
             onSelect={props.onTranslate}
           >
@@ -248,6 +250,20 @@ export function MeetingMenu(props: MeetingMenuProps) {
           </DropdownMenuItem>
 
           <DropdownMenuSeparator />
+
+          {/* Reprocessing sits down here with Delete, and not beside the
+              copy items, because of what it costs rather than what it does:
+              it rebuilds the transcript from the audio, so every hand
+              correction and every speaker name goes. See the note at the top
+              of this file for why it was absent for a while. The page confirms
+              before anything is queued. */}
+          <DropdownMenuItem
+            disabled={props.reprocessing || props.working}
+            onSelect={props.onReprocess}
+          >
+            {props.reprocessing ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+            Reprocess meeting
+          </DropdownMenuItem>
 
           <DropdownMenuItem
             className="text-destructive focus:text-destructive"

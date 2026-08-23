@@ -84,7 +84,6 @@ again in the worker.
 | GET  | `/api/v1/meetings/{id}/action-items` | — | `ActionItemResponse[]` |
 | PATCH | `/api/v1/meetings/{id}/speakers` | `{ "mapping": { "Speaker 1": "Ana" } }` | `TranscriptResponse` |
 | POST | `/api/v1/meetings/{id}/speakers/rematch` | *(no body)* | `SpeakerRematchResponse` |
-| PATCH | `/api/v1/meetings/{id}/speakers/merge` | `{ "fromSpeaker"?, "toSpeaker", "segmentIds"? }` | `TranscriptResponse` |
 | GET | `/api/v1/speakers` | — | `{ "learningEnabled", "profiles": [...] }` |
 | PUT | `/api/v1/speakers/learning` | `{ "enabled" }` | `SpeakerSettingsResponse` |
 | DELETE | `/api/v1/speakers/profiles/{id}` | — | `204` |
@@ -157,12 +156,12 @@ derived from the segments on every read. The percentage is a share of total
 **speaking** time, not of the meeting's wall-clock duration — the two differ
 whenever there is silence, and percentages that do not sum to 100 read as a bug.
 
-### Three different operations on a speaker
+### Two operations on a speaker, and one on the whole meeting
 
-They are easy to confuse and they answer different questions. Two of them used
-to share a name, which is the confusion this section exists to end: `POST
-/speakers/rematch` used to be `PATCH /speakers/rematch` and used to mean the
-manual merge below.
+They are easy to confuse and they answer different questions. There used to be
+a third — `PATCH /speakers/rematch`, which merged one label into another or
+moved selected turns. It is gone, and `POST /speakers/rematch` now means the
+automatic operation, which is what every other product means by the word.
 
 **Rename** — `PATCH /speakers`. "Who is Speaker 2?" Send
 `{"mapping": {"Speaker 2": "Sarah"}}`. The mapping is keyed by display name
@@ -196,23 +195,25 @@ unattributed turn, and never uses the speaker number, the provider's cluster
 letters or anything in the transcript text. See
 [speaker-identification.md](./speaker-identification.md).
 
-**Fix diarization** — `PATCH /speakers/merge`. "The transcriber got the
-boundaries wrong." Takes exactly one of two shapes; sending both is a `400`,
-because the result would depend on which was applied first:
+**Reprocess** — `POST /meetings/{id}/reprocess`, no body, `202`. "The
+transcriber got the boundaries wrong." The answer to a diarization that came out
+badly is now to run the clustering again rather than to ask a reader to repair
+it turn by turn. It replaces the transcript, the segments, the summary and the
+retrieval index from the audio.
 
-- **Merge** — send `fromSpeaker`. Every turn with that label becomes
-  `toSpeaker`. For when one person was split across two labels; renaming both
-  to the same name leaves the turns separate, so the transcript reads as though
-  they interrupt themselves.
-- **Reassign** — send `segmentIds`. Only those turns move. For a handover where
-  two people overlap and the turn landed on the wrong one. An unknown segment id
-  fails the whole batch rather than half-applying it.
+**It is destructive and the client must say so before calling it.** Hand-typed
+corrections are gone. Speaker names are gone from *this meeting* but not from
+the account, so a rematch afterwards can put them back — which is the difference
+between this and the "Transcribe again" that was removed for being a
+one-confirm-deep way to lose an afternoon's corrections.
 
-No amount of voice matching fixes either of these, which is why this did not go
-away when Rematch became automatic — it only stopped being called Rematch.
+It also drops the meeting's cached voiceprints, and that is correctness rather
+than housekeeping: they are filed under meeting-local speaker keys, the
+reprocess re-derives those keys by first appearance, and a stale entry would
+hand the previous occupant's voice to whoever inherits the key.
 
-All three re-index the meeting and rebuild the flat transcript, because each
-carries the speaker prefix and chat and the export read them.
+Both speaker operations re-index the meeting and rebuild the flat transcript,
+because each carries the speaker prefix and chat and the export read them.
 
 ### Voice profiles (V53)
 

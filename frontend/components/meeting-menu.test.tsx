@@ -77,7 +77,7 @@ function menu(over: Partial<React.ComponentProps<typeof MeetingMenu>> = {}) {
     onRegenerateSummary: vi.fn(),
     onTranslate: vi.fn(),
     onRematchSpeakers: vi.fn(),
-    onFixDiarization: vi.fn(),
+    onReprocess: vi.fn(),
     onDelete: vi.fn(),
     ...over,
   };
@@ -106,10 +106,10 @@ describe("MeetingMenu", () => {
       "Copy link",
       "Copy transcript",
       "Rematch speakers",
-      "Fix diarization",
       "Change language",
       "Copy summary",
       "Regenerate summary",
+      "Reprocess meeting",
       "Delete this meeting",
     ]) {
       expect(screen.getByRole("menuitem", { name: label })).toBeInTheDocument();
@@ -133,10 +133,10 @@ describe("MeetingMenu", () => {
       "Copy link",
       "Copy transcript",
       "Rematch speakers",
-      "Fix diarization",
       "Change language",
       "Copy summary",
       "Regenerate summary",
+      "Reprocess meeting",
       "Delete this meeting",
     ]);
   });
@@ -184,10 +184,10 @@ describe("MeetingMenu", () => {
     await open(user);
     await user.click(screen.getByRole("menuitem", { name: "Rematch speakers" }));
     expect(props.onRematchSpeakers).toHaveBeenCalled();
-    // And specifically NOT the one that opens the merge dropdowns. This is the
-    // whole change: the item used to scroll to a form, which is not what
-    // "rematch" means anywhere else and is not what somebody clicking it wants.
-    expect(props.onFixDiarization).not.toHaveBeenCalled();
+    // And specifically not the reprocess, which is the other item that changes
+    // who said what. One re-reads the voices; the other throws the transcript
+    // away and starts again.
+    expect(props.onReprocess).not.toHaveBeenCalled();
 
     // This one alone leaves the menu open, so it has to be closed by hand
     // before the next item can be reached. That is deliberate and is asserted
@@ -201,18 +201,41 @@ describe("MeetingMenu", () => {
     expect(props.onTranslate).toHaveBeenCalled();
   });
 
-  it("keeps the manual repair, under a name that says what it does", async () => {
+  it("hands reprocessing back to the page, which owns the warning", async () => {
     const user = userEvent.setup();
     const props = menu();
 
     await open(user);
-    await user.click(screen.getByRole("menuitem", { name: "Fix diarization" }));
+    await user.click(screen.getByRole("menuitem", { name: "Reprocess meeting" }));
 
-    // Merging two labels and moving a stray turn did not stop being necessary
-    // when Rematch became automatic — they answer a different question, and no
-    // amount of voice matching fixes one person split across two labels.
-    expect(props.onFixDiarization).toHaveBeenCalled();
+    // No confirm here. The menu does not know whether this meeting has a
+    // transcript full of hand corrections or is a failed job with nothing in
+    // it, and those deserve different warnings — so the page asks.
+    expect(props.onReprocess).toHaveBeenCalled();
     expect(props.onRematchSpeakers).not.toHaveBeenCalled();
+  });
+
+  it("says a reprocess is being queued, on the item that started it", async () => {
+    const user = userEvent.setup();
+    menu({ reprocessing: true });
+    await open(user);
+
+    expect(
+      screen.getByRole("menuitem", { name: "Reprocess meeting" }),
+    ).toHaveAttribute("data-disabled");
+  });
+
+  it("offers no manual speaker merging", async () => {
+    const user = userEvent.setup();
+    menu();
+    await open(user);
+
+    // Merging two labels and moving a stray turn were removed along with the
+    // endpoint behind them. Rematch answers "who is this?" acoustically, and
+    // reprocessing is the answer to a diarization that came out wrong — it
+    // re-runs the clustering rather than asking a reader to repair it by hand.
+    expect(screen.queryByRole("menuitem", { name: /Fix diarization/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /merge/i })).not.toBeInTheDocument();
   });
 
   it("says a rematch is running, on the item that started it", async () => {
@@ -228,16 +251,18 @@ describe("MeetingMenu", () => {
     ).toHaveAttribute("data-disabled");
   });
 
-  it("does not disable the manual repair while a rematch runs", async () => {
+  it("does not disable reprocessing while a rematch runs", async () => {
     const user = userEvent.setup();
     menu({ rematching: true });
     await open(user);
 
-    // They do not collide: one renames unresolved speakers by voice, the other
-    // opens a form. Greying the second would be borrowing a restriction from
-    // the first for no reason the reader can see.
+    // They do not collide. A rematch renames speakers in the transcript that
+    // exists; a reprocess replaces that transcript. Starting the second during
+    // the first simply throws the first's work away, which is what the confirm
+    // is for — borrowing a restriction here would grey an item for no reason
+    // the reader can see.
     expect(
-      screen.getByRole("menuitem", { name: "Fix diarization" }),
+      screen.getByRole("menuitem", { name: "Reprocess meeting" }),
     ).not.toHaveAttribute("data-disabled");
   });
 
@@ -251,22 +276,42 @@ describe("MeetingMenu", () => {
     );
   });
 
-  it("offers nothing that re-runs the transcriber", async () => {
+  it("keeps the item that re-runs the transcriber away from the copy items", async () => {
+    const user = userEvent.setup();
+    menu();
+    await open(user);
+
+    const labels = screen.getAllByRole("menuitem").map((el) => el.textContent?.trim());
+
+    // This capability was absent for a long time under the name "Transcribe
+    // again", and the objection was real: it bought the same pipeline over the
+    // same audio at the price of every correction and speaker rename anybody
+    // had made, one confirm deep in a menu people open to copy a link.
+    //
+    // It is back because it is the only answer to a diarization that came out
+    // wrong. Where it sits is part of the answer to the old objection: last,
+    // next to Delete, and nowhere near the three Copy items somebody is
+    // reaching for when they open this menu in a hurry.
+    expect(labels.indexOf("Reprocess meeting")).toBeGreaterThan(
+      labels.indexOf("Copy summary"),
+    );
+    expect(labels.indexOf("Reprocess meeting")).toBe(
+      labels.indexOf("Delete this meeting") - 1,
+    );
+  });
+
+  it("still says 'language' about the item that translates", async () => {
     const user = userEvent.setup();
     const props = menu();
     await open(user);
 
-    // "Transcribe again" bought the same pipeline over the same audio for the
-    // price of every correction and speaker rename anybody had made.
-    expect(screen.queryByRole("menuitem", { name: /Transcribe again/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: /re-?transcribe/i })).not.toBeInTheDocument();
-
-    // And the item that says "language" translates. An earlier item of that
-    // exact name re-transcribed from the audio, which is why this one spent a
-    // while called "Read in another language…" — the name is only safe now
-    // because the destructive one is gone, so what it does is asserted here.
+    // An earlier item of that exact name re-transcribed from the audio, which
+    // is why this one spent a while called "Read in another language…". The
+    // destructive one is still gone — Reprocess does not take a language — so
+    // the short name is still safe, and what it does is asserted here.
     await user.click(screen.getByRole("menuitem", { name: "Change language" }));
     expect(props.onTranslate).toHaveBeenCalled();
+    expect(screen.queryByRole("menuitem", { name: /Transcribe again/i })).not.toBeInTheDocument();
   });
 
   it("greys what a meeting with nothing in it cannot do, and keeps it in place", async () => {
@@ -281,13 +326,20 @@ describe("MeetingMenu", () => {
     for (const label of [
       "Copy transcript",
       "Rematch speakers",
-      "Fix diarization",
       "Change language",
       "Copy summary",
       "Regenerate summary",
     ]) {
       expect(screen.getByRole("menuitem", { name: label })).toHaveAttribute("data-disabled");
     }
+
+    // Reprocessing stays live. It is the one thing worth doing to a meeting
+    // that has nothing in it: a failed job is exactly what you want to retry,
+    // and greying it because there is no transcript would grey it precisely
+    // when it is needed.
+    expect(
+      screen.getByRole("menuitem", { name: "Reprocess meeting" }),
+    ).not.toHaveAttribute("data-disabled");
 
     // The three that never needed a transcript stay live — deleting it is the
     // commonest thing to want to do with a meeting that has nothing in it.

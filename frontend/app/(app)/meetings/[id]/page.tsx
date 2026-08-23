@@ -43,8 +43,8 @@ import {
   useGetTranslationsQuery,
   useGetLanguagesQuery,
   useRenameSpeakersMutation,
-  useFixDiarizationMutation,
   useRematchSpeakersMutation,
+  useReprocessMeetingMutation,
   useEditSegmentsMutation,
   useGetSummaryTemplatesQuery,
   useResummarizeMutation,
@@ -203,15 +203,10 @@ export default function MeetingDetailPage() {
    * stay down in the editor; it publishes what the button needs to draw itself
    * through `onStatus`, and what the button needs to *do* through the ref.
    */
-  /**
-   * Bumped by "Rematch speakers" on the menu, and read by the transcript panel
-   * as "open the speaker tools and scroll to them". A counter, so pressing the
-   * item a second time works a second time.
-   */
-  const [speakerTools, setSpeakerTools] = React.useState(0);
   // Rematch runs from the menu, so its pending state has to live out here
   // beside the menu rather than inside the transcript panel.
   const [rematchSpeakers, { isLoading: rematching }] = useRematchSpeakersMutation();
+  const [reprocessMeeting, { isLoading: reprocessing }] = useReprocessMeetingMutation();
   // Keyed so the three places that can rewrite this summary share one
   // in-flight flag: this page's menu item, the template picker on the tab row,
   // and the "transcript changed" banner. Without it each knows only about its
@@ -495,19 +490,40 @@ export default function MeetingDetailPage() {
   }
 
   /**
-   * Send the reader to the speaker tools, wherever they were.
+   * Run the whole pipeline again over the same audio.
    *
-   * The manual repair, for when diarization split one person across two labels
-   * or dropped a turn on the wrong person. No amount of voice matching fixes
-   * either, which is why this did not go away when Rematch became automatic —
-   * it only stopped being called Rematch.
+   * <b>Destructive, and the confirm says exactly how.</b> Reprocessing rebuilds
+   * the transcript from the recording, so every line anybody corrected by hand
+   * and every speaker they named goes back to what the transcriber produces.
+   * Nothing merges the old work into the new text — the segments are replaced
+   * wholesale, and there is no version of "keep my edits" that would not mean
+   * pasting corrections onto lines that may no longer exist.
    *
-   * A counter rather than a boolean: pressing the menu item twice has to work
-   * twice, and a flag that is already true is a second press that does nothing.
+   * The one thing that does survive is the voice profiles, because those belong
+   * to the account rather than to this meeting. So the names are recoverable
+   * with one press of Rematch afterwards, and the confirm says so — that is the
+   * difference between this and the "Transcribe again" that was taken out.
+   *
+   * Not awaited to completion: the server answers 202 with a queued job, and
+   * the page follows the meeting's status from there like any other processing
+   * meeting.
    */
-  function onFixDiarization() {
-    changeTab("transcript");
-    setSpeakerTools((n) => n + 1);
+  async function onReprocess() {
+    const warning = m?.status === "FAILED"
+      ? "Try processing this meeting again?"
+      : "Reprocess this meeting?\n\nThe transcript and summary will be rebuilt from "
+        + "the recording. Any corrections you typed, and any speakers you named, "
+        + "will be replaced.\n\nSaved voices are kept, so Rematch speakers can put "
+        + "the names back afterwards.";
+    if (!window.confirm(warning)) return;
+    try {
+      await reprocessMeeting(id).unwrap();
+      toast.success("Reprocessing started.", {
+        description: "The transcript and summary are being rebuilt.",
+      });
+    } catch {
+      toast.error("Could not start reprocessing.");
+    }
   }
 
   async function onDelete() {
@@ -734,7 +750,8 @@ export default function MeetingDetailPage() {
             onRegenerateSummary={() => void onRegenerateSummary()}
             onTranslate={() => setPickingLanguage(true)}
             onRematchSpeakers={() => void onRematchSpeakers()}
-            onFixDiarization={onFixDiarization}
+            onReprocess={() => void onReprocess()}
+            reprocessing={reprocessing}
             rematching={rematching}
             onDelete={() => void onDelete()}
           />}
@@ -1014,7 +1031,6 @@ export default function MeetingDetailPage() {
               // keeps inactive utterances from re-rendering every frame.
               onSeek={audio.seekTo}
               onAskAbout={askAbout}
-              openSpeakers={speakerTools}
             />
             )}
           </TabsContent>
@@ -1780,7 +1796,6 @@ function TranscriptPanel({
   currentTime,
   onSeek,
   onAskAbout,
-  openSpeakers,
 }: {
   meetingId: string;
   loading: boolean;
@@ -1804,16 +1819,10 @@ function TranscriptPanel({
    * counter rather than a boolean because the item has to work on the second
    * press as well as the first.
    */
-  openSpeakers: number;
 }) {
-  const speakerTools = React.useRef<HTMLDivElement | null>(null);
   const [renameSpeakers, { isLoading: renaming }] = useRenameSpeakersMutation();
-  const [fixDiarization, { isLoading: merging }] = useFixDiarizationMutation();
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState<Record<string, string>>({});
-  // Which label the user is folding away, and into whom.
-  const [mergeFrom, setMergeFrom] = React.useState("");
-  const [mergeInto, setMergeInto] = React.useState("");
 
   // Names this user has used before. Offered as autocomplete rather than a
   // forced choice: a new person in the meeting must not be harder to name than
@@ -1848,15 +1857,6 @@ function TranscriptPanel({
       toast.error("Could not save that correction.");
     }
   }
-
-  // Skips the first render: the panel mounts with a nonce of zero, and opening
-  // the speaker tools for somebody who merely opened the Transcript tab would
-  // put an editing form over what they came to read.
-  React.useEffect(() => {
-    if (openSpeakers === 0) return;
-    setEditing(true);
-    speakerTools.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [openSpeakers]);
 
   const speakers = React.useMemo(() => {
     const set = new Set<string>();
@@ -2231,40 +2231,6 @@ function TranscriptPanel({
     }
   }
 
-  /**
-   * Fold one diarization label into another.
-   *
-   * Renaming both to the same name would leave the turns separate, so the
-   * transcript reads as though the person keeps interrupting themselves. This
-   * merges them into one speaker.
-   */
-  async function mergeSpeakers() {
-    if (!mergeFrom || !mergeInto || mergeFrom === mergeInto) return;
-    try {
-      await fixDiarization({
-        id: meetingId,
-        fromSpeaker: mergeFrom,
-        toSpeaker: mergeInto,
-      }).unwrap();
-      toast.success(`${mergeFrom} merged into ${mergeInto}.`);
-      setMergeFrom("");
-      setMergeInto("");
-    } catch {
-      toast.error("Could not merge those speakers.");
-    }
-  }
-
-  /** Move a single mis-attributed turn to whoever actually said it. */
-  async function reassignTurn(segmentIds: string[], toSpeaker: string) {
-    if (segmentIds.length === 0 || !toSpeaker) return;
-    try {
-      await fixDiarization({ id: meetingId, toSpeaker, segmentIds }).unwrap();
-      toast.success(`Reassigned to ${toSpeaker}.`);
-    } catch {
-      toast.error("Could not reassign that turn.");
-    }
-  }
-
   if (loading) return <Card><CardContent className="pt-6"><Skeleton className="h-40 w-full" /></CardContent></Card>;
 
   return (
@@ -2327,7 +2293,7 @@ function TranscriptPanel({
 
         {/* Talk-time */}
         {speakers.length > 0 && talk.total > 0 && (
-          <div className="space-y-2 scroll-mt-24" ref={speakerTools}>
+          <div className="space-y-2">
             <div className="flex items-center justify-between">
               <h3 className="flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
                 <Users className="h-4 w-4" /> Talk time
@@ -2354,54 +2320,6 @@ function TranscriptPanel({
                     {renaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save
                   </Button>
                 </div>
-
-                {/* Merging is a different repair from renaming, and a
-                    different one again from Rematch. Renaming says who someone
-                    is; Rematch works that out acoustically; this fixes the
-                    transcriber putting one person under two labels, which
-                    neither of the others can touch. */}
-                {speakers.length > 1 && (
-                  <div className="space-y-2 border-t pt-3" data-testid="fix-diarization">
-                    <p className="text-sm font-medium">Fix diarization</p>
-                    <p className="text-xs text-muted-foreground">
-                      Same person twice? Merge one label into another when the
-                      transcriber split one voice across two speakers.
-                    </p>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <select
-                        className="h-8 rounded-md border bg-background px-2 text-sm"
-                        value={mergeFrom}
-                        onChange={(e) => setMergeFrom(e.target.value)}
-                      >
-                        <option value="">Merge…</option>
-                        {speakers.map((sp) => (
-                          <option key={sp} value={sp}>{sp}</option>
-                        ))}
-                      </select>
-                      <span className="text-sm text-muted-foreground">into</span>
-                      <select
-                        className="h-8 rounded-md border bg-background px-2 text-sm"
-                        value={mergeInto}
-                        onChange={(e) => setMergeInto(e.target.value)}
-                      >
-                        <option value="">Choose…</option>
-                        {speakers
-                          .filter((sp) => sp !== mergeFrom)
-                          .map((sp) => (
-                            <option key={sp} value={sp}>{sp}</option>
-                          ))}
-                      </select>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={mergeSpeakers}
-                        disabled={merging || !mergeFrom || !mergeInto}
-                      >
-                        {merging ? <Loader2 className="h-4 w-4 animate-spin" /> : "Merge"}
-                      </Button>
-                    </div>
-                  </div>
-                )}
               </div>
             ) : (
               <div className="space-y-1.5">
@@ -2503,38 +2421,6 @@ function TranscriptPanel({
                       >
                         <Bookmark className="h-3.5 w-3.5 fill-current" />
                       </button>
-                    )}
-                    {/* Per-turn reassignment, for the handovers where two people
-                        overlap and the whole turn landed on the wrong one. A
-                        label-wide rename cannot express this: it would move
-                        every other turn with it. Hidden until hover so it does
-                        not compete with reading. */}
-                    {speakers.length > 1 && turn.segments.some((s) => s.id) && (
-                      <select
-                        // Left-aligned, right beside the name it is about.
-                        // The right edge of this row belongs to the floating
-                        // toolbar, which would otherwise cover it on hover —
-                        // the one moment it is meant to be reachable.
-                        className="h-6 rounded border bg-background px-1 text-xs text-muted-foreground opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100"
-                        value=""
-                        disabled={merging}
-                        aria-label={`Reassign this turn from ${turn.speaker}`}
-                        onChange={(e) => {
-                          const to = e.target.value;
-                          if (!to) return;
-                          reassignTurn(
-                            turn.segments.map((s) => s.id).filter((id): id is string => Boolean(id)),
-                            to,
-                          );
-                        }}
-                      >
-                        <option value="">Wrong speaker?</option>
-                        {speakers
-                          .filter((sp) => sp !== turn.speaker)
-                          .map((sp) => (
-                            <option key={sp} value={sp}>Move to {sp}</option>
-                          ))}
-                      </select>
                     )}
                   </div>
                   <p className="text-sm leading-relaxed">

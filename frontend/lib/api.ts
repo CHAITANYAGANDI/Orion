@@ -11,7 +11,6 @@ import type {
   MomentCreateRequest,
   TranscriptMoment,
   ChatMessage,
-  DiarizationFix,
   SpeakerRematchResult,
   SpeakerSettings,
   Insight,
@@ -378,11 +377,29 @@ export const api = createApi({
       invalidatesTags: (_r, _e, arg) => [{ type: "Moments", id: arg.meetingId }],
     }),
 
+    /**
+     * Run the whole pipeline again over the same audio.
+     *
+     * Invalidates everything derived from the recording, not just the meeting
+     * row. The server answers 202 and queues a job, so nothing here is correct
+     * yet — but everything on screen is about to be replaced, and a transcript
+     * left cached while it is being rewritten reads as current when it is not.
+     *
+     * `Chat` and `Insights` are included because they are downstream of text
+     * that no longer exists: the retrieval passages are rebuilt from the new
+     * segments, so answers grounded in the old ones cite lines that are gone.
+     */
     reprocessMeeting: builder.mutation<ReprocessResponse, string>({
       query: (id) => ({ url: `/meetings/${id}/reprocess`, method: "POST" }),
       invalidatesTags: (_r, _e, id) => [
         { type: "Meeting", id },
         { type: "Meetings", id: "LIST" },
+        { type: "Transcript", id },
+        { type: "Summary", id },
+        { type: "Insights", id },
+        { type: "Moments", id },
+        { type: "Chat", id },
+        { type: "Translations", id },
       ],
     }),
 
@@ -847,35 +864,6 @@ export const api = createApi({
     }),
 
     /**
-     * Fix diarization: merge a label that was split across two speakers, or
-     * move individual turns to whoever actually said them.
-     *
-     * The manual repair. It used to be called `rematchSpeaker` and to sit at
-     * `/speakers/rematch`, which is the name every other product uses for the
-     * automatic operation below — so the menu item called "Rematch speakers"
-     * opened a pair of merge dropdowns and answered a question nobody asked.
-     * The capability is unchanged; only its name and its route are.
-     *
-     * Invalidates chat as well as the transcript: this re-indexes the meeting,
-     * so earlier answers attributed quotes to a speaker the transcript no longer
-     * names.
-     */
-    fixDiarization: builder.mutation<
-      TranscriptResponse,
-      { id: string } & DiarizationFix
-    >({
-      query: ({ id, ...body }) => ({
-        url: `/meetings/${id}/speakers/merge`,
-        method: "PATCH",
-        body,
-      }),
-      invalidatesTags: (_r, _e, arg) => [
-        { type: "Transcript", id: arg.id },
-        { type: "Chat", id: arg.id },
-      ],
-    }),
-
-    /**
      * Rematch speakers: identify the unresolved ones against known voices.
      *
      * One call, no body. Every speaker still labelled "Speaker N" is compared
@@ -1174,7 +1162,6 @@ export const {
   useUpdateRetentionMutation,
   useCloseAccountMutation,
   useRenameSpeakersMutation,
-  useFixDiarizationMutation,
   useRematchSpeakersMutation,
   useGetSpeakerSettingsQuery,
   useSetSpeakerLearningMutation,

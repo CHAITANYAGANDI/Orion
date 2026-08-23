@@ -214,7 +214,7 @@ and did not.
   silently destroyed hand-typed transcript corrections. Removed rather than
   renamed. The import dialog's language picker sets the *account* default, not
   a per-meeting one, so today the language is chosen before a meeting is
-  enqueued or not at all. "Transcribe again" still re-runs the pipeline, with
+  enqueued or not at all. "Reprocess meeting" re-runs the pipeline, with
   whatever language the meeting already has.
 - **A folder's chat is unreachable, not deleted.** `POST /projects/:id/chat` and
   the whole `PRJ-` scope still work; the UI for them was removed, so existing

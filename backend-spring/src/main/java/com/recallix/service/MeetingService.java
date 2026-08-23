@@ -14,7 +14,6 @@ import com.recallix.dto.PageResponse;
 import com.recallix.dto.callback.AiInsight;
 import com.recallix.dto.ReprocessResponse;
 import com.recallix.dto.SegmentDto;
-import com.recallix.dto.SpeakerRematchRequest;
 import com.recallix.dto.SpeakerRematchResponse;
 import com.recallix.dto.SpeakerStatsDto;
 import com.recallix.dto.SummaryResponse;
@@ -705,87 +704,6 @@ public class MeetingService {
     }
 
     /**
-     * Fix diarization rather than naming.
-     *
-     * <p>Renaming answers "who is Speaker 2?" — one label, one name. Neither of
-     * the two ways diarization actually goes wrong is expressible that way:
-     *
-     * <ul>
-     *   <li>One person gets split across two labels, usually across a long
-     *       pause or a change in mic level. Renaming both to "Alice" produces a
-     *       transcript where Alice appears to interrupt herself, because the
-     *       turns stay separate. Merging folds the label away.
-     *   <li>Individual turns land on the wrong person, typically where two
-     *       people overlap. That is a per-segment correction, and a label-wide
-     *       rename would move every other turn with it.
-     * </ul>
-     *
-     * <p>Like an edit, this re-indexes: retrieval passages carry the speaker
-     * prefix, so a rematch that is not re-indexed leaves chat attributing
-     * quotes to whoever the transcript no longer says.
-     */
-    @Transactional
-    public TranscriptResponse fixDiarization(String userId, String meetingId,
-                                             SpeakerRematchRequest req) {
-        require(userId, meetingId);
-
-        String invalid = req.validate();
-        if (invalid != null) {
-            throw ApiException.badRequest(invalid);
-        }
-
-        String target = req.trimmedTo();
-        var segs = segments.findByMeetingIdOrderByStartTimeAsc(meetingId);
-        boolean changed;
-
-        if (req.isMerge()) {
-            String source = req.fromSpeaker().trim();
-            changed = false;
-            for (var seg : segs) {
-                if (source.equals(seg.getSpeaker())) {
-                    seg.setSpeaker(target);
-                    changed = true;
-                }
-            }
-            if (!changed) {
-                throw ApiException.badRequest(
-                        "No turns are labelled \"" + source + "\"; reload the transcript and try again");
-            }
-        } else {
-            Map<String, TranscriptSegment> byId = segs.stream()
-                    .collect(Collectors.toMap(TranscriptSegment::getId, s -> s, (a, b) -> a));
-            changed = false;
-            for (String segmentId : req.segmentIdsOrEmpty()) {
-                var seg = byId.get(segmentId);
-                // Refused rather than skipped, for the same reason an edit is:
-                // silently dropping half a batch leaves the user believing
-                // corrections landed that did not.
-                if (seg == null) {
-                    throw ApiException.badRequest(
-                            "That segment is not part of this meeting; reload the transcript and try again");
-                }
-                if (!target.equals(seg.getSpeaker())) {
-                    seg.setSpeaker(target);
-                    changed = true;
-                }
-            }
-        }
-
-        if (!changed) {
-            return getTranscript(userId, meetingId);
-        }
-
-        // The flat transcript carries the speaker prefixes, so it is as stale
-        // after a rematch as it is after an edit — and the export reads it.
-        transcripts.findFirstByMeetingIdOrderByCreatedAtDesc(meetingId)
-                .ifPresent(t -> t.setTranscriptText(joinSegments(segs)));
-        reindex(userId, meetingId, segs);
-        markSummaryStale(meetingId);
-        audit.record(userId, "DIARIZATION_FIXED", "meeting", meetingId);
-        return getTranscript(userId, meetingId);
-    }
-
-    /**
      * Correct what the transcriber heard.
      *
      * <p>Transcription is very good and still wrong about names, jargon and
@@ -941,6 +859,20 @@ public class MeetingService {
         }
         meeting.setStatus(MeetingStatus.QUEUED);
         meeting.setErrorMessage(null);
+        // The cached voiceprints go with them, and this is not housekeeping.
+        //
+        // A voiceprint is filed under a meeting-local speaker key, and a
+        // reprocess re-derives those keys from scratch by first appearance. The
+        // audio has not changed, but who ends up as spk_1 can: a re-clustering
+        // that splits an early interjection differently is enough. Left in
+        // place, the cache would hand the *previous* occupant's voice to the
+        // new one, and the next rematch would confidently name a person after
+        // somebody else ~ the exact failure this whole feature is arranged to
+        // avoid, arriving through the back door.
+        //
+        // Named profiles are untouched. They belong to the account, not to this
+        // meeting, which is why a rematch can put every name back afterwards.
+        speakerIdentity.forgetMeeting(userId, meetingId);
         // Everything downstream is about to be rewritten from the audio, so any
         // translation of it now describes text that is on its way out. Flagged
         // here rather than when the result lands, because from this moment on

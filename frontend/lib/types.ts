@@ -299,22 +299,6 @@ export interface TranscriptResponse {
 }
 
 /**
- * Fix diarization rather than naming: merge a label that was split across two
- * speakers, or move individual turns to whoever actually said them. Exactly one
- * of `fromSpeaker` / `segmentIds` is sent.
- *
- * This is the *manual* repair, and it is a different job from Rematch. It
- * answers "the transcriber got the boundaries wrong"; Rematch answers "who is
- * this?". No amount of voice matching fixes a split label, and no amount of
- * merging tells you somebody's name.
- */
-export interface DiarizationFix {
-  fromSpeaker?: string;
-  toSpeaker: string;
-  segmentIds?: string[];
-}
-
-/**
  * What came back from "Rematch speakers".
  *
  * <p>Three outcomes and they are deliberately distinguishable. `matched > 0` is
