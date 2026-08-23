@@ -366,15 +366,17 @@ function MicrophonePicker() {
           <Button
             variant="ghost"
             size="sm"
-            className="h-8 shrink-0 gap-1 px-2 text-muted-foreground hover:text-foreground"
+            className="group h-8 shrink-0 gap-1 px-2 text-muted-foreground hover:text-foreground"
             aria-label="Microphone"
             // The name is here rather than on screen: it is worth having, and
             // not worth the width of the bar to say on every recording.
             title={`Microphone: ${current}`}
           >
             <Mic className="h-4 w-4" />
-            {/* The only thing on the glyph that says it opens anything. */}
-            <ChevronDown className="h-3 w-3" />
+            {/* The only thing on the glyph that says it opens anything, so it
+                had better also say when it is open. The menu goes upward from a
+                docked bar, which is where this then points. */}
+            <ChevronDown className="h-3 w-3 transition-transform duration-200 group-data-[state=open]:rotate-180" />
           </Button>
         </DropdownMenuTrigger>
         {/* Upward, because the bar is docked to the bottom of the window. */}

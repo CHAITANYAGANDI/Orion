@@ -47,8 +47,12 @@ const meetings = [
 const projects = [{ id: "prj_1", name: "Q4 planning" }] as unknown as Project[];
 
 const modes: ChatModeOption[] = [
-  { mode: "express", label: "Express", hint: "Balanced for accuracy and speed", isDefault: true },
-  { mode: "advanced", label: "Advanced", hint: "For in-depth analysis and actions", isDefault: false },
+  // The labels are the server's, not the client's — /chat/modes sends them, so
+  // renaming Express and Advanced to Quick and Thorough changed no code here.
+  // The wire values are deliberately still the old words: two services speak
+  // them, and they deploy separately.
+  { mode: "express", label: "Quick", hint: "Answers from the strongest evidence", isDefault: true },
+  { mode: "advanced", label: "Thorough", hint: "Reads more of the conversation", isDefault: false },
 ];
 
 function Harness({
@@ -212,10 +216,10 @@ describe("the mode picker", () => {
     const user = userEvent.setup();
     render(<Harness />);
 
-    await user.click(screen.getByRole("button", { name: /express/i }));
+    await user.click(screen.getByRole("button", { name: /quick/i }));
 
-    expect(await screen.findByText("Balanced for accuracy and speed")).toBeInTheDocument();
-    expect(screen.getByText("For in-depth analysis and actions")).toBeInTheDocument();
+    expect(await screen.findByText("Answers from the strongest evidence")).toBeInTheDocument();
+    expect(screen.getByText("Reads more of the conversation")).toBeInTheDocument();
   });
 
   it("reports the choice", async () => {
@@ -223,8 +227,8 @@ describe("the mode picker", () => {
     const user = userEvent.setup();
     render(<Harness onModeChange={onModeChange} />);
 
-    await user.click(screen.getByRole("button", { name: /express/i }));
-    await user.click(await screen.findByRole("menuitemradio", { name: /advanced/i }));
+    await user.click(screen.getByRole("button", { name: /quick/i }));
+    await user.click(await screen.findByRole("menuitemradio", { name: /thorough/i }));
 
     expect(onModeChange).toHaveBeenCalledWith("advanced");
   });
@@ -242,7 +246,7 @@ describe("the mode picker", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: /express/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /quick/i })).not.toBeInTheDocument();
   });
 });
 
@@ -264,7 +268,7 @@ describe("a scope that cannot change", () => {
   it("hides the mode picker when no modes are supported", () => {
     render(<ChatComposer scope="This meeting" onSend={vi.fn()} />);
 
-    expect(screen.queryByRole("button", { name: /express/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /quick/i })).not.toBeInTheDocument();
   });
 
   it("names the thing it reads, rather than describing it", () => {
@@ -464,5 +468,33 @@ describe("once the allowance is spent", () => {
 
     expect(onSend).toHaveBeenCalledWith("Still working?");
     expect(screen.queryByText(/AI Chat is closed/)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * The arrow on the mode picker.
+ *
+ * <p>It sat pointing down whether the list was open or shut, which on this
+ * control is worse than merely untidy: the menu opens *upwards* — there is no
+ * room under a composer docked to the bottom of the window — so a static
+ * chevron pointed away from the thing it had just opened.
+ */
+describe("the mode picker's arrow", () => {
+  function chevron() {
+    return screen.getByRole("button", { name: /quick/i }).querySelector("svg");
+  }
+
+  it("points down until the list is open", () => {
+    render(<Harness />);
+    expect(chevron()).not.toHaveClass("rotate-180");
+  });
+
+  it("turns over while the list is open", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+
+    await user.click(screen.getByRole("button", { name: /quick/i }));
+
+    expect(chevron()).toHaveClass("rotate-180");
   });
 });

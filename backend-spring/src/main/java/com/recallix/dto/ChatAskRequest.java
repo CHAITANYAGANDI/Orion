@@ -11,8 +11,9 @@ import jakarta.validation.constraints.Size;
  * chat box is the primary control on the page, so asking must never require
  * having picked a conversation first.
  *
- * <p>{@code mode} is Express or Advanced, the same choice the workspace chat
- * offers. Unparseable and absent both mean Express — see
+ * <p>{@code mode} is Quick or Thorough, the same choice the workspace chat
+ * offers, and travels as {@code express}/{@code advanced} — the words the
+ * ai-service speaks. Unparseable and absent both mean Quick — see
  * {@link com.recallix.domain.ChatMode#of} — so a client that predates the field
  * keeps getting exactly the behaviour it got before.
  */

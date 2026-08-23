@@ -10,7 +10,7 @@
  * into an answerable one. That is what "Add context" is — not an attachment
  * mechanism, a narrowing.
  *
- * **How hard to look.** Express is the width the chat has always used. Advanced
+ * **How hard to look.** Quick is the width the chat has always used. Thorough
  * retrieves more and asks the model to enumerate rather than summarise, which
  * costs proportionally more and is worth it for "list everything outstanding"
  * and wasted on "what did Priya say". The wording of both comes from the server
@@ -322,7 +322,7 @@ export function ChatComposer({
           <ModePicker
             modes={modes}
             value={mode}
-            label={chosen?.label ?? "Express"}
+            label={chosen?.label ?? "Quick"}
             onChange={(next) => onModeChange?.(next)}
           />
         ) : (
@@ -402,7 +402,13 @@ function ModePicker({
         className="flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       >
         {label}
-        <ChevronDown className="h-3 w-3" />
+        {/* Turns over when the list is showing. The menu opens *upwards* here
+            -- there is no room under a composer sitting on the bottom of the
+            window -- so pointing up while open points at it. Without this the
+            arrow says "there is more below" over a list that is above. */}
+        <ChevronDown
+          className={cn("h-3 w-3 transition-transform duration-200", open && "rotate-180")}
+        />
       </button>
 
       {open && (

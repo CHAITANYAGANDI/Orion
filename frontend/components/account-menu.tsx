@@ -38,7 +38,7 @@ export function AccountMenu() {
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            className="flex w-full items-center gap-2 rounded-lg border px-2 py-2 text-left transition-colors hover:bg-accent"
+            className="group flex w-full items-center gap-2 rounded-lg border px-2 py-2 text-left transition-colors hover:bg-accent"
           >
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground">
               {initials}
@@ -49,7 +49,11 @@ export function AccountMenu() {
                 {mode === "dev" ? "Development session" : "Signed in"}
               </span>
             </span>
-            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+            {/* Radix writes data-state on the trigger, which is the only thing
+                that knows whether the menu is showing -- `open` lives inside
+                DropdownMenu and is never handed out. `group` on the button is
+                what lets the icon read it. */}
+            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 group-data-[state=open]:rotate-180" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-56">

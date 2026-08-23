@@ -65,3 +65,38 @@ describe("the menu", () => {
     expect(signOut).toHaveBeenCalled();
   });
 });
+
+/**
+ * The arrow on the trigger.
+ *
+ * <p>It never moved. Radix writes `data-state` on the trigger and nothing was
+ * reading it, so the one glyph saying the button opens something said the same
+ * thing whether the menu was open or shut.
+ *
+ * <p>Asserted on the trigger's own state rather than on a computed rotation:
+ * jsdom applies no Tailwind, so what is checkable is that the icon is wired to
+ * the attribute and that the attribute flips.
+ */
+describe("the arrow", () => {
+  it("is wired to whether the menu is open", () => {
+    render(<AccountMenu />);
+
+    const icon = screen.getByRole("button", { name: /usr_dev/ }).querySelector("svg");
+    expect(icon).toHaveClass("group-data-[state=open]:rotate-180");
+  });
+
+  it("turns over when the menu opens", async () => {
+    const user = userEvent.setup();
+    render(<AccountMenu />);
+
+    const trigger = screen.getByRole("button", { name: /usr_dev/ });
+    expect(trigger).toHaveAttribute("data-state", "closed");
+
+    await user.click(trigger);
+
+    // The trigger carries the state and `group` on it carries it to the icon,
+    // so this flipping is the rotation happening.
+    expect(trigger).toHaveAttribute("data-state", "open");
+    expect(trigger).toHaveClass("group");
+  });
+});

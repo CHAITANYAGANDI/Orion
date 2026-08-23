@@ -102,7 +102,7 @@ public class AiClient {
         payload.put("meetingId", meetingId);
         payload.put("question", question);
         payload.put("userId", userId);
-        payload.put("mode", (mode == null ? com.recallix.domain.ChatMode.EXPRESS : mode).wire());
+        payload.put("mode", (mode == null ? com.recallix.domain.ChatMode.QUICK : mode).wire());
         // The thread so far, so a follow-up resolves. Sent even when empty:
         // an absent list and an empty one mean the same thing downstream, and
         // a field that is only sometimes present is one somebody eventually
@@ -135,7 +135,7 @@ public class AiClient {
         // Always sent, even for the default: the ai-service defaults to express
         // too, and a field that is only sometimes present is a field somebody
         // eventually reads as "unset means advanced".
-        payload.put("mode", (mode == null ? com.recallix.domain.ChatMode.EXPRESS : mode).wire());
+        payload.put("mode", (mode == null ? com.recallix.domain.ChatMode.QUICK : mode).wire());
         // Omitted rather than sent as null when the account reads everything:
         // the ai-service treats an absent window as no floor, which is what it
         // did before the setting existed.

@@ -524,7 +524,7 @@ them. `MeetingActionItemRepository.OWNED_BY` and `dueByUser` changed with it;
 grouping the deadline pass through `Meeting` would have silently dropped every
 hand-typed task, which is the half most likely to carry a date.
 
-**Express and Advanced are a real difference, not a label.** `ChatMode` travels
+**Quick and Thorough are a real difference, not a label.** `ChatMode` travels
 to the ai-service as `mode`, and the two settings differ in exactly two things so
 neither is a worse version of the other: retrieval width
 (`rag_workspace_top_k` = 10 vs `rag_workspace_deep_top_k` = 25) and whether the
@@ -532,7 +532,15 @@ answer is asked to enumerate rather than summarise. The commitment and decision
 ledgers are in **both** — they are the complete record rather than a retrieved
 sample, and withholding them from the cheaper mode would make it confidently
 wrong about what is outstanding rather than merely shallower. Absent means
-express, which is precisely what every caller got before the field existed.
+Quick, which is precisely what every caller got before the field existed.
+
+They were called Express and Advanced, which named two different axes — speed
+against capability — and so read as though the fast one was the stupid one.
+**The wire values are still `express` and `advanced`**: `rag.py`,
+`answering.py` and `retrieval.py` all speak them, the two services deploy
+separately, and renaming a protocol to match a label is churn with a window of
+outage in it. `ChatMode.of` accepts both spellings so a tab open across the
+rename still resolves.
 
 **"Add context" is a narrowing, not an attachment.** The picker's chosen
 meetings arrive as `meetingIds` on the same endpoint — one question, narrowed.

@@ -440,8 +440,9 @@ export const api = createApi({
       query: ({ id, question, conversationId, mode }) => ({
         url: `/meetings/${id}/chat`,
         method: "POST",
-        // `mode` is Express or Advanced, the same choice the workspace chat
-        // offers. Omitted means Express on the server, so nothing has to be
+        // `mode` is Quick or Thorough, the same choice the workspace chat
+        // offers. It goes over the wire as `express`/`advanced`, which is what
+        // the ai-service speaks. Omitted means Quick on the server, so nothing has to be
         // sent by a caller that does not offer the picker.
         body: { question, conversationId, mode },
       }),

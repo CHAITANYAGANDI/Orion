@@ -215,7 +215,7 @@ public class ChatService {
         // folder somebody explicitly opened would be answering a different
         // question from the one asked.
         AiClient.ChatResult result = ai.workspaceChat(
-                userId, question, meetingIds, ChatMode.EXPRESS, null,
+                userId, question, meetingIds, ChatMode.QUICK, null,
                 earlierQuestions(conversation));
         return persistTurn(userId, null, conversation, "assistant",
                 result.answer() == null ? "" : result.answer(), result.citations());

@@ -1501,7 +1501,7 @@ function ChatPanel({
    * in full either way and a picker would be a control that did nothing. That
    * was wrong: retrieval takes the nearest eight passages, and a
    * fifteen-minute recording already chunks to more than eight, so a long
-   * meeting was being answered from a sample of itself. Advanced widens that
+   * meeting was being answered from a sample of itself. Thorough widens that
    * and asks for an enumerated answer. See rag.answer in the ai-service.
    *
    * The wording comes from the server so it cannot drift from what the two
