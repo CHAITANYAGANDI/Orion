@@ -26,6 +26,8 @@ const { chatQuery, deleteExchange, unwrap, createConversation, askChat } = vi.ho
 
 let messages: ChatMessage[] = [];
 let chatIsError = false;
+/** What RTK Query would still be holding in `data` after a skip. */
+let lastChatData: ChatMessage[] | undefined;
 
 /**
  * The allowance the composer reads. Full, so these stay about chat.
@@ -48,9 +50,21 @@ vi.mock("@/lib/allowance", async (importOriginal) => {
 });
 
 vi.mock("@/lib/api", () => ({
-  useGetWorkspaceChatQuery: (arg: unknown) => {
+  // `currentData` and `isFetching` are what the page reads, and the pair is
+  // modelled rather than collapsed into one field. RTK Query keeps the last
+  // successful result in `data` when a query becomes *skipped* — which is how
+  // this chat says "no thread is open" — so a mock that served `messages` from
+  // both would hide the very state these tests are about.
+  useGetWorkspaceChatQuery: (arg: unknown, options?: { skip?: boolean }) => {
     chatQuery(arg);
-    return { data: messages, isLoading: false, isError: chatIsError };
+    const skipped = Boolean(options?.skip);
+    if (!skipped) lastChatData = messages;
+    return {
+      data: lastChatData,
+      currentData: skipped ? undefined : messages,
+      isFetching: false,
+      isError: chatIsError,
+    };
   },
   useGetWorkspaceConversationsQuery: () => ({ data: conversations }),
   useGetWorkspaceSuggestionsQuery: () => ({ data: undefined }),
@@ -91,6 +105,7 @@ vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 let conversations: ChatConversation[] = [];
 
 import { resetActiveChats, setActiveChat } from "@/lib/active-chat";
+import { resetPromptRotation } from "@/lib/use-rotating-prompts";
 
 import AskPage from "@/app/(app)/ask/page";
 
@@ -112,7 +127,11 @@ beforeEach(() => {
   // lets the home rail and this page share a conversation. It must not outlive
   // a test.
   resetActiveChats();
+  // The suggestion row rotates, and its offset is module state that outlives an
+  // unmount. Without this each test starts further into the pool than the last.
+  resetPromptRotation();
   chatIsError = false;
+  lastChatData = undefined;
   messages = [message(), message({ id: "msg_2", role: "assistant", content: "Three things." })];
   conversations = [
     {
@@ -301,5 +320,53 @@ describe("AskPage conversation state", () => {
     const calls = chatQuery.mock.calls.length;
     await new Promise((r) => setTimeout(r, 50));
     expect(chatQuery.mock.calls.length).toBe(calls);
+  });
+});
+
+describe("a starter chip that is an opening rather than a question", () => {
+  /**
+   * Two of the six workspace prompts end in a space -- "Find every discussion
+   * about ", "What did " -- because the reader finishes them. Sending one as
+   * written would ask the model to search for nothing, so `ChatSuggestions`
+   * routes them to `onCompose` instead of `onSend`.
+   *
+   * This page passed `() => undefined` for that, so those two chips were drawn,
+   * were not disabled, and did nothing at all when clicked. Asserted here as
+   * well as on the Home rail because the wiring is per surface: the shared hook
+   * has no say in it, and the meeting page had it right the whole time.
+   */
+  async function showTheSecondRow() {
+    messages = [];
+    conversations = [];
+    // The row moves along by three per visit, and the openings sit below the
+    // first three. Mounting twice is how a second visit is spelled -- see
+    // lib/use-rotating-prompts, where the offset is advanced in an effect so
+    // the row on screen never moves under the cursor.
+    render(<AskPage />).unmount();
+    render(<AskPage />);
+    await screen.findByRole("button", { name: "Find a mention" });
+  }
+
+  it("puts it in the composer instead of sending it", async () => {
+    await showTheSecondRow();
+
+    await userEvent.click(screen.getByRole("button", { name: "Find a mention" }));
+
+    expect(screen.getByLabelText("Ask a question")).toHaveValue(
+      "Find every discussion about ",
+    );
+    expect(askChat).not.toHaveBeenCalled();
+    expect(createConversation).not.toHaveBeenCalled();
+  });
+
+  it("still sends the chip beside it, which is a whole question", async () => {
+    await showTheSecondRow();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Conflicting decisions" }),
+    );
+
+    await waitFor(() => expect(askChat).toHaveBeenCalled());
+    expect(askChat.mock.calls[0][0].question).toMatch(/^Do any decisions/);
   });
 });

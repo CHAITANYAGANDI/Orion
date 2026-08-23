@@ -33,7 +33,10 @@ import type { ChatMessage } from "@/lib/types";
 
 const api = vi.hoisted(() => {
   const listeners = new Set<() => void>();
-  const store: { messages: ChatMessage[] } = { messages: [] };
+  const store: {
+    messages: ChatMessage[];
+    conversations: { id: string; title: string; updatedAt: string }[];
+  } = { messages: [], conversations: [] };
   return {
     store,
     listeners,
@@ -42,14 +45,36 @@ const api = vi.hoisted(() => {
       store.messages = messages;
       listeners.forEach((l) => l());
     },
-    reset() {
-      store.messages = [];
+    /** The thread as the history picker sees it. */
+    listConversation(id: string, title: string) {
+      store.conversations = [
+        ...store.conversations,
+        { id, title, updatedAt: "2026-08-21T08:00:05Z" },
+      ];
       listeners.forEach((l) => l());
     },
+    reset() {
+      store.messages = [];
+      store.conversations = [];
+      this.lastChatData = undefined;
+      listeners.forEach((l) => l());
+    },
+    /**
+     * What RTK Query would still be holding in `data`.
+     *
+     * Not decoration: `queryStatePreSelector` keeps the last successful result
+     * in `data` when a query becomes *skipped*, deliberately, so that a query
+     * which skips and un-skips does not flash empty. The chat uses skip to mean
+     * "no thread is open", so that retention is what kept a deleted
+     * conversation on screen. A mock that dropped the data on skip would make
+     * the bug untestable.
+     */
+    lastChatData: undefined as ChatMessage[] | undefined,
     /** Resolves the held ask. Set fresh by each test that needs one. */
     settle: null as null | ((value?: unknown) => void),
     reject: null as null | ((reason?: unknown) => void),
     asked: [] as string[],
+    deleted: [] as string[],
     conversationsCreated: 0,
   };
 });
@@ -79,14 +104,14 @@ vi.mock("@/lib/allowance", async (importOriginal) => {
 vi.mock("@/lib/api", () => {
   const React_ = require("react") as typeof import("react");
 
-  function useMessages() {
+  function useStore<T>(read: () => T) {
     return React_.useSyncExternalStore(
       (l: () => void) => {
         api.listeners.add(l);
         return () => api.listeners.delete(l);
       },
-      () => api.store.messages,
-      () => api.store.messages,
+      read,
+      read,
     );
   }
 
@@ -94,7 +119,19 @@ vi.mock("@/lib/api", () => {
   const noop = () => [() => ({ unwrap: () => Promise.resolve({}) }), {}];
 
   return {
-    useGetWorkspaceChatQuery: () => ({ data: useMessages(), isLoading: false, isError: false }),
+    useGetWorkspaceChatQuery: (_arg: unknown, options?: { skip?: boolean }) => {
+      const messages = useStore(() => api.store.messages);
+      const skipped = Boolean(options?.skip);
+      // The real hook's two fields, told apart. `currentData` belongs to the
+      // cache entry currently selected -- and a skipped query has none.
+      if (!skipped) api.lastChatData = messages;
+      return {
+        data: api.lastChatData,
+        currentData: skipped ? undefined : messages,
+        isFetching: false,
+        isError: false,
+      };
+    },
     useGetWorkspaceSuggestionsQuery: () => ({
       data: { suggestions: ["What is still open across my meetings?"] },
     }),
@@ -111,7 +148,9 @@ vi.mock("@/lib/api", () => {
       },
       { isLoading: false },
     ],
-    useGetWorkspaceConversationsQuery: () => ({ data: [] }),
+    useGetWorkspaceConversationsQuery: () => ({
+      data: useStore(() => api.store.conversations),
+    }),
     useCreateWorkspaceConversationMutation: () => [
       () => {
         api.conversationsCreated += 1;
@@ -121,7 +160,20 @@ vi.mock("@/lib/api", () => {
     ],
     useClearWorkspaceChatMutation: noop,
     useRenameConversationMutation: noop,
-    useDeleteConversationMutation: noop,
+    useDeleteConversationMutation: () => [
+      ({ conversationId }: { conversationId: string }) => {
+        api.deleted.push(conversationId);
+        // The row goes from the picker. The messages deliberately do not: the
+        // panel stops asking for them rather than being told they are gone,
+        // and that is the path the bug lived on.
+        api.store.conversations = api.store.conversations.filter(
+          (c) => c.id !== conversationId,
+        );
+        api.listeners.forEach((l) => l());
+        return { unwrap: () => Promise.resolve({}) };
+      },
+      { isLoading: false },
+    ],
     useDeleteChatExchangeMutation: noop,
     useGetChatModesQuery: () => ({ data: [] }),
     useGetMeetingsQuery: empty,
@@ -175,6 +227,7 @@ beforeEach(() => {
   api.settle = null;
   api.reject = null;
   api.asked = [];
+  api.deleted = [];
   api.conversationsCreated = 0;
 });
 
@@ -323,5 +376,142 @@ describe("when the request fails", () => {
 
     expect(api.asked).toEqual([QUESTION, QUESTION]);
     expect(await screen.findByText("Thinking…")).toBeInTheDocument();
+  });
+});
+
+describe("deleting the conversation you are reading", () => {
+  /**
+   * ## The bug
+   *
+   * Delete the thread on screen and it stayed on screen. The messages were
+   * still drawn, the starter prompts did not come back, and "New chat" was
+   * still offered as though you were somewhere else -- so the only way to a
+   * clean sheet was to press New on a conversation that no longer existed.
+   *
+   * The cause was one field. `remove` sets the thread id to null, which skips
+   * the history query, and RTK Query *keeps the last successful result in
+   * `data` when a query is skipped* -- by design, so a query that skips and
+   * un-skips does not flash empty. This chat uses skip to mean "no thread is
+   * open", so the deleted conversation's messages went on being served from a
+   * cache entry nothing was subscribed to.
+   */
+  async function askAndPersist() {
+    render(<HomeChatPanel />);
+    await ask();
+    await act(async () => {
+      api.persist(persistedExchange(QUESTION, "The transcript has no link."));
+      api.listConversation("cnv_1", QUESTION);
+      api.settle!();
+    });
+    await screen.findByText("The transcript has no link.");
+  }
+
+  async function deleteFromPicker() {
+    await userEvent.click(screen.getByRole("button", { name: "Previous chat history" }));
+    await userEvent.click(screen.getByRole("button", { name: `Delete ${QUESTION}` }));
+  }
+
+  it("empties the thread instead of leaving the deleted conversation on screen", async () => {
+    await askAndPersist();
+
+    await deleteFromPicker();
+
+    await waitFor(() => expect(api.deleted).toEqual(["cnv_1"]));
+    expect(screen.queryByText("The transcript has no link.")).toBeNull();
+    expect(screen.queryByText(QUESTION)).toBeNull();
+  });
+
+  it("offers the starter prompts again, which is what an empty chat looks like", async () => {
+    await askAndPersist();
+
+    await deleteFromPicker();
+
+    expect(
+      await screen.findByText("What is still open across my meetings?"),
+    ).toBeInTheDocument();
+  });
+
+  it("says you are already on a new chat, rather than offering to start one", async () => {
+    await askAndPersist();
+    // While the thread is up, New is a real action.
+    expect(screen.getByRole("button", { name: "New chat" })).toBeEnabled();
+
+    await deleteFromPicker();
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "New chat" })).toBeDisabled(),
+    );
+  });
+
+  it("leaves an unrelated thread alone", async () => {
+    await askAndPersist();
+    api.listConversation("cnv_2", "Something else");
+
+    await userEvent.click(screen.getByRole("button", { name: "Previous chat history" }));
+    await userEvent.click(screen.getByRole("button", { name: "Delete Something else" }));
+
+    // Deleting a thread you are not in must not clear the one you are.
+    await waitFor(() => expect(api.deleted).toEqual(["cnv_2"]));
+    expect(screen.getByText("The transcript has no link.")).toBeInTheDocument();
+  });
+});
+
+describe("a starter chip that is an opening rather than a question", () => {
+  /**
+   * ## The bug
+   *
+   * Two of the six workspace prompts end in a space -- "Find every discussion
+   * about ", "What did " -- because the user is meant to finish them. Sending
+   * one as written would ask the model to search for nothing, so
+   * `ChatSuggestions` routes those to `onCompose` instead of `onSend`.
+   *
+   * This rail, and the full AI Chat page, both passed `() => undefined` for
+   * that. So those two chips were drawn, were not disabled, and did nothing
+   * whatsoever when clicked. The meeting page had it wired correctly the whole
+   * time, which is why it only ever showed up on two surfaces.
+   */
+  const OPENING = "Find a mention";
+
+  async function showTheSecondRow() {
+    // The row rotates by three per visit, and the openings are further down
+    // the pool than the first three. Mounting once and again is how a second
+    // visit is spelled -- see lib/use-rotating-prompts, where the offset is
+    // advanced in an effect so the row you are looking at never moves.
+    render(<HomeChatPanel />).unmount();
+    render(<HomeChatPanel />);
+    await screen.findByRole("button", { name: OPENING });
+  }
+
+  it("puts it in the composer for the user to finish", async () => {
+    await showTheSecondRow();
+
+    await userEvent.click(screen.getByRole("button", { name: OPENING }));
+
+    expect(screen.getByLabelText("Ask a question")).toHaveValue(
+      "Find every discussion about ",
+    );
+  });
+
+  it("does not send it, because it is not yet a question", async () => {
+    await showTheSecondRow();
+
+    await userEvent.click(screen.getByRole("button", { name: OPENING }));
+
+    expect(api.asked).toEqual([]);
+    expect(api.conversationsCreated).toBe(0);
+  });
+
+  it("still sends a chip that is a whole question", async () => {
+    await showTheSecondRow();
+
+    // The third chip in the same row, so the two paths are compared under
+    // identical conditions: one lands in the box, the other is sent.
+    await userEvent.click(
+      screen.getByRole("button", { name: "Compare selected meetings" }),
+    );
+
+    await waitFor(() => expect(api.asked).toHaveLength(1));
+    expect(api.asked[0]).toMatch(/^Compare the meetings I have selected/);
+    expect(screen.getByLabelText("Ask a question")).toHaveValue("");
   });
 });

@@ -74,16 +74,33 @@ export function useWorkspaceChat(surface: ChatSurface) {
   const [mode, setMode] = React.useState<ChatMode>("express");
 
   const {
-    data: messages,
-    isLoading,
+    currentData: messages,
+    isFetching,
     isError: chatError,
     // Skipped until a thread is named. Asking the server for history without
     // one returns the most recent conversation, which is how opening AI Chat
     // came to resume something from days ago instead of offering a clean
     // sheet.
+    //
+    // **`currentData`, not `data`, and the difference was a bug.** RTK Query
+    // deliberately keeps the last successful result in `data` when a query
+    // becomes skipped, so that a query which skips and un-skips does not flash
+    // empty. Here skipping *is* the statement that no thread is open — it is
+    // what `remove` and the 404 guard below do by setting the id to null — so
+    // `data` went on serving the messages of a conversation that had just been
+    // deleted. Deleting the thread you were reading left it on screen, with
+    // "New chat" still offered as though you were somewhere else.
+    // `currentData` is the current cache entry's own data, and a skipped query
+    // has no current entry.
   } = useGetWorkspaceChatQuery(conversationId ? { conversationId } : undefined, {
     skip: !conversationId,
   });
+
+  // The skeleton is for "there is nothing to show and something is coming",
+  // which is not the same as `isFetching`. A skipped query is not fetching at
+  // all, and a refetch of a thread already on screen — which is what follows
+  // every answer — must not replace it with two grey bars.
+  const isLoading = isFetching && !messages;
   const { data: conversations } = useGetWorkspaceConversationsQuery();
   // Folders are resolved to their meetings when the question is asked rather
   // than when the chip is added, so a folder that gains a meeting tomorrow is
@@ -247,7 +264,13 @@ export function useWorkspaceChat(surface: ChatSurface) {
     },
     remove: async (id: string) => {
       await removeConversation({ conversationId: id, scope: "ME" }).unwrap();
-      if (id === conversationId) setConversationId(null);
+      if (id === conversationId) {
+        setConversationId(null);
+        // A question still in flight belongs to the thread that was just
+        // deleted. Leaving it would put one turn under a blank chat, and its
+        // Retry would file the answer into a conversation that is gone.
+        pending.clear();
+      }
     },
     removeExchange: async (messageId: string) => {
       const result = await deleteExchange({ messageId, scope: "ME" }).unwrap();
@@ -270,6 +293,12 @@ export function useWorkspaceChat(surface: ChatSurface) {
  */
 function useProjectMeetingIds(projectIds: string[]): string[] {
   const only = projectIds[0];
-  const { data } = useGetProjectMeetingsQuery(only ?? "", { skip: !only });
-  return React.useMemo(() => (data ?? []).map((m) => m.id), [data]);
+  // `currentData`, for the third time in this file and the same reason. Removing
+  // the folder chip skips this query, and a skipped query keeps its last result
+  // in `data` — so the ids of a folder the user had just taken out of the
+  // context would still be sent with the next question. That one is worse than
+  // the chat showing a deleted thread, because nothing on screen says the
+  // question was narrowed.
+  const { currentData } = useGetProjectMeetingsQuery(only ?? "", { skip: !only });
+  return React.useMemo(() => (currentData ?? []).map((m) => m.id), [currentData]);
 }

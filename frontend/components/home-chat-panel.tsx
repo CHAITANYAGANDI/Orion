@@ -42,6 +42,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export function HomeChatPanel() {
   const chat = useWorkspaceChat("home");
+  // The prefill for the composer, which owns what is typed. Two of the starter
+  // chips are openings rather than questions — "Find every discussion about "
+  // — and are meant to land in the box for the reader to finish. This rail
+  // passed a no-op for that, so those two chips did nothing at all when
+  // clicked. The nonce is what lets the same chip be pressed twice.
+  const [compose, setCompose] =
+    React.useState<{ text: string; nonce: number } | null>(null);
   // Only for the maximise control's own state. The pane itself is the shell's.
   const pane = useSidePane();
   // Follows the newest turn, and stops following if the reader scrolls up.
@@ -82,7 +89,7 @@ export function HomeChatPanel() {
           showPrompts={chat.showPrompts}
           busy={chat.asking}
           onSend={(q) => void chat.send(q)}
-          onCompose={() => undefined}
+          onCompose={(prefix) => setCompose({ text: prefix, nonce: Date.now() })}
         >
           <ChatComposer
             busy={chat.asking}
@@ -93,6 +100,7 @@ export function HomeChatPanel() {
             onContextChange={chat.setContext}
             meetings={chat.meetings}
             projects={chat.projects}
+            compose={compose}
             onSend={chat.send}
           />
         </ChatDock>

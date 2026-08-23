@@ -33,6 +33,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export default function AskPage() {
   const chat = useWorkspaceChat("ask");
+  // See the same state on the Home rail. An unfinished chip — "What did " —
+  // is put in the box rather than sent, and this page used to drop it on the
+  // floor instead.
+  const [compose, setCompose] =
+    React.useState<{ text: string; nonce: number } | null>(null);
   // The thread, not the document — and only while the reader is at the bottom
   // of it. See lib/use-thread-scroll.
   const threadRef = useThreadScroll([chat.messages, chat.pending]);
@@ -112,7 +117,7 @@ export default function AskPage() {
             showPrompts={chat.showPrompts}
             busy={chat.asking}
             onSend={(q) => void chat.send(q)}
-            onCompose={() => undefined}
+            onCompose={(prefix) => setCompose({ text: prefix, nonce: Date.now() })}
           >
             <ChatComposer
               busy={chat.asking}
@@ -123,6 +128,7 @@ export default function AskPage() {
               onContextChange={chat.setContext}
               meetings={chat.meetings}
               projects={chat.projects}
+              compose={compose}
               onSend={chat.send}
             />
           </ChatDock>

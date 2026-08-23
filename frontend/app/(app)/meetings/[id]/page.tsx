@@ -1508,15 +1508,23 @@ function ChatPanel({
   const [mode, setMode] = React.useState<ChatMode>("express");
 
   const {
-    data: messages,
-    isLoading,
+    currentData: messages,
+    isFetching,
     isError: chatError,
     // Skipped until a thread is named: history without one returns the most
     // recent conversation, which is what used to resume an old chat on open.
+    //
+    // `currentData` rather than `data`, for the reason spelled out in
+    // lib/use-workspace-chat: a skipped query keeps its last result in `data`,
+    // so deleting the open thread left its messages on screen.
   } = useGetChatQuery(
     { id: meetingId, conversationId: conversationId ?? undefined },
     { skip: !conversationId },
   );
+
+  // Nothing to show and something coming — not merely "a request is in
+  // flight", which is also true of the refetch after every answer.
+  const isLoading = isFetching && !messages;
   const { data: conversations } = useGetMeetingConversationsQuery(meetingId);
   const [ask, { isLoading: asking }] = useAskChatMutation();
   // The question, on screen from the click rather than from the refetch that
@@ -1637,8 +1645,14 @@ function ChatPanel({
           }}
           onDelete={async (id) => {
             await removeConversation({ conversationId: id, scope: meetingId }).unwrap();
-            // The open thread just went; fall back to the most recent one.
-            if (id === conversationId) setConversationId(null);
+            // The open thread just went, so this chat has none: a clean sheet
+            // with the starter prompts, not the messages of a conversation
+            // that no longer exists.
+            if (id === conversationId) {
+              setConversationId(null);
+              pending.clear();
+              setComposeText({ text: "", nonce: Date.now() });
+            }
           }}
         />
       }
