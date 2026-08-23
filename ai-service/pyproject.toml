@@ -15,9 +15,25 @@ dependencies = [
     "boto3>=1.34",
     "python-multipart>=0.0.9",
     "psycopg[binary,pool]>=3.2",
+    "cryptography>=42.0",
 ]
 
+# The speaker embedding model. Kept out of the core dependency set so that an
+# install without it still runs: `EcapaEmbedder.installed()` returns False,
+# "Rematch speakers" reports itself unavailable, and nothing else changes.
+# There is deliberately no fallback embedder -- pretend vectors would produce
+# pretend matches, which is the one outcome this feature is arranged to avoid.
 [project.optional-dependencies]
+voiceprints = [
+    "numpy>=1.26",
+    "torch==2.11.*",
+    # Pinned to torch's minor and installed from the PyTorch CPU index (see
+    # Dockerfile). torchaudio is in maintenance, no longer tracks torch's
+    # releases, and its compiled extension fails to load against a mismatched
+    # torch -- at import time, not at install time.
+    "torchaudio==2.11.*",
+    "speechbrain>=1.0",
+]
 test = [
     "pytest>=8.2",
     "pytest-asyncio>=0.23",

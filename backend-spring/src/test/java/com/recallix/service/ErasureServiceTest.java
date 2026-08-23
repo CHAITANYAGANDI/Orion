@@ -61,6 +61,8 @@ class ErasureServiceTest {
     @Mock private UserRepository users;
     @Mock private StorageService storage;
     @Mock private AuditService audit;
+    // Erasing a recording erases the voiceprints derived from it.
+    @Mock private SpeakerIdentityService speakerIdentity;
 
     private ErasureService service;
     private Meeting meeting;
@@ -68,7 +70,7 @@ class ErasureServiceTest {
     @BeforeEach
     void setUp() {
         service = new ErasureService(meetings, transcripts, segments, summaries, actionItems,
-                translations, moments, chunks, users, storage, audit);
+                translations, moments, chunks, users, storage, audit, speakerIdentity);
         meeting = new Meeting();
         meeting.setId(MEETING);
         meeting.setUserId(USER);

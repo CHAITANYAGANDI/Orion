@@ -13,5 +13,22 @@ python-multipart>=0.0.9
 # RAG: async Postgres access for transcript chunk storage/retrieval.
 # Vectors are passed as `::vector` string casts, so no extra adapter is needed.
 psycopg[binary,pool]>=3.2
+# Speaker identification. `cryptography` encrypts voice templates at rest (V53);
+# torch + speechbrain are the ECAPA-TDNN embedder, and they are the reason this
+# image is large. Neither transcription provider offers cross-file speaker
+# identity -- AssemblyAI documents that it does not and points at exactly this
+# approach -- so the model has to live here.
+#
+# Installed from the PyTorch CPU index in the Dockerfile: the default PyPI wheel
+# for Linux pulls the CUDA runtime, which is over a gigabyte of GPU libraries
+# this service will never call.
+cryptography>=42.0
+numpy>=1.26
+torch==2.11.*
+# Pinned to torch's minor and installed from the same index (see Dockerfile):
+# torchaudio is in maintenance, no longer tracks torch's releases, and its
+# compiled extension fails to load against a mismatched torch.
+torchaudio==2.11.*
+speechbrain>=1.0
 pytest>=8.2
 pytest-asyncio>=0.23

@@ -2,6 +2,7 @@ package com.recallix.service;
 
 import com.recallix.common.ApiException;
 import com.recallix.common.IdGenerator;
+import com.recallix.common.SpeakerLabels;
 import com.recallix.config.KafkaTopicsConfig;
 import com.recallix.domain.Language;
 import com.recallix.domain.MeetingStatus;
@@ -14,6 +15,7 @@ import com.recallix.dto.callback.AiInsight;
 import com.recallix.dto.ReprocessResponse;
 import com.recallix.dto.SegmentDto;
 import com.recallix.dto.SpeakerRematchRequest;
+import com.recallix.dto.SpeakerRematchResponse;
 import com.recallix.dto.SpeakerStatsDto;
 import com.recallix.dto.SummaryResponse;
 import com.recallix.dto.TranscriptEditRequest;
@@ -39,6 +41,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -74,6 +77,8 @@ public class MeetingService {
     private final ErasureService erasure;
     private final UserService users;
 
+    private final SpeakerIdentityService speakerIdentity;
+
     public MeetingService(MeetingRepository meetings,
                           MeetingTranscriptRepository transcripts,
                           TranscriptSegmentRepository segments,
@@ -89,7 +94,9 @@ public class MeetingService {
                           MeetingTranslationRepository translations,
                           NotificationService notifications,
                           ErasureService erasure,
-                          UserService users) {
+                          UserService users,
+                          SpeakerIdentityService speakerIdentity) {
+        this.speakerIdentity = speakerIdentity;
         this.users = users;
         this.erasure = erasure;
         this.notifications = notifications;
@@ -514,15 +521,51 @@ public class MeetingService {
         return toResponse(meetingId, summary);
     }
 
-    /** Rename transcript speaker labels (e.g. {"S1":"Alice"}); returns updated segments. */
+    /**
+     * Rename transcript speaker labels (e.g. {"Speaker 1":"Alice"}).
+     *
+     * <p><b>The mapping arrives keyed by display name and is applied by
+     * canonical key.</b> The client can only name what it can see, but "every
+     * turn labelled Speaker 2" and "every turn spoken by the second person to
+     * speak" are not the same set the moment anything has been merged or
+     * reassigned — and it is the second one the user means. So the labels are
+     * resolved to {@code speakerKey}s first, and the rename is applied to those.
+     * Segments written before V46 have no key and fall back to matching on the
+     * name, exactly as this always did.
+     *
+     * <p>The key itself is never touched. That is what keeps a speaker's colour,
+     * their talk-time row and their voiceprint attached to them across a rename:
+     * the display name is the only thing that changes, which is the whole point
+     * of having two fields.
+     *
+     * <p>A rename is also the one moment a human states, about audio they own,
+     * that a particular voice is a particular person. For an account that has
+     * switched speaker learning on, that is when a voice profile is learned —
+     * see {@link SpeakerIdentityService}. Nothing is learned otherwise, and
+     * automatic identification never learns at all.
+     */
     @Transactional
     public TranscriptResponse renameSpeakers(String userId, String meetingId, Map<String, String> mapping) {
         require(userId, meetingId);
         var segs = segments.findByMeetingIdOrderByStartTimeAsc(meetingId);
+
+        // Which canonical speakers the named labels belong to, resolved before
+        // anything is written — once the first segment is renamed, the label
+        // the user asked about no longer exists to match on.
+        Map<String, String> keyToName = new java.util.LinkedHashMap<>();
+        for (var seg : segs) {
+            String wanted = mapping.get(seg.getSpeaker());
+            if (wanted == null || wanted.isBlank() || seg.getSpeakerKey() == null) {
+                continue;
+            }
+            keyToName.putIfAbsent(seg.getSpeakerKey(), wanted.trim());
+        }
+
         boolean changed = false;
         for (var seg : segs) {
-            String mapped = mapping.get(seg.getSpeaker());
-            if (mapped != null && !mapped.isBlank()) {
+            String byKey = seg.getSpeakerKey() == null ? null : keyToName.get(seg.getSpeakerKey());
+            String mapped = byKey != null ? byKey : mapping.get(seg.getSpeaker());
+            if (mapped != null && !mapped.isBlank() && !mapped.trim().equals(seg.getSpeaker())) {
                 seg.setSpeaker(mapped.trim());
                 changed = true;
             }
@@ -531,13 +574,134 @@ public class MeetingService {
         // is not re-indexed leaves chat answering with the old label — and
         // citing a name the transcript no longer shows anywhere.
         if (changed) {
+            // The flat transcript carries the prefixes too, and the export reads
+            // it. It used to be left alone here while a rematch rewrote it,
+            // which meant a rename quietly desynchronised the two.
+            transcripts.findFirstByMeetingIdOrderByCreatedAtDesc(meetingId)
+                    .ifPresent(t -> t.setTranscriptText(joinSegments(segs)));
             reindex(userId, meetingId, segs);
             // The outline names speakers by design, so it now refers to labels
             // the transcript no longer contains.
             markSummaryStale(meetingId);
+            learnFromRename(userId, meetingId, segs, keyToName);
         }
         audit.record(userId, "SPEAKERS_RENAMED", "meeting", meetingId);
         return getTranscript(userId, meetingId);
+    }
+
+    /**
+     * Remember the voices behind the names somebody just typed.
+     *
+     * <p>Only for an account that has opted in, only for names that are actually
+     * names — renaming "Speaker 3" to "Speaker 2" is a merge, not an
+     * identification — and never fatally. The rename is the user's edit and has
+     * already been applied; failing it because an enrolment could not run would
+     * be the wrong end of the stick.
+     */
+    private void learnFromRename(String userId, String meetingId,
+                                 List<TranscriptSegment> segs, Map<String, String> renamed) {
+        if (renamed.isEmpty() || !speakerIdentity.learningEnabled(userId)) {
+            return;
+        }
+        var meeting = meetings.findByIdAndUserId(meetingId, userId).orElse(null);
+        if (meeting == null) {
+            return;
+        }
+        var turns = speakerIdentity.turnsOf(segs);
+        for (var entry : renamed.entrySet()) {
+            if (SpeakerLabels.isUnresolved(entry.getValue())) {
+                continue;
+            }
+            ai.learnSpeaker(userId, meetingId, meeting.getObjectKey(),
+                    entry.getKey(), entry.getValue(), turns);
+        }
+    }
+
+    /**
+     * Re-evaluate the unresolved speakers in this meeting against known voices.
+     *
+     * <p>This is what "Rematch speakers" does. It is one operation with no
+     * arguments: every speaker still wearing a generated label is compared
+     * acoustically against the profiles this account has built by naming people
+     * in other meetings, and the ones that are confidently somebody are renamed.
+     *
+     * <p><b>What it will not do</b>, because each of these is a way of being
+     * confidently wrong:
+     * <ul>
+     *   <li>touch a speaker somebody has already named — manual names and names
+     *       from an earlier rematch are both left exactly alone;
+     *   <li>touch an unattributed turn, which has no voice of its own to match;
+     *   <li>rename on a weak match, or on a match that is barely ahead of the
+     *       next candidate;
+     *   <li>match by speaker number, by position, by the provider's cluster
+     *       letters, or by anything said in the transcript. Identity here is an
+     *       acoustic question and is answered acoustically or not at all.
+     * </ul>
+     *
+     * <p>Renaming nobody is a normal, common and correct outcome, and it is
+     * reported as such rather than as a failure.
+     */
+    @Transactional
+    public SpeakerRematchResponse rematchSpeakers(String userId, String meetingId) {
+        var meeting = require(userId, meetingId);
+        if (!speakerIdentity.learningEnabled(userId)) {
+            return SpeakerRematchResponse.unavailable(
+                    "Turn on speaker matching in Settings to identify speakers automatically.");
+        }
+
+        var segs = segments.findByMeetingIdOrderByStartTimeAsc(meetingId);
+        if (segs.isEmpty()) {
+            return SpeakerRematchResponse.none(0);
+        }
+
+        var turns = speakerIdentity.turnsOf(segs);
+        var result = ai.identifySpeakers(userId, meetingId, meeting.getObjectKey(), turns);
+        if (!result.ran()) {
+            return SpeakerRematchResponse.unavailable(result.unavailable());
+        }
+        if (result.matches().isEmpty()) {
+            return SpeakerRematchResponse.none(result.considered());
+        }
+
+        Map<String, String> byKey = new java.util.LinkedHashMap<>();
+        for (var match : result.matches()) {
+            byKey.put(match.speakerKey(), match.displayName());
+        }
+
+        List<String> named = new ArrayList<>();
+        boolean changed = false;
+        for (var seg : segs) {
+            String name = seg.getSpeakerKey() == null ? null : byKey.get(seg.getSpeakerKey());
+            // Belt to the matcher's braces. It was told which labels were
+            // unresolved and is trusted not to propose the others, but this is
+            // the line between "a bad match" and "overwrote the name a user
+            // typed", and it is cheap to make that second thing impossible here.
+            if (name == null || !SpeakerLabels.isUnresolved(seg.getSpeaker())) {
+                continue;
+            }
+            if (!name.equals(seg.getSpeaker())) {
+                seg.setSpeaker(name);
+                changed = true;
+                if (!named.contains(name)) {
+                    named.add(name);
+                }
+            }
+        }
+
+        if (!changed) {
+            return SpeakerRematchResponse.none(result.considered());
+        }
+
+        // Same tail as any other change to who said what: the flat transcript
+        // carries the speaker prefixes and the export reads it, the retrieval
+        // passages carry them too and chat reads those, and the outline names
+        // speakers so it is now out of date.
+        transcripts.findFirstByMeetingIdOrderByCreatedAtDesc(meetingId)
+                .ifPresent(t -> t.setTranscriptText(joinSegments(segs)));
+        reindex(userId, meetingId, segs);
+        markSummaryStale(meetingId);
+        audit.record(userId, "SPEAKERS_REMATCHED", "meeting", meetingId);
+        return new SpeakerRematchResponse(named.size(), named, result.considered(), null);
     }
 
     /**
@@ -561,7 +725,7 @@ public class MeetingService {
      * quotes to whoever the transcript no longer says.
      */
     @Transactional
-    public TranscriptResponse rematchSpeaker(String userId, String meetingId,
+    public TranscriptResponse fixDiarization(String userId, String meetingId,
                                              SpeakerRematchRequest req) {
         require(userId, meetingId);
 
@@ -617,7 +781,7 @@ public class MeetingService {
                 .ifPresent(t -> t.setTranscriptText(joinSegments(segs)));
         reindex(userId, meetingId, segs);
         markSummaryStale(meetingId);
-        audit.record(userId, "SPEAKER_REMATCHED", "meeting", meetingId);
+        audit.record(userId, "DIARIZATION_FIXED", "meeting", meetingId);
         return getTranscript(userId, meetingId);
     }
 

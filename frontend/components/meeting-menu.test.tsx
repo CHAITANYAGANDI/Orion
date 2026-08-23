@@ -77,6 +77,7 @@ function menu(over: Partial<React.ComponentProps<typeof MeetingMenu>> = {}) {
     onRegenerateSummary: vi.fn(),
     onTranslate: vi.fn(),
     onRematchSpeakers: vi.fn(),
+    onFixDiarization: vi.fn(),
     onDelete: vi.fn(),
     ...over,
   };
@@ -105,6 +106,7 @@ describe("MeetingMenu", () => {
       "Copy link",
       "Copy transcript",
       "Rematch speakers",
+      "Fix diarization",
       "Change language",
       "Copy summary",
       "Regenerate summary",
@@ -131,6 +133,7 @@ describe("MeetingMenu", () => {
       "Copy link",
       "Copy transcript",
       "Rematch speakers",
+      "Fix diarization",
       "Change language",
       "Copy summary",
       "Regenerate summary",
@@ -181,10 +184,61 @@ describe("MeetingMenu", () => {
     await open(user);
     await user.click(screen.getByRole("menuitem", { name: "Rematch speakers" }));
     expect(props.onRematchSpeakers).toHaveBeenCalled();
+    // And specifically NOT the one that opens the merge dropdowns. This is the
+    // whole change: the item used to scroll to a form, which is not what
+    // "rematch" means anywhere else and is not what somebody clicking it wants.
+    expect(props.onFixDiarization).not.toHaveBeenCalled();
+
+    // This one alone leaves the menu open, so it has to be closed by hand
+    // before the next item can be reached. That is deliberate and is asserted
+    // properly two tests down: the operation takes a few seconds and reports
+    // itself on the item, and a menu that vanished on click would take the
+    // spinner with it.
+    await user.keyboard("{Escape}");
 
     await open(user);
     await user.click(screen.getByRole("menuitem", { name: "Change language" }));
     expect(props.onTranslate).toHaveBeenCalled();
+  });
+
+  it("keeps the manual repair, under a name that says what it does", async () => {
+    const user = userEvent.setup();
+    const props = menu();
+
+    await open(user);
+    await user.click(screen.getByRole("menuitem", { name: "Fix diarization" }));
+
+    // Merging two labels and moving a stray turn did not stop being necessary
+    // when Rematch became automatic — they answer a different question, and no
+    // amount of voice matching fixes one person split across two labels.
+    expect(props.onFixDiarization).toHaveBeenCalled();
+    expect(props.onRematchSpeakers).not.toHaveBeenCalled();
+  });
+
+  it("says a rematch is running, on the item that started it", async () => {
+    const user = userEvent.setup();
+    menu({ rematching: true });
+    await open(user);
+
+    // A few seconds of nothing is indistinguishable from a click that missed,
+    // and this item has no other place to report itself — it opens no dialog
+    // and moves the page nowhere.
+    expect(
+      screen.getByRole("menuitem", { name: "Rematching speakers…" }),
+    ).toHaveAttribute("data-disabled");
+  });
+
+  it("does not disable the manual repair while a rematch runs", async () => {
+    const user = userEvent.setup();
+    menu({ rematching: true });
+    await open(user);
+
+    // They do not collide: one renames unresolved speakers by voice, the other
+    // opens a form. Greying the second would be borrowing a restriction from
+    // the first for no reason the reader can see.
+    expect(
+      screen.getByRole("menuitem", { name: "Fix diarization" }),
+    ).not.toHaveAttribute("data-disabled");
   });
 
   it("greys the reading language for a meeting with nothing written yet", async () => {
@@ -227,6 +281,7 @@ describe("MeetingMenu", () => {
     for (const label of [
       "Copy transcript",
       "Rematch speakers",
+      "Fix diarization",
       "Change language",
       "Copy summary",
       "Regenerate summary",

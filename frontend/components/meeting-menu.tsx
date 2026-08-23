@@ -74,6 +74,7 @@ import {
   MoreHorizontal,
   Sparkles,
   Trash2,
+  SplitSquareHorizontal,
   Users,
 } from "lucide-react";
 import {
@@ -133,8 +134,33 @@ export interface MeetingMenuProps {
   onCopyTranscript: () => void;
   onRegenerateSummary: () => void;
   onTranslate: () => void;
+  /**
+   * Identify the unresolved speakers against voices this account has learned.
+   *
+   * Runs immediately. No dialog, no scrolling, no controls to fill in — the
+   * whole operation is "work out who these people are", and there is nothing
+   * for the user to tell us that we could use.
+   */
   onRematchSpeakers: () => void;
+  /**
+   * Open the manual repair: merge two labels, or move a turn.
+   *
+   * A different problem from the one above, which is why both are on the menu.
+   * Rematch answers "who is this?"; this answers "the transcriber split one
+   * person in two". Neither can do the other's job.
+   */
+  onFixDiarization: () => void;
   onDelete: () => void;
+
+  /**
+   * A rematch is running.
+   *
+   * Its own flag rather than folding into `working`, because it shows on the
+   * item itself: the operation takes a few seconds and gives no other sign it
+   * started, so without this the honest reading of a still menu is that the
+   * click missed.
+   */
+  rematching?: boolean;
 
   /** Greys the whole menu while something it started is in flight. */
   busy?: boolean;
@@ -180,10 +206,24 @@ export function MeetingMenu(props: MeetingMenuProps) {
             <FileText /> Copy transcript
           </DropdownMenuItem>
           <DropdownMenuItem
-            disabled={!props.hasTranscript || props.working}
-            onSelect={props.onRematchSpeakers}
+            disabled={!props.hasTranscript || props.working || props.rematching}
+            // Kept open while it runs. `onSelect` closes the menu by default,
+            // and a menu that vanishes the instant you click is indistinguishable
+            // from one that ignored you — which is exactly the doubt the spinner
+            // below exists to answer.
+            onSelect={(e) => {
+              e.preventDefault();
+              props.onRematchSpeakers();
+            }}
           >
-            <Users /> Rematch speakers
+            {props.rematching ? <Loader2 className="animate-spin" /> : <Users />}
+            {props.rematching ? "Rematching speakers…" : "Rematch speakers"}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={!props.hasTranscript || props.working}
+            onSelect={props.onFixDiarization}
+          >
+            <SplitSquareHorizontal /> Fix diarization
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={!props.canTranslate || props.working}

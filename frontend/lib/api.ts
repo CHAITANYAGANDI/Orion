@@ -11,7 +11,9 @@ import type {
   MomentCreateRequest,
   TranscriptMoment,
   ChatMessage,
-  SpeakerRematch,
+  DiarizationFix,
+  SpeakerRematchResult,
+  SpeakerSettings,
   Insight,
   MeetingCreateRequest,
   MeetingUpdateRequest,
@@ -114,6 +116,7 @@ export const api = createApi({
     "Translations",
     "Notifications",
     "Privacy",
+    "Speakers",
   ],
   endpoints: (builder) => ({
     // ---- Meetings ----
@@ -847,16 +850,22 @@ export const api = createApi({
      * Fix diarization: merge a label that was split across two speakers, or
      * move individual turns to whoever actually said them.
      *
-     * Invalidates chat as well as the transcript — a rematch re-indexes the
-     * meeting, so earlier answers attributed quotes to a speaker the transcript
-     * no longer names.
+     * The manual repair. It used to be called `rematchSpeaker` and to sit at
+     * `/speakers/rematch`, which is the name every other product uses for the
+     * automatic operation below — so the menu item called "Rematch speakers"
+     * opened a pair of merge dropdowns and answered a question nobody asked.
+     * The capability is unchanged; only its name and its route are.
+     *
+     * Invalidates chat as well as the transcript: this re-indexes the meeting,
+     * so earlier answers attributed quotes to a speaker the transcript no longer
+     * names.
      */
-    rematchSpeaker: builder.mutation<
+    fixDiarization: builder.mutation<
       TranscriptResponse,
-      { id: string } & SpeakerRematch
+      { id: string } & DiarizationFix
     >({
       query: ({ id, ...body }) => ({
-        url: `/meetings/${id}/speakers/rematch`,
+        url: `/meetings/${id}/speakers/merge`,
         method: "PATCH",
         body,
       }),
@@ -864,6 +873,56 @@ export const api = createApi({
         { type: "Transcript", id: arg.id },
         { type: "Chat", id: arg.id },
       ],
+    }),
+
+    /**
+     * Rematch speakers: identify the unresolved ones against known voices.
+     *
+     * One call, no body. Every speaker still labelled "Speaker N" is compared
+     * acoustically against the voice profiles this account has built by naming
+     * people in other meetings. Nobody who has already been named is touched,
+     * and a weak or ambiguous match renames nobody.
+     *
+     * Invalidates the transcript and the chat because a successful rematch
+     * rewrites both the labels and the retrieval passages behind them — chat
+     * would otherwise keep citing a name the transcript no longer shows.
+     * Invalidated even when nothing matched, which costs one refetch and closes
+     * the case where two tabs are open on the same meeting.
+     */
+    rematchSpeakers: builder.mutation<SpeakerRematchResult, string>({
+      query: (id) => ({
+        url: `/meetings/${id}/speakers/rematch`,
+        method: "POST",
+      }),
+      invalidatesTags: (_r, _e, id) => [
+        { type: "Transcript", id },
+        { type: "Chat", id },
+      ],
+    }),
+
+    // ---- Voice profiles ----
+    // The consent switch and the list of voices held under it. Separate from
+    // /preferences on purpose: switching this off *deletes* every voice
+    // template the account holds, and that must not be reachable from a
+    // null-means-unchanged bulk patch that the settings page sends whenever
+    // anything on it moves.
+    getSpeakerSettings: builder.query<SpeakerSettings, void>({
+      query: () => "/speakers",
+      providesTags: ["Speakers"],
+    }),
+
+    setSpeakerLearning: builder.mutation<SpeakerSettings, boolean>({
+      query: (enabled) => ({
+        url: "/speakers/learning",
+        method: "PUT",
+        body: { enabled },
+      }),
+      invalidatesTags: ["Speakers"],
+    }),
+
+    deleteSpeakerProfile: builder.mutation<void, string>({
+      query: (id) => ({ url: `/speakers/profiles/${id}`, method: "DELETE" }),
+      invalidatesTags: ["Speakers"],
     }),
 
     deleteMeeting: builder.mutation<void, string>({
@@ -1115,7 +1174,11 @@ export const {
   useUpdateRetentionMutation,
   useCloseAccountMutation,
   useRenameSpeakersMutation,
-  useRematchSpeakerMutation,
+  useFixDiarizationMutation,
+  useRematchSpeakersMutation,
+  useGetSpeakerSettingsQuery,
+  useSetSpeakerLearningMutation,
+  useDeleteSpeakerProfileMutation,
   useEditSegmentsMutation,
   useGetActionItemsQuery,
   usePatchActionItemMutation,

@@ -500,4 +500,157 @@ public class AiClient {
     private static String text(JsonNode node, String field) {
         return node != null && node.hasNonNull(field) ? node.get(field).asText() : "";
     }
+
+    // ---------------------------------------------------------------------
+    // Speaker identification
+    // ---------------------------------------------------------------------
+    // The voice half of the feature lives entirely in the ai-service: it holds
+    // the embedding model, the encryption key and the vectors. Spring sends
+    // turn boundaries and gets back proposals, and applies them itself --
+    // which is why nothing below returns or accepts an embedding. A voice
+    // template never crosses this boundary in either direction.
+
+    /** One canonical speaker's turns, on their way to the embedder. */
+    public record SpeakerTurns(String speakerKey, String displayName,
+                               List<double[]> spans) {}
+
+    /** A proposal: this unresolved speaker is confidently this person. */
+    public record SpeakerMatch(String speakerKey, String displayName,
+                               String profileId, double similarity) {}
+
+    /**
+     * The outcome of asking who the unresolved speakers are.
+     *
+     * <p>{@code unavailable} is the reason the question could not be asked at
+     * all -- no model, no key, no database -- and is deliberately separate from
+     * an empty match list. "We looked and nobody matched" and "we could not
+     * look" are different sentences on screen, and a user told the first when
+     * the second is true will keep pressing a button that can never work.
+     */
+    public record SpeakerIdentification(List<SpeakerMatch> matches, int considered,
+                                        int profiles, String unavailable) {
+        public boolean ran() {
+            return unavailable == null;
+        }
+    }
+
+    /**
+     * Ask which unresolved speakers in this meeting are somebody already known.
+     *
+     * <p>Read-only at the far end: identification never creates or updates a
+     * profile. If it did, one confident mistake would be averaged into that
+     * person's template and make the next mistake likelier -- a loop that
+     * degrades silently, because every individual step looks like the feature
+     * working.
+     *
+     * <p>A transport failure is reported as unavailable rather than thrown. The
+     * caller has a transcript to return either way, and the honest thing to
+     * show is "matching is unavailable", not a 500 on a meeting that is fine.
+     */
+    public SpeakerIdentification identifySpeakers(String userId, String meetingId,
+                                                  String objectKey, List<SpeakerTurns> speakers) {
+        Map<String, Object> payload = new java.util.HashMap<>();
+        payload.put("userId", userId);
+        payload.put("meetingId", meetingId);
+        payload.put("objectKey", objectKey);
+        payload.put("speakers", speakers.stream().map(AiClient::speakerPayload).toList());
+
+        try {
+            JsonNode body = client.post()
+                    .uri("/ai/speakers/identify")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(payload)
+                    .retrieve()
+                    .body(JsonNode.class);
+            if (body == null) {
+                return new SpeakerIdentification(List.of(), 0, 0, "Speaker matching is unavailable.");
+            }
+            String unavailable = body.hasNonNull("unavailable") ? body.get("unavailable").asText() : null;
+            List<SpeakerMatch> matches = new ArrayList<>();
+            if (body.has("matches")) {
+                for (JsonNode m : body.get("matches")) {
+                    matches.add(new SpeakerMatch(
+                            text(m, "speakerKey"),
+                            text(m, "displayName"),
+                            text(m, "profileId"),
+                            m.hasNonNull("similarity") ? m.get("similarity").asDouble() : 0.0));
+                }
+            }
+            return new SpeakerIdentification(
+                    matches,
+                    body.hasNonNull("considered") ? body.get("considered").asInt() : 0,
+                    body.hasNonNull("profiles") ? body.get("profiles").asInt() : 0,
+                    unavailable);
+        } catch (RuntimeException e) {
+            log.warn("Speaker identification failed: {}", e.getClass().getSimpleName());
+            return new SpeakerIdentification(List.of(), 0, 0, "Speaker matching is unavailable.");
+        }
+    }
+
+    /**
+     * Record that a voice belongs to the name a human just gave it.
+     *
+     * <p>Called after a manual rename, and only for an account that has switched
+     * speaker learning on -- the caller checks, because the caller owns the user
+     * row. Never fatal: the rename the user asked for has already been applied
+     * and committed, and failing their edit because a background enrolment could
+     * not run would be the wrong end of the stick entirely.
+     */
+    public void learnSpeaker(String userId, String meetingId, String objectKey,
+                             String speakerKey, String displayName, List<SpeakerTurns> speakers) {
+        Map<String, Object> payload = new java.util.HashMap<>();
+        payload.put("userId", userId);
+        payload.put("meetingId", meetingId);
+        payload.put("objectKey", objectKey);
+        payload.put("speakerKey", speakerKey);
+        payload.put("displayName", displayName);
+        payload.put("speakers", speakers.stream().map(AiClient::speakerPayload).toList());
+
+        try {
+            client.post()
+                    .uri("/ai/speakers/learn")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(payload)
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (RuntimeException e) {
+            log.warn("Learning a speaker profile failed: {}", e.getClass().getSimpleName());
+        }
+    }
+
+    /**
+     * Delete voice templates: one profile, one meeting's, or everything held.
+     *
+     * <p>Pass both ids as null to erase the lot, which is what switching speaker
+     * learning off and closing an account both do.
+     */
+    public int forgetSpeakers(String userId, String profileId, String meetingId) {
+        Map<String, Object> payload = new java.util.HashMap<>();
+        payload.put("userId", userId);
+        payload.put("profileId", profileId);
+        payload.put("meetingId", meetingId);
+        try {
+            JsonNode body = client.post()
+                    .uri("/ai/speakers/forget")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(payload)
+                    .retrieve()
+                    .body(JsonNode.class);
+            return body != null && body.hasNonNull("deleted") ? body.get("deleted").asInt() : 0;
+        } catch (RuntimeException e) {
+            // Logged loudly. Everything else here degrades quietly, but a
+            // deletion that did not happen is the one failure a user must not
+            // be left believing succeeded -- the caller turns this into an error.
+            log.error("Deleting speaker profiles failed: {}", e.getClass().getSimpleName());
+            throw e;
+        }
+    }
+
+    private static Map<String, Object> speakerPayload(SpeakerTurns speaker) {
+        Map<String, Object> m = new java.util.HashMap<>();
+        m.put("speakerKey", speaker.speakerKey());
+        m.put("displayName", speaker.displayName() == null ? "" : speaker.displayName());
+        m.put("spans", speaker.spans());
+        return m;
+    }
 }

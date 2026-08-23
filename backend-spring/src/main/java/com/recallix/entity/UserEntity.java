@@ -195,6 +195,23 @@ public class UserEntity {
     @Column(name = "meeting_retention_days")
     private Integer meetingRetentionDays;
 
+    /**
+     * Opt-in to storing voice templates for the people this user names.
+     *
+     * <p>False for every existing account and every new one. While it is false
+     * no speaker embedding is computed — not merely not stored — and
+     * "Rematch speakers" has nothing to compare against. Setting it back to
+     * false deletes every profile and voiceprint the account holds, because
+     * withdrawing consent has to remove the data and not only its use.
+     *
+     * <p>The data behind this switch is biometric-adjacent: an ECAPA-TDNN
+     * embedding is a stable identifier derived from a person's body, and is the
+     * thing that makes one recording of them linkable to every other. See
+     * {@code V53__speaker_profiles.sql}.
+     */
+    @Column(name = "speaker_learning_enabled", nullable = false)
+    private boolean speakerLearningEnabled = false;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -271,6 +288,9 @@ public class UserEntity {
 
     public Integer getMeetingRetentionDays() { return meetingRetentionDays; }
     public void setMeetingRetentionDays(Integer meetingRetentionDays) { this.meetingRetentionDays = meetingRetentionDays; }
+
+    public boolean isSpeakerLearningEnabled() { return speakerLearningEnabled; }
+    public void setSpeakerLearningEnabled(boolean speakerLearningEnabled) { this.speakerLearningEnabled = speakerLearningEnabled; }
 
     /** Whether either dial is set — the one question the settings page asks. */
     public boolean hasRetentionPolicy() {

@@ -315,10 +315,16 @@ stored as JSONB, and rows written by the older shape read back with both null.
   `expectedSpeakersMin`/`Max` are still accepted by `POST /meetings` and still
   travel on the event; nothing sends them, so every job now runs on the
   duration-based defaults in section 7.
-- **Named speaker identification is not wired.** It never was: known speakers
-  fed prompting and keyterms and were never a voiceprint, and that feature is
-  gone (V51). Speakers are numbered by who spoke first and renamed by hand. The
-  adapter will still pass a provider-returned name through as a label if one
-  ever arrives.
+- **Named speaker identification is now wired, and not by the provider.**
+  It was not, for a long time, and the reason is worth keeping: known speakers
+  (V20) held a name, a use count and a date, fed prompting and keyterms, and
+  were never a voiceprint — that feature could not have identified anybody, and
+  it is gone (V51). Neither transcription provider offers cross-file speaker
+  identity either; AssemblyAI documents that it does not and points at exactly
+  the approach Recallix now takes. Speakers are still numbered by who spoke
+  first and can still be renamed by hand; a rename is now also what teaches a
+  voice, for accounts that have opted in. See
+  [speaker-identification.md](./speaker-identification.md). The adapter will
+  still pass a provider-returned name through as a label if one ever arrives.
 - **Auto leaves a 30-speaker search space on recordings over ten minutes.** See
   section 7.

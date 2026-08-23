@@ -68,6 +68,8 @@ public class ErasureService {
     private final StorageService storage;
     private final AuditService audit;
 
+    private final SpeakerIdentityService speakerIdentity;
+
     public ErasureService(MeetingRepository meetings,
                           MeetingTranscriptRepository transcripts,
                           TranscriptSegmentRepository segments,
@@ -78,7 +80,9 @@ public class ErasureService {
                           TranscriptChunkRepository chunks,
                           UserRepository users,
                           StorageService storage,
-                          AuditService audit) {
+                          AuditService audit,
+                          SpeakerIdentityService speakerIdentity) {
+        this.speakerIdentity = speakerIdentity;
         this.meetings = meetings;
         this.transcripts = transcripts;
         this.segments = segments;
@@ -120,6 +124,18 @@ public class ErasureService {
         // "the recording is deleted" is a claim the page immediately contradicts.
         meeting.setAudioUrl(null);
         meeting.setAudioDeletedAt(Instant.now());
+
+        // And the voiceprints computed from it. An ECAPA embedding is not audio
+        // and cannot be turned back into audio, so it is tempting to argue it
+        // survives a request to delete the recording. It should not: it is a
+        // durable identifier derived from the voices on that recording, and it
+        // is the specific thing that makes those voices findable again. Keeping
+        // it would answer "delete the recording of me" with a technicality.
+        //
+        // Named profiles are untouched. Those were created by a separate,
+        // explicit act about a person, not about this file, and they are what
+        // the account holder switched the feature on for.
+        speakerIdentity.forgetMeeting(meeting.getUserId(), meeting.getId());
 
         return meeting.getAudioDeletedAt();
     }

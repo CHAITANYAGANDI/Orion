@@ -65,6 +65,8 @@ class MeetingListWindowTest {
     @Mock private MeetingTranslationRepository translations;
     @Mock private NotificationService notifications;
     @Mock private ErasureService erasure;
+    // Consulted on a rename; does nothing for an account that has not opted in.
+    @Mock private SpeakerIdentityService speakerIdentity;
     @Mock private UserService users;
 
     private MeetingService service;
@@ -72,7 +74,7 @@ class MeetingListWindowTest {
     @BeforeEach
     void setUp() {
         service = new MeetingService(meetings, transcripts, segments, summaries,
-                insights, storage, usage, outbox, audit, ai, templates, projects, translations, notifications, erasure, users);
+                insights, storage, usage, outbox, audit, ai, templates, projects, translations, notifications, erasure, users, speakerIdentity);
 
         when(meetings.search(anyString(), any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new org.springframework.data.domain.PageImpl<>(List.<Meeting>of()));

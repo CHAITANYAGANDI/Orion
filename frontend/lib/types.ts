@@ -302,11 +302,51 @@ export interface TranscriptResponse {
  * Fix diarization rather than naming: merge a label that was split across two
  * speakers, or move individual turns to whoever actually said them. Exactly one
  * of `fromSpeaker` / `segmentIds` is sent.
+ *
+ * This is the *manual* repair, and it is a different job from Rematch. It
+ * answers "the transcriber got the boundaries wrong"; Rematch answers "who is
+ * this?". No amount of voice matching fixes a split label, and no amount of
+ * merging tells you somebody's name.
  */
-export interface SpeakerRematch {
+export interface DiarizationFix {
   fromSpeaker?: string;
   toSpeaker: string;
   segmentIds?: string[];
+}
+
+/**
+ * What came back from "Rematch speakers".
+ *
+ * <p>Three outcomes and they are deliberately distinguishable. `matched > 0` is
+ * a result; `matched === 0` with no `unavailable` means it ran and nobody
+ * cleared the confidence bar, which is ordinary and correct; `unavailable` means
+ * it could not run at all, and the user's next move is different in each case.
+ *
+ * There is no confidence figure here on purpose. The matcher works on cosine
+ * similarity between voice embeddings, which is not a calibrated probability —
+ * showing it as a percentage would invent a precision it does not have.
+ */
+export interface SpeakerRematchResult {
+  matched: number;
+  names: string[];
+  /** How many speakers were still wearing a generated label when we looked. */
+  considered: number;
+  unavailable: string | null;
+}
+
+/** One voice Recallix has learned, as Settings lists it. */
+export interface SpeakerProfile {
+  id: string;
+  name: string;
+  /** How many separately-named appearances have been averaged into it. */
+  samples: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SpeakerSettings {
+  learningEnabled: boolean;
+  profiles: SpeakerProfile[];
 }
 
 /** A heading with its bullets — the repeating unit of an `outline` section. */

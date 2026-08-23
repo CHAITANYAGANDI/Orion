@@ -78,9 +78,12 @@ so it takes a fourth upload to see.
 
 - [Architecture](docs/architecture.md)
 - [API contracts](docs/api-contracts.md) — REST, Kafka, WebSocket, JSON shapes (source of truth)
-- [Database schema](docs/database-schema.sql) — 44 Flyway migrations
+- [Database schema](docs/database-schema.sql) — 53 Flyway migrations
 - [Deployment](docs/deploy.md)
 - [Demo script](docs/demo-script.md)
+- [Speaker identification](docs/speaker-identification.md) — how a voice named in
+  one meeting is recognised in another, and the biometric-adjacent data that needs
+- [Speaker diarization](docs/diarization.md) — provider clusters vs. Recallix speakers
 - [Load testing](docs/load-testing-report.md) — test plan; not yet run
 
 ## Feature status

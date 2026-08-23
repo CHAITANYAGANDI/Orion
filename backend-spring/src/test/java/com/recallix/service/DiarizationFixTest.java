@@ -35,7 +35,15 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Rematching speakers: fixing diarization rather than naming.
+ * Fixing diarization rather than naming.
+ *
+ * <p>This was called {@code SpeakerRematchTest} and tested an endpoint at
+ * {@code /speakers/rematch}. Both were renamed, and nothing about the behaviour
+ * moved with them. "Rematch" now means the automatic acoustic identification in
+ * {@link SpeakerRematchAutoTest}, which is what every other product means by it
+ * and what a menu item of that name has to do. This is the manual repair, and it
+ * solves a problem no amount of voice matching can touch: the transcriber
+ * putting one person under two labels, or dropping a turn on the wrong one.
  *
  * <p>What matters here is not that the label changes — it is that everything
  * derived from the label changes with it. The flat transcript carries speaker
@@ -45,7 +53,7 @@ import static org.mockito.Mockito.when;
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
-class SpeakerRematchTest {
+class DiarizationFixTest {
 
     private static final String USER = "usr_1";
     private static final String MEETING = "mtg_1";
@@ -68,6 +76,10 @@ class SpeakerRematchTest {
     @Mock private NotificationService notifications;
     @Mock private ErasureService erasure;
     @Mock private UserService userService;
+    // Speaker identification is not what these tests are about; it is here
+    // because MeetingService now consults it on a rename. Doing nothing is the
+    // right behaviour for an account that has not opted in.
+    @Mock private SpeakerIdentityService speakerIdentity;
 
     private MeetingService service;
     private MeetingTranscript transcript;
@@ -78,7 +90,7 @@ class SpeakerRematchTest {
     @BeforeEach
     void setUp() {
         service = new MeetingService(meetings, transcripts, segments, summaries,
-                insights, storage, usage, outbox, audit, ai, templates, projects, translations, notifications, erasure, userService);
+                insights, storage, usage, outbox, audit, ai, templates, projects, translations, notifications, erasure, userService, speakerIdentity);
 
         Meeting meeting = new Meeting();
         meeting.setId(MEETING);
@@ -105,7 +117,7 @@ class SpeakerRematchTest {
     @Test
     @DisplayName("merging folds every turn of one label into another")
     void merge_moves_all_turns() {
-        service.rematchSpeaker(USER, MEETING,
+        service.fixDiarization(USER, MEETING,
                 new SpeakerRematchRequest("Speaker 3", "Speaker 1", null));
 
         assertThat(first.getSpeaker()).isEqualTo("Speaker 1");
@@ -117,7 +129,7 @@ class SpeakerRematchTest {
     @Test
     @DisplayName("merging rebuilds the flat transcript the export reads")
     void merge_rewrites_the_denormalised_transcript() {
-        service.rematchSpeaker(USER, MEETING,
+        service.fixDiarization(USER, MEETING,
                 new SpeakerRematchRequest("Speaker 3", "Speaker 1", null));
 
         assertThat(transcript.getTranscriptText())
@@ -128,7 +140,7 @@ class SpeakerRematchTest {
     @Test
     @DisplayName("merging re-indexes so chat stops attributing quotes to the old label")
     void merge_reindexes() {
-        service.rematchSpeaker(USER, MEETING,
+        service.fixDiarization(USER, MEETING,
                 new SpeakerRematchRequest("Speaker 3", "Speaker 1", null));
 
         verify(ai).reindex(eq(USER), eq(MEETING), anyString(), any());
@@ -137,7 +149,7 @@ class SpeakerRematchTest {
     @Test
     @DisplayName("merging a label nothing is using is refused rather than silently doing nothing")
     void merge_from_an_unknown_label_is_rejected() {
-        assertThatThrownBy(() -> service.rematchSpeaker(USER, MEETING,
+        assertThatThrownBy(() -> service.fixDiarization(USER, MEETING,
                 new SpeakerRematchRequest("Speaker 9", "Speaker 1", null)))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("Speaker 9");
@@ -148,7 +160,7 @@ class SpeakerRematchTest {
     @Test
     @DisplayName("reassigning moves only the named turns")
     void reassign_moves_only_those_segments() {
-        service.rematchSpeaker(USER, MEETING,
+        service.fixDiarization(USER, MEETING,
                 new SpeakerRematchRequest(null, "Speaker 1", List.of("seg_2")));
 
         assertThat(second.getSpeaker()).isEqualTo("Speaker 1");
@@ -160,7 +172,7 @@ class SpeakerRematchTest {
     void reassign_rejects_a_stale_segment_id() {
         // Half-applying a batch would leave the user believing corrections
         // landed that did not.
-        assertThatThrownBy(() -> service.rematchSpeaker(USER, MEETING,
+        assertThatThrownBy(() -> service.fixDiarization(USER, MEETING,
                 new SpeakerRematchRequest(null, "Speaker 1", List.of("seg_2", "seg_gone"))))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("reload the transcript");
@@ -172,7 +184,7 @@ class SpeakerRematchTest {
     @DisplayName("sending both a merge and a reassignment is refused")
     void both_modes_at_once_is_rejected() {
         // The result would depend on which was applied first.
-        assertThatThrownBy(() -> service.rematchSpeaker(USER, MEETING,
+        assertThatThrownBy(() -> service.fixDiarization(USER, MEETING,
                 new SpeakerRematchRequest("Speaker 2", "Speaker 1", List.of("seg_3"))))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("not both");
@@ -181,7 +193,7 @@ class SpeakerRematchTest {
     @Test
     @DisplayName("sending neither is refused")
     void neither_mode_is_rejected() {
-        assertThatThrownBy(() -> service.rematchSpeaker(USER, MEETING,
+        assertThatThrownBy(() -> service.fixDiarization(USER, MEETING,
                 new SpeakerRematchRequest(null, "Speaker 1", List.of())))
                 .isInstanceOf(ApiException.class);
     }
@@ -189,7 +201,7 @@ class SpeakerRematchTest {
     @Test
     @DisplayName("merging a speaker into themselves is refused")
     void self_merge_is_rejected() {
-        assertThatThrownBy(() -> service.rematchSpeaker(USER, MEETING,
+        assertThatThrownBy(() -> service.fixDiarization(USER, MEETING,
                 new SpeakerRematchRequest("Speaker 1", "Speaker 1", null)))
                 .isInstanceOf(ApiException.class);
     }
@@ -199,7 +211,7 @@ class SpeakerRematchTest {
     void reassigning_a_turn_to_its_current_speaker_changes_nothing() {
         // Re-indexing costs a model round trip; doing it for a no-op would make
         // an accidental double-click expensive.
-        service.rematchSpeaker(USER, MEETING,
+        service.fixDiarization(USER, MEETING,
                 new SpeakerRematchRequest(null, "Speaker 2", List.of("seg_2")));
 
         verify(ai, never()).reindex(anyString(), anyString(), anyString(), any());

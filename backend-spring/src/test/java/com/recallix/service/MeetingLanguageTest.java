@@ -68,6 +68,8 @@ class MeetingLanguageTest {
     @Mock private MeetingTranslationRepository translations;
     @Mock private NotificationService notifications;
     @Mock private ErasureService erasure;
+    // Consulted on a rename; does nothing for an account that has not opted in.
+    @Mock private SpeakerIdentityService speakerIdentity;
     @Mock private UserService users;
 
     private MeetingService service;
@@ -77,7 +79,7 @@ class MeetingLanguageTest {
     @BeforeEach
     void setUp() {
         service = new MeetingService(meetings, transcripts, segments, summaries,
-                insights, storage, usage, outbox, audit, ai, templates, projects, translations, notifications, erasure, users);
+                insights, storage, usage, outbox, audit, ai, templates, projects, translations, notifications, erasure, users, speakerIdentity);
 
         meeting = new Meeting();
         meeting.setId(MEETING);

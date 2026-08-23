@@ -624,3 +624,92 @@ class MeetingUploadedEvent(CamelModel):
 class ProcessingFailedEvent(CamelModel):
     meeting_id: str
     error: str
+
+
+# --------------------------------------------------------------------------- #
+# Speaker identification
+# --------------------------------------------------------------------------- #
+class SpeakerTurnsDto(CamelModel):
+    """One canonical speaker in one meeting, as Spring knows them.
+
+    `speakerKey` is the meeting-local identity ("spk_2") rather than the display
+    name, because the display name is the thing about to change. `displayName`
+    is sent anyway, and it does real work: it is how this service tells an
+    unresolved "Speaker 2" from a Sarah somebody typed, and it supplies the set
+    of names already taken in this meeting.
+
+    `spans` are the start/end pairs of that speaker's turns. Sent rather than
+    re-derived here because the segments are Spring's, and they may have been
+    edited since the transcript was written.
+    """
+
+    speaker_key: str
+    display_name: str = ""
+    spans: list[tuple[float, float]] = Field(default_factory=list)
+
+
+class SpeakerIdentifyRequest(CamelModel):
+    """Ask which unresolved speakers are confidently somebody already known.
+
+    `objectKey` may be null: a recording erased by retention leaves a meeting
+    whose voiceprints were computed while it still existed, and those keep
+    working. Null with nothing cached simply means nothing can be identified.
+    """
+
+    user_id: str
+    meeting_id: str
+    object_key: str | None = None
+    speakers: list[SpeakerTurnsDto] = Field(default_factory=list)
+
+
+class SpeakerMatchDto(CamelModel):
+    """A proposal. Spring applies it; this service never edits a transcript."""
+
+    speaker_key: str
+    display_name: str
+    profile_id: str
+    # Cosine, for logs and tests. Deliberately never rendered as a percentage —
+    # it is not a calibrated probability. See app.voiceprints.
+    similarity: float
+
+
+class SpeakerIdentifyResponse(CamelModel):
+    matches: list[SpeakerMatchDto] = Field(default_factory=list)
+    #: How many speakers were still wearing a generated label.
+    considered: int = 0
+    #: How many named voices this account has to compare against.
+    profiles: int = 0
+    #: Set when the feature could not run at all, as distinct from running and
+    #: matching nobody. The two deserve different sentences on screen.
+    unavailable: str | None = None
+
+
+class SpeakerLearnRequest(CamelModel):
+    """Record that a voice belongs to the name a human just gave it."""
+
+    user_id: str
+    meeting_id: str
+    object_key: str | None = None
+    speaker_key: str
+    display_name: str
+    speakers: list[SpeakerTurnsDto] = Field(default_factory=list)
+
+
+class SpeakerLearnResponse(CamelModel):
+    #: Null when there was too little usable speech to build a template. An
+    #: ordinary outcome: the rename itself already happened.
+    profile_id: str | None = None
+    learned: bool = False
+    unavailable: str | None = None
+
+
+class SpeakerForgetRequest(CamelModel):
+    """Delete voice templates. Either one profile, or everything held."""
+
+    user_id: str
+    profile_id: str | None = None
+    meeting_id: str | None = None
+
+
+class SpeakerForgetResponse(CamelModel):
+    deleted: int = 0

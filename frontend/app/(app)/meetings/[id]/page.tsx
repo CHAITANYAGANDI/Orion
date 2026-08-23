@@ -4,6 +4,7 @@ import * as React from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
+import { rematchMessage } from "@/lib/rematch";
 import {
   RefreshCw,
   Download,
@@ -42,7 +43,8 @@ import {
   useGetTranslationsQuery,
   useGetLanguagesQuery,
   useRenameSpeakersMutation,
-  useRematchSpeakerMutation,
+  useFixDiarizationMutation,
+  useRematchSpeakersMutation,
   useEditSegmentsMutation,
   useGetSummaryTemplatesQuery,
   useResummarizeMutation,
@@ -207,6 +209,9 @@ export default function MeetingDetailPage() {
    * item a second time works a second time.
    */
   const [speakerTools, setSpeakerTools] = React.useState(0);
+  // Rematch runs from the menu, so its pending state has to live out here
+  // beside the menu rather than inside the transcript panel.
+  const [rematchSpeakers, { isLoading: rematching }] = useRematchSpeakersMutation();
   // Keyed so the three places that can rewrite this summary share one
   // in-flight flag: this page's menu item, the template picker on the tab row,
   // and the "transcript changed" banner. Without it each knows only about its
@@ -466,12 +471,41 @@ export default function MeetingDetailPage() {
   }
 
   /**
+   * Rematch speakers: one click, no dialog, no scrolling anywhere.
+   *
+   * Every speaker still labelled "Speaker N" is compared acoustically against
+   * the voices this account has learned by naming people in other meetings.
+   * Anyone already named is left alone, and a weak or ambiguous match renames
+   * nobody — so "no new speaker matches found" is a normal outcome, not a
+   * failure, and is reported as plainly as a success.
+   *
+   * This used to open the merge dropdowns instead. That is a different repair
+   * and it still exists, on the menu item below.
+   */
+  async function onRematchSpeakers() {
+    try {
+      // The wording lives in lib/speakers because it is the feature's whole
+      // visible surface: three outcomes that are easy to collapse into one, on
+      // a transcript the user may not be looking at.
+      const { tone, text, detail } = rematchMessage(await rematchSpeakers(id).unwrap());
+      toast[tone](text, detail ? { description: detail } : undefined);
+    } catch {
+      toast.error("Could not rematch speakers.");
+    }
+  }
+
+  /**
    * Send the reader to the speaker tools, wherever they were.
+   *
+   * The manual repair, for when diarization split one person across two labels
+   * or dropped a turn on the wrong person. No amount of voice matching fixes
+   * either, which is why this did not go away when Rematch became automatic —
+   * it only stopped being called Rematch.
    *
    * A counter rather than a boolean: pressing the menu item twice has to work
    * twice, and a flag that is already true is a second press that does nothing.
    */
-  function onRematchSpeakers() {
+  function onFixDiarization() {
     changeTab("transcript");
     setSpeakerTools((n) => n + 1);
   }
@@ -699,7 +733,9 @@ export default function MeetingDetailPage() {
             onCopyTranscript={() => void onCopyTranscript()}
             onRegenerateSummary={() => void onRegenerateSummary()}
             onTranslate={() => setPickingLanguage(true)}
-            onRematchSpeakers={onRematchSpeakers}
+            onRematchSpeakers={() => void onRematchSpeakers()}
+            onFixDiarization={onFixDiarization}
+            rematching={rematching}
             onDelete={() => void onDelete()}
           />}
         </div>
@@ -1772,7 +1808,7 @@ function TranscriptPanel({
 }) {
   const speakerTools = React.useRef<HTMLDivElement | null>(null);
   const [renameSpeakers, { isLoading: renaming }] = useRenameSpeakersMutation();
-  const [rematchSpeaker, { isLoading: merging }] = useRematchSpeakerMutation();
+  const [fixDiarization, { isLoading: merging }] = useFixDiarizationMutation();
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState<Record<string, string>>({});
   // Which label the user is folding away, and into whom.
@@ -2205,7 +2241,7 @@ function TranscriptPanel({
   async function mergeSpeakers() {
     if (!mergeFrom || !mergeInto || mergeFrom === mergeInto) return;
     try {
-      await rematchSpeaker({
+      await fixDiarization({
         id: meetingId,
         fromSpeaker: mergeFrom,
         toSpeaker: mergeInto,
@@ -2222,7 +2258,7 @@ function TranscriptPanel({
   async function reassignTurn(segmentIds: string[], toSpeaker: string) {
     if (segmentIds.length === 0 || !toSpeaker) return;
     try {
-      await rematchSpeaker({ id: meetingId, toSpeaker, segmentIds }).unwrap();
+      await fixDiarization({ id: meetingId, toSpeaker, segmentIds }).unwrap();
       toast.success(`Reassigned to ${toSpeaker}.`);
     } catch {
       toast.error("Could not reassign that turn.");
@@ -2319,15 +2355,17 @@ function TranscriptPanel({
                   </Button>
                 </div>
 
-                {/* Merging is a different repair from renaming: this one is for
-                    when diarization split a single person across two labels,
-                    which renaming both cannot fix. */}
+                {/* Merging is a different repair from renaming, and a
+                    different one again from Rematch. Renaming says who someone
+                    is; Rematch works that out acoustically; this fixes the
+                    transcriber putting one person under two labels, which
+                    neither of the others can touch. */}
                 {speakers.length > 1 && (
-                  <div className="space-y-2 border-t pt-3">
-                    <p className="text-sm font-medium">Same person twice?</p>
+                  <div className="space-y-2 border-t pt-3" data-testid="fix-diarization">
+                    <p className="text-sm font-medium">Fix diarization</p>
                     <p className="text-xs text-muted-foreground">
-                      Merge one label into another when the transcriber split one
-                      voice across two speakers.
+                      Same person twice? Merge one label into another when the
+                      transcriber split one voice across two speakers.
                     </p>
                     <div className="flex flex-wrap items-center gap-2">
                       <select

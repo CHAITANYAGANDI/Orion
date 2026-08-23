@@ -88,6 +88,10 @@ class MeetingTitleTest {
     @Mock private MeetingTranslationRepository translations;
     @Mock private ErasureService erasure;
     @Mock private UserService userService;
+    // Speaker identification is not what these tests are about; it is here
+    // because MeetingService now consults it on a rename. Doing nothing is the
+    // right behaviour for an account that has not opted in.
+    @Mock private SpeakerIdentityService speakerIdentity;
 
     private CallbackService callbacks;
     private MeetingService meetingService;
@@ -99,7 +103,7 @@ class MeetingTitleTest {
                 insights, statusPublisher, usage, events, notifications, users);
         meetingService = new MeetingService(meetings, transcripts, segments, summaries,
                 insights, storage, usage, outbox, audit, ai, templates, projects, translations,
-                notifications, erasure, userService);
+                notifications, erasure, userService, speakerIdentity);
 
         meeting = new Meeting();
         meeting.setId(MEETING);
