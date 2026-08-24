@@ -84,7 +84,22 @@ class DeepgramTranscriptionAdapter(TranscriptionPort):
         async def _op() -> TranscriptResponse:
             params: dict[str, Any] = {
                 "model": self._settings.deepgram_model,
-                "diarize": "true",
+                # The current batch diarizer, pinned rather than "latest".
+                #
+                # `diarize=true` is deprecated and routes to v1 whatever else is
+                # asked for, and the API rejects a request that sets both, so
+                # this is a replacement and not an addition. Pinned to v2 rather
+                # than `latest` for the same reason the transcription model is
+                # pinned: a diarizer that changes underneath a deployment
+                # changes every speaker label in every new meeting, and that
+                # should be a decision somebody made.
+                #
+                # Measured on the reported recording (docs/diarization.md
+                # section 12): v1 merged the 4.85s turn at 57.34 exactly as
+                # AssemblyAI does; v2 separated it. v2 is strictly better here
+                # and costs the same — diarization is included in Deepgram's
+                # per-hour rate.
+                "diarize_model": "v2",
                 "utterances": "true",
                 "punctuate": "true",
                 # Turns "one two three" into "123" and formats dates/times, which

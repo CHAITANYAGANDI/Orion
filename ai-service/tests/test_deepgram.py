@@ -224,7 +224,12 @@ async def test_request_asks_for_diarization_and_utterances():
 
     await adapter.transcribe(b"fake audio", "meeting.mp3")
 
-    assert seen["params"]["diarize"] == "true"
+    # The current batch diarizer, and only it. Deepgram rejects a request that
+    # sets both parameters, and `diarize=true` silently routes to the v1 model
+    # that merged the reported 4.85s turn -- so sending both would be an error
+    # and sending the old one would be a regression.
+    assert seen["params"]["diarize_model"] == "v2"
+    assert "diarize" not in seen["params"], "diarize=true is deprecated and conflicts"
     assert seen["params"]["utterances"] == "true"
     assert seen["params"]["detect_language"] == "true"
     assert seen["auth"] == "Token dg_test_key"

@@ -1,6 +1,7 @@
 package com.recallix.controller;
 
 import com.recallix.domain.MeetingStatus;
+import com.recallix.dto.SegmentSpeakerRequest;
 import com.recallix.dto.MeetingCreateRequest;
 import com.recallix.dto.MeetingLanguageRequest;
 import com.recallix.dto.MeetingResponse;
@@ -162,6 +163,25 @@ public class MeetingController {
     public TranscriptResponse editSegments(@PathVariable String id,
                                            @Valid @RequestBody TranscriptEditRequest req) {
         return meetings.editSegments(SecurityUtils.currentUserId(), id, req.edits());
+    }
+
+    /**
+     * Move one turn, or part of one, to a different speaker.
+     *
+     * <p>Separate from {@code PATCH /speakers}, which renames a voice
+     * everywhere it appears. This corrects an attribution and changes nothing
+     * else — including nothing about any other turn, and nothing about the
+     * voice profiles Rematch has learned.
+     *
+     * <p>Returns the whole transcript rather than the changed line: a partial
+     * move splits one segment into three, so the client cannot patch its cache
+     * from the response without reimplementing the split.
+     */
+    @PatchMapping("/{id}/segments/{segmentId}/speaker")
+    public TranscriptResponse setSegmentSpeaker(@PathVariable String id,
+                                                @PathVariable String segmentId,
+                                                @Valid @RequestBody SegmentSpeakerRequest req) {
+        return meetings.setSegmentSpeaker(SecurityUtils.currentUserId(), id, segmentId, req);
     }
 
     @PostMapping("/{id}/reprocess")

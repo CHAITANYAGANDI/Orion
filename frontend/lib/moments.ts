@@ -116,6 +116,48 @@ export interface WordRef {
   speaker: string;
 }
 
+/**
+ * Which words a character range covers, as positions in the segment's own
+ * `words` array.
+ *
+ * The speaker-correction call addresses words by position, because that is what
+ * the server can split on -- a character offset has no matching point in the
+ * audio. The mapping goes through `tokenize`, which is also what rendered the
+ * words the user selected, so the positions returned here are the same ones the
+ * reader was pointing at. Doing the arithmetic separately would be a second
+ * implementation of word boundaries, and the two would disagree on exactly the
+ * punctuation-heavy line somebody is trying to fix.
+ *
+ * Returns null when the segment has no per-word timings. Those cannot be split
+ * at all, and saying so is the caller's job.
+ */
+export function wordRangeFor(
+  segment: { text: string; start: number; end: number; words?: SpokenWord[] | null },
+  startOffset: number,
+  endOffset: number,
+): { fromWord: number; toWord: number } | null {
+  if (!segment.words || segment.words.length === 0) return null;
+  // A caret is not a selection. Without this a zero-width range still matches
+  // whichever word it sits inside, so a stray click would offer to reattribute
+  // a word the user never selected.
+  if (endOffset <= startOffset) return null;
+
+  const tokens = tokenize(segment.text, segment.start, segment.end, segment.words);
+  let first = -1;
+  let last = -1;
+  for (let i = 0; i < tokens.length; i += 1) {
+    // Touching, not containing: a selection that clips the first character of a
+    // word still means that word. Requiring containment would silently drop the
+    // edges of every drag a person actually makes.
+    if (tokens[i].to > startOffset && tokens[i].from < endOffset) {
+      if (first < 0) first = i;
+      last = i;
+    }
+  }
+  if (first < 0) return null;
+  return { fromWord: first, toWord: last };
+}
+
 export interface SelectionCapture {
   ranges: MomentRange[];
   quote: string;

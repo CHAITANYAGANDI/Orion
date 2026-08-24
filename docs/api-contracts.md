@@ -156,7 +156,7 @@ derived from the segments on every read. The percentage is a share of total
 **speaking** time, not of the meeting's wall-clock duration — the two differ
 whenever there is silence, and percentages that do not sum to 100 read as a bug.
 
-### Two operations on a speaker, and one on the whole meeting
+### Three operations on a speaker, and one on the whole meeting
 
 They are easy to confuse and they answer different questions. There used to be
 a third — `PATCH /speakers/rematch`, which merged one label into another or
@@ -172,6 +172,35 @@ no key and fall back to matching the name.
 
 For an account with voice recognition on, this is also the moment a voice is
 learned — see below.
+
+**Correct one turn** — `PATCH /segments/{segmentId}/speaker`. "These words were
+not that person." Send `{"speakerKey": "spk_1"}` to move a whole turn, or add
+`fromWord`/`toWord` (zero-based, inclusive) to move only part of one.
+
+The word range is the reason this exists. Automatic diarization is not perfect
+and the failing case is specific: a provider that buries a short reply inside
+somebody else's turn. "Yes, sir." arriving as words 5–6 of a ten-word utterance
+cannot be fixed by a rename, because the other eight words are attributed
+correctly. Given a range, the server splits the segment into up to three rows,
+timed from the words themselves — the only points in the utterance that
+correspond to anything in the audio. A segment with no per-word timings is
+refused rather than cut at a character offset.
+
+It changes **only** what was named. No neighbouring turn is merged, re-split or
+relabelled, no other turn by the same speaker is touched, and no voice is
+learned — enrolling a voiceprint from a turn somebody just told you was
+misattributed would train the profile on the mistake. Everything derived does
+move: the flat transcript the export reads, the retrieval index chat cites, and
+the talk-time stats (derived on read, so they follow for free). The summary is
+marked stale rather than regenerated.
+
+`speakerKey`, not a display name: names are not unique — two people can both be
+called Chris — and the key is what survives a rename. The destination must
+already exist in the meeting; this endpoint cannot create a participant.
+
+Returns the whole `TranscriptResponse`, because a partial move turns one segment
+into three and a client cannot patch its cache without reimplementing the
+split.
 
 **Rematch** — `POST /speakers/rematch`, no body. "Which of these unresolved
 speakers are people we already know?" Every speaker still wearing a generated

@@ -850,6 +850,39 @@ export const api = createApi({
       ],
     }),
 
+    /**
+     * Move one turn, or part of one, to a different speaker.
+     *
+     * Invalidates the same two tags as a text edit and for the same reason: the
+     * server re-indexes, so any chat answer already on screen was grounded in a
+     * transcript that attributed these words to somebody else.
+     *
+     * `fromWord`/`toWord` are optional and omitted for a whole turn. When they
+     * are sent the server splits the segment, so the response is the whole
+     * transcript rather than one line -- there is no way to patch the cache
+     * locally without reimplementing the split.
+     */
+    setSegmentSpeaker: builder.mutation<
+      TranscriptResponse,
+      {
+        id: string;
+        segmentId: string;
+        speakerKey: string;
+        fromWord?: number;
+        toWord?: number;
+      }
+    >({
+      query: ({ id, segmentId, speakerKey, fromWord, toWord }) => ({
+        url: `/meetings/${id}/segments/${segmentId}/speaker`,
+        method: "PATCH",
+        body: { speakerKey, fromWord, toWord },
+      }),
+      invalidatesTags: (_r, _e, arg) => [
+        { type: "Transcript", id: arg.id },
+        { type: "Chat", id: arg.id },
+      ],
+    }),
+
     // ---- Speaker rename ----
     renameSpeakers: builder.mutation<
       TranscriptResponse,
@@ -1166,6 +1199,7 @@ export const {
   useSetSpeakerLearningMutation,
   useDeleteSpeakerProfileMutation,
   useEditSegmentsMutation,
+  useSetSegmentSpeakerMutation,
   useGetActionItemsQuery,
   usePatchActionItemMutation,
   useDeleteActionItemMutation,

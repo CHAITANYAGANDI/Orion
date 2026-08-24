@@ -5,6 +5,7 @@ import com.recallix.common.IdGenerator;
 import com.recallix.common.SpeakerLabels;
 import com.recallix.config.KafkaTopicsConfig;
 import com.recallix.domain.Language;
+import com.recallix.domain.SpokenWord;
 import com.recallix.domain.MeetingStatus;
 import com.recallix.domain.SourceType;
 import com.recallix.dto.MeetingCreateRequest;
@@ -14,6 +15,7 @@ import com.recallix.dto.PageResponse;
 import com.recallix.dto.callback.AiInsight;
 import com.recallix.dto.ReprocessResponse;
 import com.recallix.dto.SegmentDto;
+import com.recallix.dto.SegmentSpeakerRequest;
 import com.recallix.dto.SpeakerRematchResponse;
 import com.recallix.dto.SpeakerStatsDto;
 import com.recallix.dto.SummaryResponse;
@@ -784,6 +786,201 @@ public class MeetingService {
         markSummaryStale(meetingId);
         audit.record(userId, "TRANSCRIPT_EDITED", "meeting", meetingId);
         return getTranscript(userId, meetingId);
+    }
+
+    /**
+     * Move one turn, or part of one, to a different speaker.
+     *
+     * <p>The manual answer to a diarization mistake. Automatic diarization is
+     * not perfect and the known short-turn case is a model limitation, not a
+     * bug in this code: a provider that buries "Yes, sir." inside the other
+     * person's utterance gives Recallix nothing to split on. This is how a
+     * human fixes it, and it is deliberately the *only* thing that changes when
+     * they do.
+     *
+     * <h2>What it touches, and what it must not</h2>
+     *
+     * <p>Exactly the words named. No neighbouring turn is merged, re-split or
+     * relabelled, and no other occurrence of the same speaker is touched. A
+     * correction that "helpfully" applied itself elsewhere would be
+     * unreviewable — the user can see one line, not the forty the rule fired
+     * on.
+     *
+     * <p>It also does not teach a voice. {@code learnFromRename} enrols a
+     * voiceprint when somebody puts a *name* to a speaker, which is a statement
+     * about who that voice is. Moving a turn is the opposite: a statement that
+     * these words were misattributed. Feeding that audio into a voiceprint
+     * would train the model on the very mistake being corrected, so Rematch
+     * learning is left strictly alone here.
+     *
+     * <p>Everything downstream of the segments does move, because they all
+     * carry the speaker: the flat transcript (which the export reads), the
+     * retrieval index (which chat cites), and the speaker statistics (derived
+     * at read time from these same rows, so they follow for free). The summary
+     * is marked stale rather than regenerated — it names speakers, so it may
+     * now disagree, and silently spending a model call on a one-line fix is
+     * worse than saying so.
+     */
+    @Transactional
+    public TranscriptResponse setSegmentSpeaker(String userId, String meetingId,
+                                                String segmentId, SegmentSpeakerRequest req) {
+        require(userId, meetingId);
+        var segs = segments.findByMeetingIdOrderByStartTimeAsc(meetingId);
+
+        var target = segs.stream()
+                .filter(x -> x.getId().equals(segmentId))
+                .findFirst()
+                .orElseThrow(() -> ApiException.badRequest(
+                        "That line is not part of this meeting; reload the transcript and try again"));
+
+        // The destination has to be a speaker this meeting already has. Anything
+        // else would invent a participant from a typo in a request body.
+        String key = req.speakerKey().trim();
+        String name = segs.stream()
+                .filter(x -> key.equals(x.getSpeakerKey()))
+                .map(TranscriptSegment::getSpeaker)
+                .filter(n -> n != null && !n.isBlank())
+                .findFirst()
+                .orElseThrow(() -> ApiException.badRequest(
+                        "There is no such speaker in this meeting"));
+
+        List<TranscriptSegment> replacement = req.isPartial()
+                ? splitForSpeaker(target, req, key, name)
+                : moveWholeSegment(target, key, name);
+
+        if (replacement.isEmpty()) {
+            return getTranscript(userId, meetingId);
+        }
+
+        if (replacement.size() > 1) {
+            // A split: the original row is replaced by the pieces. Deleted and
+            // re-inserted rather than mutated in place because one row cannot
+            // become three, and the pieces need their own ids so a later edit
+            // can address them.
+            segments.delete(target);
+            segments.saveAll(replacement);
+        }
+
+        // Re-read after a split so the flat transcript and the index are built
+        // from the pieces rather than from the row that no longer exists.
+        final var rows = replacement.size() > 1
+                ? segments.findByMeetingIdOrderByStartTimeAsc(meetingId)
+                : segs;
+
+        transcripts.findFirstByMeetingIdOrderByCreatedAtDesc(meetingId)
+                .ifPresent(t -> t.setTranscriptText(joinSegments(rows)));
+        reindex(userId, meetingId, rows);
+        markSummaryStale(meetingId);
+        audit.record(userId, "SEGMENT_SPEAKER_CORRECTED", "meeting", meetingId);
+        return getTranscript(userId, meetingId);
+    }
+
+    /**
+     * The whole turn moves. Returns the mutated segment, or nothing if it was
+     * already attributed that way.
+     */
+    private List<TranscriptSegment> moveWholeSegment(TranscriptSegment seg,
+                                                     String key, String name) {
+        if (key.equals(seg.getSpeakerKey())) {
+            return List.of();
+        }
+        seg.setSpeakerKey(key);
+        seg.setSpeaker(name);
+        // A human has said whose this is, so it is attributed even if the
+        // provider had given up on it.
+        seg.setSpeakerStatus("attributed");
+        seg.setWords(reattributeWords(seg.getWords(), 0, seg.getWords().size() - 1, key, name));
+        return List.of(seg);
+    }
+
+    /**
+     * Part of a turn moves, so the turn becomes two or three.
+     *
+     * <p>Split on word boundaries and timed from the words themselves, because
+     * those are the only points in the utterance that correspond to anything in
+     * the audio. A segment with no word timings cannot be split at all and says
+     * so, rather than cutting the text at a character offset and producing a
+     * turn whose start time is a guess.
+     */
+    private List<TranscriptSegment> splitForSpeaker(TranscriptSegment seg,
+                                                    SegmentSpeakerRequest req,
+                                                    String key, String name) {
+        var words = seg.getWords();
+        if (words == null || words.isEmpty()) {
+            throw ApiException.badRequest(
+                    "This line has no word timings, so only the whole line can be moved");
+        }
+        int from = req.fromWord() == null ? 0 : req.fromWord();
+        int to = req.toWord() == null ? words.size() - 1 : req.toWord();
+        if (from > to || to >= words.size()) {
+            throw ApiException.badRequest("That is not a valid range of words in this line");
+        }
+        if (from == 0 && to == words.size() - 1) {
+            return moveWholeSegment(seg, key, name);
+        }
+
+        List<TranscriptSegment> out = new ArrayList<>();
+        if (from > 0) {
+            out.add(pieceOf(seg, words.subList(0, from),
+                    seg.getSpeakerKey(), seg.getSpeaker(), seg.getSpeakerStatus()));
+        }
+        out.add(pieceOf(seg, words.subList(from, to + 1), key, name, "attributed"));
+        if (to < words.size() - 1) {
+            out.add(pieceOf(seg, words.subList(to + 1, words.size()),
+                    seg.getSpeakerKey(), seg.getSpeaker(), seg.getSpeakerStatus()));
+        }
+        return out;
+    }
+
+    /** One piece of a split segment: its own row, its own id, its own timings. */
+    private TranscriptSegment pieceOf(TranscriptSegment source, List<SpokenWord> words,
+                                      String key, String name, String status) {
+        var piece = new TranscriptSegment();
+        piece.setId(IdGenerator.segment());
+        piece.setMeetingId(source.getMeetingId());
+        piece.setStartTime(words.get(0).start());
+        piece.setEndTime(words.get(words.size() - 1).end());
+        piece.setSpeaker(name);
+        piece.setSpeakerKey(key);
+        piece.setSpeakerStatus(status == null ? "attributed" : status);
+        // The provider's own token stays with the words it came from, so a
+        // complaint about this line is still traceable to whoever caused it.
+        piece.setSpeakerRaw(source.getSpeakerRaw());
+        piece.setLanguage(source.getLanguage());
+        piece.setWords(reattributeWords(words, 0, words.size() - 1, key, name));
+        piece.setText(joinWords(words));
+        return piece;
+    }
+
+    /**
+     * Per-word attribution follows the turn it now belongs to.
+     *
+     * <p>The words carry their own speaker (V46) and the diarization trace reads
+     * them, so leaving them saying "spk_2" under a line labelled Speaker 1 would
+     * make the record contradict itself.
+     */
+    private static List<SpokenWord> reattributeWords(List<SpokenWord> words, int from, int to,
+                                                     String key, String name) {
+        if (words == null || words.isEmpty()) {
+            return List.of();
+        }
+        List<SpokenWord> out = new ArrayList<>(words.size());
+        for (int i = 0; i < words.size(); i++) {
+            var w = words.get(i);
+            out.add(i >= from && i <= to
+                    ? new SpokenWord(w.text(), w.start(), w.end(), key, w.speakerRaw())
+                    : w);
+        }
+        return out;
+    }
+
+    /** The words of one piece, as the line a reader sees. */
+    private static String joinWords(List<SpokenWord> words) {
+        return words.stream()
+                .map(SpokenWord::text)
+                .map(String::trim)
+                .filter(t -> !t.isEmpty())
+                .collect(Collectors.joining(" "));
     }
 
     /**

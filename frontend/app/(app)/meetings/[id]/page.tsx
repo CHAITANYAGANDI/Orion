@@ -46,6 +46,7 @@ import {
   useRematchSpeakersMutation,
   useReprocessMeetingMutation,
   useEditSegmentsMutation,
+  useSetSegmentSpeakerMutation,
   useGetSummaryTemplatesQuery,
   useResummarizeMutation,
   useGetMomentsQuery,
@@ -130,6 +131,10 @@ import { useThreadScroll } from "@/lib/use-thread-scroll";
 import { MEETING_PROMPTS, toPrompts } from "@/lib/chat-prompts";
 import { useRotatingPrompts } from "@/lib/use-rotating-prompts";
 import { SelectionMenu, type SelectionAction } from "@/components/selection-menu";
+import {
+  ReassignSpeakerDialog,
+  type ReassignTarget,
+} from "@/components/reassign-speaker-dialog";
 import { MomentsPanel } from "@/components/moments-panel";
 import { ActionItemDialog, NoteDialog, type Passage } from "@/components/moment-composer";
 import {
@@ -140,6 +145,7 @@ import {
   segmentMarks,
   summarizePrompt,
   tokenize,
+  wordRangeFor,
   type SegmentMark,
   type SelectionCapture,
 } from "@/lib/moments";
@@ -1959,6 +1965,8 @@ function TranscriptPanel({
   } | null>(null);
   const [noteFor, setNoteFor] = React.useState<Passage | null>(null);
   const [actionFor, setActionFor] = React.useState<Passage | null>(null);
+  const [reassignFor, setReassignFor] = React.useState<ReassignTarget | null>(null);
+  const [setSegmentSpeaker, { isLoading: reassigning }] = useSetSegmentSpeakerMutation();
   const bodyRef = React.useRef<HTMLDivElement | null>(null);
 
   const clearSelection = React.useCallback(() => {
@@ -2030,6 +2038,24 @@ function TranscriptPanel({
     }
   }
 
+  async function confirmReassign(speakerKey: string) {
+    if (!reassignFor) return;
+    try {
+      await setSegmentSpeaker({
+        id: meetingId,
+        segmentId: reassignFor.segmentId,
+        speakerKey,
+        fromWord: reassignFor.fromWord,
+        toWord: reassignFor.toWord,
+      }).unwrap();
+      setReassignFor(null);
+      clearSelection();
+      toast.success("Speaker corrected for that line.");
+    } catch {
+      toast.error("Could not change the speaker on that line.");
+    }
+  }
+
   async function copyToClipboard(text: string, ok: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -2065,6 +2091,38 @@ function TranscriptPanel({
       case "action-item":
         setActionFor(p);
         break;
+      case "reassign": {
+        // One segment at a time. A selection spanning two turns is ambiguous
+        // about what is being corrected -- the words, or the boundary between
+        // them -- and guessing would move text the user never pointed at.
+        if (p.ranges.length !== 1) {
+          toast.error("Select words inside a single turn to change its speaker.");
+          break;
+        }
+        const range = p.ranges[0];
+        const seg = segments.find((x) => x.id === range.segmentId);
+        // `id` is optional on the wire: transcripts recorded before segments
+        // were addressable have none, and those cannot be corrected line by
+        // line. Refusing beats sending `undefined` as a path segment.
+        if (!seg?.id) {
+          toast.error("This transcript is too old to correct line by line.");
+          break;
+        }
+        const span = wordRangeFor(seg, range.startOffset, range.endOffset);
+        const whole =
+          span === null ||
+          (span.fromWord === 0 && span.toWord === (seg.words?.length ?? 0) - 1);
+        setReassignFor({
+          segmentId: seg.id,
+          // Omitted for a whole turn so the server moves the row rather than
+          // splitting it into one piece.
+          fromWord: whole ? undefined : span?.fromWord,
+          toWord: whole ? undefined : span?.toWord,
+          quote: whole ? seg.text : p.quote,
+          currentKey: seg.speakerKey ?? null,
+        });
+        break;
+      }
       case "share": {
         // The in-app deep link, which the page already knows how to open at a
         // timestamp. Not the public share link: that is a separate capability
@@ -2627,6 +2685,13 @@ function TranscriptPanel({
       </CardContent>
 
       <SelectionMenu anchor={picked?.anchor ?? null} onAction={onSelectionAction} busy={marking} />
+      <ReassignSpeakerDialog
+        target={reassignFor}
+        speakers={speakerStats ?? []}
+        busy={reassigning}
+        onClose={() => setReassignFor(null)}
+        onConfirm={confirmReassign}
+      />
       <NoteDialog meetingId={meetingId} passage={noteFor} onClose={() => setNoteFor(null)} />
       <ActionItemDialog
         meetingId={meetingId}

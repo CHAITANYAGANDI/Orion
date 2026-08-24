@@ -22,6 +22,7 @@ import {
   Sparkles,
   ListPlus,
   Link2,
+  UserRoundCog,
   FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -33,7 +34,8 @@ export type SelectionAction =
   | "ask"
   | "summarize"
   | "action-item"
-  | "share";
+  | "share"
+  | "reassign";
 
 interface Item {
   action: SelectionAction;
@@ -55,6 +57,12 @@ const ITEMS: Item[] = [
   { action: "summarize", label: "Summarize", icon: FileText },
   { action: "action-item", label: "Create action item", icon: ListPlus },
   { action: "share", label: "Copy link to moment", icon: Link2 },
+  // Last, and on its own conceptually: everything above adds something
+  // alongside the transcript, and this one corrects the transcript itself.
+  // It is here rather than on the turn menu because the case it exists for is
+  // a short reply the provider buried inside somebody else's turn -- fixing
+  // that means naming words, not naming a turn.
+  { action: "reassign", label: "Wrong speaker", icon: UserRoundCog },
 ];
 
 export interface SelectionMenuProps {

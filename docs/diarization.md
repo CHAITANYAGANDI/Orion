@@ -569,6 +569,14 @@ a pure function of times.
   what happened when a real diarization model was pointed at that same turn: it
   did not fix it either, and split `"Yes, sir."` across two speakers on the way
   past.
+- **The short merged turn has a manual repair, not an automatic one.** Four
+  systems were measured on the reported recording (section 12 and the provider
+  comparison beneath it) and none fixed the 4.85s turn at 57.34 without
+  breaking something else. So `PATCH /segments/{id}/speaker` exists: a user
+  selects the words and says who said them, and nothing else on the transcript
+  moves. That is the honest state — the automatic path still gets this case
+  wrong, and will until a tested system improves it without regressing other
+  speech.
 - **Overlapping speech cannot be represented.** One `speaker` per word is the
   schema, and there is nowhere to put a second. Where the diarizer offers an
   `exclusive_speaker_diarization` it is preferred, so the overlap is resolved by

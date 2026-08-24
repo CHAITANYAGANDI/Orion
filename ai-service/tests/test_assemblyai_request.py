@@ -55,6 +55,22 @@ def test_diarization_and_its_prerequisite_are_always_on():
     assert body["speech_models"] == U3
 
 
+def test_the_deepgram_diarizer_change_did_not_leak_into_this_request():
+    """AssemblyAI is the transcription source of truth and did not move.
+
+    Deepgram's request switched to its current batch diarizer (`diarize_model`),
+    which is a Deepgram parameter and means nothing here. Asserted rather than
+    assumed because the two adapters are edited for the same reasons and a
+    stray field would be accepted quietly by neither provider's mock.
+    """
+    body = build_request(URL, U3, _request())
+    assert "diarize_model" not in body
+    assert "diarize" not in body
+    # Still exactly the two fields diarization has ever needed here.
+    assert body["speaker_labels"] is True
+    assert body["punctuate"] is True
+
+
 # --- language ---------------------------------------------------------------- #
 def test_a_stated_language_is_sent_and_detection_is_not():
     body = build_request(URL, U3, _request(language="es"))
