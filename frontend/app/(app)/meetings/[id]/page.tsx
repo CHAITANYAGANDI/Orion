@@ -108,7 +108,7 @@ import {
   timecode,
 } from "@/lib/format";
 import { useMeetingProgress } from "@/lib/progress";
-import { useAllowance, aiRefusal } from "@/lib/allowance";
+import { useAllowance, aiRefusal, reprocessCost } from "@/lib/allowance";
 import { languageName } from "@/lib/language";
 // Shared with the transcript editor, so reading and correcting agree about
 // where the paragraphs are and the page does not reflow when you switch modes.
@@ -276,6 +276,10 @@ export default function MeetingDetailPage() {
    * runs, or every stage it spent hidden would be forgotten. See lib/progress.
    */
   const percent = useMeetingProgress(id, status, live?.progress ?? statusProgress(status));
+
+  // Read here rather than inside `onReprocess`, which is not a component and
+  // so cannot call a hook. Used only to say what a reprocess will cost.
+  const allowance = useAllowance();
 
   const audio = useAudioController();
 
@@ -520,12 +524,23 @@ export default function MeetingDetailPage() {
    * meeting.
    */
   async function onReprocess() {
+    // What it costs, first.
+    //
+    // This dialog warned about the hand corrections and the speaker names,
+    // which are replaceable -- the saved voices survive, so Rematch puts the
+    // names back -- and said nothing at all about the minutes, which are not.
+    // Reprocessing sends the audio back to the provider and is charged again
+    // in full, so a thirty-minute meeting reprocessed three times has spent
+    // ninety of the hundred an account ever gets. Until now the button that
+    // did that looked free. See reprocessCost.
+    const cost = reprocessCost(allowance, m?.durationSeconds);
     const warning = m?.status === "FAILED"
-      ? "Try processing this meeting again?"
-      : "Reprocess this meeting?\n\nThe transcript and summary will be rebuilt from "
-        + "the recording. Any corrections you typed, and any speakers you named, "
-        + "will be replaced.\n\nSaved voices are kept, so Rematch speakers can put "
-        + "the names back afterwards.";
+      ? "Try processing this meeting again?\n\n" + cost
+      : "Reprocess this meeting?\n\n" + cost
+        + "\n\nThe transcript and summary will be rebuilt from the recording. "
+        + "Any corrections you typed, and any speakers you named, will be replaced."
+        + "\n\nSaved voices are kept, so Rematch speakers can put the names "
+        + "back afterwards.";
     if (!window.confirm(warning)) return;
     try {
       await reprocessMeeting(id).unwrap();

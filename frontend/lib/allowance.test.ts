@@ -5,6 +5,7 @@ import {
   lengthRefusal,
   aiRefusal,
   spentNote,
+  reprocessCost,
   type AiFeature,
   type Allowance,
 } from "@/lib/allowance";
@@ -205,5 +206,83 @@ describe("the AI features", () => {
     // would be five lines there.
     expect(note.length).toBeLessThan(120);
     expect(note).toContain("stays");
+  });
+});
+
+/**
+ * What a reprocess costs, said before it is spent.
+ *
+ * <p>Reprocessing is charged again in full: the audio really does go back to
+ * the provider. The dialog warned about the hand corrections and the speaker
+ * names -- both replaceable, since the saved voices survive -- and said nothing
+ * about the minutes, which are not. Three reprocesses of a thirty-minute
+ * meeting spend ninety of the hundred an account ever gets.
+ *
+ * <p>The number has to be the number that will actually be deducted.
+ * `addAiMinutes` rounds to nearest; the `chargeMeetingOrThrow` check at upload
+ * rounds up instead, on purpose, because refusing a file that would overrun is
+ * worth being pessimistic about. Stating the pessimistic one here would tell
+ * people a 90-second clip costs two minutes when it costs one, which is a small
+ * lie about a number nobody can verify.
+ */
+describe("what a reprocess costs", () => {
+  const plenty = allowance({ minutesLeft: 97 });
+
+  it("says the minutes and what is left of them", () => {
+    expect(reprocessCost(plenty, 1800)).toBe(
+      "This transcribes the recording again, so it spends about 30 minutes of the 97 you have left.",
+    );
+  });
+
+  it("rounds the way the charge rounds, not the way the check does", () => {
+    // 89 seconds is where the two roundings part company: nearest is 1, which
+    // is what gets deducted, and ceiling is 2, which is what the upload check
+    // would have said. Asserting 1 is asserting that this quotes the deduction.
+    expect(reprocessCost(plenty, 90)).toContain("about 2 minutes");
+    expect(reprocessCost(plenty, 150)).toContain("about 3 minutes");
+    // 89 seconds rounds to 1, where rounding up would have said 2.
+    expect(reprocessCost(plenty, 89)).toContain("about 1 minute");
+  });
+
+  it("says minute rather than minutes when it is one", () => {
+    expect(reprocessCost(plenty, 60)).toContain("about 1 minute of");
+    expect(reprocessCost(plenty, 60)).not.toContain("1 minutes");
+  });
+
+  it("does not claim a cost for something too short to be charged", () => {
+    // Under thirty seconds rounds to nothing, and "about 0 minutes" is a
+    // sentence that makes the reader check their arithmetic.
+    expect(reprocessCost(plenty, 20)).toContain("under a minute");
+    expect(reprocessCost(plenty, 20)).not.toContain("0 minute");
+  });
+
+  it("still warns when the length was never recorded", () => {
+    // The cost is real and the number is not known. Saying nothing would be
+    // the old behaviour, which is the thing being fixed.
+    for (const unknown of [null, undefined, 0]) {
+      const sentence = reprocessCost(plenty, unknown);
+      expect(sentence).toContain("transcribes the recording again");
+      expect(sentence).toContain("minutes from your allowance");
+    }
+  });
+
+  it("leaves the balance out when it cannot state one", () => {
+    // "of the Infinity you have left" and "of the 0 you have left" are both
+    // worse than not mentioning it.
+    expect(reprocessCost(allowance({ loading: true }), 1800)).toContain("of your allowance");
+    expect(reprocessCost(allowance({ unknown: true }), 1800)).toContain("of your allowance");
+    expect(
+      reprocessCost(allowance({ minutesLeft: Number.POSITIVE_INFINITY }), 1800),
+    ).toContain("of your allowance");
+  });
+
+  it("always says something, whatever it knows", () => {
+    // There is no combination where this returns nothing: the point of the
+    // sentence is that the button is not free.
+    for (const a of [plenty, allowance({ loading: true }), allowance({ unknown: true })]) {
+      for (const d of [null, 0, 20, 60, 90, 1800, 36000]) {
+        expect(reprocessCost(a, d)).toMatch(/transcribes the recording again/);
+      }
+    }
   });
 });

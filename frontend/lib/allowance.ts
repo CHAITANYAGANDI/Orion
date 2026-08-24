@@ -213,3 +213,47 @@ export function lengthRefusal(a: Allowance, durationSeconds: number | null): str
   if (wanted <= a.minutesLeft) return null;
   return `That file is ${wanted} minutes and you have ${a.minutesLeft} left of your 100.`;
 }
+
+/**
+ * What reprocessing a meeting will take off the allowance, as a sentence.
+ *
+ * <p><b>Reprocessing is charged again, in full.</b> It really does send the
+ * audio back to the transcription provider, so a second run costs what the
+ * first one did — a thirty-minute meeting reprocessed twice has spent sixty of
+ * the hundred minutes. Nothing said so until this sentence existed: the confirm
+ * dialog warned about losing hand corrections and speaker names, which are
+ * recoverable, and said nothing about the minutes, which are not.
+ *
+ * <p><b>Rounded the way the charge is rounded, not the way the check is.</b>
+ * `UsageLimitService.addAiMinutes` — what actually runs when a reprocessed
+ * meeting lands — rounds to nearest, so a 90-second recording spends two
+ * minutes and a 20-second one spends none. The `chargeMeetingOrThrow` check at
+ * upload time rounds *up* instead, deliberately, because refusing a file that
+ * would overrun is worth being pessimistic about. This is a statement of what
+ * will be deducted, so it follows the deduction.
+ *
+ * <p>Never null. The whole point is that this costs something, so there is
+ * always a sentence — what varies is how precise it can be about the number.
+ */
+export function reprocessCost(a: Allowance, durationSeconds?: number | null): string {
+  const opening = "This transcribes the recording again, so it spends";
+
+  if (durationSeconds == null || durationSeconds <= 0) {
+    // A meeting whose length was never recorded. The cost is real and unknown,
+    // and guessing a number would be worse than admitting that.
+    return `${opening} minutes from your allowance.`;
+  }
+
+  const minutes = Math.round(durationSeconds / 60);
+  if (minutes < 1) {
+    return "This transcribes the recording again. It is short enough to cost under a minute.";
+  }
+
+  const unit = minutes === 1 ? "minute" : "minutes";
+  // The balance is only mentioned when it is known and finite: "of your
+  // Infinity remaining" and "of your 0 remaining" are both worse than silence.
+  if (a.loading || a.unknown || !Number.isFinite(a.minutesLeft)) {
+    return `${opening} about ${minutes} ${unit} of your allowance.`;
+  }
+  return `${opening} about ${minutes} ${unit} of the ${a.minutesLeft} you have left.`;
+}
