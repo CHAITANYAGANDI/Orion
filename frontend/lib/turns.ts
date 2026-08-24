@@ -32,12 +32,36 @@ export interface Turn {
  * interjection's neighbours back together as one paragraph and lose the fact
  * that somebody else spoke in the middle — which is the bug this was reported
  * as, arriving by a different route.
+ *
+ * <p><b>Identity is `speakerKey`, not the name on screen.</b> This used to
+ * compare the displayed string, which is the one thing about a speaker that is
+ * not stable: two people can carry the same display name at once. Rename two
+ * speakers to "Chris" and every alternation between them silently collapses
+ * into one paragraph attributed to whichever came first. Unattributed turns are
+ * worse — they all render the same words, so two different unknown voices back
+ * to back would merge into one.
+ *
+ * <p>So a key, where there is one, decides. Different keys never merge however
+ * the names read; the same key merges even mid-rename. The string is the
+ * fallback only for transcripts recorded before canonical keys existed, where
+ * it is the only identity there is.
  */
+function sameVoice(a: Turn, b: TranscriptSegment): boolean {
+  if (a.speakerKey && b.speakerKey) return a.speakerKey === b.speakerKey;
+  // One side predates canonical keys. Falling back to the name is what those
+  // transcripts have always done, and refusing to merge them instead would
+  // reflow every old transcript in the archive.
+  if (!a.speakerKey && !b.speakerKey) return a.speaker === b.speaker;
+  // Exactly one has a key: they cannot be shown to be the same voice, so they
+  // are not merged. This only happens mid-migration.
+  return false;
+}
+
 export function groupIntoTurns(segments: TranscriptSegment[]): Turn[] {
   const turns: Turn[] = [];
   for (const s of segments) {
     const last = turns[turns.length - 1];
-    if (last && last.speaker === s.speaker) {
+    if (last && sameVoice(last, s)) {
       last.segments.push(s);
     } else {
       turns.push({
