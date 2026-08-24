@@ -13,7 +13,6 @@ export type MeetingStatus =
   | "READY"
   | "FAILED";
 
-export type Priority = "high" | "medium" | "low";
 export type Confidence = "high" | "medium" | "low";
 export type Severity = "high" | "medium" | "low";
 export type ActionItemStatus = "OPEN" | "IN_PROGRESS" | "DONE";
@@ -442,7 +441,6 @@ export interface ActionItemResponse {
   dueStatus: DueStatus;
   /** Negative when overdue, 0 today, null when there is no resolved date. */
   daysUntilDue?: number | null;
-  priority: Priority;
   status: ActionItemStatus;
   sourceSentence?: string | null;
   /** Where the source sentence sits in the recording, when it could be located. */
@@ -465,7 +463,6 @@ export interface ActionItemPatchRequest {
   title?: string;
   ownerName?: string | null;
   dueDate?: string | null;
-  priority?: Priority;
   status?: ActionItemStatus;
 }
 
@@ -687,7 +684,6 @@ export interface SearchCommitmentHit {
   owner?: string | null;
   status: ActionItemStatus;
   dueDate?: string | null;
-  priority: Priority;
 }
 
 export interface SearchMentionHit {
@@ -1026,7 +1022,6 @@ export interface ActionItemCreateRequest {
   title: string;
   ownerName?: string;
   dueDate?: string;
-  priority?: Priority;
   /** The transcript line it came from — the same field the extractor fills. */
   sourceSentence?: string;
   /**
@@ -1048,8 +1043,7 @@ export interface SharedMeeting {
     title: string;
     ownerName?: string | null;
     dueDate?: string | null;
-    priority: Priority;
-  }[];
+    }[];
   transcript?: string | null;
   /** Short-lived presigned media URL; absent unless the recording was shared. */
   audioUrl?: string | null;
@@ -1200,7 +1194,6 @@ export interface ActionItemListQuery {
   size?: number;
   /** `OPEN_ANY` is everything unfinished — the default view. */
   status?: ActionItemStatus | "OPEN_ANY";
-  priority?: Priority;
   /** A name, or `unassigned` for the ones nobody owns. */
   owner?: string;
   due?: "overdue" | "soon" | "dated" | "none";

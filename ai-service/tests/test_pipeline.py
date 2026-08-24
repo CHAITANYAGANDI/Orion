@@ -38,8 +38,10 @@ def test_process_meeting_matches_schema_and_is_camel_case(client):
     assert parsed.transcript
     assert parsed.short_summary
     assert len(parsed.action_items) >= 1
-    # Priority is within the allowed literal set.
-    assert parsed.action_items[0].priority in {"high", "medium", "low"}
+    # No priority. It was three words in a coloured badge, guessed from a tone
+    # of voice, and the deadline beside it answers the same question from
+    # something somebody actually said. See V54.
+    assert not hasattr(parsed.action_items[0], "priority")
 
 
 def test_process_meeting_is_deterministic(client):

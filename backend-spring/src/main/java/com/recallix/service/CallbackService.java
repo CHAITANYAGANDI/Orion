@@ -333,7 +333,6 @@ public class CallbackService {
             e.setOwnerName(a.ownerName());
             e.setDueDate(a.dueDate());
             e.setDueOn(DueDates.resolve(a.dueDate(), reference));
-            e.setPriority(a.priority() == null ? "medium" : a.priority());
             e.setStatus("OPEN");
             e.setSourceSentence(a.sourceSentence());
             e.setSourceStartSeconds(SentenceLocator.locate(a.sourceSentence(), lines));

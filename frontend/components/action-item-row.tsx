@@ -39,14 +39,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { PriorityBadge } from "@/components/status-badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { ActionItemResponse, Priority, TranslatedTask } from "@/lib/types";
+import type { ActionItemResponse, TranslatedTask } from "@/lib/types";
 
 export interface ActionItemRowProps {
   item: ActionItemResponse;
@@ -163,7 +162,6 @@ export function ActionItemRow({
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
-          <PriorityBadge priority={item.priority} />
           <Button
             variant="ghost"
             size="sm"
@@ -217,7 +215,7 @@ function ActionItemDetails({
 }: {
   item: ActionItemResponse;
   onOpenSource?: (seconds: number) => void;
-  onPatch: (body: { title?: string; ownerName?: string; dueDate?: string; priority?: Priority }) => Promise<void>;
+  onPatch: (body: { title?: string; ownerName?: string; dueDate?: string }) => Promise<void>;
   busy: boolean;
 }) {
   const [title, setTitle] = React.useState(item.title);
@@ -304,7 +302,6 @@ function ActionItemDetails({
         <Button size="sm" onClick={save} disabled={busy || !dirty}>
           {busy && <Loader2 className="h-4 w-4 animate-spin" />} Save
         </Button>
-        <PriorityPicker item={item} onPick={(priority) => onPatch({ priority })} disabled={busy} />
         <div className="flex-1" />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -381,36 +378,6 @@ function SourceLink({
     >
       {label}
     </Link>
-  );
-}
-
-function PriorityPicker({
-  item,
-  onPick,
-  disabled,
-}: {
-  item: ActionItemResponse;
-  onPick: (priority: Priority) => void;
-  disabled: boolean;
-}) {
-  return (
-    <div className="flex items-center gap-1">
-      <span className="text-xs text-muted-foreground">Priority</span>
-      {(["high", "medium", "low"] as Priority[]).map((p) => (
-        <Button
-          key={p}
-          type="button"
-          size="sm"
-          variant={item.priority === p ? "secondary" : "ghost"}
-          disabled={disabled}
-          aria-pressed={item.priority === p}
-          className="h-7 px-2 text-xs capitalize"
-          onClick={() => onPick(p)}
-        >
-          {p}
-        </Button>
-      ))}
-    </div>
   );
 }
 

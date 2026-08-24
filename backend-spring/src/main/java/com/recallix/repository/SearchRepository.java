@@ -274,7 +274,7 @@ public class SearchRepository {
     public SearchGroup<CommitmentHit> commitments(String userId, SearchQuery s, String like) {
         String sql = """
                 SELECT a.id, a.meeting_id, m.title, m.created_at,
-                       a.title, a.owner_name, a.status, a.due_date, a.priority,
+                       a.title, a.owner_name, a.status, a.due_date,
                        COUNT(*) OVER () AS total
                   FROM meeting_action_items a
                   JOIN meetings m ON m.id = a.meeting_id
@@ -293,7 +293,7 @@ public class SearchRepository {
         bind(q, userId, s, "", like);
         return collect(q, row -> new CommitmentHit(
                 str(row[0]), str(row[1]), str(row[2]), instant(row[3]),
-                str(row[4]), str(row[5]), str(row[6]), str(row[7]), str(row[8])), 9);
+                str(row[4]), str(row[5]), str(row[6]), str(row[7])), 8);
     }
 
     /**

@@ -12,7 +12,7 @@ import * as React from "react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { useCreateActionItemMutation, useCreateMomentMutation } from "@/lib/api";
-import type { MomentRange, Priority } from "@/lib/types";
+import type { MomentRange } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -157,14 +157,12 @@ export function ActionItemDialog({
   const [title, setTitle] = React.useState("");
   const [owner, setOwner] = React.useState("");
   const [due, setDue] = React.useState("");
-  const [priority, setPriority] = React.useState<Priority>("medium");
 
   React.useEffect(() => {
     setTitle(titleFrom(passage?.quote ?? ""));
     // Whoever was speaking is the likeliest owner of what they just promised.
     setOwner(passage?.speaker ?? "");
     setDue("");
-    setPriority("medium");
   }, [passage]);
 
   async function save() {
@@ -176,7 +174,6 @@ export function ActionItemDialog({
           title: title.trim(),
           ownerName: owner.trim() || undefined,
           dueDate: due || undefined,
-          priority,
           // The verbatim line, kept as evidence exactly as the extractor keeps
           // it, so a hand-added item is as traceable as a generated one.
           sourceSentence: passage.quote || undefined,
@@ -215,7 +212,7 @@ export function ActionItemDialog({
               placeholder="Send the pricing deck"
             />
           </div>
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="moment-action-owner">Owner</Label>
               <Input
@@ -233,19 +230,6 @@ export function ActionItemDialog({
                 value={due}
                 onChange={(e) => setDue(e.target.value)}
               />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="moment-action-priority">Priority</Label>
-              <select
-                id="moment-action-priority"
-                value={priority}
-                onChange={(e) => setPriority(e.target.value as Priority)}
-                className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-              >
-                <option value="high">High</option>
-                <option value="medium">Medium</option>
-                <option value="low">Low</option>
-              </select>
             </div>
           </div>
           <div className="flex items-center gap-2">

@@ -75,7 +75,6 @@ function item(over: Partial<ActionItemResponse> = {}): ActionItemResponse {
     dueOn: "2026-08-14",
     dueStatus: "OVERDUE",
     daysUntilDue: -2,
-    priority: "high",
     status: "OPEN",
     sourceSentence: "Priya will finish the JWT validation by Friday.",
     sourceStartSeconds: 942,
@@ -206,16 +205,17 @@ describe("ActionItemRow editing", () => {
     expect(patch).not.toHaveBeenCalled();
   });
 
-  it("changes priority on its own", async () => {
+  it("offers no priority to set", async () => {
     await expand();
 
-    // Rendered lower-case and capitalised by CSS, so the accessible name is
-    // the text content rather than what the eye reads.
-    await userEvent.click(screen.getByRole("button", { name: /^low$/i }));
-
-    // Not bundled with the rest of the form: a stale field in the same request
-    // would quietly overwrite an edit made elsewhere.
-    await waitFor(() => expect(lastPatch()).toEqual({ priority: "low" }));
+    // Gone in V54. It was three words guessed from a tone of voice, sitting in
+    // a coloured badge beside a deadline somebody actually said out loud.
+    // Asserted absent rather than deleted, because a badge is one line to add
+    // back and adding it reads like a fix.
+    expect(screen.queryByText(/priority/i)).not.toBeInTheDocument();
+    for (const word of [/^high$/i, /^medium$/i, /^low$/i]) {
+      expect(screen.queryByRole("button", { name: word })).not.toBeInTheDocument();
+    }
   });
 
   it("clears a deadline with an empty string rather than a null", async () => {

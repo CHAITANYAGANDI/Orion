@@ -8,16 +8,6 @@ export function StatusBadge({ status }: { status: MeetingStatus }) {
   return <Badge variant={variant}>{statusLabel(status)}</Badge>;
 }
 
-export function PriorityBadge({ priority }: { priority: string }) {
-  const variant =
-    priority === "high" ? "destructive" : priority === "low" ? "secondary" : "warning";
-  return (
-    <Badge variant={variant} className="capitalize">
-      {priority}
-    </Badge>
-  );
-}
-
 export function ActionStatusBadge({ status }: { status: string }) {
   const variant = status === "DONE" ? "success" : status === "IN_PROGRESS" ? "default" : "secondary";
   const label = status === "IN_PROGRESS" ? "In progress" : status === "DONE" ? "Done" : "Open";

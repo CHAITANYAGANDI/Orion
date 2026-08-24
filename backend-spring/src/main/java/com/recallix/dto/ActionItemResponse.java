@@ -30,7 +30,6 @@ public record ActionItemResponse(
         DueStatus dueStatus,
         /** Negative when overdue, 0 today, null when there is no resolved date. */
         Integer daysUntilDue,
-        String priority,
         String status,
         String sourceSentence,
         /** Where the source sentence sits in the recording, when it could be located. */
@@ -55,7 +54,6 @@ public record ActionItemResponse(
                 dueOn,
                 DueStatus.of(dueOn, today, a.isDone()),
                 dueOn == null ? null : (int) ChronoUnit.DAYS.between(today, dueOn),
-                a.getPriority(),
                 a.getStatus(),
                 a.getSourceSentence(),
                 a.getSourceStartSeconds(),

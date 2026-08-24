@@ -30,7 +30,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { Priority } from "@/lib/types";
 
 export function NewActionItemDialog({
   meetingId,
@@ -46,7 +45,6 @@ export function NewActionItemDialog({
   const [title, setTitle] = React.useState("");
   const [owner, setOwner] = React.useState("");
   const [due, setDue] = React.useState("");
-  const [priority, setPriority] = React.useState<Priority>("medium");
   const [meeting, setMeeting] = React.useState("");
 
   // Only fetched when the dialog has to ask — the meeting page already knows.
@@ -57,7 +55,6 @@ export function NewActionItemDialog({
     setTitle("");
     setOwner("");
     setDue("");
-    setPriority("medium");
     setMeeting("");
   }, [open]);
 
@@ -72,7 +69,6 @@ export function NewActionItemDialog({
           title: title.trim(),
           ownerName: owner.trim() || undefined,
           dueDate: due || undefined,
-          priority,
         },
       }).unwrap();
       toast.success("Action item added.");
@@ -129,7 +125,7 @@ export function NewActionItemDialog({
               </div>
             )}
 
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="new-action-owner">Owner</Label>
                 <Input
@@ -147,19 +143,6 @@ export function NewActionItemDialog({
                   value={due}
                   onChange={(e) => setDue(e.target.value)}
                 />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="new-action-priority">Priority</Label>
-                <select
-                  id="new-action-priority"
-                  value={priority}
-                  onChange={(e) => setPriority(e.target.value as Priority)}
-                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                >
-                  <option value="high">High</option>
-                  <option value="medium">Medium</option>
-                  <option value="low">Low</option>
-                </select>
               </div>
             </div>
 

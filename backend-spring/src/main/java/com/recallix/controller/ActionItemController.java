@@ -73,14 +73,13 @@ public class ActionItemController {
     public PageResponse<ActionItemResponse> list(@RequestParam(defaultValue = "0") int page,
                                                  @RequestParam(defaultValue = "50") int size,
                                                  @RequestParam(defaultValue = "OPEN_ANY") String status,
-                                                 @RequestParam(required = false) String priority,
                                                  @RequestParam(required = false) String owner,
                                                  @RequestParam(required = false) String due,
                                                  @RequestParam(required = false) String meetingId,
                                                  @RequestParam(defaultValue = "false") boolean standalone,
                                                  @RequestParam(defaultValue = "false") boolean mine) {
         return actionItems.list(SecurityUtils.currentUserId(),
-                new ActionItemQuery(status, priority, owner, due, meetingId, standalone, mine,
+                new ActionItemQuery(status, owner, due, meetingId, standalone, mine,
                         page, size));
     }
 

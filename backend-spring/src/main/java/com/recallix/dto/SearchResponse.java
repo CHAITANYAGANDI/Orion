@@ -110,8 +110,7 @@ public record SearchResponse(
             String title,
             String owner,
             String status,
-            String dueDate,
-            String priority
+            String dueDate
     ) {
     }
 

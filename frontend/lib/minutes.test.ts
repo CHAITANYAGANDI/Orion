@@ -49,7 +49,6 @@ function input(over: Partial<MinutesInput> = {}): MinutesInput {
         title: "Draft the rollout plan",
         ownerName: "Marcus",
         dueDate: "2026-08-20",
-        priority: "high",
         status: "OPEN",
       } as ActionItemResponse,
     ],

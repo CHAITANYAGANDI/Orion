@@ -11,7 +11,7 @@ package com.recallix.domain;
  * lets the reader be shown the current wording instead, untranslated and
  * obviously so.
  *
- * <p>Only the text is stored. Status, priority and the deadline are read from
+ * <p>Only the text is stored. Status and the deadline are read from
  * the live task, so a translated view cannot disagree with the tracker about
  * what is still open.
  */

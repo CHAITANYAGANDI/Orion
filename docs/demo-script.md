@@ -19,7 +19,7 @@ Target length: 2–3 minutes.
    The strongest beat is "Ask Recallix" — it carries the passage into the chat,
    which is the one thing a highlight in a document cannot do.
 8. **Action items** (1:55) — the item created from the transcript is in the list
-   with the spoken line as its evidence; edit owner/due/priority, mark one done,
+   with the spoken line as its evidence; edit owner/due, mark one done,
    then show it on the cross-meeting Action Items page.
 9. **Search & export** (2:05) — search a past decision; export the brief as PDF/Markdown.
 10. **Billing** (2:20) — show plan cards + usage limits; (test-mode) Stripe checkout.

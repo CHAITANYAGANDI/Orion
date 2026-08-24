@@ -28,5 +28,8 @@ def test_extract_action_items_shape(client):
     items = resp.json()["actionItems"]
     assert items
     for it in items:
-        assert {"taskTitle", "ownerName", "dueDate", "priority", "sourceSentence"} <= set(it.keys())
-        assert it["priority"] in {"high", "medium", "low"}
+        assert {"taskTitle", "ownerName", "dueDate", "sourceSentence"} <= set(it.keys())
+        # Gone in V54, and asserted absent rather than merely dropped from the
+        # set above: `<=` is a subset check, so an extra key would slip through
+        # it unnoticed, and this is a field the model still knows how to invent.
+        assert "priority" not in it

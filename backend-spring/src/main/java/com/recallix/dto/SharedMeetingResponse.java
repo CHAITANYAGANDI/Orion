@@ -47,5 +47,5 @@ public record SharedMeetingResponse(
         String quote
 ) {
 
-    public record SharedActionItem(String title, String ownerName, String dueDate, String priority) {}
+    public record SharedActionItem(String title, String ownerName, String dueDate) {}
 }

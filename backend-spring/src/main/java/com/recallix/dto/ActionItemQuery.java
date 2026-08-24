@@ -19,7 +19,6 @@ import java.util.Set;
  */
 public record ActionItemQuery(
         String status,
-        String priority,
         String owner,
         String due,
         String meetingId,
@@ -38,7 +37,6 @@ public record ActionItemQuery(
         int size
 ) {
     private static final Set<String> STATUSES = Set.of("OPEN", "IN_PROGRESS", "DONE", "OPEN_ANY");
-    private static final Set<String> PRIORITIES = Set.of("high", "medium", "low");
     private static final Set<String> DUE = Set.of("overdue", "soon", "dated", "none");
 
     /** The empty owner, spelled so it survives a query string. */
@@ -48,7 +46,6 @@ public record ActionItemQuery(
 
     public ActionItemQuery {
         status = oneOf(blankToNull(upper(status)), STATUSES, "status");
-        priority = oneOf(blankToNull(lower(priority)), PRIORITIES, "priority");
         due = oneOf(blankToNull(lower(due)), DUE, "due");
         meetingId = blankToNull(meetingId);
 
@@ -63,7 +60,7 @@ public record ActionItemQuery(
 
     /** The default view: everything still outstanding, nearest deadline first. */
     public static ActionItemQuery open() {
-        return new ActionItemQuery("OPEN_ANY", null, null, null, null, false, false, 0, 50);
+        return new ActionItemQuery("OPEN_ANY", null, null, null, false, false, 0, 50);
     }
 
     private static String oneOf(String value, Set<String> allowed, String field) {

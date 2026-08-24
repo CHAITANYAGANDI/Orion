@@ -5,7 +5,6 @@ public record AiActionItem(
         String taskTitle,
         String ownerName,
         String dueDate,
-        String priority,
         String sourceSentence
 ) {
 }

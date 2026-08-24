@@ -12,7 +12,6 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-Priority = Literal["high", "medium", "low"]
 Confidence = Literal["high", "medium", "low"]
 
 # Meeting lifecycle status (api-contracts.md §5 MeetingResponse).
@@ -49,7 +48,6 @@ class ActionItem(CamelModel):
     task_title: str
     owner_name: str | None = None
     due_date: str | None = None
-    priority: Priority = "medium"
     source_sentence: str
 
 

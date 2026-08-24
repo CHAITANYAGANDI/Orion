@@ -79,10 +79,10 @@ public record ExportDocument(
     /**
      * An action item as it appears in a file.
      *
-     * <p>{@code detail} is the owner, deadline and priority already joined,
-     * because how they read as one line is a decision about the document, not
-     * about the format: four renderers making it separately is four chances to
-     * make it differently.
+     * <p>{@code detail} is the owner and deadline already joined, because how
+     * they read as one line is a decision about the document, not about the
+     * format: four renderers making it separately is four chances to make it
+     * differently.
      */
     public record Task(boolean done, String title, String detail) {
     }

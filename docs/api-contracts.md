@@ -528,7 +528,7 @@ reported as failed because the sentence about it could not be written down.
 
 | Method | Endpoint | Body / Query | Response |
 |---|---|---|---|
-| POST | `/api/v1/action-items` | `{ title, ownerName?, dueDate?, priority? }` | `ActionItemResponse` |
+| POST | `/api/v1/action-items` | `{ title, ownerName?, dueDate? }` | `ActionItemResponse` |
 | GET | `/api/v1/chat/modes` | — | `ChatModeResponse[]` |
 | POST | `/api/v1/chat` | `{ question, meetingIds?, conversationId?, mode? }` | `ChatMessageResponse` |
 
@@ -1132,11 +1132,11 @@ annotation.
 ### Action items
 | Method | Endpoint | Body | Response |
 |---|---|---|---|
-| GET | `/api/v1/action-items` | `?page&size&status&priority&owner&due&meetingId&mine` | `Page<ActionItemResponse>` |
+| GET | `/api/v1/action-items` | `?page&size&status&owner&due&meetingId&mine` | `Page<ActionItemResponse>` |
 | GET | `/api/v1/action-items/overview` | — | `ActionItemOverview` |
 | GET | `/api/v1/meetings/{id}/action-items` | — | `ActionItemResponse[]` |
-| POST | `/api/v1/meetings/{id}/action-items` | `{ title, ownerName?, dueDate?, priority?, sourceSentence?, sourceStartSeconds? }` | `201 ActionItemResponse` |
-| PATCH | `/api/v1/action-items/{id}` | `{ title?, ownerName?, dueDate?, priority?, status? }` | `ActionItemResponse` |
+| POST | `/api/v1/meetings/{id}/action-items` | `{ title, ownerName?, dueDate?, sourceSentence?, sourceStartSeconds? }` | `201 ActionItemResponse` |
+| PATCH | `/api/v1/action-items/{id}` | `{ title?, ownerName?, dueDate?, status? }` | `ActionItemResponse` |
 | PATCH | `/api/v1/action-items` | `{ ids: [], status }` | `{ "changed": n }` |
 | DELETE | `/api/v1/action-items/{id}` | — | `204` |
 | GET | `/api/v1/action-items/{id}/comments` | — | `ActionItemCommentResponse[]` |
@@ -1340,7 +1340,7 @@ than imply otherwise, but that path is untested against real data.
 ```jsonc
 // ActionItem
 { "taskTitle": "Finish JWT validation", "ownerName": "Chaitanya",
-  "dueDate": "Friday", "priority": "high|medium|low",
+  "dueDate": "Friday",
   "sourceSentence": "Chaitanya will finish JWT validation by Friday." }
 
 // Insight — a decision or a risk, READ OUT OF the sections below rather than

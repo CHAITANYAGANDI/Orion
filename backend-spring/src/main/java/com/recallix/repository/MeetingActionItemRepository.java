@@ -32,15 +32,17 @@ public interface MeetingActionItemRepository extends JpaRepository<MeetingAction
      *
      * <p>Finished work sinks, undated work sinks within its group, and the
      * nearest deadline is at the top — which is the only ordering that answers
-     * the question somebody opens this page to ask. Priority breaks ties between
-     * items due the same day; without it "high" and "low" on the same Friday
-     * would come back in insertion order.
+     * the question somebody opens this page to ask.
+     *
+     * <p>Priority used to break ties between two items due the same day. It is
+     * gone (V54), so those fall back to newest first — which is what this
+     * already did for everything undated, and is a fact about the list rather
+     * than a guess about the work.
      */
     String DEADLINE_ORDER = """
             ORDER BY CASE WHEN a.status = 'DONE' THEN 1 ELSE 0 END,
                      CASE WHEN a.dueOn IS NULL THEN 1 ELSE 0 END,
                      a.dueOn,
-                     CASE a.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
                      a.createdAt DESC
             """;
 
@@ -107,7 +109,6 @@ public interface MeetingActionItemRepository extends JpaRepository<MeetingAction
               AND (:status IS NULL
                    OR (:status = 'OPEN_ANY' AND a.status <> 'DONE')
                    OR a.status = :status)
-              AND (:priority IS NULL OR a.priority = :priority)
               AND (:meetingId IS NULL OR a.meetingId = :meetingId)
               AND (:standalone = FALSE OR a.meetingId IS NULL)
               AND (:owner IS NULL OR LOWER(TRIM(COALESCE(a.ownerName, ''))) = :owner)
@@ -120,7 +121,6 @@ public interface MeetingActionItemRepository extends JpaRepository<MeetingAction
             """ + DEADLINE_ORDER)
     Page<MeetingActionItem> findForUser(@Param("userId") String userId,
                                         @Param("status") String status,
-                                        @Param("priority") String priority,
                                         @Param("meetingId") String meetingId,
                                         @Param("standalone") boolean standalone,
                                         @Param("owner") String owner,

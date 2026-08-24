@@ -114,7 +114,7 @@ class ActionItemServiceTest {
             return stored.stream().filter(a -> ids.contains(a.getId())).toList();
         });
         when(actionItems.findByMeetingId(MEETING)).thenAnswer(inv -> List.copyOf(stored));
-        when(actionItems.findForUser(anyString(), any(), any(), any(), anyBoolean(), any(), any(), any(), any(), any()))
+        when(actionItems.findForUser(anyString(), any(), any(), anyBoolean(), any(), any(), any(), any(), any()))
                 .thenAnswer(inv -> new PageImpl<>(List.copyOf(stored)));
         // Explicitly typed: List.of with one array argument spreads it, and the
         // varargs call infers List<Object> rather than List<Object[]>.
@@ -149,7 +149,6 @@ class ActionItemServiceTest {
         a.setMeetingId(MEETING);
         a.setTitle(title);
         a.setStatus(status);
-        a.setPriority("medium");
         return a;
     }
 
@@ -158,7 +157,7 @@ class ActionItemServiceTest {
     }
 
     private static ActionItemCreateRequest creating(String title, String due) {
-        return new ActionItemCreateRequest(title, "Priya", due, "high", "Priya will do it.", 31.0);
+        return new ActionItemCreateRequest(title, "Priya", due, "Priya will do it.", 31.0);
     }
 
     @Nested
@@ -211,14 +210,6 @@ class ActionItemServiceTest {
         }
 
         @Test
-        @DisplayName("an unknown priority is refused rather than coerced")
-        void validatesPriority() {
-            assertThatThrownBy(() -> service.create(USER, MEETING,
-                    new ActionItemCreateRequest("x", null, null, "urgent", null, null)))
-                    .isInstanceOf(ApiException.class);
-        }
-
-        @Test
         @DisplayName("an item knows who owns it, so it is findable without its meeting")
         void carriesTheOwner() {
             service.create(USER, MEETING, creating("Send the pricing deck", null));
@@ -241,7 +232,7 @@ class ActionItemServiceTest {
         @DisplayName("is created with no meeting at all")
         void hasNoMeeting() {
             ActionItemResponse created = service.createStandalone(
-                    USER, new ActionItemCreateRequest("Write the migration", null, null, null, null, null));
+                    USER, new ActionItemCreateRequest("Write the migration", null, null, null, null));
 
             assertThat(created.meetingId()).isNull();
             assertThat(created.meetingTitle()).isNull();
@@ -252,7 +243,7 @@ class ActionItemServiceTest {
         @DisplayName("belongs to whoever typed it")
         void belongsToTheTyper() {
             service.createStandalone(
-                    USER, new ActionItemCreateRequest("Write the migration", null, null, null, null, null));
+                    USER, new ActionItemCreateRequest("Write the migration", null, null, null, null));
 
             assertThat(stored.get(stored.size() - 1).getUserId()).isEqualTo(USER);
         }
@@ -261,7 +252,7 @@ class ActionItemServiceTest {
         @DisplayName("is protected from every reprocess, having no meeting to be swept by")
         void isEdited() {
             service.createStandalone(
-                    USER, new ActionItemCreateRequest("Write the migration", null, null, null, null, null));
+                    USER, new ActionItemCreateRequest("Write the migration", null, null, null, null));
 
             assertThat(stored.get(stored.size() - 1).isEdited()).isTrue();
         }
@@ -270,19 +261,12 @@ class ActionItemServiceTest {
         @DisplayName("reads a deadline against today, since no meeting date could mean anything else")
         void resolvesAgainstToday() {
             ActionItemResponse created = service.createStandalone(
-                    USER, new ActionItemCreateRequest("Ship it", null, "friday", null, null, null));
+                    USER, new ActionItemCreateRequest("Ship it", null, "friday", null, null));
 
             assertThat(created.dueDate()).isEqualTo("friday");
             assertThat(created.dueOn()).isNotNull();
         }
 
-        @Test
-        @DisplayName("still refuses a priority that is not one")
-        void validatesPriority() {
-            assertThatThrownBy(() -> service.createStandalone(USER,
-                    new ActionItemCreateRequest("x", null, null, "urgent", null, null)))
-                    .isInstanceOf(ApiException.class);
-        }
     }
 
     @Nested
@@ -291,7 +275,7 @@ class ActionItemServiceTest {
         @Test
         @DisplayName("the title can be corrected")
         void retitles() {
-            service.patch(USER, ITEM, new ActionItemPatchRequest("Finish JWT validation", null, null, null, null));
+            service.patch(USER, ITEM, new ActionItemPatchRequest("Finish JWT validation", null, null, null));
 
             assertThat(stored(stored, ITEM).getTitle()).isEqualTo("Finish JWT validation");
             assertThat(stored(stored, ITEM).isEdited()).isTrue();
@@ -301,14 +285,14 @@ class ActionItemServiceTest {
         @DisplayName("a title cannot be emptied")
         void refusesAnEmptyTitle() {
             assertThatThrownBy(() -> service.patch(USER, ITEM,
-                    new ActionItemPatchRequest("   ", null, null, null, null)))
+                    new ActionItemPatchRequest("   ", null, null, null)))
                     .isInstanceOf(ApiException.class);
         }
 
         @Test
         @DisplayName("a new deadline is re-read, so the date always matches the words")
         void rereadsTheDeadline() {
-            service.patch(USER, ITEM, new ActionItemPatchRequest(null, null, "2026-09-01", null, null));
+            service.patch(USER, ITEM, new ActionItemPatchRequest(null, null, "2026-09-01", null));
 
             assertThat(stored(stored, ITEM).getDueOn()).isEqualTo(LocalDate.of(2026, 9, 1));
         }
@@ -316,8 +300,8 @@ class ActionItemServiceTest {
         @Test
         @DisplayName("an empty deadline clears both halves of it")
         void clearsTheDeadline() {
-            service.patch(USER, ITEM, new ActionItemPatchRequest(null, null, "friday", null, null));
-            service.patch(USER, ITEM, new ActionItemPatchRequest(null, null, "", null, null));
+            service.patch(USER, ITEM, new ActionItemPatchRequest(null, null, "friday", null));
+            service.patch(USER, ITEM, new ActionItemPatchRequest(null, null, "", null));
 
             // A stale dueOn under a cleared dueDate would keep an item overdue
             // for a deadline the page no longer shows.
@@ -328,7 +312,7 @@ class ActionItemServiceTest {
         @Test
         @DisplayName("an omitted field is left alone")
         void leavesOmittedFieldsAlone() {
-            service.patch(USER, ITEM, new ActionItemPatchRequest(null, "Marcus", null, null, null));
+            service.patch(USER, ITEM, new ActionItemPatchRequest(null, "Marcus", null, null));
 
             assertThat(stored(stored, ITEM).getTitle()).isEqualTo("Finish the JWT validation");
             assertThat(stored(stored, ITEM).getOwnerName()).isEqualTo("Marcus");
@@ -338,7 +322,7 @@ class ActionItemServiceTest {
         @DisplayName("another user's item is not found")
         void refusesSomebodyElsesItem() {
             assertThatThrownBy(() -> service.patch(OTHER, ITEM,
-                    new ActionItemPatchRequest("Mine now", null, null, null, null)))
+                    new ActionItemPatchRequest("Mine now", null, null, null)))
                     .isInstanceOf(ApiException.class);
         }
     }
@@ -349,7 +333,7 @@ class ActionItemServiceTest {
         @Test
         @DisplayName("finishing something records when")
         void stampsCompletion() {
-            service.patch(USER, ITEM, new ActionItemPatchRequest(null, null, null, null, "DONE"));
+            service.patch(USER, ITEM, new ActionItemPatchRequest(null, null, null, "DONE"));
 
             assertThat(stored(stored, ITEM).getCompletedAt()).isNotNull();
         }
@@ -357,8 +341,8 @@ class ActionItemServiceTest {
         @Test
         @DisplayName("reopening clears the stamp rather than leaving a lie")
         void clearsTheStampOnReopen() {
-            service.patch(USER, ITEM, new ActionItemPatchRequest(null, null, null, null, "DONE"));
-            service.patch(USER, ITEM, new ActionItemPatchRequest(null, null, null, null, "OPEN"));
+            service.patch(USER, ITEM, new ActionItemPatchRequest(null, null, null, "DONE"));
+            service.patch(USER, ITEM, new ActionItemPatchRequest(null, null, null, "OPEN"));
 
             assertThat(stored(stored, ITEM).getCompletedAt()).isNull();
         }
@@ -366,10 +350,10 @@ class ActionItemServiceTest {
         @Test
         @DisplayName("re-completing does not move the completion time")
         void doesNotRestampAnAlreadyDoneItem() {
-            service.patch(USER, ITEM, new ActionItemPatchRequest(null, null, null, null, "DONE"));
+            service.patch(USER, ITEM, new ActionItemPatchRequest(null, null, null, "DONE"));
             Instant first = stored(stored, ITEM).getCompletedAt();
 
-            service.patch(USER, ITEM, new ActionItemPatchRequest(null, null, null, null, "DONE"));
+            service.patch(USER, ITEM, new ActionItemPatchRequest(null, null, null, "DONE"));
 
             assertThat(stored(stored, ITEM).getCompletedAt()).isEqualTo(first);
         }
@@ -394,7 +378,7 @@ class ActionItemServiceTest {
         @DisplayName("an unknown status is refused")
         void validatesStatus() {
             assertThatThrownBy(() -> service.patch(USER, ITEM,
-                    new ActionItemPatchRequest(null, null, null, null, "ALMOST")))
+                    new ActionItemPatchRequest(null, null, null, "ALMOST")))
                     .isInstanceOf(ApiException.class);
         }
     }
@@ -469,9 +453,9 @@ class ActionItemServiceTest {
         @Test
         @DisplayName("the filter reaches the query")
         void asksForStandalone() {
-            service.list(USER, new ActionItemQuery(null, null, null, null, null, true, false, 0, 50));
+            service.list(USER, new ActionItemQuery(null, null, null, null, true, false, 0, 50));
 
-            verify(actionItems).findForUser(anyString(), any(), any(), any(),
+            verify(actionItems).findForUser(anyString(), any(), any(),
                     org.mockito.ArgumentMatchers.eq(true), any(), any(), any(), any(), any());
         }
 
@@ -480,7 +464,7 @@ class ActionItemServiceTest {
         void defaultsToEverything() {
             service.list(USER, ActionItemQuery.open());
 
-            verify(actionItems).findForUser(anyString(), any(), any(), any(),
+            verify(actionItems).findForUser(anyString(), any(), any(),
                     org.mockito.ArgumentMatchers.eq(false), any(), any(), any(), any(), any());
         }
     }
@@ -491,12 +475,12 @@ class ActionItemServiceTest {
         @Test
         @DisplayName("asking for mine before saying who I am returns nothing")
         void refusesToGuess() {
-            var page = service.list(USER, new ActionItemQuery(null, null, null, null, null, false, true, 0, 50));
+            var page = service.list(USER, new ActionItemQuery(null, null, null, null, false, true, 0, 50));
 
             // The alternative is showing the whole workspace under the heading
             // "My tasks", which reads as an answer and is not one.
             assertThat(page.content()).isEmpty();
-            verify(actionItems, never()).findForUser(anyString(), any(), any(), any(), anyBoolean(),
+            verify(actionItems, never()).findForUser(anyString(), any(), any(), anyBoolean(),
                     any(), any(), any(), any(), any());
         }
 
@@ -505,9 +489,9 @@ class ActionItemServiceTest {
         void matchesCaseInsensitively() {
             user.setDisplayName("  Priya  ");
 
-            service.list(USER, new ActionItemQuery(null, null, null, null, null, false, true, 0, 50));
+            service.list(USER, new ActionItemQuery(null, null, null, null, false, true, 0, 50));
 
-            verify(actionItems).findForUser(anyString(), any(), any(), any(), anyBoolean(),
+            verify(actionItems).findForUser(anyString(), any(), any(), anyBoolean(),
                     org.mockito.ArgumentMatchers.eq("priya"), any(), any(), any(), any());
         }
 

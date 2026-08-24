@@ -51,7 +51,6 @@ import java.util.stream.Collectors;
 @Service
 public class ActionItemService {
 
-    private static final Set<String> VALID_PRIORITIES = Set.of("high", "medium", "low");
     private static final Set<String> VALID_STATUSES = Set.of("OPEN", "IN_PROGRESS", "DONE");
     private static final String DONE = "DONE";
 
@@ -118,7 +117,7 @@ public class ActionItemService {
         }
 
         Page<MeetingActionItem> result = actionItems.findForUser(
-                userId, q.status(), q.priority(), q.meetingId(), q.standalone(), owner, q.due(),
+                userId, q.status(), q.meetingId(), q.standalone(), owner, q.due(),
                 today, today.plusDays(DueStatus.SOON_DAYS),
                 PageRequest.of(q.page(), q.size()));
 
@@ -170,7 +169,6 @@ public class ActionItemService {
         item.setMeetingId(meetingId);
         item.setTitle(req.title().trim());
         item.setOwnerName(blankToNull(req.ownerName()));
-        item.setPriority(validPriority(req.priority()));
         item.setStatus("OPEN");
         item.setSourceSentence(blankToNull(req.sourceSentence()));
         item.setSourceStartSeconds(req.sourceStartSeconds());
@@ -202,7 +200,6 @@ public class ActionItemService {
         item.setMeetingId(null);
         item.setTitle(req.title().trim());
         item.setOwnerName(blankToNull(req.ownerName()));
-        item.setPriority(validPriority(req.priority()));
         item.setStatus("OPEN");
         // Typed by a person, so a reprocess must never sweep it away.
         item.setEdited(true);
@@ -239,9 +236,6 @@ public class ActionItemService {
             // Blank clears it; anything else is re-read, so dueOn always
             // describes the text sitting next to it.
             setDue(item, blankToNull(req.dueDate()), meeting);
-        }
-        if (req.priority() != null) {
-            item.setPriority(validPriority(req.priority()));
         }
         if (req.status() != null) {
             applyStatus(item, req.status());
@@ -380,17 +374,6 @@ public class ActionItemService {
             throw ApiException.badRequest("status must be one of " + VALID_STATUSES);
         }
         return s;
-    }
-
-    private static String validPriority(String raw) {
-        if (raw == null || raw.isBlank()) {
-            return "medium";
-        }
-        String p = raw.trim().toLowerCase();
-        if (!VALID_PRIORITIES.contains(p)) {
-            throw ApiException.badRequest("priority must be one of " + VALID_PRIORITIES);
-        }
-        return p;
     }
 
     /** The caller's name as transcripts spell it, lower-cased for matching. */

@@ -64,8 +64,6 @@ public class MeetingActionItem {
     @Column(name = "due_on")
     private LocalDate dueOn;
 
-    private String priority = "medium";
-
     @Column(nullable = false)
     private String status = "OPEN";
 
@@ -121,9 +119,6 @@ public class MeetingActionItem {
 
     public LocalDate getDueOn() { return dueOn; }
     public void setDueOn(LocalDate dueOn) { this.dueOn = dueOn; }
-
-    public String getPriority() { return priority; }
-    public void setPriority(String priority) { this.priority = priority; }
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }

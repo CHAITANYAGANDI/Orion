@@ -259,10 +259,10 @@ public class ExportService {
     /**
      * The action items, in the language being read.
      *
-     * <p>The owner, the deadline and the priority are joined here rather than in
-     * each renderer. The deadline keeps the words that were said — "before the
-     * demo" is what somebody committed to, and a file that silently replaced it
-     * with a date would be putting a promise in their mouth they never made.
+     * <p>The owner and the deadline are joined here rather than in each
+     * renderer. The deadline keeps the words that were said — "before the demo"
+     * is what somebody committed to, and a file that silently replaced it with a
+     * date would be putting a promise in their mouth they never made.
      */
     private List<ExportDocument.Block> taskBlocks(List<MeetingActionItem> tasks,
                                                   TranslationResponse translation,
@@ -282,15 +282,12 @@ public class ExportService {
             String title = t == null ? task.getTitle() : t.title();
             String due = t == null ? task.getDueDate() : t.dueDate();
 
-            List<String> detail = new ArrayList<>(3);
+            List<String> detail = new ArrayList<>(2);
             if (notBlank(task.getOwnerName())) {
                 detail.add(task.getOwnerName());
             }
             if (notBlank(due)) {
                 detail.add("due " + due);
-            }
-            if (notBlank(task.getPriority())) {
-                detail.add(task.getPriority());
             }
             items.add(new ExportDocument.Task(task.isDone(), title, String.join(" · ", detail)));
         }

@@ -16,7 +16,6 @@ public record ActionItemPatchRequest(
         @Size(max = 500) String title,
         @Size(max = 200) String ownerName,
         @Size(max = 40) String dueDate,
-        String priority,
         String status
 ) {
 }

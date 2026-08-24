@@ -991,7 +991,6 @@ export const api = createApi({
         params.set("page", String(query.page ?? 0));
         params.set("size", String(query.size ?? 50));
         if (query.status) params.set("status", query.status);
-        if (query.priority) params.set("priority", query.priority);
         if (query.owner) params.set("owner", query.owner);
         if (query.due) params.set("due", query.due);
         if (query.meetingId) params.set("meetingId", query.meetingId);

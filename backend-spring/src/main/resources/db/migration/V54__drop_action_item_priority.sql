@@ -1,0 +1,23 @@
+-- Remove the priority on an action item.
+--
+-- It was three words in a coloured badge, and nobody ever chose them. The
+-- extractor set one on every task it produced — reading urgency out of a
+-- sentence somebody said in passing — and "medium" was the default for anything
+-- it could not read, which is what most tasks got. So the badge on a list of
+-- twenty was twenty guesses, all rendered with the confidence of a fact, and a
+-- red "high" that the model inferred from the word "urgently" sat beside a
+-- deadline the speaker actually stated.
+--
+-- The deadline is the honest version of the same question, and it was always
+-- there. Lists are ordered by it, overdue work is coloured by it, and it comes
+-- from something said out loud rather than from a tone of voice.
+--
+-- Order is unaffected in every case that matters. Priority was only ever the
+-- tiebreaker between two items due the same day; those now fall back to newest
+-- first, which is what the ordering already did for everything undated.
+--
+-- Destructive and deliberate, matching V14/V15/V18/V19/V23: the column goes
+-- rather than lingering as a field no code writes and a future reader has to
+-- prove is dead.
+
+ALTER TABLE meeting_action_items DROP COLUMN IF EXISTS priority;

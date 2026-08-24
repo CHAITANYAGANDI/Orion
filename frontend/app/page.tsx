@@ -32,7 +32,7 @@ const LANDING_INCLUDED = [
 
 const FEATURES = [
   { icon: FileText, title: "Accurate transcripts", body: "Upload audio or video and get a clean, timestamped transcript in seconds." },
-  { icon: ListChecks, title: "Action items & owners", body: "Every task, owner, due date and priority extracted with the source sentence." },
+  { icon: ListChecks, title: "Action items & owners", body: "Every task, owner and due date extracted with the source sentence." },
   { icon: Zap, title: "Summary templates", body: "Notes shaped to the meeting — a 1:1, an interview and a standup each read differently." },
   { icon: Bot, title: "Agent follow-ups", body: "With approval, draft emails, create tasks, schedule meetings and Notion notes." },
   { icon: ShieldCheck, title: "Private by design", body: "Scoped access per user, presigned uploads, audit logs and data deletion." },

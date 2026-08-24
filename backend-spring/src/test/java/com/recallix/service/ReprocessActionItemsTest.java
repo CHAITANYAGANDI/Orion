@@ -99,7 +99,7 @@ class ReprocessActionItemsTest {
     }
 
     private static AiActionItem extracted(String title, String due, String sentence) {
-        return new AiActionItem(title, "Priya", due, "medium", sentence);
+        return new AiActionItem(title, "Priya", due, sentence);
     }
 
     private static final List<AiSegment> SEGMENTS = List.of(

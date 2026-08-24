@@ -193,7 +193,7 @@ class ExportServiceTest {
 
             // "before the demo" is what was promised. Replacing it with a date
             // is putting a commitment in somebody's mouth they did not make.
-            assertThat(task.detail()).isEqualTo("Priya · due friday · high");
+            assertThat(task.detail()).isEqualTo("Priya · due friday");
         }
 
         @Test
@@ -470,7 +470,6 @@ class ExportServiceTest {
         open.setTitle("Finish the JWT validation");
         open.setOwnerName("Priya");
         open.setDueDate("friday");
-        open.setPriority("high");
         open.setStatus("OPEN");
 
         MeetingActionItem done = new MeetingActionItem();

@@ -666,8 +666,8 @@ class OpenAiLlmAdapter(LlmPort):
             # where people simply said what they would do yields nothing.
             user = (
                 "Extract action items as JSON: "
-                '{"actionItems":[{"taskTitle","ownerName","dueDate","priority"'
-                '(high|medium|low),"sourceSentence"}]}. '
+                '{"actionItems":[{"taskTitle","ownerName","dueDate",'
+                '"sourceSentence"}]}. '
                 "Use null for unknown owner/dueDate.\n\n"
                 "An action item is anything someone undertook to do, was asked "
                 "to do, or was assigned. It counts however casually it was "

@@ -71,7 +71,6 @@ function item(over: Partial<ActionItemResponse> = {}): ActionItemResponse {
     dueOn: "2026-08-21",
     dueStatus: "SCHEDULED",
     daysUntilDue: 5,
-    priority: "high",
     status: "OPEN",
     sourceSentence: null,
     sourceStartSeconds: null,

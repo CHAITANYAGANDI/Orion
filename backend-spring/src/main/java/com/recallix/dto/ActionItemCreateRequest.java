@@ -25,7 +25,6 @@ public record ActionItemCreateRequest(
         @Size(max = 200) String ownerName,
         /** ISO date, or null. Stored as text like the extractor's output. */
         @Size(max = 40) String dueDate,
-        String priority,
         @Size(max = 2000) String sourceSentence,
         Double sourceStartSeconds
 ) {
