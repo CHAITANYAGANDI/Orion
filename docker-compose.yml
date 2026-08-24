@@ -202,6 +202,17 @@ services:
       ASSEMBLYAI_FALLBACK_MODEL: ${ASSEMBLYAI_FALLBACK_MODEL:-universal-2}
       ASSEMBLYAI_LANGUAGE: ${ASSEMBLYAI_LANGUAGE:-}
       DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+      # A second, acoustic opinion on who spoke, allowed to overrule the
+      # transcription provider's speaker labels. "none" keeps them, which is
+      # the default and what has always shipped -- see docs/diarization.md
+      # section 12 for the benchmark behind that. "pyannote" additionally needs
+      # pyannote.audio installed in the image and an HF_TOKEN below.
+      DIARIZATION_PROVIDER: ${DIARIZATION_PROVIDER:-none}
+      # Hugging Face read token. Only used by DIARIZATION_PROVIDER=pyannote:
+      # every pyannote checkpoint is gated and returns 401 without one. Blank
+      # is fine and is the normal case -- the port then reports itself
+      # unavailable and the provider's labels are kept.
+      HF_TOKEN: ${HF_TOKEN:-}
       DEEPGRAM_MODEL: ${DEEPGRAM_MODEL:-nova-3}
       DEEPGRAM_LANGUAGE: ${DEEPGRAM_LANGUAGE:-}
       S3_ENDPOINT: http://minio:9000

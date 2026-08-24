@@ -25,6 +25,8 @@ from app.language import annotate_segments
 from app.quotes import anchor_outline, verify_quotes
 from app.suggestions import meeting_material
 from app.providers.ports import LlmPort, TranscriptionPort
+from app.reattribute import flatten, reattribute
+from app.reconcile import assign
 from app.rediarize import SpeakerRefiner
 from app.schemas import (
     DraftEmailRequest,
@@ -109,10 +111,47 @@ class Pipeline:
     """Coordinates the transcription + LLM ports into a MeetingBriefResult."""
 
     def __init__(self, transcription: TranscriptionPort, llm: LlmPort,
-                 refiner: "SpeakerRefiner | None" = None) -> None:
+                 refiner: "SpeakerRefiner | None" = None,
+                 diarizer=None) -> None:
         self._transcription = transcription
         self._refiner = refiner
+        #: An acoustic DiarizationPort allowed to overrule the provider's
+        #: speaker labels outright, or None to keep them. None in every
+        #: deployment that has not opted in — see `Settings.diarization_provider`
+        #: and docs/diarization.md for why the default is off.
+        self._diarizer = diarizer
         self._llm = llm
+
+    async def _reattribute(self, segments, audio, audio_loader):
+        """Replace the provider's speakers with the diarizer's, or keep them.
+
+        Never raises and never returns fewer words than it was given. Every
+        failure — no audio, no weights, a model that throws, a word count that
+        does not line up — returns the input untouched, because a meeting with a
+        good transcript and a broken diarizer still has a good transcript.
+        """
+        clip = audio
+        if not clip and audio_loader is not None:
+            try:
+                clip = await audio_loader()
+            except Exception:  # noqa: BLE001 - unreadable audio is "no audio"
+                clip = None
+        if not clip:
+            return segments
+
+        timeline = await self._diarizer.diarize(clip)
+        if timeline.unavailable:
+            logger.info("diarizer unavailable (%s); keeping the provider's speakers.",
+                        timeline.unavailable)
+            return segments
+
+        # Flattened by reattribute's own helper, so the verdicts come back
+        # positionally aligned with the words they were made about.
+        words = [(w.text, w.start, w.end, w.speaker) for w in flatten(segments)]
+        result = assign(words, timeline)
+        # Counts only. Never the words themselves, in any deployment (§12).
+        logger.info("diarization reconciled: %s", result.telemetry())
+        return reattribute(segments, result)
 
     # --- individual stages (used directly by HTTP endpoints) ---------------- #
     async def transcribe(
@@ -232,9 +271,24 @@ class Pipeline:
                 # turns rather than left describing the old ones.
                 transcript.transcript = _joined(transcript.segments) or transcript.transcript
 
+        # A second opinion from an acoustic diarizer, where one is configured.
+        # This does not adjust the provider's boundaries the way the refiner
+        # above does — it replaces them, attributing every word to whichever
+        # speaker the diarizer heard holding most of it. Off unless a
+        # deployment asked for it; the benchmark behind that default is in
+        # docs/diarization.md.
+        if self._diarizer is not None:
+            transcript.segments = await self._reattribute(
+                transcript.segments, audio, audio_loader
+            )
+            transcript.transcript = _joined(transcript.segments) or transcript.transcript
+
         # Providers report one language for the whole recording, which is wrong
         # for the meetings people actually notice: half in one language, half in
         # another. This marks the utterances that differ, leaving the rest None.
+        #
+        # After reattribution, deliberately: a split creates segments and every
+        # one of them needs its language decided.
         annotate_segments(transcript.segments, transcript.language)
         transcribed_at = time.perf_counter()
         # Still TRANSCRIBING, deliberately: the status has not moved on, but the

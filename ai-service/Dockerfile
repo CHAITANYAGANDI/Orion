@@ -52,6 +52,15 @@ RUN python -c "from speechbrain.inference.speaker import EncoderClassifier; \
 EncoderClassifier.from_hparams(source='speechbrain/spkrec-ecapa-voxceleb', \
 savedir='/opt/models/ecapa', run_opts={'device': 'cpu'})"
 
+# NOT installed: pyannote.audio, for DIARIZATION_PROVIDER=pyannote.
+#
+# It is ~2GB with its dependencies and the default is `none`, so an image that
+# carried it would be paying for a feature nothing switches on. A deployment
+# that wants it adds `pip install pyannote.audio` here plus a build-time
+# download into /opt/models/pyannote, exactly as the ECAPA layer above does.
+# Read docs/diarization.md section 12 first -- it is off because of what it
+# measured, not because it was never tried.
+
 # Copy application source.
 COPY app ./app
 # Developer tools, not runtime: scripts/compare_modes.py proves Express and

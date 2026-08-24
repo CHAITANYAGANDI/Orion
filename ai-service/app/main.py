@@ -42,7 +42,10 @@ async def lifespan(app: FastAPI):
     # degrades to "leave the provider's segmentation alone" without the
     # embedder.
     refiner = SpeakerRefiner()
-    pipeline = Pipeline(transcription, llm, refiner)
+    # An acoustic second opinion, if this deployment configured one. Usually
+    # None; see Settings.diarization_provider.
+    diarizer = AiProviderFactory.create_diarization(settings)
+    pipeline = Pipeline(transcription, llm, refiner, diarizer)
     app.state.pipeline = pipeline
 
     # RAG service (pgvector). Indexes transcripts + answers grounded questions.

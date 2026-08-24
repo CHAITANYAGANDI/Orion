@@ -57,6 +57,40 @@ class AiProviderFactory:
         return MockTranscriptionAdapter()
 
     @staticmethod
+    def create_diarization(settings: Settings):
+        """An acoustic diarizer allowed to overrule the provider, or None.
+
+        None is the default and the common case. Returning None rather than a
+        no-op port is deliberate: the pipeline then skips decoding the audio a
+        second time, which is not free on a long recording.
+
+        Import is local so that a deployment with ``diarization_provider="none"``
+        never imports pyannote — and therefore never pays for it, and does not
+        need it installed.
+        """
+        choice = (settings.diarization_provider or "none").strip().lower()
+        if choice in ("", "none", "off"):
+            return None
+        if choice != "pyannote":
+            logger.warning("Unknown diarization_provider %r; keeping the provider's "
+                           "speaker labels.", choice)
+            return None
+
+        from app.providers.pyannote_diarizer import PyannoteDiarizer
+
+        diarizer = PyannoteDiarizer(cache_dir=settings.pyannote_cache)
+        reason = diarizer.unavailable_reason()
+        if reason:
+            # Configured but unusable. Loud, because somebody asked for this and
+            # is entitled to know it is not happening -- but not fatal, because
+            # a missing model must not fail a transcript.
+            logger.warning("Diarization provider 'pyannote' is configured but "
+                           "unavailable (%s); keeping the provider's labels.", reason)
+            return None
+        logger.info("Diarization provider: pyannote (%s).", diarizer.name)
+        return diarizer
+
+    @staticmethod
     def create_llm(settings: Settings) -> LlmPort:
         if settings.ai_provider == "openai":
             from app.providers.openai_adapter import OpenAiLlmAdapter

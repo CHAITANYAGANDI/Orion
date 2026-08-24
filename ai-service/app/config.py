@@ -260,6 +260,34 @@ class Settings(BaseSettings):
     # space and end up plausibly close to everybody.
     speaker_min_speech_seconds: float = 6.0
 
+    # --- Second-opinion diarization ---------------------------------------- #
+    # Which acoustic diarizer, if any, is allowed to overrule the transcription
+    # provider's speaker labels. "none" keeps the provider's segmentation plus
+    # the ECAPA refinement in app/rediarize.py, which is what has always
+    # shipped. "pyannote" additionally runs Community-1 over the whole
+    # recording and re-attributes each word by maximum temporal overlap.
+    #
+    # Defaulted OFF, and the reason is measurement rather than caution. On
+    # ground-truth audio Community-1 is exact: every boundary in a 105-second
+    # two-speaker file, including a 0.42-second "Good." -- but so is AssemblyAI
+    # on that file, so there is nothing to win. On the recording this work was
+    # commissioned for, a phone call captured through a speaker, it reported
+    # silence across 14.1 seconds the provider transcribed as 62 words, and the
+    # 13 words it did move sat a median 0.74s from a boundary the provider had
+    # already found. That is boundary jitter, not a repair, and turning it on
+    # would have made that meeting worse.
+    #
+    # Enabling it also needs `pip install pyannote.audio` and an HF_TOKEN whose
+    # account has accepted the model's terms; without either, the port reports
+    # itself unavailable and this setting has no effect. See
+    # docs/diarization.md for the numbers and how to re-run them.
+    diarization_provider: str = "none"
+
+    # Where Community-1's weights are cached. Baked at image build time in a
+    # deployment that enables it, so a container start does not depend on
+    # Hugging Face being reachable.
+    pyannote_cache: str = "/opt/models/pyannote"
+
 
 @lru_cache
 def get_settings() -> Settings:

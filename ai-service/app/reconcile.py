@@ -24,12 +24,33 @@ covers most of it. A word that straddles a boundary goes to whoever said more of
 it, which is both the defensible answer and the one that agrees with what a
 listener hears.
 
+<h2>Who wins where, and why silence is not a verdict</h2>
+
+The diarizer is canonical *where it heard speech*. Where it heard none, it has
+not disagreed with the provider — it has said nothing, and those are different
+things. Measured on a real recording, a phone call captured through a speaker,
+Community-1 reported no speech across a third of a file the provider
+transcribed continuously. Treating that silence as a verdict threw away the
+speaker of 73 of 296 words, which is a regression against what ships today.
+
+So there are two sources and an explicit precedence:
+
+* the diarizer heard speech — its answer wins, including where it contradicts
+  the provider, because that contradiction is the entire point of the rewrite;
+* the diarizer heard nothing at all — the provider's label stands, translated
+  into the same key space. Today's behaviour is the floor, never the ceiling;
+* the diarizer heard speech but cannot say whose — unresolved.
+
+That last case does *not* fall back. The distinction is the whole rule: silence
+means no opinion, and an ambiguous boundary means an opinion that is not safe to
+act on. Letting the provider win there would hand back exactly the boundaries
+the diarizer was brought in to second-guess.
+
 <h2>Refusing rather than guessing</h2>
 
-Three cases produce no speaker at all:
+Two cases still produce no speaker at all:
 
-* the word lies outside every turn — the diarizer heard no speech there;
-* it lies inside a cluster the phantom-speaker guard rejected;
+* the word sits inside a cluster the phantom-speaker guard rejected;
 * the best cluster's share of the word does not beat the runner-up by
   ``MARGIN`` — the boundary is genuinely ambiguous.
 
@@ -37,6 +58,10 @@ Unresolved is a real answer and renders as one. Recallix already has
 ``speaker_status="unknown"`` for precisely this, and filing an ambiguous word
 under whoever was nearest is how a transcript comes to quote somebody who did
 not speak.
+
+The provider's own label is never *reinterpreted* on the way through. Mapping it
+into the key space is decided by time overlap alone, on the words the diarizer
+did resolve — never by what the words say.
 
 <h2>What is kept for diagnosis</h2>
 
@@ -70,6 +95,20 @@ MIN_SPEAKER_SECONDS = 0.4
 #: for punctuation-only tokens.
 _ZERO = 1e-6
 
+#: Why a word has no cluster. Machine-readable because the fallback rule turns
+#: on *which* of these happened, and a rule that switched on English prose would
+#: break the next time somebody improved the wording.
+SILENT = "silent"        #: the diarizer heard no speech here at all
+AMBIGUOUS = "ambiguous"  #: it heard speech but no cluster clearly owns the word
+BELOW_FLOOR = "floor"    #: the owning cluster did not earn a speaker
+
+#: Prose for the trace and for `WordVerdict.reason`.
+REASONS = {
+    SILENT: "outside every diarized turn",
+    AMBIGUOUS: "no speaker holds enough of the word",
+    BELOW_FLOOR: "cluster below the speech floor",
+}
+
 
 @dataclass
 class WordVerdict:
@@ -86,6 +125,13 @@ class WordVerdict:
     key: str | None
     #: Why, when there is no key.
     reason: str = ""
+    #: One of SILENT / AMBIGUOUS / BELOW_FLOOR, or "" when the diarizer placed
+    #: the word. Survives a provider fallback on purpose: the diarizer really
+    #: was silent there, and `silent_seconds` needs to keep counting it even
+    #: though the word now has a speaker.
+    reason_code: str = ""
+    #: True when the key came from the provider because the diarizer was silent.
+    from_provider: bool = False
 
     @property
     def resolved(self) -> bool:
@@ -113,6 +159,12 @@ class Reconciliation:
     diarizer_speakers: int = 0
     #: Clusters dropped by the phantom-speaker guard.
     rejected_clusters: int = 0
+    #: Words the diarizer had no opinion on, kept at the provider's label.
+    provider_fallbacks: int = 0
+    #: Seconds the provider transcribed and the diarizer reported as silence.
+    #: A large figure means the diarizer is not hearing this recording, which
+    #: is worth an operator's attention even when the output looks fine.
+    silent_seconds: float = 0.0
     model: str = ""
     verdicts: list[WordVerdict] = field(default_factory=list)
 
@@ -127,6 +179,8 @@ class Reconciliation:
             "provider_speakers": self.provider_speakers,
             "diarizer_speakers": self.diarizer_speakers,
             "rejected_clusters": self.rejected_clusters,
+            "provider_fallbacks": self.provider_fallbacks,
+            "silent_seconds": round(self.silent_seconds, 1),
             "model": self.model,
         }
 
@@ -137,12 +191,18 @@ def assign(
     *,
     margin: float = MARGIN,
     min_speaker_seconds: float = MIN_SPEAKER_SECONDS,
+    fall_back_to_provider: bool = True,
 ) -> Reconciliation:
     """Give every word a speaker key, or none.
 
     ``words`` is ``(text, start, end, provider_label)``. Returned in the order
     given, one verdict each — the caller relies on that to write the answers
     back without re-matching.
+
+    ``fall_back_to_provider`` keeps the provider's label where the diarizer
+    heard no speech at all. On by default because off is a regression against
+    what ships today; the switch exists so the two can be measured against each
+    other rather than argued about.
     """
     clean = timeline.normalised()
     mapping, rejected = canonical_map(clean, min_speech_seconds=min_speaker_seconds)
@@ -156,25 +216,80 @@ def assign(
     )
 
     for text, start, end, raw in words:
-        cluster, reason = _cluster_for(clean.turns, start, end, margin)
+        cluster, code = _cluster_for(clean.turns, start, end, margin)
         key = mapping.get(cluster) if cluster else None
         if cluster and key is None:
             # A real acoustic cluster that did not earn a speaker. Its audio is
             # unresolved rather than reassigned: handing it to a neighbour is
             # exactly the phantom the guard exists to stop, one step later.
-            reason = "cluster below the speech floor"
+            code = BELOW_FLOOR
         out.verdicts.append(
             WordVerdict(text=text, start=start, end=end, raw=raw,
-                        cluster=cluster, key=key, reason="" if key else reason)
+                        cluster=cluster, key=key,
+                        reason="" if key else REASONS.get(code, code),
+                        reason_code="" if key else code)
         )
-        if key:
+
+    if fall_back_to_provider:
+        _fill_silence(out, mapping)
+
+    for verdict in out.verdicts:
+        if verdict.resolved:
             out.resolved += 1
         else:
             out.unresolved += 1
+        if verdict.reason_code == SILENT:
+            out.silent_seconds += max(0.0, verdict.end - verdict.start)
 
     out.disagreements = _count_disagreements(out.verdicts)
     out.repaired_boundaries = _count_repairs(out.verdicts)
     return out
+
+
+def _fill_silence(out: Reconciliation, mapping: dict[str, str]) -> None:
+    """Keep the provider's answer wherever the diarizer heard nothing.
+
+    The provider's labels live in their own namespace ("Speaker 1", "A", "B"),
+    so they have to be translated before they can be written back. The
+    translation is learned from the words the diarizer *did* resolve: whichever
+    key a provider label most often coincides with in time is that label's key.
+
+    Learned rather than assumed, because the two systems number speakers in
+    whatever order they happen to meet them and the orders do not have to agree.
+    Learned from time alone, never from what the words say.
+
+    A label the diarizer never resolved anywhere gets a key of its own rather
+    than being folded into an existing speaker. It is a participant the
+    transcript plainly has and the diarizer simply never heard; giving it a
+    fresh key keeps it separate, and separate is the recoverable error. Merging
+    two people is not.
+    """
+    votes: dict[str, dict[str, int]] = {}
+    for verdict in out.verdicts:
+        if verdict.resolved and verdict.raw:
+            votes.setdefault(verdict.raw, {})
+            votes[verdict.raw][verdict.key] = votes[verdict.raw].get(verdict.key, 0) + 1
+
+    translation = {
+        raw: max(counts.items(), key=lambda kv: kv[1])[0]
+        for raw, counts in votes.items()
+        if counts
+    }
+    # A provider label the diarizer never resolved anywhere still deserves a
+    # speaker of its own: the alternative is dropping a participant the
+    # transcript clearly has. It gets a fresh key rather than an existing one,
+    # because merging it into somebody else is the error that cannot be undone.
+    spare = len(set(mapping.values()))
+    for verdict in out.verdicts:
+        if verdict.resolved or verdict.reason_code != SILENT or not verdict.raw:
+            continue
+        if verdict.raw not in translation:
+            spare += 1
+            translation[verdict.raw] = f"spk_{spare}"
+        verdict.key = translation[verdict.raw]
+        verdict.from_provider = True
+        verdict.reason = ""
+        out.provider_fallbacks += 1
 
 
 def _cluster_for(
@@ -187,7 +302,7 @@ def _cluster_for(
         for turn in turns:
             if turn.start <= start < turn.end:
                 return turn.speaker, ""
-        return None, "no speech at this instant"
+        return None, SILENT
 
     shares: dict[str, float] = {}
     for turn in turns:
@@ -196,7 +311,7 @@ def _cluster_for(
             shares[turn.speaker] = shares.get(turn.speaker, 0.0) + seconds
 
     if not shares:
-        return None, "outside every diarized turn"
+        return None, SILENT
 
     ranked = sorted(shares.items(), key=lambda kv: kv[1], reverse=True)
     duration = end - start
@@ -205,7 +320,7 @@ def _cluster_for(
     if best_seconds / duration < margin:
         # Either the word is mostly outside any turn, or it is split too evenly
         # between two. Both are boundaries this cannot call.
-        return None, "no speaker holds enough of the word"
+        return None, AMBIGUOUS
     return best, ""
 
 

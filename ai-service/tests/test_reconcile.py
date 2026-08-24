@@ -8,7 +8,7 @@ tested exhaustively with constructed times instead of sampled with audio.
 from __future__ import annotations
 
 from app.diarize_port import SpeakerTurn, Timeline
-from app.reconcile import assign, trace
+from app.reconcile import AMBIGUOUS, BELOW_FLOOR, SILENT, assign, trace
 
 
 def timeline(*turns: tuple[float, float, str], model: str = "test") -> Timeline:
@@ -79,13 +79,106 @@ def test_an_evenly_split_word_is_left_unresolved_rather_than_guessed():
     assert result.verdicts[0].reason
 
 
-def test_a_word_outside_every_turn_is_unresolved():
+def test_a_word_outside_every_turn_is_unresolved_in_strict_mode():
     result = assign(
         words(("stray", 5.0, 5.4, "A")),
         timeline((0.0, 1.0, "D0")),
+        fall_back_to_provider=False,
     )
     assert result.verdicts[0].key is None
+    assert result.verdicts[0].reason_code == SILENT
     assert "outside" in result.verdicts[0].reason
+
+
+# ------------------------------------------------------- silence vs doubt ---
+
+def test_silence_is_not_a_verdict_so_the_provider_keeps_the_word():
+    """The rule the real recording forced.
+
+    Community-1 reported no speech across a third of a phone call the provider
+    transcribed continuously. Reading that silence as disagreement threw away
+    the speaker of a quarter of the words, which is worse than what ships
+    today. Where the diarizer says nothing, the provider stands.
+    """
+    result = assign(
+        words(
+            ("Definitely", 0.0, 0.9, "A"),
+            ("mine", 10.0, 10.9, "B"),
+            ("again", 30.0, 30.9, "A"),   # nothing diarized out here
+        ),
+        timeline((0.0, 1.0, "D0"), (10.0, 11.0, "D1")),
+    )
+    assert [v.key for v in result.verdicts] == ["spk_1", "spk_2", "spk_1"]
+    assert result.verdicts[2].from_provider
+    assert result.provider_fallbacks == 1
+    # And the silence is still reported, because an operator wants to know the
+    # model could not hear a third of the meeting even though it looks fine.
+    assert result.verdicts[2].reason_code == SILENT
+    assert result.silent_seconds > 0
+
+
+def test_an_ambiguous_boundary_never_falls_back():
+    """The distinction the whole rule turns on.
+
+    Here the diarizer *did* hear speech and could not say whose. Handing the
+    word back to the provider would return exactly the boundary the diarizer
+    was brought in to second-guess.
+    """
+    result = assign(
+        words(("split", 0.80, 1.20, "A")),
+        timeline((0.0, 1.0, "D0"), (1.0, 2.0, "D1")),
+    )
+    assert result.verdicts[0].key is None
+    assert result.verdicts[0].reason_code == AMBIGUOUS
+    assert result.provider_fallbacks == 0
+
+
+def test_a_rejected_cluster_never_falls_back_either():
+    """The phantom guard heard something and distrusted it. Still not silence."""
+    result = assign(
+        words(
+            ("talking", 0.0, 3.0, "A"),
+            ("--", 3.05, 3.20, "A"),
+            ("onwards", 3.3, 6.0, "A"),
+        ),
+        timeline((0.0, 3.02, "D0"), (3.02, 3.22, "D9"), (3.22, 6.0, "D0")),
+    )
+    assert result.verdicts[1].key is None
+    assert result.verdicts[1].reason_code == BELOW_FLOOR
+    assert result.provider_fallbacks == 0
+
+
+def test_the_provider_label_is_translated_by_overlap_not_by_its_number():
+    """"Speaker 2" is not spk_2 just because of the digit in it.
+
+    The two systems number speakers in whatever order they meet them, and the
+    orders need not agree. Here the provider's second label belongs to the
+    voice the diarizer heard first.
+    """
+    result = assign(
+        words(
+            ("first", 0.0, 0.9, "Speaker 2"),
+            ("second", 10.0, 10.9, "Speaker 1"),
+            ("later", 30.0, 30.9, "Speaker 2"),  # silent region
+        ),
+        timeline((0.0, 1.0, "D0"), (10.0, 11.0, "D1")),
+    )
+    assert result.verdicts[0].key == "spk_1"
+    assert result.verdicts[2].key == "spk_1", "translated by time, not by label"
+
+
+def test_a_speaker_the_diarizer_never_heard_keeps_a_key_of_its_own():
+    """Never folded into somebody else: merging two people is unrecoverable."""
+    result = assign(
+        words(
+            ("hello", 0.0, 0.9, "Speaker 1"),
+            ("nowhere", 30.0, 30.9, "Speaker 3"),
+        ),
+        timeline((0.0, 1.0, "D0")),
+    )
+    keys = [v.key for v in result.verdicts]
+    assert keys[0] == "spk_1"
+    assert keys[1] is not None and keys[1] != keys[0]
 
 
 def test_a_zero_length_token_uses_the_instant_it_sits_at():
@@ -194,11 +287,34 @@ def test_a_monologue_is_never_split():
 
 # ------------------------------------------------------------- degradation --
 
-def test_an_unavailable_timeline_resolves_nothing_and_invents_nothing():
-    """A missing model must leave the provider's labels alone, not guess."""
+def test_an_unavailable_timeline_degrades_to_exactly_the_provider():
+    """A missing model must not cost a meeting its speakers.
+
+    No weights, a broken download, no HF token: the transcript still has the
+    provider's segmentation, which is what shipped before any of this existed.
+    The diarizer contributes nothing and invents nothing.
+    """
+    result = assign(
+        words(
+            ("Morning", 0.0, 0.5, "Speaker 1"),
+            ("all", 1.0, 1.5, "Speaker 2"),
+            ("again", 2.0, 2.5, "Speaker 1"),
+        ),
+        Timeline(turns=[], model="none", unavailable="no weights"),
+    )
+    assert result.diarizer_speakers == 0
+    assert [v.cluster for v in result.verdicts] == [None, None, None]
+    keys = [v.key for v in result.verdicts]
+    assert keys[0] == keys[2] and keys[0] != keys[1], "the provider's two speakers, kept"
+    assert result.provider_fallbacks == 3
+    assert result.repaired_boundaries == 0, "a silent model repairs nothing"
+
+
+def test_strict_mode_still_resolves_nothing_without_a_timeline():
     result = assign(
         words(("hello", 0.0, 0.5, "A")),
         Timeline(turns=[], model="none", unavailable="no weights"),
+        fall_back_to_provider=False,
     )
     assert result.verdicts[0].key is None
     assert result.diarizer_speakers == 0

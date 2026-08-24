@@ -36,10 +36,10 @@ the repair. That is deliberate: a missing credential must not fail a transcript.
 
 from __future__ import annotations
 
+import array
 import logging
 import os
 import subprocess
-import tempfile
 from pathlib import Path
 
 from app.diarize_port import SpeakerTurn, Timeline, unavailable
@@ -65,19 +65,34 @@ def _token() -> str | None:
     return None
 
 
-def _decode_to_wav(audio: bytes, path: Path) -> None:
-    """Whatever arrived, as 16 kHz mono PCM on disk.
+#: Everything is resampled to this. pyannote's own models are trained at
+#: 16 kHz, and it is what the existing embedder already asks ffmpeg for.
+SAMPLE_RATE = 16_000
 
-    pyannote wants a file or a waveform tensor; ffmpeg is already in the image
-    for the existing embedder. Written to a temporary file rather than kept in
-    memory because the pipeline mmaps it, and deleted by the caller's context
-    manager — a recording must not be left on disk after the meeting is done.
+
+def _decode(audio: bytes):
+    """Whatever arrived, as a mono float32 waveform in memory.
+
+    In memory rather than a temporary file for two reasons. A recording is a
+    user's, and the fewer places it is written the fewer places it can be left
+    behind. And pyannote's own file reader needs torchcodec, whose shared
+    object does not load on this image — passing a waveform bypasses it
+    entirely, so the port does not depend on a decoder it does not use.
+
+    Raw PCM out of ffmpeg rather than a wav container: there is no header to
+    parse and no ambiguity about sample width.
     """
-    subprocess.run(
+    import torch
+
+    raw = subprocess.run(
         ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", "pipe:0",
-         "-ac", "1", "-ar", "16000", "-f", "wav", str(path)],
+         "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "s16le", "pipe:1"],
         input=audio, check=True, capture_output=True,
-    )
+    ).stdout
+    samples = array.array("h")
+    samples.frombytes(raw)
+    waveform = torch.tensor(samples, dtype=torch.float32).unsqueeze(0) / 32768.0
+    return {"waveform": waveform, "sample_rate": SAMPLE_RATE}
 
 
 class PyannoteDiarizer:
@@ -152,10 +167,7 @@ class PyannoteDiarizer:
             return unavailable(_load_error or "pipeline failed to load", self._model)
 
         try:
-            with tempfile.TemporaryDirectory() as tmp:
-                wav = Path(tmp) / "audio.wav"
-                _decode_to_wav(audio, wav)
-                output = pipeline(str(wav))
+            output = pipeline(_decode(audio))
         except Exception as exc:  # noqa: BLE001
             logger.warning("pyannote failed on this recording: %s", exc)
             return unavailable(f"{type(exc).__name__}", self._model)
@@ -166,19 +178,25 @@ class PyannoteDiarizer:
 def _to_timeline(output, model: str) -> Timeline:
     """pyannote's annotation → our Timeline.
 
+    pyannote 4 returns a ``DiarizeOutput`` carrying several views of the same
+    result; 3.x returned the annotation itself. Both are accepted, because the
+    installed version is a deployment decision and this port should not be the
+    thing that breaks on an upgrade.
+
     Prefers ``exclusive_speaker_diarization`` where the build provides it: that
     is the model's own resolution of overlapping speech, and Recallix has one
     speaker field per word, so somebody has to resolve it. Better the model that
     heard the audio than a rule applied afterwards.
     """
+    plain = getattr(output, "speaker_diarization", output)
     exclusive = getattr(output, "exclusive_speaker_diarization", None)
-    annotation = exclusive if exclusive is not None else output
+    annotation = exclusive if exclusive is not None else plain
     overlap = 0.0
 
     if exclusive is not None:
         # How much simultaneous speech the model resolved away, so the honest
         # figure survives into the limitation note rather than vanishing.
-        overlap = max(0.0, _total(output) - _total(exclusive))
+        overlap = max(0.0, _total(plain) - _total(exclusive))
 
     turns = [
         SpeakerTurn(start=float(segment.start), end=float(segment.end), speaker=str(label))

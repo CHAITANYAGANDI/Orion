@@ -412,6 +412,124 @@ below the line where the evidence is good enough to act on.
 
 ---
 
+## 12. A second, acoustic diarizer — evaluated, and left off
+
+Section 10's repair works inside the provider's answer: it can move a boundary
+the provider drew and it can reassign a turn to a speaker the provider already
+found. It cannot invent a speaker the provider missed, and it cannot look at a
+turn shorter than six seconds. Both are structural, so the question was whether
+a real diarization model — audio in, speaker timeline out, no transcript
+involved — should sit behind the provider's labels instead.
+
+It was built, benchmarked and **left switched off**, because the benchmark said
+so. `DIARIZATION_PROVIDER` defaults to `none`.
+
+### What was built
+
+| Module | Job |
+| --- | --- |
+| `app/diarize_port.py` | `DiarizationPort`: audio → `Timeline`, and nothing else |
+| `app/providers/pyannote_diarizer.py` | pyannote Community-1 behind that port |
+| `app/reconcile.py` | each word to whoever held most of it, by overlap |
+| `app/reattribute.py` | a reconciliation written back as segments |
+| `app/diareval.py` | attribution, cpWER, missed/false boundaries |
+
+Words are matched to the timeline by **maximum temporal overlap**, not by
+looking up the speaker at `word.start`. Word timings and diarization boundaries
+come from two different models and never agree to the millisecond, so a
+start-timestamp lookup is wrong exactly at boundaries — which is where every
+error already is.
+
+### Which model, and which were rejected
+
+- **pyannote Community-1** — MIT, gated on Hugging Face. Chosen.
+- **`nvidia/diar_sortformer_4spk-v1`** — ungated and capable, but **CC-BY-NC**.
+  It cannot ship in a commercial product, so it was not evaluated further.
+- **pyannote Precision-2** — a paid API. Not introduced silently.
+
+Every pyannote checkpoint returns **HTTP 401** unauthenticated. Enabling this
+needs `pip install pyannote.audio`, an account that has accepted the model's
+terms, and `HF_TOKEN` in the environment. Without any of those the port reports
+itself unavailable, and a meeting processes exactly as it does today.
+
+### Benchmark 1: ground-truth audio, where the truth is exact
+
+105 seconds, two Windows TTS voices spliced at known boundaries — including a
+0.42s "Good.", a 0.65s "I agree.", zero-pause handoffs and a 33s monologue that
+must not be split. Media is not committed; see the generator note in
+`docs/` history and rebuild it locally.
+
+| System | Attribution | cpWER | Missed | False |
+| --- | --- | --- | --- | --- |
+| A. AssemblyAI raw | 100.0% | 0.0% | 0 | 0 |
+| B. Recallix today | 100.0% | 0.0% | 0 | 0 |
+| C. SpeakerRefiner | 100.0% | 0.0% | 0 | 0 |
+| D. Reconciliation | 100.0% | 0.0% | 0 | 0 |
+
+Community-1 placed every boundary, including the sub-second turns the section 10
+refiner cannot reach. So the model works. But **AssemblyAI is already perfect on
+this audio**, so there is nothing here to win — a clean, two-voice, well-separated
+recording is not where the provider fails.
+
+### Benchmark 2: the recording this work was commissioned for
+
+A phone call captured through a speaker, with a narrator layer. 296 words.
+
+- Community-1 reported **no speech at all across 14.1 seconds** covering **62 of
+  296 words** (21%) that AssemblyAI transcribed. Not a gain problem: `loudnorm`
+  and `highpass+dynaudnorm` both failed to recover it, and `loudnorm` made it
+  worse (two speakers collapsed to one). The 26–40s stretch returns 0.0s of
+  speech even when it is the entire file.
+- Of the 13 words it did move, **11 sat within 1.3s of a boundary the provider
+  had already drawn** (median 0.74s). That is boundary jitter, not discovery.
+- Run end to end, it splits `"Yes, sir."` into `Speaker 1: "Yes,"` /
+  `Speaker 2: "Sir."`, tears `"thing."` off its sentence, and carves a 0.38s
+  `"I just"` out of the middle of one. It also **undid** a correct section 10
+  repair, putting the narration back on the wrong speaker.
+
+The honest conclusion: this recording's two voices arrive down one heavily
+compressed telephone channel. Acoustic diarization keys on channel and timbre,
+and here the channel is identical for both people. The model is not broken; this
+audio defeats it, and Recallix's users record a lot of audio like it.
+
+### The rule that came out of it
+
+Silence is not a verdict. Where the diarizer heard nothing it has not
+disagreed with the provider — it has said nothing, and those are different
+things. So `app/reconcile.py` uses an explicit precedence:
+
+- the diarizer heard speech → its answer wins, contradictions included;
+- it heard **nothing** → the provider's label stands, translated into the same
+  key space by time overlap alone;
+- it heard speech but cannot say whose → **unresolved**, and no fallback.
+
+That last case deliberately does not fall back. Silence means no opinion; an
+ambiguous boundary means an opinion that is not safe to act on, and handing it
+back to the provider would return the very boundary the diarizer was brought in
+to second-guess.
+
+Without this rule the first real recording lost the speaker of 73 of 296 words,
+which is worse than shipping nothing.
+
+### Cost, if it is ever turned on
+
+Community-1 runs at roughly **4.5× realtime on CPU** in this image — a
+60-minute meeting is about four and a half hours. It would need a GPU, or to be
+a separate queue, before it could be on by default for anyone.
+
+### Reproducing this
+
+```bash
+pip install pyannote.audio            # not in requirements.txt; ~2GB with deps
+export HF_TOKEN=hf_...                # account must have accepted the terms
+export DIARIZATION_PROVIDER=pyannote
+```
+
+`tests/test_reconcile.py`, `tests/test_reattribute.py` and
+`tests/test_diarization_eval.py` cover the join, the write-back and the
+comparison; none of them need the model, because the behaviour that matters is
+a pure function of times.
+
 ## 11. Known limitations
 
 - **Live and final can disagree mid-meeting.** They are separate mappings by
@@ -447,4 +565,13 @@ below the line where the evidence is good enough to act on.
   why the floor is where it is: the same threshold that decides what to examine
   decides what may serve as reference audio, and below it there is not reliably
   enough safe audio to judge against. The reported recording contains one such
-  turn, at 57.34, and it is left as the provider gave it.
+  turn, at 57.34, and it is left as the provider gave it. Section 12 records
+  what happened when a real diarization model was pointed at that same turn: it
+  did not fix it either, and split `"Yes, sir."` across two speakers on the way
+  past.
+- **Overlapping speech cannot be represented.** One `speaker` per word is the
+  schema, and there is nowhere to put a second. Where the diarizer offers an
+  `exclusive_speaker_diarization` it is preferred, so the overlap is resolved by
+  the model that heard it rather than by a tie-break downstream, and how much was
+  resolved away is kept on `Timeline.overlap_seconds`. Two people talking at once
+  still end up attributed to one of them.
