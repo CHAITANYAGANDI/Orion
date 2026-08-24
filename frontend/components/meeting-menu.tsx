@@ -104,6 +104,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { FOLDERS } from "@/lib/routes";
+import { useAllowance, spentNote } from "@/lib/allowance";
 
 export interface MeetingMenuProps {
   meetingId: string;
@@ -177,6 +178,21 @@ export interface MeetingMenuProps {
 export function MeetingMenu(props: MeetingMenuProps) {
   const [moving, setMoving] = React.useState(false);
 
+  /**
+   * Four of the items below ask a model for something new, and an account that
+   * has spent its allowance cannot have it.
+   *
+   * <p>Read here rather than passed in, for the reason the chat composer gives:
+   * "disable every AI feature" has to mean every one, and a prop is a thing the
+   * next caller forgets. The server refuses these on its own — this is so
+   * nobody finds out by clicking.
+   *
+   * <p>One note for the four, at the bottom, rather than four sentences or four
+   * tooltips. A greyed-out row with no reason beside it is the thing worth
+   * avoiding; a menu that explains itself four times is not the fix.
+   */
+  const spent = spentNote(useAllowance());
+
   async function copyLink() {
     // The in-app URL, not a share link. Minting a public capability URL from a
     // menu item called "Copy link" would publish a meeting nobody asked to
@@ -214,7 +230,7 @@ export function MeetingMenu(props: MeetingMenuProps) {
             <FileText /> Copy transcript
           </DropdownMenuItem>
           <DropdownMenuItem
-            disabled={!props.hasTranscript || props.working || props.rematching}
+            disabled={!props.hasTranscript || props.working || props.rematching || spent !== null}
             // Kept open while it runs. `onSelect` closes the menu by default,
             // and a menu that vanishes the instant you click is indistinguishable
             // from one that ignored you — which is exactly the doubt the spinner
@@ -228,7 +244,10 @@ export function MeetingMenu(props: MeetingMenuProps) {
             {props.rematching ? "Rematching speakers…" : "Rematch speakers"}
           </DropdownMenuItem>
           <DropdownMenuItem
-            disabled={!props.canTranslate || props.working}
+            // Closed on a spent account even though languages already
+            // translated still open: what this item does is *ask for a new one*.
+            // Reading one you have is on the page, not in here.
+            disabled={!props.canTranslate || props.working || spent !== null}
             onSelect={props.onTranslate}
           >
             <Languages /> Change language
@@ -243,7 +262,7 @@ export function MeetingMenu(props: MeetingMenuProps) {
             <ClipboardCopy /> Copy summary
           </DropdownMenuItem>
           <DropdownMenuItem
-            disabled={!props.hasSummary || props.working}
+            disabled={!props.hasSummary || props.working || spent !== null}
             onSelect={props.onRegenerateSummary}
           >
             <Sparkles /> Regenerate summary
@@ -258,7 +277,7 @@ export function MeetingMenu(props: MeetingMenuProps) {
               of this file for why it was absent for a while. The page confirms
               before anything is queued. */}
           <DropdownMenuItem
-            disabled={props.reprocessing || props.working}
+            disabled={props.reprocessing || props.working || spent !== null}
             onSelect={props.onReprocess}
           >
             {props.reprocessing ? <Loader2 className="animate-spin" /> : <RefreshCw />}
@@ -271,6 +290,20 @@ export function MeetingMenu(props: MeetingMenuProps) {
           >
             <Trash2 /> Delete this meeting
           </DropdownMenuItem>
+
+          {/* Why four of the rows above are grey. Below Delete because it is a
+              statement about the account rather than an action on this meeting,
+              and inside the menu because that is where the greyed-out items
+              are — a reason somewhere else is a reason nobody reads. Copy,
+              Move, Share and Delete are untouched: none of them asks a model
+              for anything, and closing them would be taking the meeting away
+              rather than declining to do more work. */}
+          {spent && (
+            <>
+              <DropdownMenuSeparator />
+              <p className="px-2 py-1.5 text-xs leading-snug text-muted-foreground">{spent}</p>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 

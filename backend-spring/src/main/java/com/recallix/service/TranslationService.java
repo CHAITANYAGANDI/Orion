@@ -60,13 +60,17 @@ public class TranslationService {
     private final TranscriptSegmentRepository segments;
     private final MeetingTranslationRepository translations;
     private final AiClient ai;
+    /** Only to refuse a translation that has not been paid for. See {@link #translate}. */
+    private final UsageLimitService usage;
 
     public TranslationService(MeetingRepository meetings,
                               MeetingSummaryRepository summaries,
                               MeetingActionItemRepository actionItems,
                               TranscriptSegmentRepository segments,
                               MeetingTranslationRepository translations,
-                              AiClient ai) {
+                              AiClient ai,
+                              UsageLimitService usage) {
+        this.usage = usage;
         this.meetings = meetings;
         this.summaries = summaries;
         this.actionItems = actionItems;
@@ -109,15 +113,23 @@ public class TranslationService {
         requireMeeting(userId, meetingId);
         Language language = require(rawLanguage);
 
-        MeetingTranslation stored = translations
+        MeetingTranslation existing = translations
                 .findByMeetingIdAndLanguage(meetingId, language.code())
-                .orElseGet(() -> {
-                    MeetingTranslation fresh = new MeetingTranslation();
-                    fresh.setId(IdGenerator.translation());
-                    fresh.setMeetingId(meetingId);
-                    fresh.setLanguage(language.code());
-                    return translations.save(fresh);
-                });
+                .orElse(null);
+
+        // Refused only when it would cost something, and refused before
+        // anything is written.
+        //
+        // A language already translated comes back from storage without a model
+        // call, and that has to keep working: the work is paid for and the
+        // result is the user's. Closing it would be taking a page away rather
+        // than declining to write a new one -- which is the line the whole
+        // allowance is drawn along. See UsageLimitService.
+        if (wouldAskTheModel(existing, includeTranscript)) {
+            usage.requireAiOrThrow(userId, UsageLimitService.AiFeature.TRANSLATION);
+        }
+
+        MeetingTranslation stored = existing != null ? existing : translations.save(blank(meetingId, language));
 
         boolean refresh = stored.isStale();
         if (refresh && !includeTranscript) {
@@ -137,6 +149,29 @@ public class TranslationService {
         stored.setStale(false);
 
         return render(meetingId, stored);
+    }
+
+    /**
+     * Whether serving this request means asking the model for something new.
+     *
+     * <p>Deliberately the same four conditions the two calls below are guarded
+     * by, read one step earlier. They have to agree: answering yes here and no
+     * there refuses a request that would have cost nothing, and answering no
+     * here and yes there lets a spent account buy another translation.
+     */
+    private static boolean wouldAskTheModel(MeetingTranslation stored, boolean includeTranscript) {
+        if (stored == null) return true;
+        if (stored.isStale()) return true;
+        if (!stored.hasBrief()) return true;
+        return includeTranscript && !stored.hasTranscript();
+    }
+
+    private static MeetingTranslation blank(String meetingId, Language language) {
+        MeetingTranslation fresh = new MeetingTranslation();
+        fresh.setId(IdGenerator.translation());
+        fresh.setMeetingId(meetingId);
+        fresh.setLanguage(language.code());
+        return fresh;
     }
 
     @Transactional

@@ -108,6 +108,7 @@ import {
   timecode,
 } from "@/lib/format";
 import { useMeetingProgress } from "@/lib/progress";
+import { useAllowance, aiRefusal } from "@/lib/allowance";
 import { languageName } from "@/lib/language";
 // Shared with the transcript editor, so reading and correcting agree about
 // where the paragraphs are and the page does not reflow when you switch modes.
@@ -1182,6 +1183,10 @@ function TemplatePicker({ meetingId, current }: { meetingId: string; current: st
   const [resummarize, { isLoading: rewriting }] = useResummarizeMutation({
     fixedCacheKey: `resummarize:${meetingId}`,
   });
+  // Changing the template *is* a rewrite — same request the menu item makes —
+  // so the same allowance closes it. Without this the one surface that does not
+  // look like a button would still spend a model call.
+  const refusal = aiRefusal(useAllowance(), "summary");
 
   if (!templates || templates.length === 0) return null;
 
@@ -1197,7 +1202,7 @@ function TemplatePicker({ meetingId, current }: { meetingId: string; current: st
   return (
     <div className="flex items-center gap-2 pb-2 no-print">
       <span className="text-sm text-muted-foreground">Template:</span>
-      <Select value={current} onValueChange={onChange} disabled={rewriting}>
+      <Select value={current} onValueChange={onChange} disabled={rewriting || refusal !== null}>
         {/* The spinner sits beside the word, not in a wrapper around it.
             SelectTrigger styles its direct `span` with `line-clamp-1`, which is
             `display: -webkit-box` with a vertical box orientation — and as a
@@ -1207,7 +1212,10 @@ function TemplatePicker({ meetingId, current }: { meetingId: string; current: st
             units tall. The trigger is already a flex row that centres what it
             is handed, which is all this ever needed. Same shape as the folder
             icon in components/project-picker. */}
-        <SelectTrigger className="h-8 w-[170px] gap-2">
+        {/* The reason, on the control itself. There is no room beside it on
+            the tab row for a sentence, and a picker that simply stops working
+            is the worst of the three options. */}
+        <SelectTrigger className="h-8 w-[170px] gap-2" title={refusal ?? undefined}>
           {rewriting ? (
             <>
               <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
@@ -1341,6 +1349,8 @@ function SummaryPanel({
   const [resummarize, { isLoading: rewriting }] = useResummarizeMutation({
     fixedCacheKey: `resummarize:${meetingId}`,
   });
+  // The banner below offers a rewrite, which is the same spend as the menu's.
+  const refusal = aiRefusal(useAllowance(), "summary");
   const translated = translation;
 
   async function onTemplateChange(slug: string) {
@@ -1417,15 +1427,25 @@ function SummaryPanel({
                   <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
                   The transcript changed after this summary was written.
                 </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onTemplateChange(current)}
-                  disabled={rewriting}
-                >
-                  {rewriting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                  Rewrite it
-                </Button>
+                {/* On a spent account the offer is withdrawn rather than
+                    greyed. This banner exists to ask for a decision, and a
+                    disabled button leaves it asking for one that cannot be
+                    made — the warning is still worth showing, since it is why
+                    the summary and the transcript below it disagree, but the
+                    reader needs the reason instead of the button. */}
+                {refusal ? (
+                  <span className="text-xs text-muted-foreground">{refusal}</span>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onTemplateChange(current)}
+                    disabled={rewriting}
+                  >
+                    {rewriting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                    Rewrite it
+                  </Button>
+                )}
               </div>
             )}
 

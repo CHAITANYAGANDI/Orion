@@ -3,6 +3,9 @@ import {
   recordRefusal,
   importRefusal,
   lengthRefusal,
+  aiRefusal,
+  spentNote,
+  type AiFeature,
   type Allowance,
 } from "@/lib/allowance";
 
@@ -111,5 +114,96 @@ describe("whether a file fits", () => {
     // -1 is the server's unlimited. No plan carries it now, but a row left by
     // an earlier build would otherwise be refused for every file.
     expect(lengthRefusal(allowance({ minutesLeft: Number.POSITIVE_INFINITY }), 99999)).toBeNull();
+  });
+});
+
+/**
+ * The AI features, and the line the allowance is drawn along.
+ *
+ * <p>Chat, rewriting a summary, rematching speakers, translating and
+ * reprocessing all close when the minutes go. Three of the five spend no
+ * transcription minutes at all, so this is a decision about what the allowance
+ * *is* rather than what it counts — and the tests are here so that decision has
+ * to be made again deliberately rather than eroded one feature at a time.
+ *
+ * <p>The refusals are also asserted for what they say. These are permanent,
+ * there is nothing to buy, and a sentence that only says what stopped working
+ * reads as an account that has been closed.
+ */
+const FEATURES: AiFeature[] = ["chat", "summary", "speakers", "translation", "reprocess"];
+
+describe("the AI features", () => {
+  it("are all open while a single minute remains", () => {
+    for (const feature of FEATURES) {
+      expect(aiRefusal(allowance({ minutesLeft: 1 }), feature)).toBeNull();
+    }
+    expect(spentNote(allowance({ minutesLeft: 1 }))).toBeNull();
+  });
+
+  it("are all closed once the minutes are gone", () => {
+    // Listed rather than looped over a runtime value, so adding a sixth feature
+    // means adding it here rather than inheriting an exemption.
+    for (const feature of FEATURES) {
+      expect(aiRefusal(allowance({ minutesLeft: 0 }), feature)).not.toBeNull();
+    }
+    expect(spentNote(allowance({ minutesLeft: 0 }))).not.toBeNull();
+  });
+
+  it("stay open for an account with no ceiling", () => {
+    // A limit of -1 is the server's unlimited, and survives here as Infinity.
+    for (const feature of FEATURES) {
+      expect(aiRefusal(allowance({ minutesLeft: Number.POSITIVE_INFINITY }), feature)).toBeNull();
+    }
+  });
+
+  it("say nothing while the balance is loading or unreadable", () => {
+    // Deliberately unlike recording, which fails closed. There is nothing
+    // irreversible to protect here, the server refuses on its own, and greying
+    // five features out over one failed request closes a working product.
+    for (const feature of FEATURES) {
+      expect(aiRefusal(allowance({ loading: true, minutesLeft: 0 }), feature)).toBeNull();
+      expect(aiRefusal(allowance({ unknown: true, minutesLeft: 0 }), feature)).toBeNull();
+    }
+    expect(spentNote(allowance({ loading: true, minutesLeft: 0 }))).toBeNull();
+    expect(spentNote(allowance({ unknown: true, minutesLeft: 0 }))).toBeNull();
+  });
+
+  it("each say what is refused and what is kept", () => {
+    const spent = allowance({ minutesLeft: 0 });
+
+    for (const feature of FEATURES) {
+      const message = aiRefusal(spent, feature)!;
+      expect(message).toContain("100 transcription minutes");
+      // The second half. Without it the sentence reads as the account having
+      // been closed rather than as one allowance having run out.
+      expect(message).toMatch(/still here\.$/);
+    }
+  });
+
+  it("never suggest upgrading, because there is nothing to upgrade to", () => {
+    const spent = allowance({ minutesLeft: 0 });
+
+    for (const feature of FEATURES) {
+      expect(aiRefusal(spent, feature)).not.toMatch(/upgrade|plan|billing|subscri/i);
+    }
+    expect(spentNote(spent)).not.toMatch(/upgrade|plan|billing|subscri/i);
+  });
+
+  it("say something different for each one", () => {
+    const spent = allowance({ minutesLeft: 0 });
+    const messages = FEATURES.map((f) => aiRefusal(spent, f));
+
+    // Five features failing with one sentence between them reads as one
+    // unexplained fault rather than as five deliberate closures.
+    expect(new Set(messages).size).toBe(FEATURES.length);
+  });
+
+  it("has a short form for a menu, and it is short", () => {
+    const note = spentNote(allowance({ minutesLeft: 0 }))!;
+
+    // It sits in a 16rem dropdown under four greyed rows. The full sentence
+    // would be five lines there.
+    expect(note.length).toBeLessThan(120);
+    expect(note).toContain("stays");
   });
 });

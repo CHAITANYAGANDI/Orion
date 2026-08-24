@@ -66,6 +66,7 @@ class TranslationServiceTest {
     @Mock private TranscriptSegmentRepository segments;
     @Mock private MeetingTranslationRepository translations;
     @Mock private AiClient ai;
+    @Mock private UsageLimitService usage;
 
     private TranslationService service;
     private final List<MeetingTranslation> stored = new ArrayList<>();
@@ -74,7 +75,7 @@ class TranslationServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new TranslationService(meetings, summaries, actionItems, segments, translations, ai);
+        service = new TranslationService(meetings, summaries, actionItems, segments, translations, ai, usage);
         stored.clear();
         tasks.clear();
 

@@ -157,28 +157,67 @@ public class UsageLimitService {
     }
 
     /**
+     * Everything that asks a model, and what to call it when it is refused.
+     *
+     * <p>An enum rather than a string per call site so the refusals cannot drift
+     * apart: five features saying the same thing five slightly different ways
+     * reads as five different problems. Each clause finishes the sentence begun
+     * in {@link #requireAiOrThrow}.
+     *
+     * <p>Every one of them names what is <em>kept</em> as well as what is
+     * refused. Running out of an allowance is not the account being closed, and
+     * a refusal that does not say so is read as one.
+     */
+    public enum AiFeature {
+        CHAT("AI Chat is closed",
+                "Your meetings and the answers you already have are still here."),
+        RESUMMARIZE("the summary cannot be rewritten",
+                "The summary you have is still here."),
+        SPEAKER_REMATCH("speakers cannot be rematched",
+                "The speaker names already on this meeting are still here."),
+        TRANSLATION("nothing further can be translated",
+                "Translations you already have are still here."),
+        REPROCESS("meetings cannot be reprocessed",
+                "Everything already transcribed is still here.");
+
+        private final String refused;
+        private final String kept;
+
+        AiFeature(String refused, String kept) {
+            this.refused = refused;
+            this.kept = kept;
+        }
+    }
+
+    /**
      * Refuse anything that asks a model, once the minutes are gone.
      *
-     * <p>Chat does not spend transcription minutes — it spends context and a
-     * completion — so on the arithmetic alone it could run forever on an
-     * account that can no longer record. It does not, and the reason is what the
-     * allowance is for rather than what it counts: 100 minutes is the whole of
-     * what an account gets, and an AI feature still answering afterwards would
-     * make the limit a limit on recording rather than on the product.
+     * <p><b>Most of these spend no transcription minutes at all.</b> Chat spends
+     * context and a completion; rewriting a summary and rematching speakers
+     * re-read a transcript already paid for. On the arithmetic alone they could
+     * run forever on an account that can no longer record. They do not, and the
+     * reason is what the allowance is for rather than what it counts: 100
+     * minutes is the whole of what an account gets, and AI features still
+     * running afterwards would make it a limit on recording rather than on the
+     * product.
      *
-     * <p>Reads are left alone. Somebody out of minutes keeps every conversation
-     * they have already had, because those are theirs and hiding them would be
-     * taking something away rather than declining to do more work.
+     * <p>Reprocessing is the exception that proves it — that one really does
+     * re-transcribe the audio and really is charged again when it lands.
+     *
+     * <p><b>Reads are left alone.</b> Somebody out of minutes keeps every
+     * conversation they have had, every summary, every translation and every
+     * name they typed. This declines to do more work; it does not take away
+     * work already done, and each refusal below says which of the two it is.
      */
     @Transactional(readOnly = true)
-    public void requireAiOrThrow(String userId) {
+    public void requireAiOrThrow(String userId, AiFeature feature) {
         UsageLimit u = usage.findByUserId(userId).orElse(null);
         int used = u == null ? 0 : u.getAiMinutesUsed();
         if (used >= MINUTES_ALLOWANCE) {
             throw ApiException.usageLimitReached(
                     "You have used all " + MINUTES_ALLOWANCE
-                            + " transcription minutes on this account, so AI Chat is closed. "
-                            + "Your meetings and the answers you already have are still here.");
+                            + " transcription minutes on this account, so "
+                            + feature.refused + ". " + feature.kept);
         }
     }
 

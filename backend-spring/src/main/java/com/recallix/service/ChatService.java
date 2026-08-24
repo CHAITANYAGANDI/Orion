@@ -158,7 +158,7 @@ public class ChatService {
     @Transactional
     public ChatMessageResponse ask(String userId, String meetingId, String question,
                                    String conversationId, ChatMode mode) {
-        usage.requireAiOrThrow(userId);
+        usage.requireAiOrThrow(userId, UsageLimitService.AiFeature.CHAT);
         requireOwnedMeeting(userId, meetingId);
         ChatScope scope = ChatScope.meeting(meetingId);
         ChatConversation conversation = resolveForAsk(userId, scope, conversationId);
@@ -191,7 +191,7 @@ public class ChatService {
     @Transactional
     public ChatMessageResponse askProject(String userId, String projectId, String question,
                                           String conversationId) {
-        usage.requireAiOrThrow(userId);
+        usage.requireAiOrThrow(userId, UsageLimitService.AiFeature.CHAT);
         ChatScope scope = ChatScope.project(projectId);
         requireOwnedScope(userId, scope);
         ChatConversation conversation = resolveForAsk(userId, scope, conversationId);
@@ -230,7 +230,7 @@ public class ChatService {
     public ChatMessageResponse askWorkspace(String userId, String question,
                                             List<String> meetingIds, String conversationId,
                                             ChatMode mode) {
-        usage.requireAiOrThrow(userId);
+        usage.requireAiOrThrow(userId, UsageLimitService.AiFeature.CHAT);
         // If the caller narrowed the search, verify they own what they named.
         // This is also the check behind the composer's "Add context": the ids
         // arrive from a picker, and a picker is a client-side control.

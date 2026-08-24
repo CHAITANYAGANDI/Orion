@@ -13,10 +13,29 @@ const mocks = vi.hoisted(() => ({
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
   projects: [] as { id: string; name: string; meetingCount: number }[],
+  /** What is left of the allowance. Four of the items below close without it. */
+  minutesUsed: 4,
+  /** The balance request itself, which can also be in flight or broken. */
+  usageLoading: false,
+  usageFailed: false,
 }));
 
 vi.mock("@/lib/api", () => ({
   useGetProjectsQuery: () => ({ data: mocks.projects }),
+  useGetUsageQuery: () => ({
+    data: mocks.usageLoading || mocks.usageFailed
+      ? undefined
+      : {
+          plan: "FREE",
+          minutesUsed: mocks.minutesUsed,
+          minutesLimit: 100,
+          importsUsed: 0,
+          importsLimit: 3,
+          meetingsUsed: 1,
+        },
+    isLoading: mocks.usageLoading,
+    isError: mocks.usageFailed,
+  }),
   useGetLanguagesQuery: () => ({
     data: [
       { code: "en", name: "English", nativeName: "English", rightToLeft: false },
@@ -93,6 +112,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.unwrap.mockReset().mockResolvedValue({});
   mocks.projects = [];
+  mocks.minutesUsed = 4;
+  mocks.usageLoading = false;
+  mocks.usageFailed = false;
 });
 
 describe("MeetingMenu", () => {
@@ -460,5 +482,139 @@ describe("MeetingMenu", () => {
 
       expect(mocks.assign).toHaveBeenCalledWith({ meetingId: "mtg_1", projectId: null });
     });
+  });
+});
+
+/**
+ * An account that has spent its minutes.
+ *
+ * <p>Four of these items ask a model for something new and are closed; four of
+ * them do not and stay open. Both halves are asserted, and the second is the
+ * one that matters: running out of an allowance is not the account being
+ * closed, and a menu where Copy and Delete had also gone grey would say it was.
+ *
+ * <p>The server refuses all four on its own — this is so nobody finds out by
+ * clicking, and so the reason is on screen next to the rows it explains.
+ */
+describe("MeetingMenu when the minutes are gone", () => {
+  /** Every minute spent. */
+  function spent() {
+    mocks.minutesUsed = 100;
+  }
+
+  function marks(label: string) {
+    return screen.getByRole("menuitem", { name: new RegExp(label) });
+  }
+
+  it("closes the four that would ask a model for something new", async () => {
+    const user = userEvent.setup();
+    spent();
+    menu();
+    await open(user);
+
+    for (const label of [
+      "Rematch speakers",
+      "Change language",
+      "Regenerate summary",
+      "Reprocess meeting",
+    ]) {
+      expect(marks(label)).toHaveAttribute("data-disabled");
+    }
+  });
+
+  it("leaves everything that only reads or files alone", async () => {
+    const user = userEvent.setup();
+    spent();
+    menu();
+    await open(user);
+
+    // Copying a transcript, filing a meeting and deleting one cost nothing and
+    // are the user's own work. Closing them would be a repossession rather
+    // than a limit.
+    for (const label of ["Move…", "Copy link", "Copy transcript", "Copy summary", "Delete this"]) {
+      expect(marks(label)).not.toHaveAttribute("data-disabled");
+    }
+  });
+
+  it("says why, once, rather than four times or not at all", async () => {
+    const user = userEvent.setup();
+    spent();
+    menu();
+    await open(user);
+
+    // A row greyed out with no reason beside it is read as a fault in the app.
+    const note = screen.getByText(/100 transcription minutes/);
+    expect(note).toBeInTheDocument();
+    expect(screen.getAllByText(/100 transcription minutes/)).toHaveLength(1);
+    // And it says what survives, not only what does not.
+    expect(note).toHaveTextContent(/already here stays/i);
+  });
+
+  it("keeps the same rows in the same order", async () => {
+    const user = userEvent.setup();
+    spent();
+    menu();
+    await open(user);
+
+    // Greyed and in place, never removed — the menu is the same list on every
+    // meeting, and an item that vanishes is one somebody hunts for.
+    expect(screen.getAllByRole("menuitem").map((el) => el.textContent?.trim())).toEqual([
+      "Move…",
+      "Copy link",
+      "Copy transcript",
+      "Rematch speakers",
+      "Change language",
+      "Copy summary",
+      "Regenerate summary",
+      "Reprocess meeting",
+      "Delete this meeting",
+    ]);
+  });
+
+  it("says nothing at all while there are minutes left", async () => {
+    const user = userEvent.setup();
+    menu();
+    await open(user);
+
+    expect(screen.queryByText(/100 transcription minutes/)).not.toBeInTheDocument();
+    expect(marks("Regenerate summary")).not.toHaveAttribute("data-disabled");
+  });
+
+  it("stays open while the balance is still being read", async () => {
+    const user = userEvent.setup();
+    // Not the same as having none. Greying a control out over a request that
+    // has not come back yet closes a working feature on a slow network, and
+    // there is nothing irreversible here to protect: the server refuses on its
+    // own if the account really is spent.
+    mocks.usageLoading = true;
+    menu();
+    await open(user);
+
+    expect(marks("Reprocess meeting")).not.toHaveAttribute("data-disabled");
+    expect(screen.queryByText(/100 transcription minutes/)).not.toBeInTheDocument();
+  });
+
+  it("stays open when the balance cannot be read at all", async () => {
+    const user = userEvent.setup();
+    mocks.usageFailed = true;
+    menu();
+    await open(user);
+
+    // Same reasoning, and the case that actually happens: one failed request
+    // must not take four features off the menu.
+    expect(marks("Regenerate summary")).not.toHaveAttribute("data-disabled");
+    expect(marks("Rematch speakers")).not.toHaveAttribute("data-disabled");
+  });
+
+  it("still greys what the meeting itself cannot do", async () => {
+    const user = userEvent.setup();
+    spent();
+    menu({ hasTranscript: false, hasSummary: false, canTranslate: false });
+    await open(user);
+
+    // Two reasons at once, and the menu must not lose the older one: a meeting
+    // whose transcript was erased has nothing to copy whatever the balance is.
+    expect(marks("Copy transcript")).toHaveAttribute("data-disabled");
+    expect(marks("Copy summary")).toHaveAttribute("data-disabled");
   });
 });

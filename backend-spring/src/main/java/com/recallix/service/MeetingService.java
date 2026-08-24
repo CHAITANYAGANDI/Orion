@@ -447,6 +447,9 @@ public class MeetingService {
     @Transactional
     public SummaryResponse resummarize(String userId, String meetingId, String templateSlug) {
         Meeting meeting = require(userId, meetingId);
+        // Always a model call -- there is no cached answer to hand back, since
+        // the point of asking is that the existing one is wrong.
+        usage.requireAiOrThrow(userId, UsageLimitService.AiFeature.RESUMMARIZE);
         var transcript = transcripts.findFirstByMeetingIdOrderByCreatedAtDesc(meetingId)
                 .orElseThrow(() -> ApiException.badRequest(
                         "This meeting has no transcript yet, so there is nothing to summarize"));
@@ -653,6 +656,13 @@ public class MeetingService {
             return SpeakerRematchResponse.none(0);
         }
 
+        // Here rather than at the top, so the two answers above still get
+        // through. "Turn on speaker matching in Settings" tells somebody what to
+        // do about it; being told the account is out of minutes instead would
+        // send them looking for the wrong problem -- and neither of those paths
+        // asks the model for anything.
+        usage.requireAiOrThrow(userId, UsageLimitService.AiFeature.SPEAKER_REMATCH);
+
         var turns = speakerIdentity.turnsOf(segs);
         var result = ai.identifySpeakers(userId, meetingId, meeting.getObjectKey(), turns);
         if (!result.ran()) {
@@ -857,6 +867,12 @@ public class MeetingService {
         if (meeting.getObjectKey() == null && meeting.getSourceUrl() == null) {
             throw ApiException.badRequest("Meeting has no source to reprocess");
         }
+        // The one on this list that genuinely re-transcribes: the whole
+        // recording goes through the provider again, and the minutes are
+        // charged again when it lands. Refusing it on a spent account is not a
+        // policy choice about AI features -- it is the minute allowance doing
+        // exactly what it counts.
+        usage.requireAiOrThrow(userId, UsageLimitService.AiFeature.REPROCESS);
         meeting.setStatus(MeetingStatus.QUEUED);
         meeting.setErrorMessage(null);
         // The cached voiceprints go with them, and this is not housekeeping.

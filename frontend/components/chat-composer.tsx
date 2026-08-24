@@ -26,7 +26,7 @@ import { AtSign, ArrowUp, ChevronDown, Loader2, X, Folder, FileAudio, Search } f
 import type { ChatMode, ChatModeOption, MeetingResponse, Project } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useAllowance, chatRefusal } from "@/lib/allowance";
+import { useAllowance, aiRefusal } from "@/lib/allowance";
 
 /** How tall the box is allowed to grow before it scrolls instead. */
 const MAX_ROWS = 8;
@@ -201,7 +201,7 @@ export function ChatComposer({
   // Read here rather than passed in by each of the four surfaces that mount a
   // composer. "Disable every AI chat" has to mean every one, and a prop is a
   // thing the fifth caller forgets.
-  const refusal = chatRefusal(allowance);
+  const refusal = aiRefusal(allowance, "chat");
   const shut = refusal !== null;
 
   const chosen = modes?.find((m) => m.mode === mode);

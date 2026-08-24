@@ -126,26 +126,72 @@ export function importRefusal(a: Allowance): string | null {
   return null;
 }
 
+/** Everything that asks a model, and is therefore closed once the minutes go. */
+export type AiFeature = "chat" | "summary" | "speakers" | "translation" | "reprocess";
+
+const SPENT = "You have used all 100 transcription minutes on this account";
+
 /**
- * Why AI Chat is closed, or null when it is not.
+ * How each refusal finishes the sentence.
  *
- * <p>Chat spends no transcription minutes — it spends context and a completion
- * — so on the arithmetic it could answer forever on an account that can no
- * longer record. It does not, and the reason is what the allowance is *for*
- * rather than what it counts: 100 minutes is the whole of what an account gets,
- * and an AI feature still running afterwards would make it a limit on recording
- * rather than on the product.
+ * <p>Mirrors `AiFeature` in the server's UsageLimitService, deliberately word
+ * for word: the server is the authority and will say its own version if a
+ * request gets through anyway, and one sentence in a greyed-out menu with a
+ * different one in the toast that follows reads as two different problems.
  *
- * <p>Silent while the balance is loading or unreadable. Unlike recording there
- * is nothing irreversible to protect here — the server refuses on its own, and
- * greying the box out over a failed request would close a working feature.
+ * <p>Each names what is <em>kept</em> as well as what is refused. Running out
+ * of an allowance is not the account being closed, and a refusal that does not
+ * say so is read as one.
  */
-export function chatRefusal(a: Allowance): string | null {
+const CLOSED: Record<AiFeature, string> = {
+  chat: "AI Chat is closed. Your meetings and the answers you already have are still here.",
+  summary: "the summary cannot be rewritten. The summary you have is still here.",
+  speakers:
+    "speakers cannot be rematched. The speaker names already on this meeting are still here.",
+  translation:
+    "nothing further can be translated. Translations you already have are still here.",
+  reprocess: "meetings cannot be reprocessed. Everything already transcribed is still here.",
+};
+
+/**
+ * Why an AI feature is closed, or null when it is not.
+ *
+ * <p><b>Most of these spend no transcription minutes at all.</b> Chat spends
+ * context and a completion; rewriting a summary and rematching speakers re-read
+ * a transcript already paid for. On the arithmetic they could run forever on an
+ * account that can no longer record. They do not, and the reason is what the
+ * allowance is *for* rather than what it counts: 100 minutes is the whole of
+ * what an account gets, and AI features still running afterwards would make it
+ * a limit on recording rather than on the product. Reprocessing is the
+ * exception that proves it — that one really does re-transcribe the audio.
+ *
+ * <p><b>Silent while the balance is loading or unreadable.</b> Unlike recording
+ * there is nothing irreversible to protect here — the server refuses on its own,
+ * and greying a control out over a failed request would close a working
+ * feature. That makes the server check load-bearing rather than a backstop, and
+ * it is there for all five.
+ *
+ * <p>Reads are untouched, here and on the server. Somebody out of minutes keeps
+ * every meeting, summary, translation and name they typed; what closes is
+ * asking for something new.
+ */
+export function aiRefusal(a: Allowance, feature: AiFeature): string | null {
   if (a.loading || a.unknown) return null;
-  if (a.minutesLeft <= 0) {
-    return "You have used all 100 transcription minutes on this account, so AI Chat is closed. Your meetings and the answers you already have are still here.";
-  }
-  return null;
+  if (a.minutesLeft > 0) return null;
+  return `${SPENT}, so ${CLOSED[feature]}`;
+}
+
+/**
+ * The same fact, short enough for a menu.
+ *
+ * <p>Five disabled rows want one reason between them, not five sentences: a
+ * dropdown is not the place to explain each closure, and a control greyed out
+ * with no reason at all is the thing this exists to avoid.
+ */
+export function spentNote(a: Allowance): string | null {
+  if (a.loading || a.unknown) return null;
+  if (a.minutesLeft > 0) return null;
+  return `${SPENT}. What is already here stays; nothing new can be generated.`;
 }
 
 /**
