@@ -25,6 +25,28 @@ import * as React from "react";
 import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+/** The presets under the calendar, as stable ids. */
+export type PresetKey = "any" | "today" | "week" | "month";
+
+/**
+ * What was *chosen*, as opposed to what it resolved to.
+ *
+ * <p>The window itself is two absolute instants, which is right for asking the
+ * server and wrong for remembering. "Today" picked yesterday evening is a pair
+ * of instants that mean yesterday, and restoring them tomorrow would show a
+ * day-old list under a label reading Today. "Last 7 days" would quietly stop
+ * rolling. A single day off the calendar is the one case where the instants
+ * *are* the choice, and it is stored as a plain local date for the same reason:
+ * `2026-08-13` survives a change of timezone as the day somebody clicked.
+ *
+ * <p>So this is what gets written down, and `restoreWindow` turns it back into
+ * a window against the clock of whenever it is read.
+ */
+export type DateChoice =
+  | { kind: "preset"; key: PresetKey }
+  /** A local calendar date, `YYYY-MM-DD`. */
+  | { kind: "day"; day: string };
+
 /** The window a filter is asking for, plus what to call it on the trigger. */
 export interface DateWindow {
   /** Inclusive ISO instant, or null for no lower bound. */
@@ -32,9 +54,23 @@ export interface DateWindow {
   /** Exclusive ISO instant, or null for no upper bound. */
   to: string | null;
   label: string;
+  /**
+   * How this window was arrived at, when it came from the picker.
+   *
+   * <p>Optional because a window can be built directly — `dayWindow` and
+   * `sinceWindow` are exported and used on their own — and a window with no
+   * choice attached is simply one that cannot be restored later, which falls
+   * back to the default rather than guessing.
+   */
+  choice?: DateChoice;
 }
 
-export const ANY_TIME: DateWindow = { from: null, to: null, label: "Any time" };
+export const ANY_TIME: DateWindow = {
+  from: null,
+  to: null,
+  label: "Any time",
+  choice: { kind: "preset", key: "any" },
+};
 
 function midnight(d: Date): Date {
   const out = new Date(d.getTime());
@@ -87,12 +123,55 @@ export function sinceWindow(days: number, label: string, now: Date = new Date())
   return { from: midnight(addDays(now, -days)).toISOString(), to: null, label };
 }
 
-const PRESETS: { key: string; label: string; make: (now: Date) => DateWindow }[] = [
+const PRESETS: { key: PresetKey; label: string; make: (now: Date) => DateWindow }[] = [
   { key: "any", label: "Any time", make: () => ANY_TIME },
   { key: "today", label: "Today", make: (now) => dayWindow(now, now) },
   { key: "week", label: "Last 7 days", make: (now) => sinceWindow(7, "Last 7 days", now) },
   { key: "month", label: "Last 30 days", make: (now) => sinceWindow(30, "Last 30 days", now) },
 ];
+
+/** A local calendar date as `YYYY-MM-DD`, which is not what `toISOString` gives. */
+export function localDay(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
+ * Turn a remembered choice back into a window, against the clock right now.
+ *
+ * <p>Returns null for anything it does not recognise — a key from a build that
+ * offered a preset this one does not, a malformed date, a day in the future
+ * that the calendar would not have allowed. The caller falls back to its
+ * default, because a filter restored from something unreadable is worse than no
+ * filter: it narrows a list for a reason nobody can see.
+ */
+export function restoreWindow(raw: unknown, now: Date = new Date()): DateWindow | null {
+  if (!raw || typeof raw !== "object") return null;
+  const choice = raw as Partial<DateChoice>;
+
+  if (choice.kind === "preset") {
+    const preset = PRESETS.find((p) => p.key === (choice as { key: string }).key);
+    if (!preset) return null;
+    // Rebuilt from `now`, which is the entire point: a rolling window has to
+    // roll, and Today has to mean today.
+    return { ...preset.make(now), choice: { kind: "preset", key: preset.key } };
+  }
+
+  if (choice.kind === "day") {
+    const day = (choice as { day: unknown }).day;
+    if (typeof day !== "string") return null;
+    const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+    if (!parts) return null;
+    // Constructed field by field, not parsed: `new Date("2026-08-13")` is
+    // midnight UTC, which is the previous day for anybody west of Greenwich.
+    const local = new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]));
+    if (Number.isNaN(local.getTime())) return null;
+    if (local.getTime() > midnight(now).getTime()) return null;
+    return { ...dayWindow(local, now), choice: { kind: "day", day } };
+  }
+
+  return null;
+}
 
 const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
 
@@ -243,7 +322,11 @@ export function DateFilter({
                   type="button"
                   data-day=""
                   disabled={day.getTime() > midnight(now).getTime()}
-                  onClick={() => pick(dayWindow(day, now))}
+                  // The choice rides along with the window so the picker's
+                  // owner can remember it. See DateChoice.
+                  onClick={() =>
+                    pick({ ...dayWindow(day, now), choice: { kind: "day", day: localDay(day) } })
+                  }
                   aria-pressed={Boolean(selectedDay && sameDay(day, selectedDay))}
                   className={cn(
                     "flex h-8 items-center justify-center rounded-md text-sm transition-colors",
@@ -271,7 +354,7 @@ export function DateFilter({
                 <button
                   key={p.key}
                   type="button"
-                  onClick={() => pick(made)}
+                  onClick={() => pick({ ...made, choice: { kind: "preset", key: p.key } })}
                   aria-pressed={value.label === made.label}
                   className={cn(
                     "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",

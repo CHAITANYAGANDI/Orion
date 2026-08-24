@@ -7,6 +7,7 @@ import {
   ANY_TIME,
   dayWindow,
   sinceWindow,
+  restoreWindow,
   type DateWindow,
 } from "@/components/date-filter";
 
@@ -202,5 +203,131 @@ describe("DateFilter", () => {
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * What survives a page, and how.
+ *
+ * <p>The window is two absolute instants, and instants are exactly the wrong
+ * thing to write down. "Last 7 days" stored as instants stops rolling; "Today"
+ * stored as instants is labelled Today over yesterday's list. So what is stored
+ * is the choice, and what is tested here is that the choice comes back as the
+ * window it originally meant — against the clock of whenever it is read, not
+ * the clock it was made on.
+ */
+describe("remembering a choice", () => {
+  /** A week later, so anything frozen to the moment of choosing shows up. */
+  const LATER = new Date(2026, 7, 20, 9, 15, 0);
+
+  it("hands the choice back with the window when a preset is picked", async () => {
+    const user = ui();
+    const { onChange } = filter();
+    const panel = await open(user);
+
+    await user.click(within(panel).getByRole("button", { name: /Last 7 days/ }));
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ choice: { kind: "preset", key: "week" } }),
+    );
+  });
+
+  it("hands back the day as a local date when one is picked", async () => {
+    const user = ui();
+    const { onChange } = filter();
+    const panel = await open(user);
+
+    await user.click(within(panel).getByRole("button", { name: "11" }));
+
+    // The local calendar date, not `toISOString()` -- which is the previous day
+    // for anybody west of Greenwich.
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ choice: { kind: "day", day: "2026-08-11" } }),
+    );
+  });
+
+  it("rolls a period forward to the day it is read on", () => {
+    const stored = sinceWindow(7, "Last 7 days", NOW).from;
+    const restored = restoreWindow({ kind: "preset", key: "week" }, LATER);
+
+    // A week later it means a different week. Storing the instants would have
+    // left it pinned to the 6th for ever.
+    expect(restored?.label).toBe("Last 7 days");
+    expect(restored?.from).not.toBe(stored);
+    expect(new Date(restored!.from!).getDate()).toBe(13);
+  });
+
+  it("rebuilds Today as today, not as the day it was chosen", () => {
+    const restored = restoreWindow({ kind: "preset", key: "today" }, LATER);
+
+    expect(restored?.label).toBe("Today");
+    const from = new Date(restored!.from!);
+    expect(from.getDate()).toBe(20);
+    expect(from.getHours()).toBe(0);
+  });
+
+  it("brings back a single day exactly as it was", () => {
+    const restored = restoreWindow({ kind: "day", day: "2026-08-11" }, LATER);
+
+    // The one case where the instants *are* the choice: the 11th is the 11th
+    // whenever it is read.
+    const from = new Date(restored!.from!);
+    expect(from.getFullYear()).toBe(2026);
+    expect(from.getMonth()).toBe(7);
+    expect(from.getDate()).toBe(11);
+    expect(from.getHours()).toBe(0);
+    expect(restored?.choice).toEqual({ kind: "day", day: "2026-08-11" });
+  });
+
+  it("reads a stored day in the reader's timezone, not in UTC", () => {
+    const restored = restoreWindow({ kind: "day", day: "2026-08-11" }, LATER);
+
+    // `new Date("2026-08-11")` is midnight UTC, which is the 10th in the
+    // Americas. Every window this filter builds is local midnight, and this one
+    // has to match or the stored day quietly shifts by one.
+    expect(new Date(restored!.from!).getHours()).toBe(0);
+    expect(restored!.to).toBe(
+      new Date(2026, 7, 12).toISOString(),
+    );
+  });
+
+  it("survives a round trip through the picker", async () => {
+    const user = ui();
+    const { onChange } = filter();
+    const panel = await open(user);
+    await user.click(within(panel).getByRole("button", { name: /Last 30 days/ }));
+
+    const chosen = onChange.mock.calls[0][0] as DateWindow;
+    const restored = restoreWindow(chosen.choice, NOW);
+
+    expect(restored).toEqual(chosen);
+  });
+
+  it("declines anything it cannot make sense of", () => {
+    // Each of these becomes the default rather than a filter nobody can
+    // explain: a list narrowed for an invisible reason is worse than a wide one.
+    expect(restoreWindow(null)).toBeNull();
+    expect(restoreWindow("week")).toBeNull();
+    expect(restoreWindow({})).toBeNull();
+    expect(restoreWindow({ kind: "preset" })).toBeNull();
+    // A key from a build that offered a preset this one does not.
+    expect(restoreWindow({ kind: "preset", key: "quarter" })).toBeNull();
+    expect(restoreWindow({ kind: "day" })).toBeNull();
+    expect(restoreWindow({ kind: "day", day: "11/08/2026" })).toBeNull();
+    expect(restoreWindow({ kind: "day", day: "2026-13-45" })).toBeNull();
+  });
+
+  it("declines a day in the future", () => {
+    // The calendar will not let one be picked, so one in storage means a clock
+    // that moved -- and a filter guaranteed to be empty.
+    expect(restoreWindow({ kind: "day", day: "2026-09-01" }, NOW)).toBeNull();
+    expect(restoreWindow({ kind: "day", day: "2026-08-13" }, NOW)).not.toBeNull();
+  });
+
+  it("carries its own choice on Any time", () => {
+    // Home clears the date filter with ANY_TIME directly rather than through
+    // the picker, and that is still a choice worth remembering.
+    expect(ANY_TIME.choice).toEqual({ kind: "preset", key: "any" });
+    expect(restoreWindow(ANY_TIME.choice, NOW)).toEqual(ANY_TIME);
   });
 });

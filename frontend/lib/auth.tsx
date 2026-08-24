@@ -8,6 +8,7 @@ import {
   DEV_USER_KEY,
   authStore,
 } from "@/lib/auth-store";
+import { clearPreferences } from "@/lib/preference-store";
 
 interface AuthContextValue {
   mode: "dev" | "clerk";
@@ -15,6 +16,19 @@ interface AuthContextValue {
   userId: string;
   /** Dev-only: switch the active dev user. No-op in clerk mode. */
   setDevUserId: (id: string) => void;
+  /**
+   * Identifies the current sign-in, for anything stored in the browser that
+   * must not outlive it — see lib/preference-store.ts.
+   *
+   * <p>Clerk's session id where there is one, because that is the thing that
+   * actually changes when somebody signs out and back in; the dev user id in
+   * dev mode, which has no sessions and so relies on `signOut` clearing up
+   * after itself.
+   *
+   * <p>Empty until `isLoaded`. Nothing scoped to a sign-in should be read
+   * before then, or it will be read under the wrong one.
+   */
+  sessionKey: string;
   isSignedIn: boolean;
   isLoaded: boolean;
   signOut?: () => void;
@@ -69,6 +83,9 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
     } catch {
       /* ignore */
     }
+    // Dev mode signs back in as the same id, so the session key alone would not
+    // notice this happened. See lib/preference-store.ts.
+    clearPreferences();
     authStore.devUserId = DEFAULT_DEV_USER;
     window.location.href = "/";
   }, []);
@@ -77,6 +94,9 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
     mode: "dev",
     userId,
     setDevUserId,
+    // Dev has no sessions. The id is the only thing that distinguishes one
+    // sign-in from another, and switching dev users is a sign-in.
+    sessionKey: isLoaded ? userId : "",
     isSignedIn: true,
     isLoaded,
     signOut,

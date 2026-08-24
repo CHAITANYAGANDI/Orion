@@ -6,6 +6,7 @@
 import * as React from "react";
 import { ClerkProvider, useAuth as useClerkAuth } from "@clerk/nextjs";
 import { authStore } from "@/lib/auth-store";
+import { clearPreferences } from "@/lib/preference-store";
 import type { AuthContextValue } from "@/lib/auth";
 
 type Ctx = React.Context<AuthContextValue | null>;
@@ -17,7 +18,7 @@ function ClerkBridge({
   AuthContext: Ctx;
   children: React.ReactNode;
 }) {
-  const { getToken, userId, isSignedIn, isLoaded, signOut } = useClerkAuth();
+  const { getToken, userId, sessionId, isSignedIn, isLoaded, signOut } = useClerkAuth();
 
   React.useEffect(() => {
     authStore.tokenGetter = () => getToken();
@@ -32,9 +33,16 @@ function ClerkBridge({
     setDevUserId: () => {
       /* no-op in clerk mode */
     },
+    // The session, not the user: signing out and back in as the same person is
+    // a new session, and that is exactly the case anything stored per-sign-in
+    // has to notice. See lib/preference-store.ts.
+    sessionKey: isLoaded ? sessionId ?? "" : "",
     isSignedIn: Boolean(isSignedIn),
     isLoaded,
     signOut: () => {
+      // Belt to the session key's braces, and the part that runs even when the
+      // next person to sign in on this browser is somebody else.
+      clearPreferences();
       void signOut();
     },
   };

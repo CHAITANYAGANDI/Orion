@@ -36,7 +36,13 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/status-badge";
 import { ActionItemsPanel } from "@/components/action-items-panel";
-import { DateFilter, ANY_TIME, type DateWindow } from "@/components/date-filter";
+import {
+  DateFilter,
+  ANY_TIME,
+  restoreWindow,
+  type DateWindow,
+} from "@/components/date-filter";
+import { useStickyPreference, type PreferenceCodec } from "@/lib/preferences";
 import { HomeChatPanel } from "@/components/home-chat-panel";
 import { SidePane } from "@/components/side-pane";
 import { formatDuration } from "@/lib/format";
@@ -84,15 +90,51 @@ type Scope = (typeof SCOPES)[number]["value"];
 
 type Panel = "chat" | "actions";
 
+/**
+ * Both filters are remembered until you sign out. See lib/preferences.ts.
+ *
+ * <p>Defined out here rather than inline because the hook depends on them: a
+ * codec rebuilt on every render would re-read storage on every render, and put
+ * back the value you had just changed.
+ */
+const SCOPE_CODEC: PreferenceCodec<Scope> = {
+  save: (value) => value,
+  load: (raw) => (raw === "recent" || raw === "all" ? raw : null),
+};
+
+const WHEN_CODEC: PreferenceCodec<DateWindow> = {
+  // The choice, not the window. Storing the instants would pin "Last 7 days" to
+  // the week it was picked and leave "Today" labelling a day that has passed.
+  save: (value) => value.choice ?? null,
+  load: (raw) => restoreWindow(raw),
+};
+
 export default function HomePage() {
   // Home opens on Recent: what has not been filed anywhere else. A meeting
   // recorded inside a folder is therefore not on this list until you switch to
   // All — deliberately, because the folder is where it was put and the rail on
   // the left is how you get back to it. The consequence is worth knowing before
   // anybody reports it: the count on Home is not the count in the workspace.
-  const [scope, setScope] = React.useState<Scope>("recent");
+  // Both of these are remembered until sign-out. Home is a page people leave
+  // and come back to constantly — open a meeting, come back, open another — and
+  // a filter that reset on every return meant narrowing the list was work you
+  // did once per visit rather than once.
+  const scopePref = useStickyPreference<Scope>("home.scope", "recent", SCOPE_CODEC);
+  const whenPref = useStickyPreference<DateWindow>("home.when", ANY_TIME, WHEN_CODEC);
+  const { value: scope, set: setScope } = scopePref;
+  const { value: when, set: setWhen } = whenPref;
   const [panel, setPanel] = React.useState<Panel>("chat");
-  const [when, setWhen] = React.useState<DateWindow>(ANY_TIME);
+
+  /**
+   * Whether the remembered filters have been read back yet.
+   *
+   * <p>They cannot be read while rendering, so the first render always holds
+   * the defaults. Asking the server during that render would fetch the whole
+   * workspace and then immediately fetch it again narrowed — two requests, and
+   * a list that visibly changes under the reader. Waiting one tick costs the
+   * skeleton that was going to be on screen anyway.
+   */
+  const restored = scopePref.ready && whenPref.ready;
 
   // Both filters go to the server rather than narrowing what came back. This
   // asks for fifty rows; dropping the filed ones from those would answer
@@ -100,16 +142,19 @@ export default function HomePage() {
   // happened to be outside one, and would look right until somebody had more
   // than fifty meetings. The scope used to be applied here, over the page,
   // which is half of why it did nothing.
-  const { data, isLoading } = useGetMeetingsQuery({
-    page: 0,
-    size: 50,
-    from: when.from ?? undefined,
-    to: when.to ?? undefined,
-    // The screen says Recent and the wire says unfiled, and each is right where
-    // it is: the label is the product's word for this list, the parameter is
-    // what the query actually does to it. One seam, here.
-    unfiled: scope === "recent",
-  });
+  const { data, isLoading } = useGetMeetingsQuery(
+    {
+      page: 0,
+      size: 50,
+      from: when.from ?? undefined,
+      to: when.to ?? undefined,
+      // The screen says Recent and the wire says unfiled, and each is right
+      // where it is: the label is the product's word for this list, the
+      // parameter is what the query actually does to it. One seam, here.
+      unfiled: scope === "recent",
+    },
+    { skip: !restored },
+  );
   // Derived from `data` rather than from a `?? []` above it: the fallback array
   // is a new value on every render, which would make the grouping below rerun
   // — and `new Date()` inside it produce different day boundaries — on renders
@@ -136,7 +181,10 @@ export default function HomePage() {
             <ScopePicker value={scope} onChange={setScope} />
           </div>
 
-          {isLoading ? (
+          {/* `!restored` too: until the remembered filters are back the query
+              has not been asked, so `isLoading` is false over a list that does
+              not exist yet. Without it the empty state flashes on every visit. */}
+          {isLoading || !restored ? (
             <div className="space-y-3">
               {Array.from({ length: 4 }).map((_, i) => (
                 <Skeleton key={i} className="h-24 w-full" />

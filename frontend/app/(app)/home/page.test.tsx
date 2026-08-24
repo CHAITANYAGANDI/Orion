@@ -47,7 +47,13 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
-vi.mock("@/lib/auth", () => ({ useAuth: () => ({ userId: "usr_1" }) }));
+// `isLoaded` and `sessionKey` are not decoration: both filters are remembered
+// per sign-in, and nothing reads what was remembered until auth says which
+// sign-in this is.
+const auth = vi.hoisted(() => ({ sessionKey: "sess_1" }));
+vi.mock("@/lib/auth", () => ({
+  useAuth: () => ({ userId: "usr_1", sessionKey: auth.sessionKey, isLoaded: true }),
+}));
 vi.mock("@/components/side-pane", () => ({ SidePane: () => null }));
 vi.mock("@/components/home-chat-panel", () => ({ HomeChatPanel: () => null }));
 vi.mock("@/components/action-items-panel", () => ({ ActionItemsPanel: () => null }));
@@ -65,6 +71,17 @@ function aMeeting(overrides: Partial<MeetingResponse> = {}): MeetingResponse {
   };
 }
 
+/**
+ * What the mock last recorded.
+ *
+ * <p>A function, not `query.last` directly: a test that clears it and then
+ * re-renders is narrowed to `null` by the compiler, which cannot know that
+ * rendering writes to it. Reading through a call returns the declared type.
+ */
+function lastQuery(): MeetingListQuery | null {
+  return query.last;
+}
+
 /** Open the picker and choose a row by its label. */
 async function choose(label: string) {
   await userEvent.click(screen.getByRole("button", { name: /Conversations/ }));
@@ -76,6 +93,11 @@ beforeEach(() => {
   loading = false;
   rows = [aMeeting()];
   workspaceTotal = rows.length;
+  // The filters outlive a page now, so without this they would outlive a test
+  // and the order the suite happened to run in would decide what Home opened
+  // on. See lib/preference-store.ts.
+  window.localStorage.clear();
+  auth.sessionKey = "sess_1";
 });
 
 describe("the scope picker", () => {
@@ -203,5 +225,94 @@ describe("when there is nothing to show", () => {
       "href",
       "/record?r=%2Fhome",
     );
+  });
+});
+
+/**
+ * A filter you set once.
+ *
+ * <p>Home is a page people leave and come back to all day — open a meeting,
+ * come back, open another — and both controls above the list used to reset
+ * every time. Narrowing to last week was work you redid on every return.
+ *
+ * <p>So the choice is remembered, and the exception is the requirement: signing
+ * out puts both back to their defaults. `unmount` then `render` here is
+ * literally leaving Home and returning to it; the sign-in changing is somebody
+ * signing out and back in.
+ */
+describe("filters that stay where you left them", () => {
+  it("opens on the scope you chose last time", async () => {
+    const visit = render(<HomePage />);
+    await choose("All Conversations");
+    expect(query.last?.unfiled).toBe(false);
+    visit.unmount();
+
+    render(<HomePage />);
+
+    expect(screen.getByRole("button", { name: /All Conversations/ })).toBeInTheDocument();
+    expect(query.last?.unfiled).toBe(false);
+  });
+
+  it("opens on the date window you chose last time", async () => {
+    const visit = render(<HomePage />);
+    await userEvent.click(screen.getByRole("button", { name: /Any time/ }));
+    await userEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: /Last 7 days/ }),
+    );
+    expect(query.last?.from).toBeTruthy();
+    visit.unmount();
+
+    render(<HomePage />);
+
+    // The label, and a lower bound actually reaching the server. A restored
+    // label over an unfiltered query is the version of this that looks right.
+    expect(screen.getByRole("button", { name: /Last 7 days/ })).toBeInTheDocument();
+    expect(query.last?.from).toBeTruthy();
+  });
+
+  it("remembers going back to the default just as firmly", async () => {
+    const first = render(<HomePage />);
+    await choose("All Conversations");
+    first.unmount();
+
+    const second = render(<HomePage />);
+    await choose("Recent Conversations");
+    second.unmount();
+
+    // Choosing the default is a choice. Were it treated as "no opinion", the
+    // next visit would reinstate All and this would be the same bug reversed.
+    render(<HomePage />);
+    expect(query.last?.unfiled).toBe(true);
+  });
+
+  it("goes back to the defaults after a sign-out and sign-in", async () => {
+    const visit = render(<HomePage />);
+    await choose("All Conversations");
+    expect(query.last?.unfiled).toBe(false);
+    visit.unmount();
+
+    // A new session is what signing out and back in produces — as the same
+    // person or as somebody else.
+    auth.sessionKey = "sess_2";
+    render(<HomePage />);
+
+    expect(screen.getByRole("button", { name: /Recent Conversations/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Any time/ })).toBeInTheDocument();
+    expect(query.last?.unfiled).toBe(true);
+  });
+
+  it("asks the server once, with the filters it restored", async () => {
+    const visit = render(<HomePage />);
+    await choose("All Conversations");
+    visit.unmount();
+
+    query.last = null;
+    render(<HomePage />);
+
+    // Storage cannot be read while rendering, so the first render necessarily
+    // holds the defaults. Asking then would fetch the whole workspace and fetch
+    // it again narrowed -- two requests and a list that changes under the
+    // reader. The query waits instead.
+    expect(lastQuery()?.unfiled).toBe(false);
   });
 });
