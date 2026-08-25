@@ -1334,15 +1334,48 @@ cannot protect it, and before V58 a redelivered attempt-1 execution ran a blind
 back. Its result callback was then rejected as stale, correctly and far too
 late: the page showed the new transcript and chat answered from the old one.
 
-Every row now carries `processing_attempt`.
+Every row now carries `processing_attempt`, and two separate things use it.
 
-* **Writing** deletes only `processing_attempt <= N` and inserts at `N`. An
-  execution has no statement available to it that reaches a newer run's rows —
-  not a check that a reprocess could land just after, but an absence of reach.
-  A stale run may still write its own generation; nothing reads it.
+* **Writing** holds the meeting row for the length of the write, and deletes
+  only `processing_attempt <= N`:
+
+  ```sql
+  BEGIN;
+    SELECT processing_attempt FROM meetings WHERE id = ? FOR NO KEY UPDATE;
+    -- not this run's number?  commit nothing and leave
+    DELETE FROM transcript_chunks WHERE meeting_id = ? AND processing_attempt <= N;
+    INSERT INTO transcript_chunks (…, processing_attempt) VALUES (…, N);
+  COMMIT;
+  ```
+
 * **Reading** takes the newest generation present per meeting, via
   `NOT EXISTS (… newer.processing_attempt > c.processing_attempt)` on all three
   query paths (meeting chat, workspace chat, semantic search).
+
+The generation scope alone was not enough, and the gap is worth naming: it stops
+a delete reaching a *newer* run's rows, and does nothing when no newer run has
+indexed yet — which is the whole window between pressing reprocess and the new
+run finishing. In that window generation 1 is not a superseded copy of anything,
+it is the transcript the user is chatting with, and a redelivered attempt-1
+execution would delete it and write its own text over it, corrections and all.
+
+`MeetingService.reprocess` advances `processing_attempt` with an ordinary
+`UPDATE`, which takes the same row at `FOR NO KEY UPDATE` strength. So exactly
+one of two orders happens and both are correct:
+
+| order | outcome |
+|---|---|
+| index commits first | the reprocess waits for it; this run genuinely was current when it wrote |
+| reprocess commits first | the index reads the new number under the lock and does nothing |
+
+There is no interleaving in which a stale run's delete lands. `FOR NO KEY UPDATE`
+rather than `FOR UPDATE` deliberately: it conflicts with the reprocess, which is
+the point, without blocking the `FOR KEY SHARE` that every insert referencing the
+meeting takes — a segment, an action item, a notification.
+
+Nothing slow runs under that lock. Chunking and embedding — the network call to
+the model — finish before the connection is checked out; the lock covers one
+delete and the inserts.
 
 **Newest generation present, not the meeting's current attempt.** Reprocessing
 does not delete the transcript, the summary or the action items while it runs,

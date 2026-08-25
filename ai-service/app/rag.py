@@ -15,12 +15,39 @@ rejected as stale would already have run `DELETE FROM transcript_chunks WHERE
 meeting_id = ?` and written the old transcript back, and "ask this meeting"
 would answer out of the text the user had just asked to have replaced.
 
-Every row now carries `processing_attempt` (V58). Indexing deletes only rows at
-or below its own generation, so an execution has no statement available to it
-that reaches a newer run's chunks. That is the boundary: not a check on the way
-in, which a reprocess landing a microsecond later would simply walk past, but an
-absence of reach. A stale execution can still write its own generation, and
-those rows are never read.
+Every row carries `processing_attempt` (V58), and indexing deletes only rows at
+or below its own generation. That alone was not enough. It stops an old run
+reaching a *newer* generation, and does nothing in the window between somebody
+pressing reprocess and the new run finishing -- because in that window there is
+no newer generation, and generation 1 is not a superseded copy of anything, it
+is the transcript the user is chatting with. A redelivered attempt-1 execution
+would delete it and write its own text back over it, including over corrections
+somebody had typed into it by hand.
+
+So the write is guarded where the mutation happens, by holding the meeting row:
+
+    BEGIN
+      SELECT processing_attempt FROM meetings WHERE id = ? FOR NO KEY UPDATE
+      if it is not this run's number -> commit nothing and leave
+      DELETE the generations at or below this one
+      INSERT this one
+    COMMIT
+
+`MeetingService.reprocess` advances `processing_attempt` with an ordinary
+`UPDATE`, which takes the same row at `FOR NO KEY UPDATE` strength, so exactly
+one of the two orders happens and both are correct: either the index commits
+first and the reprocess waits (this run genuinely was current when it wrote), or
+the reprocess commits first and the index reads the new number and does nothing.
+There is no interleaving in which a stale run's delete lands.
+
+`FOR NO KEY UPDATE` rather than `FOR UPDATE` deliberately: it conflicts with the
+reprocess, which is the point, without blocking the `FOR KEY SHARE` that every
+insert referencing this meeting takes -- a segment, an action item, a
+notification -- none of which have anything to do with which run is current.
+
+**Nothing slow happens under that lock.** Chunking and embedding -- the network
+call to the model -- are finished before the connection is checked out. What the
+lock covers is one delete and the inserts.
 
 Retrieval reads the newest generation present for each meeting -- deliberately
 not "the meeting's current attempt". A reprocess does not delete the transcript,
@@ -282,32 +309,48 @@ class RagService:
         try:
             async with self.connection(user_id) as conn:
                 async with conn.cursor() as cur:
-                    # Housekeeping, not the safety property. If a reprocess
-                    # commits a newer generation between this read and the write
-                    # below, the write still happens and is simply never read --
-                    # which is the whole point of the generation being on the
-                    # row rather than being checked at the door. Skipping early
-                    # only saves embedding rows nobody would ever retrieve.
+                    # Take the meeting row, and hold it until this write commits.
+                    #
+                    # Not a read followed by a decision: `reprocess` is one
+                    # `UPDATE` away at all times, and a plain read leaves a gap
+                    # between believing this run is current and acting on it. The
+                    # lock closes the gap by making the two operations queue --
+                    # see the module docstring for the two orders and why both
+                    # are correct.
                     await cur.execute(
                         """
-                        SELECT 1 FROM transcript_chunks
-                         WHERE meeting_id = %s AND processing_attempt > %s
-                         LIMIT 1
+                        SELECT processing_attempt FROM meetings
+                         WHERE id = %s
+                           FOR NO KEY UPDATE
                         """,
-                        (meeting_id, processing_attempt),
+                        (meeting_id,),
                     )
-                    if await cur.fetchone():
+                    row = await cur.fetchone()
+                    if row is None:
+                        # Deleted, or belonging to somebody else -- row-level
+                        # security answers the second case by returning nothing
+                        # rather than by raising, and either way there is no
+                        # meeting here to index.
+                        logger.warning(
+                            "Not indexing meeting %s: no such meeting for this tenant.",
+                            meeting_id,
+                        )
+                        return
+                    current = row[0]
+                    if current != processing_attempt:
                         logger.info(
-                            "Not indexing meeting %s from attempt %d; a later run has "
-                            "already indexed it.", meeting_id, processing_attempt,
+                            "Not indexing meeting %s from attempt %d; it is now on "
+                            "attempt %d. The chunks already there stay readable.",
+                            meeting_id, processing_attempt, current,
                         )
                         return
 
                     # `<=`, not `=`: a run replaces its own chunks and clears
                     # every older generation on its way past, so the table holds
-                    # one generation per meeting in the ordinary case. It cannot
-                    # reach above itself, and that is what stops an overtaken run
-                    # deleting the chunks somebody is chatting with.
+                    # one generation per meeting in the ordinary case. Kept even
+                    # though the lock above already refuses a stale run -- it is
+                    # what makes the delete unable to reach a newer generation
+                    # even if this guard were ever weakened or bypassed.
                     await cur.execute(
                         """
                         DELETE FROM transcript_chunks
