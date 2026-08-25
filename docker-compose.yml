@@ -3,18 +3,6 @@
 name: recallix
 
 services:
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
-  # Official Apache Kafka image in KRaft mode (single node, no ZooKeeper).
-  # NOTE: uses KAFKA_* env vars, not Bitnami's KAFKA_CFG_* convention.
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
@@ -51,8 +39,6 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      redis:
-        condition: service_healthy
       minio:
         condition: service_healthy
     environment:
@@ -75,9 +61,10 @@ services:
       FLYWAY_URL: ${FLYWAY_URL:?set it in .env}
       FLYWAY_USER: ${FLYWAY_USER:-recallix}
       FLYWAY_PASSWORD: ${FLYWAY_PASSWORD:-recallix}
-      # Still the compose container. Point these at a managed Redis by setting
-      # the four in .env; nothing here needs to change.
-      SPRING_DATA_REDIS_HOST: ${REDIS_HOST:-redis}
+      # Redis Cloud. SSL is off because that endpoint does not speak TLS --
+      # a handshake against it returns "wrong version number", meaning the
+      # server answered in plaintext.
+      SPRING_DATA_REDIS_HOST: ${REDIS_HOST:?set it in .env}
       SPRING_DATA_REDIS_PORT: ${REDIS_PORT:-6379}
       SPRING_DATA_REDIS_USERNAME: ${REDIS_USERNAME:-}
       SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:-}
