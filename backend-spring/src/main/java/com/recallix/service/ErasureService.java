@@ -11,8 +11,6 @@ import com.recallix.repository.TranscriptChunkRepository;
 import com.recallix.repository.TranscriptMomentRepository;
 import com.recallix.repository.TranscriptSegmentRepository;
 import com.recallix.repository.UserRepository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -53,8 +51,6 @@ import java.util.List;
  */
 @Service
 public class ErasureService {
-
-    private static final Logger log = LoggerFactory.getLogger(ErasureService.class);
 
     private final MeetingRepository meetings;
     private final MeetingTranscriptRepository transcripts;
@@ -169,19 +165,36 @@ public class ErasureService {
             return meeting.getTranscriptDeletedAt();
         }
         String meetingId = meeting.getId();
+        // The meeting row first, before any of the rows drawn from it. The
+        // ai-service's indexer takes the same row before it replaces
+        // `transcript_chunks`, and taking the chunks first here was an inverted
+        // lock order: run the two together and PostgreSQL kills one of them.
+        // Nothing slow happens between here and the commit.
+        meetings.lockForWrite(meetingId);
+
         transcripts.deleteByMeetingId(meetingId);
         segments.deleteByMeetingId(meetingId);
         moments.deleteByMeetingId(meetingId);
         translations.deleteByMeetingId(meetingId);
-        try {
-            chunks.deleteByMeetingId(meetingId);
-        } catch (Exception e) {
-            // Loud, and not fatal to the rest: the transcript still goes. But
-            // this is the one leftover that can still speak, so it is an error
-            // rather than a shrug.
-            log.error("Transcript erased for {} but its embeddings survived — chat may still quote it: {}",
-                    meetingId, e.toString());
-        }
+        // Not wrapped in a try. This used to be caught and logged, on the
+        // reasoning that the rest of the transcript should still go -- but the
+        // embeddings are the one leftover that can still speak, in prose, with
+        // a citation. "Deleted, except for the part that can quote it back to
+        // you" is not a deletion, and a caller told the erasure succeeded has no
+        // way to find out otherwise. If this cannot be done, none of it is done.
+        chunks.deleteByMeetingId(meetingId);
+
+        // Invalidate every execution that is already in flight.
+        //
+        // Erasure does not otherwise touch this number, and that was a way back
+        // in: a pipeline run that started before the erasure wakes up
+        // afterwards, finds the attempt it was given still current, and writes
+        // its transcript and its embeddings over the deletion -- through
+        // `applyResult`, which replaces the transcript wholesale, and through
+        // the indexer, which replaces the chunks. Moving it makes both of those
+        // stale by the check they already perform, so the erased meeting stays
+        // erased without either side needing to know that erasure exists.
+        meeting.setProcessingAttempt(meeting.getProcessingAttempt() + 1);
         meeting.setTranscriptDeletedAt(Instant.now());
 
         return meeting.getTranscriptDeletedAt();

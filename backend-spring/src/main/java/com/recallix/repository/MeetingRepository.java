@@ -17,6 +17,30 @@ public interface MeetingRepository extends JpaRepository<Meeting, String> {
     Optional<Meeting> findByIdAndUserId(String id, String userId);
 
     /**
+     * Take this meeting's row, and hold it until the transaction ends.
+     *
+     * <p>Not for what it reads — the id is already known — but for the order it
+     * imposes. Two things replace a meeting's transcript-derived rows: erasure
+     * here, and the ai-service's RAG indexer. The indexer takes this row first
+     * and {@code transcript_chunks} second (see {@code app/rag.py}), so anything
+     * on this side that takes the chunks first and the meeting second is an
+     * inverted lock order and deadlocks whenever the two overlap. This is how
+     * the erasure path joins the same queue rather than fighting it.
+     *
+     * <p>{@code FOR NO KEY UPDATE} rather than {@code FOR UPDATE}, matching the
+     * indexer: it conflicts with the ordinary {@code UPDATE} that both sides
+     * eventually issue, which is the point, without blocking the
+     * {@code FOR KEY SHARE} every insert referencing this meeting takes — a
+     * segment, an action item, a notification.
+     *
+     * <p>Nothing slow may run while this is held. It is taken immediately before
+     * the deletes and released by the commit that follows them.
+     */
+    @Query(value = "SELECT id FROM meetings WHERE id = :id FOR NO KEY UPDATE",
+            nativeQuery = true)
+    Optional<String> lockForWrite(@Param("id") String id);
+
+    /**
      * The most recent meeting a user owns, whatever its state.
      *
      * <p>Read only to date-stamp the workspace suggestion cache: if a meeting

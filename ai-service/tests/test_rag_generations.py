@@ -137,6 +137,17 @@ class _Table:
         """What Spring's reprocess() does to the row the indexer coordinates on."""
         self.meeting_attempt += 1
 
+    def erase_transcript(self) -> None:
+        """What Spring's eraseTranscript() does, in one transaction.
+
+        It takes the meeting row first -- the same row, at the same strength, so
+        the two never interleave -- deletes the chunks, and moves the attempt on
+        so that anything already in flight is stale by the check it already
+        makes.
+        """
+        self.rows = [r for r in self.rows if r["meeting_id"] != MEETING]
+        self.meeting_attempt += 1
+
     def generations(self) -> set[int]:
         return {r["attempt"] for r in self.rows}
 
@@ -363,6 +374,53 @@ def test_a_run_ahead_of_the_meeting_is_refused_too():
 
     assert table.generations() == {1}
     assert table.texts() == ["attempt one text"]
+
+
+# --------------------------------------------------------------------------- #
+# Erased transcripts stay erased
+# --------------------------------------------------------------------------- #
+def test_a_run_that_started_before_an_erasure_cannot_put_the_chunks_back():
+    # The resurrection the attempt check did not cover on its own: erasure does
+    # not look like a reprocess, so without moving the attempt this run would
+    # have woken up, found its own number still current, and written the
+    # embeddings of a transcript the account holder had deleted back into the
+    # table that chat reads.
+    table = _Table()
+    service, llm = _service(table)
+    _run(service, table, "the words somebody asked us to delete", 1)
+
+    table.erase_transcript()
+
+    _stale(service, "the words somebody asked us to delete", 1)
+
+    assert table.rows == []
+    assert "asked us to delete" not in _retrieved(service, llm)
+
+
+def test_an_index_that_won_the_race_is_still_erased_afterwards():
+    # The other order. The indexer got the meeting row first, so erasure waited
+    # for its commit -- and then deleted what it had just written. Both orders
+    # converge on erased.
+    table = _Table()
+    service, _ = _service(table)
+    _run(service, table, "the words somebody asked us to delete", 1)
+
+    table.erase_transcript()
+
+    assert table.rows == []
+
+
+def test_erasure_does_not_stop_a_later_reprocess_indexing():
+    # Erasing the transcript leaves the recording, so the meeting can be run
+    # again. The bump makes older runs stale; it must not make future ones so.
+    table = _Table()
+    service, llm = _service(table)
+    _run(service, table, "the original transcript", 1)
+    table.erase_transcript()          # meeting is now on attempt 2
+
+    _run(service, table, "a freshly transcribed version", 2)
+
+    assert "a freshly transcribed version" in _retrieved(service, llm)
 
 
 # --------------------------------------------------------------------------- #

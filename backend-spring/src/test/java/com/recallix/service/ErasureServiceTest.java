@@ -17,6 +17,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -30,6 +31,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -162,14 +165,80 @@ class ErasureServiceTest {
         }
 
         @Test
-        @DisplayName("still erases the transcript when the embeddings cannot be reached")
-        void survivesAVectorFailure() {
+        @DisplayName("fails outright when the embeddings cannot be reached")
+        void aVectorFailureFailsTheWholeErasure() {
+            // This used to be caught, logged, and called a success. The
+            // embeddings are the one leftover that can still speak — chat
+            // answers in prose and cites the passage it read — so "erased,
+            // except for the part that can quote it back to you" is not a
+            // deletion, and the caller was given no way to find that out.
+            //
+            // It also could not do what its comment claimed. Every statement
+            // here is in one transaction, and PostgreSQL refuses every
+            // statement after a failed one, so the timestamp this returned was
+            // never going to reach the database: the real behaviour was a
+            // rollback under a log line announcing success.
             when(chunks.deleteByMeetingId(MEETING)).thenThrow(new IllegalStateException("pgvector down"));
 
-            Instant at = service.eraseTranscript(USER, MEETING);
+            assertThatThrownBy(() -> service.eraseTranscript(USER, MEETING))
+                    .isInstanceOf(IllegalStateException.class);
+        }
 
-            assertThat(at).isNotNull();
-            verify(segments).deleteByMeetingId(MEETING);
+        @Test
+        @DisplayName("does not claim the transcript is gone when the embeddings are not")
+        void aVectorFailureLeavesNoDeletionMark() {
+            when(chunks.deleteByMeetingId(MEETING)).thenThrow(new IllegalStateException("pgvector down"));
+
+            assertThatThrownBy(() -> service.eraseTranscript(USER, MEETING))
+                    .isInstanceOf(IllegalStateException.class);
+
+            // The mark is what the page reads to say "deleted". Set beside
+            // surviving embeddings it is a false statement about the account
+            // holder's data.
+            assertThat(meeting.getTranscriptDeletedAt()).isNull();
+        }
+
+        @Test
+        @DisplayName("takes the meeting row before any of the rows drawn from it")
+        void locksTheMeetingFirst() {
+            // Lock order, and the reason it matters is not theoretical: the
+            // ai-service's indexer takes the meeting and then the chunks, so
+            // taking the chunks first here deadlocks whenever a meeting is
+            // erased while it is being indexed. Reproduced against a real
+            // PostgreSQL before this line existed.
+            service.eraseTranscript(USER, MEETING);
+
+            InOrder order = inOrder(meetings, chunks);
+            order.verify(meetings).lockForWrite(MEETING);
+            order.verify(chunks).deleteByMeetingId(MEETING);
+        }
+
+        @Test
+        @DisplayName("moves the processing attempt on, so a run in flight cannot undo it")
+        void invalidatesRunsThatAreAlreadyGoing() {
+            // A pipeline run that started before the erasure would otherwise
+            // wake up afterwards, find the attempt it was given still current,
+            // and put the transcript and its embeddings straight back —
+            // `applyResult` replaces the transcript wholesale and the indexer
+            // replaces the chunks. Moving the number makes both of them stale
+            // by the check each already performs.
+            meeting.setProcessingAttempt(3);
+
+            service.eraseTranscript(USER, MEETING);
+
+            assertThat(meeting.getProcessingAttempt()).isEqualTo(4);
+        }
+
+        @Test
+        @DisplayName("erasing twice does not keep moving the attempt")
+        void isStillIdempotent() {
+            service.eraseTranscript(USER, MEETING);
+            int after = meeting.getProcessingAttempt();
+
+            service.eraseTranscript(USER, MEETING);
+
+            assertThat(meeting.getProcessingAttempt()).isEqualTo(after);
+            verify(chunks, times(1)).deleteByMeetingId(MEETING);
         }
 
     }

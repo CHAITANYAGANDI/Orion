@@ -1377,6 +1377,32 @@ Nothing slow runs under that lock. Chunking and embedding — the network call t
 the model — finish before the connection is checked out; the lock covers one
 delete and the inserts.
 
+**Erasure joins the same queue.** `ErasureService.eraseTranscript` takes the
+meeting row with the same `FOR NO KEY UPDATE` before it deletes any of the rows
+drawn from it. It used to take `transcript_chunks` first and the meeting last,
+which is the opposite order to the indexer — reproducible as a PostgreSQL
+deadlock whenever a meeting was erased while it was being indexed.
+
+That erasure is also one transaction with no escape hatch. The chunk delete was
+wrapped in a `try` that logged and continued; the embeddings are the one leftover
+that can still speak, in prose, with a citation, so "erased apart from the part
+that can quote it back to you" is not a deletion. If any part fails, none of it
+happens and the caller is told.
+
+Erasing a transcript **advances `processing_attempt`**. Erasure is not a run, but
+it needs exactly what the number already provides: a way to invalidate
+executions that are already in flight. Without it, a pipeline run that started
+before the erasure would wake afterwards, find its own attempt still current,
+and write the transcript back through `applyResult` and the embeddings back
+through the indexer. With it, both are stale by the check each already makes, and
+neither side needs to know erasure exists. The recording is untouched, so the
+meeting can still be reprocessed afterwards — that run gets the next number and
+indexes normally.
+
+Object-storage deletion stays outside the transaction and keeps its existing
+semantics: the object goes first, and a failure there leaves an orphaned object
+rather than a row claiming audio it no longer has.
+
 **Newest generation present, not the meeting's current attempt.** Reprocessing
 does not delete the transcript, the summary or the action items while it runs,
 and chat does not go dark either: the previous run stays answerable until the new
