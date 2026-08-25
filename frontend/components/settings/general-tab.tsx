@@ -678,14 +678,10 @@ function CloseAccountSection() {
         <p className="text-sm text-muted-foreground">
           {held
             ? `Deletes ${held.meetings} meeting${held.meetings === 1 ? "" : "s"}, ` +
-              `${held.recordings} recording${held.recordings === 1 ? "" : "s"}, and every `
-            : "Deletes every meeting, every recording, and every "}
-          transcript, summary, action item, note, project and conversation with
-          them.{" "}
-          <strong className="text-foreground">
-            Immediately, and with no way back
-          </strong>{" "}
-          — nothing is held in a bin, so there is nothing anybody could restore.
+              `${held.recordings} recording${held.recordings === 1 ? "" : "s"} ` +
+              "and everything in them."
+            : "Deletes every meeting, every recording and everything in them."}{" "}
+          <strong className="text-foreground">This cannot be undone.</strong>{" "}
           Export anything you want to keep first.
         </p>
 
