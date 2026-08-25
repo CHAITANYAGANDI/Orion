@@ -43,6 +43,32 @@ class Settings(BaseSettings):
     kafka_sasl_mechanism: str = "PLAIN"
     kafka_sasl_username: str | None = None
     kafka_sasl_password: str | None = None
+    # How long the consumer may go without taking a message before Kafka decides
+    # it has stopped and evicts it. 100 minutes, and not a round number picked
+    # for looking generous:
+    #
+    #   * transcription is the floor. `assemblyai_timeout_seconds` is 900 and
+    #     `assemblyai_max_retries` is 2, so one transcription can legitimately
+    #     take 3 x 900s plus backoff = ~45 minutes before it gives up.
+    #   * fetching the audio costs up to `download_timeout_seconds` twice (60s
+    #     each) when the provider cannot reach the object and the bytes have to
+    #     be uploaded instead.
+    #   * speaker refinement decodes the audio with a 120s ceiling, plus the
+    #     embedding calls around it.
+    #   * summarize, extract, suggestions and RAG indexing are each bounded by
+    #     `openai_timeout_seconds` x (`openai_max_retries` + 1) ~ 190s; the first
+    #     two run concurrently.
+    #   * the result and status callbacks are 15s apiece.
+    #
+    # 2703 + 120 + 120 + 540 + 30 = ~3513s, so ~59 minutes of worst case --
+    # against a recording that cannot exceed 100 minutes anyway, because that is
+    # the whole AI-minute allowance an account ever gets. 100 minutes leaves
+    # ~41 minutes of margin over it.
+    #
+    # Being generous costs nothing here: one worker consumes one partition, so
+    # evicting it early buys no failover, it only guarantees the meeting in
+    # flight is transcribed twice and paid for twice.
+    kafka_max_poll_interval_ms: int = 6_000_000
 
     # --- Spring internal callback ---
     spring_callback_url: str = "http://localhost:8080"

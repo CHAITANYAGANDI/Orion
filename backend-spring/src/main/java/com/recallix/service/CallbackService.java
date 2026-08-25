@@ -1,5 +1,6 @@
 package com.recallix.service;
 
+import com.recallix.common.ApiException;
 import com.recallix.common.DueDates;
 import com.recallix.common.IdGenerator;
 import com.recallix.common.SentenceLocator;
@@ -42,6 +43,20 @@ import java.util.Locale;
  * Handles internal callbacks from the FastAPI worker: relays status updates to
  * the frontend and persists the final {@link MeetingBriefResult}. Idempotent —
  * re-running the pipeline (reprocess) replaces prior results.
+ *
+ * <p><strong>Every callback names the run it is reporting, and is judged against
+ * the run the meeting is on.</strong> Kafka delivery is at-least-once and the
+ * worker holds its offset until Spring has taken a terminal outcome, so a
+ * callback that arrives after its response was lost arrives again — and it can
+ * arrive after a person has already asked for the meeting to be reprocessed.
+ *
+ * <p>Without the check, that late arrival read {@code processing_attempt} off
+ * the row and became whatever run was current: it would have spent the new
+ * run's AI-minute claim, taken the new run's notification keys, and written a
+ * stale transcript over a fresh one — while the run actually in flight found
+ * its own effects already claimed and landed silently. The attempt now travels
+ * with the work, from {@code meeting_uploaded} through the worker's retries to
+ * here, and this is where it is compared.
  */
 @Service
 public class CallbackService {
@@ -84,27 +99,108 @@ public class CallbackService {
         this.events = events;
     }
 
+    /** Which run a callback is reporting, relative to the run the meeting is on. */
+    private enum Relevance {
+        /** The run the meeting is on. Apply it. */
+        CURRENT,
+        /** A run a reprocess has since replaced. Ignore it, and say so calmly. */
+        STALE,
+        /** A run this meeting has never reached. Refuse it and leave the row alone. */
+        INCONSISTENT
+    }
+
+    /**
+     * The first run of any meeting, and what a callback with no attempt is taken
+     * to be.
+     *
+     * <p>The oldest possible run, deliberately, and never "whatever the meeting
+     * is on now". A missing attempt means the sender predates this field, and a
+     * message that old cannot be the current run of a meeting somebody has
+     * reprocessed since — so reading it as the current one is precisely how an
+     * obsolete execution would impersonate a new one. Taken as 1 it is applied
+     * to a meeting that has never been reprocessed, which is what such a message
+     * always is, and ignored as stale otherwise.
+     */
+    private static final int FIRST_ATTEMPT = 1;
+
+    private static int attemptOf(Integer sent) {
+        return sent == null || sent < FIRST_ATTEMPT ? FIRST_ATTEMPT : sent;
+    }
+
+    private static Relevance relevanceOf(Meeting meeting, int attempt) {
+        int current = meeting.getProcessingAttempt();
+        if (attempt == current) {
+            return Relevance.CURRENT;
+        }
+        return attempt < current ? Relevance.STALE : Relevance.INCONSISTENT;
+    }
+
+    /**
+     * A callback claiming a run this meeting has not started.
+     *
+     * <p>Nothing sensible can be done with it. {@code processing_attempt} moves
+     * in exactly one place — {@code MeetingService.reprocess} — so an attempt
+     * ahead of the row means the row and the queue disagree about reality:
+     * a restored database, an event replayed from somewhere it should not have
+     * been kept, or two Spring instances writing over each other. Moving the row
+     * forward to match would settle the disagreement in favour of whichever
+     * message spoke last, and would silently make the fabricated run real.
+     */
+    private ApiException aheadOfTheMeeting(String meetingId, int attempt, Meeting meeting) {
+        log.error("Callback for meeting {} reports processing attempt {}, but the meeting has "
+                        + "only ever reached attempt {}. Refusing it and changing nothing.",
+                meetingId, attempt, meeting.getProcessingAttempt());
+        return ApiException.conflict(
+                "Processing attempt " + attempt + " is ahead of meeting " + meetingId + ".");
+    }
+
+    private boolean isStale(String meetingId, Meeting meeting, int attempt, String what) {
+        Relevance relevance = relevanceOf(meeting, attempt);
+        if (relevance == Relevance.INCONSISTENT) {
+            throw aheadOfTheMeeting(meetingId, attempt, meeting);
+        }
+        if (relevance == Relevance.STALE) {
+            // Not a warning. This is the system working: an execution that was
+            // overtaken has reported in, and the only correct thing to do with
+            // it is nothing. Said out loud because it is also the trace that
+            // explains a Kafka message being acknowledged with no effect.
+            log.info("Ignoring {} for meeting {} from attempt {}; it is now on attempt {}.",
+                    what, meetingId, attempt, meeting.getProcessingAttempt());
+            return true;
+        }
+        return false;
+    }
+
     @Transactional
     public void applyStatus(String meetingId, StatusCallbackRequest req) {
         MeetingStatus status = parseStatus(req.status());
-        meetings.findById(meetingId).ifPresent(m -> {
+        int attempt = attemptOf(req.processingAttempt());
+        Meeting meeting = meetings.findById(meetingId).orElse(null);
+
+        if (meeting != null) {
+            // Before the publish as well as before the writes: a frame from an
+            // overtaken run would put the old run's progress bar back on screen
+            // over the one the user is watching.
+            if (isStale(meetingId, meeting, attempt, req.status() + " status")) {
+                return;
+            }
             if (status != null) {
-                m.setStatus(status);
+                meeting.setStatus(status);
             }
             if (status == MeetingStatus.FAILED) {
-                m.setErrorMessage(req.message());
+                meeting.setErrorMessage(req.message());
                 // The one people most need. An upload that failed while the tab
                 // was closed is otherwise indistinguishable from one still
                 // running, for as long as nobody goes looking.
-                notifications.processingFailed(m, req.message());
+                notifications.processingFailed(meeting, req.message(), attempt);
             }
             // READY is the worker's last word: the brief is persisted AND the
             // transcript is indexed into pgvector. Only now can Meeting Memory
             // retrieve evidence from this meeting, so this is where it fires.
             if (status == MeetingStatus.READY) {
-                events.publishEvent(new MeetingReadyEvent(meetingId, m.getUserId()));
+                events.publishEvent(new MeetingReadyEvent(meetingId, meeting.getUserId()));
             }
-        });
+        }
         int progress = req.progress() == null ? 0 : req.progress();
         statusPublisher.publish(new StatusEvent(
                 meetingId,
@@ -118,6 +214,14 @@ public class CallbackService {
         Meeting meeting = meetings.findById(meetingId).orElse(null);
         if (meeting == null) {
             log.warn("Result callback for unknown meeting {}", meetingId);
+            return;
+        }
+
+        // First, and before a single row is touched. Everything below replaces
+        // the meeting's derived state wholesale, so a stale run reaching any of
+        // it is a fresh transcript overwritten by an old one.
+        int attempt = attemptOf(result.processingAttempt());
+        if (isStale(meetingId, meeting, attempt, "result")) {
             return;
         }
 
@@ -148,10 +252,10 @@ public class CallbackService {
             // replays the whole run -- and the allowance is for the life of the
             // account, so a second charge is not recoverable by waiting.
             usage.chargeAiMinutesOnce(
-                    meeting.getUserId(), meetingId, meeting.getProcessingAttempt(),
+                    meeting.getUserId(), meetingId, attempt,
                     Math.round(meeting.getDurationSeconds() / 60.0f));
         }
-        announce(meeting, result);
+        announce(meeting, result, attempt);
         log.info("Persisted brief for meeting {} ({} actions).", meetingId, result.actionItemsOrEmpty().size());
     }
 
@@ -216,12 +320,12 @@ public class CallbackService {
      * you rather than about the meeting, and it is the one that has somebody
      * open the page rather than nod at it.
      */
-    private void announce(Meeting meeting, MeetingBriefResult result) {
+    private void announce(Meeting meeting, MeetingBriefResult result, int attempt) {
         boolean hasSummary = result.shortSummary() != null && !result.shortSummary().isBlank();
         if (hasSummary) {
-            notifications.summaryReady(meeting);
+            notifications.summaryReady(meeting, attempt);
         } else if (!result.segmentsOrEmpty().isEmpty()) {
-            notifications.transcriptReady(meeting);
+            notifications.transcriptReady(meeting, attempt);
         }
         notifications.mentionedIn(meeting, assignedToMe(meeting));
     }

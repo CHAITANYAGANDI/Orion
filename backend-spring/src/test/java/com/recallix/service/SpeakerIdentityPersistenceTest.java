@@ -173,6 +173,6 @@ class SpeakerIdentityPersistenceTest {
         return new MeetingBriefResult(
                 MEETING, "full text", "en", segs,
                 "short", "detailed", List.of(), List.of(), List.of(),
-                "general", List.of(), List.of(), List.of(), null, null);
+                "general", List.of(), List.of(), List.of(), null, null, 1);
     }
 }

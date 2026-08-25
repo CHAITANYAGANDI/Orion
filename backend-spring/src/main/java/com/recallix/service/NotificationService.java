@@ -143,9 +143,15 @@ public class NotificationService {
      * when somebody asks for the work to be redone, so a redelivery of one run
      * produces the identical key and is refused, while a genuine second run
      * produces a new one.
+     *
+     * <p><strong>The attempt is passed in rather than read off the meeting.</strong>
+     * The row says which run is current; a callback says which run it is
+     * reporting, and after a reprocess those are two different numbers. Reading
+     * the row here would have let a late redelivery of run 1 mint run 2's key
+     * and so silence the announcement run 2 was entitled to make.
      */
-    private static String once(String event, Meeting meeting) {
-        return event + ":" + meeting.getId() + ":" + meeting.getProcessingAttempt();
+    private static String once(String event, String meetingId, int attempt) {
+        return event + ":" + meetingId + ":" + attempt;
     }
 
     /**
@@ -158,23 +164,30 @@ public class NotificationService {
         emit(meeting.getUserId(), NotificationKind.PROCESSING_STARTED,
                 meeting.getTitle(),
                 "Being " + because + ". We'll tell you when the notes are ready.",
-                meeting.getId(), null, link(meeting), once("processing-started", meeting));
+                // Raised at enqueue, by the operation that allocated the
+                // attempt, so the row is the run being announced.
+                meeting.getId(), null, link(meeting),
+                once("processing-started", meeting.getId(), meeting.getProcessingAttempt()));
     }
 
+    /** @param attempt the processing run the worker is reporting, from its callback */
     @Transactional
-    public void transcriptReady(Meeting meeting) {
+    public void transcriptReady(Meeting meeting, int attempt) {
         emit(meeting.getUserId(), NotificationKind.TRANSCRIPT_READY,
                 meeting.getTitle(),
                 "The transcript is ready to read and search.",
-                meeting.getId(), null, link(meeting), once("transcript-ready", meeting));
+                meeting.getId(), null, link(meeting),
+                once("transcript-ready", meeting.getId(), attempt));
     }
 
+    /** @param attempt the processing run the worker is reporting, from its callback */
     @Transactional
-    public void summaryReady(Meeting meeting) {
+    public void summaryReady(Meeting meeting, int attempt) {
         emit(meeting.getUserId(), NotificationKind.SUMMARY_READY,
                 meeting.getTitle(),
                 "The notes are written. Summary, decisions and action items are in.",
-                meeting.getId(), null, link(meeting), once("summary-ready", meeting));
+                meeting.getId(), null, link(meeting),
+                once("summary-ready", meeting.getId(), attempt));
     }
 
     /**
@@ -193,15 +206,17 @@ public class NotificationService {
                 meeting.getId(), null, link(meeting), null);
     }
 
+    /** @param attempt the processing run the worker is reporting, from its callback */
     @Transactional
-    public void processingFailed(Meeting meeting, String message) {
+    public void processingFailed(Meeting meeting, String message, int attempt) {
         emit(meeting.getUserId(), NotificationKind.PROCESSING_FAILED,
                 meeting.getTitle(),
                 (message == null || message.isBlank()
                         ? "Processing failed."
                         : "Processing failed: " + message.strip())
                         + " You can try again from the meeting page.",
-                meeting.getId(), null, link(meeting), once("processing-failed", meeting));
+                meeting.getId(), null, link(meeting),
+                once("processing-failed", meeting.getId(), attempt));
     }
 
     /**

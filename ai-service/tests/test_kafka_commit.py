@@ -7,7 +7,8 @@ already acknowledged and never ran it again — the meeting sat in QUEUED with n
 error, no retry and nothing in the bell.
 
 Every test here is about the boundary that replaced it: an offset is committed
-only once Spring has written down a terminal outcome.
+only once Spring has written down a terminal outcome, or has said in as many
+words that it never will.
 
 Nothing sleeps for a real backoff; the worker takes its own timings so the
 tests can set them to zero.
@@ -21,6 +22,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
+from app.callback import Delivery
 from app.kafka_worker import KafkaWorker, Outcome, is_retryable
 from app.providers.assemblyai_adapter import (
     AudioUnreachableError,
@@ -39,19 +41,27 @@ EVENT = MeetingUploadedEvent(
 class RecordingCallback:
     """A Spring that says yes, unless told otherwise."""
 
-    def __init__(self, *, result_ok: bool = True, status_ok: bool = True) -> None:
-        self.result_ok = result_ok
-        self.status_ok = status_ok
+    def __init__(
+        self,
+        *,
+        result: Delivery = Delivery.ACCEPTED,
+        status: Delivery = Delivery.ACCEPTED,
+    ) -> None:
+        self.result_delivery = result
+        self.status_delivery = status
         self.statuses: list[str] = []
+        self.attempts: list[int | None] = []
         self.results = 0
 
-    async def post_result(self, meeting_id, result) -> bool:
+    async def post_result(self, meeting_id, result, *, attempt=None) -> Delivery:
         self.results += 1
-        return self.result_ok
+        self.attempts.append(attempt)
+        return self.result_delivery
 
-    async def post_status(self, meeting_id, event) -> bool:
+    async def post_status(self, meeting_id, event, *, attempt=None) -> Delivery:
         self.statuses.append(event.status)
-        return self.status_ok
+        self.attempts.append(attempt)
+        return self.status_delivery
 
 
 def worker(callback, *, max_attempts: int = 5) -> KafkaWorker:
@@ -61,6 +71,7 @@ def worker(callback, *, max_attempts: int = 5) -> KafkaWorker:
             kafka_topic_meeting_uploaded="meeting_uploaded",
             kafka_consumer_group="ai-service",
             kafka_security_protocol="PLAINTEXT",
+            kafka_max_poll_interval_ms=6_000_000,
         ),
         pipeline=None,
         callback=callback,
@@ -70,10 +81,10 @@ def worker(callback, *, max_attempts: int = 5) -> KafkaWorker:
     )
 
 
-def drive(w: KafkaWorker, process, *, attempt: int = 0) -> Outcome:
+def drive(w: KafkaWorker, process, *, failures: int = 0, event=EVENT) -> Outcome:
     """Run one message through `_handle` with the pipeline stubbed out."""
     w._process_source = process  # noqa: SLF001 — the seam under test is around it
-    return asyncio.run(w._handle(EVENT, attempt=attempt))  # noqa: SLF001
+    return asyncio.run(w._handle(event, failures=failures))  # noqa: SLF001
 
 
 async def _succeeds(event, progress_hook, transcript_hook):
@@ -94,7 +105,7 @@ def test_success_commits_only_after_the_result_is_accepted():
 def test_a_rejected_result_callback_is_not_committed():
     # Everything was computed and none of it is written down anywhere. This is
     # exactly the case auto-commit acknowledged.
-    cb = RecordingCallback(result_ok=False)
+    cb = RecordingCallback(result=Delivery.UNDELIVERED)
 
     assert drive(worker(cb), _succeeds) is Outcome.RETRY
     assert "READY" not in cb.statuses
@@ -104,12 +115,8 @@ def test_a_lost_ready_frame_does_not_hold_the_offset():
     # applyResult has already persisted the brief and flipped the meeting to
     # READY, so the terminal state exists. Redelivering the whole meeting to
     # re-send one WebSocket frame would re-run a paid transcription.
-    class ResultYesStatusNo(RecordingCallback):
-        async def post_status(self, meeting_id, event) -> bool:
-            self.statuses.append(event.status)
-            return False
+    cb = RecordingCallback(status=Delivery.UNDELIVERED)
 
-    cb = ResultYesStatusNo()
     assert drive(worker(cb), _succeeds) is Outcome.COMMIT
 
 
@@ -156,7 +163,7 @@ def test_a_terminal_failure_nobody_heard_is_not_committed():
     async def refused(event, progress_hook, transcript_hook):
         raise TranscriptionConfigurationError("that parameter is not valid")
 
-    cb = RecordingCallback(status_ok=False)
+    cb = RecordingCallback(status=Delivery.UNDELIVERED)
     assert drive(worker(cb), refused) is Outcome.RETRY
 
 
@@ -181,11 +188,33 @@ def test_retries_are_bounded_so_one_message_cannot_block_the_partition():
     cb = RecordingCallback()
     w = worker(cb, max_attempts=3)
 
-    assert drive(w, transient, attempt=0) is Outcome.RETRY
-    assert drive(w, transient, attempt=1) is Outcome.RETRY
+    assert drive(w, transient, failures=0) is Outcome.RETRY
+    assert drive(w, transient, failures=1) is Outcome.RETRY
     # The third failure gives up and records it, rather than holding the queue.
-    assert drive(w, transient, attempt=2) is Outcome.COMMIT
+    assert drive(w, transient, failures=2) is Outcome.COMMIT
     assert cb.statuses[-1] == "FAILED"
+
+
+# --------------------------------------------------------------------------- #
+# Refusal — Spring read it and said no, and will say no again
+# --------------------------------------------------------------------------- #
+def test_a_refused_result_is_finished_rather_than_retried():
+    # The obsolete-run case. Spring declined the result because a reprocess has
+    # overtaken it, so there is no version of this message that can succeed and
+    # holding the single partition open for it is an outage with no upside.
+    cb = RecordingCallback(result=Delivery.REFUSED)
+
+    assert drive(worker(cb), _succeeds) is Outcome.COMMIT
+    # And it does not go on to announce a meeting it was refused.
+    assert "READY" not in cb.statuses
+
+
+def test_a_refused_failure_report_is_also_finished():
+    async def broken(event, progress_hook, transcript_hook):
+        raise TranscriptionConfigurationError("that parameter is not valid")
+
+    cb = RecordingCallback(status=Delivery.REFUSED)
+    assert drive(worker(cb), broken) is Outcome.COMMIT
 
 
 # --------------------------------------------------------------------------- #

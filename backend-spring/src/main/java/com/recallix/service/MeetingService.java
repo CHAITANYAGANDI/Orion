@@ -262,6 +262,16 @@ public class MeetingService {
         event.put("context", transcriptionContext(meeting));
         // How many voices to look for. Auto unless a human said otherwise.
         event.put("speakers", speakerExpectation(meeting));
+        // Which run this is, fixed at the moment the job is created and carried
+        // by the worker through every retry and redelivery of this message.
+        //
+        // The alternative -- letting the callbacks read the current number off
+        // the meeting when they land -- is a race with reprocess. A result whose
+        // response was lost comes back after the user has asked for the meeting
+        // to be redone, reads the row, calls itself the new run, and spends that
+        // run's AI-minute claim and notification keys on a transcript that is
+        // already out of date.
+        event.put("processingAttempt", meeting.getProcessingAttempt());
 
         outbox.enqueue(KafkaTopicsConfig.MEETING_UPLOADED, meeting.getId(), event);
     }

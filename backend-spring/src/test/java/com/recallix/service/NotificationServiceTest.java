@@ -109,7 +109,7 @@ class NotificationServiceTest {
         void refusesToLetAFailureBeSwitchedOff() {
             user.setMutedNotifications(new ArrayList<>(List.of("PROCESSING_FAILED")));
 
-            service.processingFailed(meeting(), "the audio was unreadable");
+            service.processingFailed(meeting(), "the audio was unreadable", 1);
 
             // Muting this one turns "nothing happened" and "something went
             // wrong" into the same silence, which is the state the whole
@@ -159,7 +159,7 @@ class NotificationServiceTest {
 
         @Test
         void namesTheMeetingRatherThanTheEvent() {
-            service.summaryReady(meeting());
+            service.summaryReady(meeting(), 1);
 
             // "Sprint planning" is what somebody scanning a list recognises;
             // "Summary ready" is the same sentence on every row.
@@ -171,7 +171,7 @@ class NotificationServiceTest {
 
         @Test
         void saysWhatWentWrongWhenSomethingDid() {
-            service.processingFailed(meeting(), "the audio was unreadable");
+            service.processingFailed(meeting(), "the audio was unreadable", 1);
 
             assertThat(written().getBody())
                     .contains("the audio was unreadable")
@@ -180,7 +180,7 @@ class NotificationServiceTest {
 
         @Test
         void survivesAFailureWithNoExplanation() {
-            service.processingFailed(meeting(), null);
+            service.processingFailed(meeting(), null, 1);
 
             assertThat(written().getBody()).startsWith("Processing failed.");
         }
@@ -218,7 +218,7 @@ class NotificationServiceTest {
             Meeting untitled = meeting();
             untitled.setTitle("   ");
 
-            service.summaryReady(untitled);
+            service.summaryReady(untitled, 1);
 
             assertThat(written().getTitle()).isEqualTo("Untitled meeting");
         }
@@ -243,7 +243,7 @@ class NotificationServiceTest {
         void tellsTheBrowserSomethingChanged() {
             when(notifications.countByUserIdAndReadAtIsNull(USER)).thenReturn(4L);
 
-            service.summaryReady(meeting());
+            service.summaryReady(meeting(), 1);
 
             // Only a count. The topic is unauthenticated, so the content stays
             // on the REST side where the caller is actually checked.
@@ -254,7 +254,7 @@ class NotificationServiceTest {
         void saysNothingToTheBrowserWhenNothingWasWritten() {
             user.setMutedNotifications(new ArrayList<>(List.of("SUMMARY_READY")));
 
-            service.summaryReady(meeting());
+            service.summaryReady(meeting(), 1);
 
             verify(publisher, never()).ping(anyString(), anyLong());
         }
@@ -273,14 +273,14 @@ class NotificationServiceTest {
 
             // A meeting that processed correctly must not be reported as failed
             // because the sentence about it could not be written down.
-            assertThatCode(() -> service.summaryReady(meeting())).doesNotThrowAnyException();
+            assertThatCode(() -> service.summaryReady(meeting(), 1)).doesNotThrowAnyException();
         }
 
         @Test
         void survivesAUserRowThatIsNotThere() {
             when(users.findById(USER)).thenReturn(Optional.empty());
 
-            service.summaryReady(meeting());
+            service.summaryReady(meeting(), 1);
 
             // No preferences to read is not the same as everything muted.
             assertThat(written()).isNotNull();

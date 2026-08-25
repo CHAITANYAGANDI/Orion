@@ -1267,8 +1267,26 @@ readable.
 ### Internal callback (FastAPI -> Spring, `X-Internal-Token`)
 | Method | Endpoint | Body | Purpose |
 |---|---|---|---|
-| POST | `/internal/meetings/{id}/status` | `{ "status", "progress", "message" }` | Push status; Spring persists it and relays to WS |
-| POST | `/internal/meetings/{id}/result` | `MeetingBriefResult` | Persist transcript/summary/actions/decisions/risks |
+| POST | `/internal/meetings/{id}/status` | `{ "status", "progress", "message", "processingAttempt" }` | Push status; Spring persists it and relays to WS |
+| POST | `/internal/meetings/{id}/result` | `MeetingBriefResult` (with `processingAttempt`) | Persist transcript/summary/actions/decisions/risks |
+
+Both bodies carry `processingAttempt`: the run the worker is reporting, copied
+from the `meeting_uploaded` event that started it and never re-read from the
+meeting row. Spring compares it against `meetings.processing_attempt`:
+
+| Callback attempt | Meaning | Response | Effect |
+|---|---|---|---|
+| `== current` | the run in flight | `200` | applied, and charged and deduped under that attempt |
+| `< current` | overtaken by a reprocess | `200` | **nothing at all** — no writes, no charge, no notification, no WebSocket frame |
+| `> current` | a run the meeting never started | `409 CONFLICT` | nothing, and logged at ERROR |
+| absent | a worker older than the field | treated as attempt `1` | applied only to a meeting that has never been reprocessed |
+
+A stale callback answers `200` on purpose. The worker holds its Kafka offset
+until Spring accepts a callback, and `meeting_uploaded` has one partition — so
+an obsolete message that could never be accepted would queue every later meeting
+behind it. `409` is likewise a *permanent* answer, and the worker treats it as
+one: it commits the message rather than retrying a request that will be refused
+identically for ever.
 
 ### Health
 - Spring: `GET /actuator/health`
@@ -1460,9 +1478,34 @@ behaviour, since it transcribes again.
 
 Redelivery still re-runs transcription, and the provider bills for it.
 
+**The attempt travels with the message.** `meeting_uploaded` carries the
+`processingAttempt` that was current when Spring created the job, the worker
+reads it once and quotes it on every callback, and no retry, redelivery or
+audio-fallback ever changes it. Only `MeetingService.reprocess` starts a new
+one.
+
+Deriving it at callback time instead — reading `meetings.processing_attempt`
+when the result lands — was a race with reprocess, and a losing one. Run 1
+finishes, its HTTP response is lost, the worker keeps the message; the user
+reprocesses, so the meeting is on run 2 and a second job is queued; Kafka
+redelivers run 1 first. Reading the row, run 1's result *became* run 2: it spent
+run 2's `meeting_usage_charges` claim, took run 2's notification keys, and wrote
+the old transcript over the new one — after which run 2 landed and found every
+one of its own effects already claimed, so it changed nothing and said nothing.
+
+**Consumer liveness.** `max_poll_interval_ms` is set explicitly to 6,000,000
+(100 minutes, `Settings.kafka_max_poll_interval_ms`). aiokafka's default is five
+minutes, measured from the last time a message was handed to the loop, and its
+heartbeat task leaves the group once that is exceeded — so any meeting taking
+longer than five minutes end-to-end was evicted mid-run, had its offset commit
+refused, and was redelivered to be transcribed and paid for all over again. The
+value covers the ~59-minute worst case that the pipeline's own timeouts allow
+(3 × 900s of AssemblyAI, plus fetch, decode, three LLM passes and the callbacks)
+with about 41 minutes of margin.
+
 | Topic | Produced by | Consumed by | Payload |
 |---|---|---|---|
-| `meeting_uploaded` | Spring | FastAPI | `{ meetingId, userId, audioUrl, objectKey, sourceType, sourceUrl, summaryTemplate, language, context, speakers }` |
+| `meeting_uploaded` | Spring | FastAPI | `{ meetingId, userId, audioUrl, objectKey, sourceType, sourceUrl, summaryTemplate, language, context, speakers, processingAttempt }` |
 
 There were eight. `transcription_started`, `transcription_completed`,
 `summary_generated`, `action_items_extracted` and `meeting_processing_failed`

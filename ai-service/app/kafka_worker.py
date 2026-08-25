@@ -39,6 +39,22 @@ are idempotent per processing attempt (V57). This is not exactly-once and does
 not pretend to be: a redelivery re-runs transcription, and the provider bills
 for it.
 
+**The processing run travels with the message.** `meeting_uploaded` carries the
+`processingAttempt` Spring allocated when it created the job, and every callback
+this worker sends quotes it back. It is read once, from the message, and never
+recomputed: retries, redeliveries and a second pass through the audio-fallback
+are all the same run, and only `MeetingService.reprocess` ever starts a new one.
+The number is what lets Spring tell a result that is late from a result that is
+obsolete, which are the same HTTP request and opposite instructions.
+
+**The consumer stays in the group while a meeting is being processed.**
+`max_poll_interval_ms` is configured rather than defaulted, because aiokafka's
+default is five minutes and Recallix supports meetings that take longer than
+that. Its heartbeat task measures `fetcher_idle_time` — time since the last
+message was handed to this loop — and leaves the group once that passes the
+interval, so a long transcription used to be evicted mid-run, fail its commit,
+and be redelivered to be transcribed again, for ever. See `Settings`.
+
 Connection is resilient: if the broker is unreachable at startup the worker logs
 and retries with exponential backoff — it never crashes the app.
 """
@@ -52,7 +68,7 @@ from enum import Enum
 
 import httpx
 
-from app.callback import SpringCallbackClient
+from app.callback import RETRYABLE_STATUS, Delivery, SpringCallbackClient
 from app.config import Settings
 from app.pipeline import PROGRESS_DONE, Pipeline
 from app.schemas import (
@@ -78,11 +94,6 @@ class Outcome(Enum):
     RETRY = "retry"
 
 
-#: HTTP statuses worth another attempt. Everything else in the 4xx range is the
-#: request being wrong, and it will be wrong again in ten seconds.
-_RETRYABLE_STATUS = frozenset({408, 425, 429})
-
-
 def is_retryable(exc: BaseException) -> bool:
     """Whether redelivering this message could plausibly do better.
 
@@ -102,7 +113,7 @@ def is_retryable(exc: BaseException) -> bool:
         return False
     if isinstance(exc, httpx.HTTPStatusError):
         code = exc.response.status_code
-        return code >= 500 or code in _RETRYABLE_STATUS
+        return code >= 500 or code in RETRYABLE_STATUS
     if isinstance(exc, (httpx.TransportError, asyncio.TimeoutError, ConnectionError, OSError)):
         return True
     return True
@@ -216,6 +227,10 @@ class KafkaWorker:
             # durable. See the module docstring for what auto-commit did.
             enable_auto_commit=False,
             auto_offset_reset="earliest",
+            # Long enough for the longest meeting this product accepts. Left at
+            # its default, aiokafka evicted the consumer five minutes into every
+            # long transcription; see the module docstring.
+            max_poll_interval_ms=self._settings.kafka_max_poll_interval_ms,
             **security,
         )
         await self._consumer.start()
@@ -273,9 +288,9 @@ class KafkaWorker:
                 await self._commit(msg)
                 continue
 
-            attempt = self._attempts.get(key, 0)
+            failures = self._attempts.get(key, 0)
             try:
-                outcome = await self._handle(event, attempt=attempt)
+                outcome = await self._handle(event, failures=failures)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 — one bad message must not kill the loop.
@@ -287,17 +302,24 @@ class KafkaWorker:
                 await self._commit(msg)
                 continue
 
-            self._attempts[key] = attempt + 1
+            self._attempts[key] = failures + 1
             logger.warning(
                 "Leaving %s uncommitted for redelivery (failure %d of %d).",
-                event.meeting_id, attempt + 1, self._max_attempts,
+                event.meeting_id, failures + 1, self._max_attempts,
             )
             if not await self._pause_before_retry():
                 break
             # Rewind so this session re-reads the message. Without it the
             # position has already moved on and the redelivery would only
             # happen at the next rebalance or restart.
-            self._consumer.seek(_partition_of(msg), msg.offset)
+            try:
+                self._consumer.seek(_partition_of(msg), msg.offset)
+            except Exception as exc:  # noqa: BLE001
+                # The partition is no longer ours -- a rebalance happened while
+                # we were backing off. The offset is uncommitted either way, so
+                # whoever holds the partition next reads this message again.
+                logger.warning("Could not rewind to offset %d: %s", msg.offset, exc)
+                break
 
     async def _pause_before_retry(self) -> bool:
         """Wait out the backoff. False when the worker is shutting down."""
@@ -407,18 +429,24 @@ class KafkaWorker:
                 audio_loader=load_audio,
             )
 
-    async def _handle(self, event: MeetingUploadedEvent, *, attempt: int = 0) -> Outcome:
+    async def _handle(self, event: MeetingUploadedEvent, *, failures: int = 0) -> Outcome:
         """Run one meeting, and say whether its offset may be acknowledged.
 
-        `attempt` is how many times this same message has already failed
+        `failures` is how many times this same message has already failed
         retryably, so a message that cannot be made to work is eventually
-        reported as FAILED rather than blocking the partition for ever.
+        reported as FAILED rather than blocking the partition for ever. It is
+        deliberately not the *processing run*: a retry is the same run trying
+        again, and calling it a new attempt is exactly the confusion that let a
+        late result claim a reprocess's identity.
         """
         meeting_id = event.meeting_id
-        logger.info("Processing meeting_uploaded for %s.", meeting_id)
+        # Read once, from the message. Every callback below quotes it, and it is
+        # the same number on the fifth redelivery as on the first.
+        run = event.processing_attempt
+        logger.info("Processing meeting_uploaded for %s (run %d).", meeting_id, run)
 
         async def progress_hook(status_event: StatusEvent) -> None:
-            await self._callback.post_status(meeting_id, status_event)
+            await self._callback.post_status(meeting_id, status_event, attempt=run)
 
         # Index into pgvector the moment the transcript exists, concurrently with
         # summarization/extraction, so RAG chat is queryable as soon as the
@@ -444,7 +472,8 @@ class KafkaWorker:
             # READY status in one transaction, and charges the attempt. Until
             # it is accepted, nothing about this run exists outside this
             # process, so nothing may be acknowledged.
-            if not await self._callback.post_result(meeting_id, result):
+            delivery = await self._callback.post_result(meeting_id, result, attempt=run)
+            if delivery is Delivery.UNDELIVERED:
                 if index_task is not None and not index_task.done():
                     index_task.cancel()
                 logger.warning(
@@ -452,6 +481,21 @@ class KafkaWorker:
                     meeting_id,
                 )
                 return Outcome.RETRY
+            if delivery is Delivery.REFUSED:
+                # Spring read it and declined it -- this run has been overtaken
+                # by a reprocess, or the payload is one it will never take.
+                # Either way it changed nothing and it will change nothing next
+                # time, so this message is finished. Nothing is reported as
+                # FAILED: the meeting either belongs to a newer run or is in a
+                # state a person needs to look at, and neither is improved by
+                # this execution writing an error onto it.
+                if index_task is not None and not index_task.done():
+                    index_task.cancel()
+                logger.warning(
+                    "Spring refused the result for %s (run %d); the message is done.",
+                    meeting_id, run,
+                )
+                return Outcome.COMMIT
 
             # Indexing started during analysis; make sure it landed before READY.
             if index_task is not None:
@@ -464,7 +508,8 @@ class KafkaWorker:
             # Postgres; this frame only saves the browser a poll, and holding
             # the offset for it would re-run a paid transcription to redeliver
             # a notification.
-            if not await self._callback.post_status(meeting_id, ready):
+            if not (await self._callback.post_status(
+                    meeting_id, ready, attempt=run)).accepted:
                 logger.warning(
                     "READY status frame for %s was not delivered; the meeting is "
                     "READY in Postgres and the client will poll it.", meeting_id,
@@ -478,7 +523,7 @@ class KafkaWorker:
                 index_task.cancel()
 
             retryable = is_retryable(exc)
-            if retryable and attempt + 1 < self._max_attempts:
+            if retryable and failures + 1 < self._max_attempts:
                 logger.warning(
                     "Processing %s failed retryably (%s: %s); leaving it for redelivery.",
                     meeting_id, type(exc).__name__, exc,
@@ -488,7 +533,7 @@ class KafkaWorker:
             if retryable:
                 logger.error(
                     "Processing %s failed %d times; recording it as failed rather than "
-                    "holding the partition.", meeting_id, attempt + 1,
+                    "holding the partition.", meeting_id, failures + 1,
                 )
             logger.exception("Processing failed for %s: %s", meeting_id, exc)
             # The only report of a failure. This is what sets FAILED in
@@ -504,8 +549,9 @@ class KafkaWorker:
                     meeting_id=meeting_id, status="FAILED", progress=PROGRESS_DONE,
                     message=str(exc),
                 ),
+                attempt=run,
             )
-            if not delivered:
+            if delivered is Delivery.UNDELIVERED:
                 # The failure is real but nobody has been told. Acknowledging
                 # now would lose it exactly the way auto-commit used to.
                 logger.warning(
@@ -513,4 +559,11 @@ class KafkaWorker:
                     meeting_id,
                 )
                 return Outcome.RETRY
+            if delivered is Delivery.REFUSED:
+                # An overtaken run failing is not news, and must not be written
+                # over the run that replaced it. Finished, quietly.
+                logger.warning(
+                    "Spring refused the FAILED status for %s (run %d); the message is done.",
+                    meeting_id, run,
+                )
             return Outcome.COMMIT

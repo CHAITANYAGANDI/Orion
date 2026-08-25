@@ -93,8 +93,8 @@ class ProcessingNotificationDedupeTest {
     @Test
     @DisplayName("a summary-ready delivered twice is stored once")
     void summaryReadyIsIdempotent() {
-        service.summaryReady(meeting(1));
-        service.summaryReady(meeting(1));
+        service.summaryReady(meeting(1), 1);
+        service.summaryReady(meeting(1), 1);
 
         assertThat(countOf(NotificationKind.SUMMARY_READY)).isEqualTo(1);
     }
@@ -102,8 +102,8 @@ class ProcessingNotificationDedupeTest {
     @Test
     @DisplayName("a transcript-ready delivered twice is stored once")
     void transcriptReadyIsIdempotent() {
-        service.transcriptReady(meeting(1));
-        service.transcriptReady(meeting(1));
+        service.transcriptReady(meeting(1), 1);
+        service.transcriptReady(meeting(1), 1);
 
         assertThat(countOf(NotificationKind.TRANSCRIPT_READY)).isEqualTo(1);
     }
@@ -111,8 +111,8 @@ class ProcessingNotificationDedupeTest {
     @Test
     @DisplayName("a processing-failed delivered twice is stored once")
     void processingFailedIsIdempotent() {
-        service.processingFailed(meeting(1), "the audio was unreadable");
-        service.processingFailed(meeting(1), "the audio was unreadable");
+        service.processingFailed(meeting(1), "the audio was unreadable", 1);
+        service.processingFailed(meeting(1), "the audio was unreadable", 1);
 
         assertThat(countOf(NotificationKind.PROCESSING_FAILED)).isEqualTo(1);
     }
@@ -133,9 +133,9 @@ class ProcessingNotificationDedupeTest {
         // A shared key would let whichever arrived first silence the rest.
         Meeting m = meeting(1);
         service.processingStarted(m, "uploaded");
-        service.transcriptReady(m);
-        service.summaryReady(m);
-        service.processingFailed(m, "something went wrong afterwards");
+        service.transcriptReady(m, 1);
+        service.summaryReady(m, 1);
+        service.processingFailed(m, "something went wrong afterwards", 1);
 
         assertThat(countOf(NotificationKind.PROCESSING_STARTED)).isEqualTo(1);
         assertThat(countOf(NotificationKind.TRANSCRIPT_READY)).isEqualTo(1);
@@ -146,11 +146,11 @@ class ProcessingNotificationDedupeTest {
     @Test
     @DisplayName("a reprocess announces itself again")
     void reprocessIsNotSuppressed() {
-        service.summaryReady(meeting(1));
+        service.summaryReady(meeting(1), 1);
 
         // reprocess() incremented processing_attempt, so this is a different
         // run and the user is entitled to hear about it.
-        service.summaryReady(meeting(2));
+        service.summaryReady(meeting(2), 2);
 
         assertThat(countOf(NotificationKind.SUMMARY_READY)).isEqualTo(2);
     }
@@ -158,10 +158,10 @@ class ProcessingNotificationDedupeTest {
     @Test
     @DisplayName("a redelivery of the first run is still suppressed after a reprocess")
     void staleRedeliveryStaysSuppressed() {
-        service.summaryReady(meeting(1));
-        service.summaryReady(meeting(2));
+        service.summaryReady(meeting(1), 1);
+        service.summaryReady(meeting(2), 2);
 
-        service.summaryReady(meeting(1));
+        service.summaryReady(meeting(1), 1);
 
         assertThat(countOf(NotificationKind.SUMMARY_READY)).isEqualTo(2);
     }
@@ -169,7 +169,7 @@ class ProcessingNotificationDedupeTest {
     @Test
     @DisplayName("the key names the event and the attempt, not just the meeting")
     void keyShape() {
-        service.summaryReady(meeting(3));
+        service.summaryReady(meeting(3), 3);
 
         assertThat(stored.get(0).getDedupeKey()).isEqualTo("summary-ready:mtg_1:3");
     }
@@ -180,10 +180,10 @@ class ProcessingNotificationDedupeTest {
         // Two callbacks in flight together both pass the existence check and
         // both attempt the insert; the index refuses the second. That must not
         // surface as a failed callback.
-        service.summaryReady(meeting(1));
+        service.summaryReady(meeting(1), 1);
         stored.clear();
 
-        service.summaryReady(meeting(1));
+        service.summaryReady(meeting(1), 1);
 
         assertThat(stored).isEmpty();
     }

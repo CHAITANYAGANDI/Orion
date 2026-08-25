@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -98,8 +99,8 @@ class MeetingAnnouncementsTest {
 
         // The notes imply the transcript, so saying both would be two bells for
         // one arrival — and the second is the one that gets a bell ignored.
-        verify(notifications).summaryReady(meeting);
-        verify(notifications, never()).transcriptReady(any());
+        verify(notifications).summaryReady(meeting, 1);
+        verify(notifications, never()).transcriptReady(any(), anyInt());
     }
 
     @Test
@@ -108,8 +109,8 @@ class MeetingAnnouncementsTest {
 
         // A run where summarization produced nothing still produced something
         // worth reading, and silence would look like a meeting that vanished.
-        verify(notifications).transcriptReady(meeting);
-        verify(notifications, never()).summaryReady(any());
+        verify(notifications).transcriptReady(meeting, 1);
+        verify(notifications, never()).summaryReady(any(), anyInt());
     }
 
     @Test
@@ -151,20 +152,20 @@ class MeetingAnnouncementsTest {
 
     @Test
     void saysSoWhenProcessingFails() {
-        service.applyStatus(MEETING, new StatusCallbackRequest("FAILED", 0, "the audio was unreadable"));
+        service.applyStatus(MEETING, new StatusCallbackRequest("FAILED", 0, "the audio was unreadable", 1));
 
         // The one that has to survive a closed tab: a failed upload is
         // otherwise indistinguishable from one still running.
-        verify(notifications).processingFailed(meeting, "the audio was unreadable");
+        verify(notifications).processingFailed(meeting, "the audio was unreadable", 1);
     }
 
     @Test
     void staysQuietWhileTheWorkIsStillRunning() {
-        service.applyStatus(MEETING, new StatusCallbackRequest("TRANSCRIBING", 40, "Transcribing..."));
+        service.applyStatus(MEETING, new StatusCallbackRequest("TRANSCRIBING", 40, "Transcribing...", 1));
 
         // Progress belongs on the socket the meeting page already listens to.
         // A notification per stage is four rows per upload.
-        verify(notifications, never()).processingFailed(any(), anyString());
+        verify(notifications, never()).processingFailed(any(), anyString(), anyInt());
     }
 
     @Test
@@ -173,8 +174,8 @@ class MeetingAnnouncementsTest {
 
         service.applyResult("mtg_gone", result("short"));
 
-        verify(notifications, never()).summaryReady(any());
-        verify(notifications, never()).transcriptReady(any());
+        verify(notifications, never()).summaryReady(any(), anyInt());
+        verify(notifications, never()).transcriptReady(any(), anyInt());
     }
 
     private static MeetingBriefResult result(String shortSummary) {
@@ -182,7 +183,7 @@ class MeetingAnnouncementsTest {
                 MEETING, "full text", "en",
                 List.of(new AiSegment(0.0, 8.0, "Priya", "Right, shall we start?", null, null)),
                 shortSummary, "detailed", List.of(), List.of(), List.of(),
-                "general", List.of(), List.of(), List.of(), null, null);
+                "general", List.of(), List.of(), List.of(), null, null, 1);
     }
 
     private static MeetingActionItem task(String title, String owner) {

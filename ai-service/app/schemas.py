@@ -617,6 +617,15 @@ class MeetingUploadedEvent(CamelModel):
     # has everybody on both channels, and splitting it by channel would invent
     # two speakers out of one.
     multichannel: bool = False
+    # Which run of this meeting the message is, allocated by Spring when the job
+    # was created and echoed back on every callback so Spring can tell a late
+    # result from an obsolete one.
+    #
+    # Defaults to the first run, never to "whatever the meeting is on now". An
+    # event published before this field existed cannot be the current run of a
+    # meeting that has been reprocessed since, so reading it as the current one
+    # is precisely how a stale execution would overwrite a fresh one.
+    processing_attempt: int = 1
 
 
 # --------------------------------------------------------------------------- #

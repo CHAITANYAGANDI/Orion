@@ -115,7 +115,7 @@ class ReprocessActionItemsTest {
     private void process() {
         service.applyResult(MEETING, new MeetingBriefResult(
                 MEETING, "full text", "en", SEGMENTS, "short", "detailed",
-                List.of(), List.of(), List.of(), "general", EXTRACTION, List.of(), List.of(), null, null));
+                List.of(), List.of(), List.of(), "general", EXTRACTION, List.of(), List.of(), null, null, 1));
     }
 
     /** Stand in for a person having worked the row. */
@@ -205,12 +205,12 @@ class ReprocessActionItemsTest {
 
         service.applyResult(MEETING, new MeetingBriefResult(
                 MEETING, "t", "en", List.of(), "s", "d", List.of(), List.of(), List.of(),
-                "general", pair, List.of(), List.of(), null, null));
+                "general", pair, List.of(), List.of(), null, null, 1));
         worked("Write the migration").setStatus("DONE");
 
         service.applyResult(MEETING, new MeetingBriefResult(
                 MEETING, "t", "en", List.of(), "s", "d", List.of(), List.of(), List.of(),
-                "general", pair, List.of(), List.of(), null, null));
+                "general", pair, List.of(), List.of(), null, null, 1));
 
         // A survivor claims one incoming item, not every item quoting the same
         // line — otherwise ticking off half a sentence deletes the other half.

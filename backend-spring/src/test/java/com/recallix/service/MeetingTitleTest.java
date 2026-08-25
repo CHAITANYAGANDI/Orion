@@ -272,7 +272,7 @@ class MeetingTitleTest {
                 MEETING, "full text", "en",
                 List.of(new AiSegment(0.0, 8.0, "Speaker 1", "Right, shall we start?", null, null)),
                 "short", "detailed", List.of(), List.of(), List.of(),
-                "general", List.of(), List.of(), List.of(), title, null);
+                "general", List.of(), List.of(), List.of(), title, null, 1);
     }
 
     private static MeetingCreateRequest create(boolean recorded) {
