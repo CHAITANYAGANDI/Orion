@@ -31,6 +31,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -81,12 +82,15 @@ class TranscriptEditTest {
     private TranscriptSegment first;
     private TranscriptSegment second;
 
+    /** Held, so a test can move it onto a later processing run. */
+    private Meeting meeting;
+
     @BeforeEach
     void setUp() {
         service = new MeetingService(meetings, transcripts, segments, summaries,
                 insights, storage, usage, outbox, audit, ai, templates, projects, translations, notifications, erasure, userService, speakerIdentity);
 
-        Meeting meeting = new Meeting();
+        meeting = new Meeting();
         meeting.setId(MEETING);
         meeting.setUserId(USER);
         meeting.setTitle("Sprint review");
@@ -163,9 +167,32 @@ class TranscriptEditTest {
         service.editSegments(USER, MEETING, List.of(new SegmentEdit("seg_1", "Corrected line.")));
 
         ArgumentCaptor<String> sent = ArgumentCaptor.forClass(String.class);
-        verify(ai).reindex(eq(USER), eq(MEETING), sent.capture(), any());
+        verify(ai).reindex(eq(USER), eq(MEETING), anyInt(), sent.capture(), any());
         assertThat(sent.getValue()).contains("Corrected line.");
         assertThat(sent.getValue()).doesNotContain("Browserker");
+    }
+
+    @Test
+    @DisplayName("the correction is filed under the run the meeting is on")
+    void reindexUsesTheCurrentProcessingAttempt() {
+        // Chunks are stored per processing run and retrieval reads the newest
+        // one present, so the number sent here decides whether the correction
+        // is ever seen. Filed under run 1 on a meeting that has been reprocessed
+        // twice, this edit would sit underneath run 3's chunks and chat would
+        // keep answering with the word the user had just fixed.
+        meeting.setProcessingAttempt(3);
+
+        service.editSegments(USER, MEETING, List.of(new SegmentEdit("seg_1", "Corrected line.")));
+
+        verify(ai).reindex(eq(USER), eq(MEETING), eq(3), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("a meeting that has never been reprocessed is filed under its first run")
+    void reindexDefaultsToTheFirstAttempt() {
+        service.editSegments(USER, MEETING, List.of(new SegmentEdit("seg_1", "Corrected line.")));
+
+        verify(ai).reindex(eq(USER), eq(MEETING), eq(1), anyString(), any());
     }
 
     @Test
@@ -186,7 +213,7 @@ class TranscriptEditTest {
         service.editSegments(USER, MEETING,
                 List.of(new SegmentEdit("seg_1", "We should use Browserker for scanning.")));
 
-        verify(ai, never()).reindex(anyString(), anyString(), anyString(), any());
+        verify(ai, never()).reindex(anyString(), anyString(), anyInt(), anyString(), any());
     }
 
     @Test
@@ -196,7 +223,7 @@ class TranscriptEditTest {
                 List.of(new SegmentEdit("seg_from_elsewhere", "Anything."))))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("not part of this meeting");
-        verify(ai, never()).reindex(anyString(), anyString(), anyString(), any());
+        verify(ai, never()).reindex(anyString(), anyString(), anyInt(), anyString(), any());
     }
 
     @Test
@@ -214,7 +241,7 @@ class TranscriptEditTest {
     @DisplayName("a failed re-index still saves the correction")
     void reindexFailureDoesNotLoseTheEdit() {
         doThrow(new RuntimeException("ai-service down"))
-                .when(ai).reindex(anyString(), anyString(), anyString(), any());
+                .when(ai).reindex(anyString(), anyString(), anyInt(), anyString(), any());
 
         service.editSegments(USER, MEETING, List.of(new SegmentEdit("seg_1", "Corrected line.")));
 
@@ -232,7 +259,7 @@ class TranscriptEditTest {
         service.renameSpeakers(USER, MEETING, java.util.Map.of("Speaker 1", "Cindy"));
 
         ArgumentCaptor<String> sent = ArgumentCaptor.forClass(String.class);
-        verify(ai).reindex(eq(USER), eq(MEETING), sent.capture(), any());
+        verify(ai).reindex(eq(USER), eq(MEETING), anyInt(), sent.capture(), any());
         assertThat(sent.getValue()).startsWith("Cindy: ");
     }
 
@@ -240,7 +267,7 @@ class TranscriptEditTest {
     @DisplayName("a rename that matches nobody does not re-index")
     void renameWithNoMatchDoesNothing() {
         service.renameSpeakers(USER, MEETING, java.util.Map.of("Speaker 9", "Nobody"));
-        verify(ai, never()).reindex(anyString(), anyString(), anyString(), any());
+        verify(ai, never()).reindex(anyString(), anyString(), anyInt(), anyString(), any());
     }
 
     // --- the summary going out of date ------------------------------------- //

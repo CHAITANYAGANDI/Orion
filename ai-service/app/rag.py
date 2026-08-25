@@ -4,6 +4,28 @@ Owns the transcript_chunks table directly (async psycopg). Vectors are passed
 as `::vector` string casts, so no pgvector Python adapter is required. When
 PG_HOST is unset the service disables itself gracefully (chat returns a friendly
 message) so the app still boots.
+
+**Chunks belong to a processing run, and a run can only touch its own.**
+
+This table is the one piece of a meeting's derived state that Spring does not
+write. The worker indexes it directly, during processing, before the result
+callback exists -- so the attempt check inside `applyResult` comes far too late
+to protect it. A redelivered attempt-1 execution whose result was about to be
+rejected as stale would already have run `DELETE FROM transcript_chunks WHERE
+meeting_id = ?` and written the old transcript back, and "ask this meeting"
+would answer out of the text the user had just asked to have replaced.
+
+Every row now carries `processing_attempt` (V58). Indexing deletes only rows at
+or below its own generation, so an execution has no statement available to it
+that reaches a newer run's chunks. That is the boundary: not a check on the way
+in, which a reprocess landing a microsecond later would simply walk past, but an
+absence of reach. A stale execution can still write its own generation, and
+those rows are never read.
+
+Retrieval reads the newest generation present for each meeting -- deliberately
+not "the meeting's current attempt". A reprocess does not delete the transcript,
+the summary or the action items while it runs, and chat should not go blind
+either: the previous run stays answerable until the new one lands.
 """
 
 from __future__ import annotations
@@ -35,6 +57,27 @@ from app.suggestions import MAX_MEETINGS, MAX_OPEN_ITEMS, workspace_material
 from app.timeframe import detect_window
 
 logger = logging.getLogger("ai-service.rag")
+
+
+#: A chunk is readable when no later generation of its meeting exists.
+#:
+#: Written as a NOT EXISTS rather than a join to `meetings.processing_attempt`
+#: on purpose. The meeting's current attempt moves the instant somebody presses
+#: reprocess, and matching on it would blank that meeting's chat for however
+#: long the new run takes -- while the transcript page beside it carries on
+#: showing the previous run quite happily. What retrieval wants is the newest
+#: run that has actually finished indexing, which is what this asks for.
+#:
+#: `idx_chunks_meeting_generation` answers it from the index. In the ordinary
+#: case there is exactly one generation per meeting, because each indexer
+#: deletes everything at or below its own.
+#:
+#: The alias `c` is not incidental: every query this is spliced into names the
+#: chunk table `c`, and `newer` is a second reference to the same table.
+_LATEST_GENERATION = """NOT EXISTS (
+                       SELECT 1 FROM transcript_chunks newer
+                        WHERE newer.meeting_id = c.meeting_id
+                          AND newer.processing_attempt > c.processing_attempt)"""
 
 
 def _vec_literal(embedding: list[float]) -> str:
@@ -203,8 +246,9 @@ class RagService:
         user_id: str | None,
         transcript: str,
         segments: list[Segment],
+        processing_attempt: int = 1,
     ) -> None:
-        """Chunk, embed and store one meeting's transcript.
+        """Chunk, embed and store one processing run's transcript.
 
         `user_id` is denormalised onto every row so workspace-wide retrieval can
         filter by owner without joining `meetings`.
@@ -215,6 +259,13 @@ class RagService:
         would have handed the whole indexing path an escape from tenant
         isolation to cover an event shape that no longer occurs. Skipping is the
         safe failure: the meeting simply is not searchable until reprocessed.
+
+        `processing_attempt` is the run these chunks came out of: the number on
+        the `meeting_uploaded` message for a pipeline run, or the meeting's
+        current attempt for a re-index after a transcript edit. The delete below
+        is scoped to it, so a run that has been overtaken cannot remove or
+        replace a newer one's chunks — see the module docstring for why that
+        matters more here than anywhere else in the pipeline.
         """
         if not self.enabled:
             return
@@ -231,16 +282,46 @@ class RagService:
         try:
             async with self.connection(user_id) as conn:
                 async with conn.cursor() as cur:
+                    # Housekeeping, not the safety property. If a reprocess
+                    # commits a newer generation between this read and the write
+                    # below, the write still happens and is simply never read --
+                    # which is the whole point of the generation being on the
+                    # row rather than being checked at the door. Skipping early
+                    # only saves embedding rows nobody would ever retrieve.
                     await cur.execute(
-                        "DELETE FROM transcript_chunks WHERE meeting_id = %s", (meeting_id,)
+                        """
+                        SELECT 1 FROM transcript_chunks
+                         WHERE meeting_id = %s AND processing_attempt > %s
+                         LIMIT 1
+                        """,
+                        (meeting_id, processing_attempt),
+                    )
+                    if await cur.fetchone():
+                        logger.info(
+                            "Not indexing meeting %s from attempt %d; a later run has "
+                            "already indexed it.", meeting_id, processing_attempt,
+                        )
+                        return
+
+                    # `<=`, not `=`: a run replaces its own chunks and clears
+                    # every older generation on its way past, so the table holds
+                    # one generation per meeting in the ordinary case. It cannot
+                    # reach above itself, and that is what stops an overtaken run
+                    # deleting the chunks somebody is chatting with.
+                    await cur.execute(
+                        """
+                        DELETE FROM transcript_chunks
+                         WHERE meeting_id = %s AND processing_attempt <= %s
+                        """,
+                        (meeting_id, processing_attempt),
                     )
                     for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
                         await cur.execute(
                             """
                             INSERT INTO transcript_chunks
                                 (id, meeting_id, user_id, chunk_index, text,
-                                 start_time, end_time, embedding)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s::vector)
+                                 start_time, end_time, embedding, processing_attempt)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s::vector, %s)
                             """,
                             (
                                 "chk_" + uuid.uuid4().hex,
@@ -251,10 +332,14 @@ class RagService:
                                 chunk["start"],
                                 chunk["end"],
                                 _vec_literal(emb),
+                                processing_attempt,
                             ),
                         )
                 await conn.commit()
-            logger.info("Indexed %d transcript chunks for meeting %s.", len(chunks), meeting_id)
+            logger.info(
+                "Indexed %d transcript chunks for meeting %s (attempt %d).",
+                len(chunks), meeting_id, processing_attempt,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning("RAG indexing failed for %s: %s", meeting_id, exc)
 
@@ -299,13 +384,14 @@ class RagService:
             async with self.connection(user_id) as conn:
                 async with conn.cursor() as cur:
                     await cur.execute(
-                        """
-                        SELECT chunk_index, text, start_time, end_time,
-                               embedding <=> %s::vector AS distance
-                        FROM transcript_chunks
-                        WHERE meeting_id = %s
-                        ORDER BY distance
-                        LIMIT %s
+                        f"""
+                        SELECT c.chunk_index, c.text, c.start_time, c.end_time,
+                               c.embedding <=> %s::vector AS distance
+                          FROM transcript_chunks c
+                         WHERE c.meeting_id = %s
+                           AND {_LATEST_GENERATION}
+                         ORDER BY distance
+                         LIMIT %s
                         """,
                         (_vec_literal(q_emb), meeting_id, candidates),
                     )
@@ -676,13 +762,14 @@ class RagService:
         a workspace with a year of meetings leaves a "last week" question
         answering from two surviving chunks.
         """
-        sql = """
+        sql = f"""
             SELECT c.chunk_index, c.text, c.start_time, c.end_time,
                    c.meeting_id, m.title, m.created_at,
                    c.embedding <=> %s::vector AS distance
               FROM transcript_chunks c
               JOIN meetings m ON m.id = c.meeting_id
              WHERE c.user_id = %s
+               AND {_LATEST_GENERATION}
         """
         params: list = [_vec_literal(q_emb), user_id]
         if meeting_ids:
@@ -1053,13 +1140,14 @@ class RagService:
             async with self.connection(user_id) as conn:
                 async with conn.cursor() as cur:
                     await cur.execute(
-                        """
+                        f"""
                         WITH candidates AS (
                             SELECT c.meeting_id, c.chunk_index, c.text,
                                    c.start_time, c.end_time,
                                    c.embedding <=> %s::vector AS distance
                               FROM transcript_chunks c
                              WHERE c.user_id = %s
+                               AND {_LATEST_GENERATION}
                              ORDER BY c.embedding <=> %s::vector
                              LIMIT %s
                         ),

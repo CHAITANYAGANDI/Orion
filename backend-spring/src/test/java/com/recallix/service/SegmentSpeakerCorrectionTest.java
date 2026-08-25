@@ -33,6 +33,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -305,7 +306,7 @@ class SegmentSpeakerCorrectionTest {
             @SuppressWarnings("unchecked")
             ArgumentCaptor<List<SegmentDto>> captor =
                     ArgumentCaptor.forClass((Class<List<SegmentDto>>) (Class<?>) List.class);
-            verify(ai).reindex(anyString(), anyString(), anyString(), captor.capture());
+            verify(ai).reindex(anyString(), anyString(), anyInt(), anyString(), captor.capture());
 
             // Four passages, each carrying its own speaker: chat cites what it
             // retrieves, so an index that still says Speaker 2 would answer
@@ -419,7 +420,7 @@ class SegmentSpeakerCorrectionTest {
                     new SegmentSpeakerRequest("spk_2", null, null));
 
             assertThat(rows).hasSize(2);
-            verify(ai, never()).reindex(anyString(), anyString(), anyString(), any());
+            verify(ai, never()).reindex(anyString(), anyString(), anyInt(), anyString(), any());
         }
     }
 }

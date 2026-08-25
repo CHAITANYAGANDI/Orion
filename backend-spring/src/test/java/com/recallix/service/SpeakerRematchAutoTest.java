@@ -32,6 +32,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -343,7 +344,7 @@ class SpeakerRematchAutoTest {
             service.rematchSpeakers(USER, MEETING);
 
             var text = org.mockito.ArgumentCaptor.forClass(String.class);
-            verify(ai).reindex(eq(USER), eq(MEETING), text.capture(), anyList());
+            verify(ai).reindex(eq(USER), eq(MEETING), anyInt(), text.capture(), anyList());
             // Retrieval passages are stored as "Speaker 2: ..." — an un-indexed
             // rematch leaves chat answering with a name the transcript no longer
             // shows anywhere, and citing it.
@@ -369,7 +370,7 @@ class SpeakerRematchAutoTest {
 
             service.rematchSpeakers(USER, MEETING);
 
-            verify(ai, never()).reindex(anyString(), anyString(), anyString(), anyList());
+            verify(ai, never()).reindex(anyString(), anyString(), anyInt(), anyString(), anyList());
             assertThat(transcript.getTranscriptText()).isEqualTo("Speaker 1: Shall we start?");
         }
     }

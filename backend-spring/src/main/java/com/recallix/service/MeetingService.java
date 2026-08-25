@@ -1020,7 +1020,19 @@ public class MeetingService {
     private void reindex(String userId, String meetingId,
                          List<TranscriptSegment> segs) {
         try {
-            ai.reindex(userId, meetingId, joinSegments(segs),
+            // Which run the correction belongs to. Chunks are stored per run and
+            // retrieval reads the newest, so an edit filed under an older one
+            // would be invisible and chat would carry on answering with the name
+            // that was just fixed.
+            //
+            // The same lookup every caller here already made, so it is the
+            // persistence context answering rather than a second query — and
+            // tenant-scoped, so this cannot read an attempt off somebody else's
+            // meeting on the way past.
+            int attempt = meetings.findByIdAndUserId(meetingId, userId)
+                    .map(Meeting::getProcessingAttempt)
+                    .orElse(1);
+            ai.reindex(userId, meetingId, attempt, joinSegments(segs),
                     segs.stream().map(SegmentDto::from).toList());
         } catch (Exception e) {
             log.warn("Re-indexing meeting {} failed; chat may answer from stale text: {}",

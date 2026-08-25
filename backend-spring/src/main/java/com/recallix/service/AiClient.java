@@ -390,10 +390,15 @@ public class AiClient {
      * <p>The owner is sent because row-level security checks it; the ai-service
      * has no privilege to look one up.
      */
-    public void reindex(String userId, String meetingId, String transcript, List<SegmentDto> segments) {
+    public void reindex(String userId, String meetingId, int processingAttempt,
+                        String transcript, List<SegmentDto> segments) {
         Map<String, Object> payload = new java.util.HashMap<>();
         payload.put("userId", userId);
         payload.put("meetingId", meetingId);
+        // Chunks are stored per processing run and retrieval reads the newest,
+        // so a correction filed under an older run would be invisible: chat
+        // would carry on answering from the text that was just fixed.
+        payload.put("processingAttempt", processingAttempt);
         payload.put("transcript", transcript);
         payload.put("segments", segments.stream()
                 .map(seg -> {

@@ -323,6 +323,13 @@ class IndexRequest(CamelModel):
     user_id: str
     transcript: str
     segments: list[Segment] = Field(default_factory=list)
+    # Which run of the meeting the edited transcript belongs to. Spring reads it
+    # off the meeting row, because an edit is not a pipeline run and has no
+    # message of its own to carry it. Chunks are stored per run and retrieval
+    # reads the newest, so sending the wrong number here would file a correction
+    # under an older generation and leave chat answering from the text the user
+    # just fixed. Defaults to the first run for a caller that predates it.
+    processing_attempt: int = 1
 
 
 class IndexResponse(CamelModel):

@@ -1324,6 +1324,37 @@ Retrieval on the two workspace endpoints filters on `user_id`, which is
 denormalised onto `transcript_chunks` (migration `V3`). Cross-tenant grounding is
 therefore impossible even if a caller passes meeting ids they do not own.
 
+### Embedded chunks belong to a processing run (V58)
+
+`transcript_chunks` is the one piece of a meeting's derived state Spring does not
+write — the worker indexes it directly, during processing, minutes before the
+result callback exists. The stale-attempt check inside `applyResult` therefore
+cannot protect it, and before V58 a redelivered attempt-1 execution ran a blind
+`DELETE FROM transcript_chunks WHERE meeting_id = ?` and put the old transcript
+back. Its result callback was then rejected as stale, correctly and far too
+late: the page showed the new transcript and chat answered from the old one.
+
+Every row now carries `processing_attempt`.
+
+* **Writing** deletes only `processing_attempt <= N` and inserts at `N`. An
+  execution has no statement available to it that reaches a newer run's rows —
+  not a check that a reprocess could land just after, but an absence of reach.
+  A stale run may still write its own generation; nothing reads it.
+* **Reading** takes the newest generation present per meeting, via
+  `NOT EXISTS (… newer.processing_attempt > c.processing_attempt)` on all three
+  query paths (meeting chat, workspace chat, semantic search).
+
+**Newest generation present, not the meeting's current attempt.** Reprocessing
+does not delete the transcript, the summary or the action items while it runs,
+and chat does not go dark either: the previous run stays answerable until the new
+one has finished indexing. Matching on `meetings.processing_attempt` would have
+blanked a meeting's chat for the length of a transcription.
+
+`POST /ai/index` — the re-index Spring calls after a transcript edit — carries
+`processingAttempt` for the same reason, read off the meeting row. An edit filed
+under an older generation would be invisible, and chat would keep answering with
+the wording that was just corrected.
+
 ### Date-aware workspace retrieval
 
 `/ai/workspace-chat` reads a time window out of the question before retrieving

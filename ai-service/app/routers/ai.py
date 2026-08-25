@@ -265,7 +265,10 @@ async def index(body: IndexRequest, rag: RagService = Depends(get_rag)) -> Index
     reads the chunks, not the segments, so an edit that is not re-indexed is
     invisible to chat and to search.
     """
-    await rag.index(body.meeting_id, body.user_id, body.transcript, body.segments)
+    await rag.index(
+        body.meeting_id, body.user_id, body.transcript, body.segments,
+        body.processing_attempt,
+    )
     return IndexResponse(indexed=True)
 
 

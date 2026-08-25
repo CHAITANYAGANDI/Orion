@@ -458,10 +458,17 @@ class KafkaWorker:
             if self._rag is None:
                 return
             index_task = asyncio.create_task(
+                # Tagged with this run. pgvector is the one piece of derived
+                # state Spring does not write, so the attempt check in
+                # `applyResult` cannot protect it -- indexing happens here,
+                # minutes before the result callback exists. Carrying the run
+                # down is what stops an overtaken execution replacing the chunks
+                # a newer one has already written.
                 self._rag.index(
-                    meeting_id, event.user_id, transcript.transcript, transcript.segments
+                    meeting_id, event.user_id, transcript.transcript,
+                    transcript.segments, run,
                 ),
-                name=f"rag-index-{meeting_id}",
+                name=f"rag-index-{meeting_id}-run{run}",
             )
 
         try:
