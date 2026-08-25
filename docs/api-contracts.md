@@ -13,11 +13,11 @@ these contracts so they interoperate.
 | frontend       | Next.js            | 3000  | http://localhost:3000     |
 | backend-spring | Spring Boot        | 8080  | http://localhost:8080     |
 | ai-service     | FastAPI            | 8000  | http://localhost:8000     |
-| minio (S3)     | MinIO              | 9000  | http://localhost:9000     |
 
-Postgres, Kafka and Redis are no longer containers. They are Neon, Confluent
-Cloud and Redis Cloud, reached over the internet and configured from `.env`;
-only object storage still runs locally.
+No infrastructure runs locally. Postgres, Kafka, Redis and object storage are
+Neon, Confluent Cloud, Redis Cloud and Cloudflare R2, reached over the internet
+and configured from `.env`. Only the three application containers above are
+built and run here.
 
 The frontend talks **only** to Spring Boot (`/api/v1/**`) and the WebSocket.
 Spring Boot orchestrates FastAPI via Kafka. FastAPI calls back to Spring Boot's

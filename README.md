@@ -13,7 +13,7 @@ tracks commitments and decision drift *across* meetings.
 ```
 Next.js Frontend ──Clerk JWT──▶ Spring Boot API ──┬── PostgreSQL + pgvector
    ▲  (STOMP/WS status)                            ├── Redis (status/rate limit)
-   └───────────────── WebSocket ◀──────────────────┤── S3 / MinIO (audio)
+   └───────────────── WebSocket ◀──────────────────┤── Cloudflare R2 (audio)
                                                     │
                                     Kafka: meeting_uploaded
                                                     ▼
@@ -29,7 +29,7 @@ Next.js Frontend ──Clerk JWT──▶ Spring Boot API ──┬── Postgr
 | `frontend/` | Next.js 14, React, TypeScript, Redux Toolkit, Tailwind, shadcn/ui | 3000 |
 | `backend-spring/` | Java 21, Spring Boot 3, Spring Security, Spring Kafka, JPA, Flyway | 8080 |
 | `ai-service/` | Python 3.12, FastAPI, OpenAI, aiokafka | 8000 |
-| infra | Neon (Postgres 18 + pgvector), Confluent Cloud (Kafka), Redis Cloud, MinIO (S3) | — |
+| infra | Neon (Postgres 18 + pgvector), Confluent Cloud (Kafka), Redis Cloud, Cloudflare R2 | — |
 
 Transcription is chosen separately from the LLM, because the two are not the
 same decision: AssemblyAI and Deepgram diarize, Whisper does not. `auto` follows
@@ -45,7 +45,6 @@ docker compose up --build
 - Frontend:  http://localhost:3000
 - Spring API: http://localhost:8080/actuator/health · Swagger: http://localhost:8080/swagger-ui.html
 - AI service: http://localhost:8000/health · Docs: http://localhost:8000/docs
-- MinIO console: http://localhost:9001 (minioadmin / minioadmin)
 
 The stack runs end-to-end out of the box: **dev auth** (no Clerk account needed)
 and **mock AI** (deterministic transcript/summary, no OpenAI key). To enable the
@@ -155,9 +154,9 @@ so it takes a fourth upload to see.
 The ai-service has its own README with local (non-Docker) run instructions:
 [ai-service](ai-service/README.md). The other two run with `npm run dev` and
 `mvn spring-boot:run`, against the infra services from
-`docker compose up minio minio-init`. Only object storage is local now:
-Postgres, Kafka and Redis are Neon, Confluent Cloud and Redis Cloud, all
-configured from `.env`.
+nothing -- there are no infrastructure containers left. Postgres, Kafka, Redis
+and object storage are Neon, Confluent Cloud, Redis Cloud and Cloudflare R2,
+all configured from `.env`.
 
 ### Tests
 

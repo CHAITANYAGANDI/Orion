@@ -23,7 +23,7 @@ disagreement is recorded.
                                                                        │
                                         ┌──────────────────────────────┘
                                         ▼
-                        presigned PUT ──▶ MinIO/S3 (private)
+                        presigned PUT ──▶ Cloudflare R2 (private)
                                         │
                         Spring createMeeting ──▶ outbox ──▶ Kafka meeting_uploaded
                                         │
