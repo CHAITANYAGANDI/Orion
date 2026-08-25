@@ -643,12 +643,9 @@ function Dial({
  */
 function CloseAccountSection() {
   const { signOut } = useAuth();
-  const overview = useGetPrivacyOverviewQuery();
   const [close, { isLoading }] = useCloseAccountMutation();
   const [typed, setTyped] = React.useState("");
   const [open, setOpen] = React.useState(false);
-
-  const held = overview.data?.held;
 
   async function onClose() {
     try {
@@ -676,13 +673,9 @@ function CloseAccountSection() {
 
       <div className="space-y-3 border-b py-4">
         <p className="text-sm text-muted-foreground">
-          {held
-            ? `Deletes ${held.meetings} meeting${held.meetings === 1 ? "" : "s"}, ` +
-              `${held.recordings} recording${held.recordings === 1 ? "" : "s"} ` +
-              "and everything in them."
-            : "Deletes every meeting, every recording and everything in them."}{" "}
-          <strong className="text-foreground">This cannot be undone.</strong>{" "}
-          Export anything you want to keep first.
+          Deletes everything,{" "}
+          <strong className="text-foreground">permanently</strong>. Export
+          anything you want to keep first.
         </p>
 
         {open ? (

@@ -424,10 +424,12 @@ describe("how long things are kept", () => {
 });
 
 describe("closing the account", () => {
-  it("says the size of what goes, because the number is the warning", () => {
+  it("says what goes and that it is permanent", () => {
     render(<GeneralTab />);
 
-    expect(screen.getByText(/Deletes 12 meetings, 9 recordings/)).toBeInTheDocument();
+    expect(screen.getByText(/Deletes everything/)).toBeInTheDocument();
+    // Bold and its own word, so it survives a skim of the paragraph.
+    expect(screen.getByText("permanently")).toBeInTheDocument();
   });
 
   it("cannot be reached by one click", async () => {
