@@ -29,7 +29,7 @@ Next.js Frontend ──Clerk JWT──▶ Spring Boot API ──┬── Postgr
 | `frontend/` | Next.js 14, React, TypeScript, Redux Toolkit, Tailwind, shadcn/ui | 3000 |
 | `backend-spring/` | Java 21, Spring Boot 3, Spring Security, Spring Kafka, JPA, Flyway | 8080 |
 | `ai-service/` | Python 3.12, FastAPI, OpenAI, aiokafka | 8000 |
-| infra | Postgres 16 + pgvector, Redis 7, Kafka (KRaft), MinIO (S3) | — |
+| infra | Neon (Postgres 18 + pgvector), Confluent Cloud (Kafka), Redis 7, MinIO (S3) | — |
 
 Transcription is chosen separately from the LLM, because the two are not the
 same decision: AssemblyAI and Deepgram diarize, Whisper does not. `auto` follows
@@ -155,7 +155,8 @@ so it takes a fourth upload to see.
 The ai-service has its own README with local (non-Docker) run instructions:
 [ai-service](ai-service/README.md). The other two run with `npm run dev` and
 `mvn spring-boot:run`, against the infra services from
-`docker compose up postgres redis kafka minio minio-init`.
+`docker compose up redis minio minio-init`. Postgres and Kafka are no longer
+local: the stack talks to Neon and Confluent Cloud, configured from `.env`.
 
 ### Tests
 

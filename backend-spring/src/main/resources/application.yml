@@ -41,9 +41,19 @@ spring:
     password: ${FLYWAY_PASSWORD:recallix}
 
   data:
+    # Username and password are blank for the local container, which listens
+    # without auth. A managed Redis (Redis Cloud, Upstash, ElastiCache) needs
+    # both, and `ssl.enabled` alongside them — the hosted endpoints that speak
+    # TLS refuse a plaintext handshake rather than downgrading, so an
+    # unencrypted client hangs instead of reporting anything useful.
     redis:
       host: ${SPRING_DATA_REDIS_HOST:localhost}
       port: ${SPRING_DATA_REDIS_PORT:6379}
+      username: ${SPRING_DATA_REDIS_USERNAME:}
+      password: ${SPRING_DATA_REDIS_PASSWORD:}
+      ssl:
+        enabled: ${SPRING_DATA_REDIS_SSL:false}
+      timeout: 5s
 
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}

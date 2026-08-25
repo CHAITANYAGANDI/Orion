@@ -3,27 +3,6 @@
 name: recallix
 
 services:
-  postgres:
-    # pgvector image = Postgres 16 + the `vector` extension (for RAG chat).
-    image: pgvector/pgvector:pg16
-    environment:
-      POSTGRES_USER: recallix
-      POSTGRES_PASSWORD: recallix
-      POSTGRES_DB: recallix
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-      # Creates the unprivileged runtime role on a fresh volume. Without it the
-      # app would connect as a superuser, and superusers ignore row-level
-      # security entirely — see the script for why that matters.
-      - ./infra/postgres-init:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U recallix"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
   redis:
     image: redis:7-alpine
     ports:
@@ -36,31 +15,6 @@ services:
 
   # Official Apache Kafka image in KRaft mode (single node, no ZooKeeper).
   # NOTE: uses KAFKA_* env vars, not Bitnami's KAFKA_CFG_* convention.
-  kafka:
-    image: apache/kafka:3.7.0
-    ports:
-      - "9092:9092"
-    environment:
-      KAFKA_NODE_ID: "1"
-      KAFKA_PROCESS_ROLES: "controller,broker"
-      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
-      KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
-      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092"
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
-      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
-      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      # Single-node replication settings (defaults of 3 would block topic creation).
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
-    healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
-      interval: 10s
-      timeout: 10s
-      retries: 15
-
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
@@ -97,16 +51,15 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
-        condition: service_healthy
-      kafka:
         condition: service_healthy
       minio:
         condition: service_healthy
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/recallix
+      # Postgres is Neon. The JDBC form of Neon's pooled URL, with
+      # `channel_binding` stripped -- that is a libpq parameter the JDBC driver
+      # does not understand and rejects.
+      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL:?set it in .env}
       # Runtime: unprivileged, so row-level security binds.
       SPRING_DATASOURCE_USERNAME: ${APP_DB_USER:-recallix_app}
       SPRING_DATASOURCE_PASSWORD: ${APP_DB_PASSWORD:-recallix_app}
@@ -115,16 +68,26 @@ services:
       # connection, so no statement can grant itself this privilege.
       RECALLIX_DATASOURCE_SYSTEM_USERNAME: ${SYS_DB_USER:-recallix_sys}
       RECALLIX_DATASOURCE_SYSTEM_PASSWORD: ${SYS_DB_PASSWORD:-recallix_sys}
-      # Migrations: schema owner.
+      # Migrations: schema owner, and the DIRECT endpoint rather than the
+      # pooled one. Flyway holds an advisory lock across several transactions
+      # and a transaction-mode pooler does not keep it, so migrating through
+      # the pooler can deadlock or half-apply.
+      FLYWAY_URL: ${FLYWAY_URL:?set it in .env}
       FLYWAY_USER: ${FLYWAY_USER:-recallix}
       FLYWAY_PASSWORD: ${FLYWAY_PASSWORD:-recallix}
-      SPRING_DATA_REDIS_HOST: redis
+      # Still the compose container. Point these at a managed Redis by setting
+      # the four in .env; nothing here needs to change.
+      SPRING_DATA_REDIS_HOST: ${REDIS_HOST:-redis}
+      SPRING_DATA_REDIS_PORT: ${REDIS_PORT:-6379}
+      SPRING_DATA_REDIS_USERNAME: ${REDIS_USERNAME:-}
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      SPRING_DATA_REDIS_SSL: ${REDIS_SSL:-false}
       # Defaults to the compose broker. Set KAFKA_BOOTSTRAP_SERVERS plus the
       # SASL vars in .env to point local dev at a managed broker instead —
       # worth doing once before a deploy, because credentials that are wrong
       # here fail the same way they would on Render, where the logs are worse.
       # One .env name feeds both services; only the container env differs.
-      SPRING_KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:?set it in .env}
       KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-PLAINTEXT}
       KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-PLAIN}
       KAFKA_SASL_JAAS_CONFIG: ${KAFKA_SASL_JAAS_CONFIG:-}
@@ -152,7 +115,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:?set it in .env}
       KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-PLAINTEXT}
       KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-PLAIN}
       KAFKA_SASL_USERNAME: ${KAFKA_SASL_USERNAME:-}
@@ -203,13 +166,19 @@ services:
       S3_SECRET_KEY: minioadmin
       S3_BUCKET: recallix
       # RAG: direct Postgres access for transcript chunk storage/retrieval.
-      PG_HOST: postgres
-      PG_PORT: "5432"
-      PG_DATABASE: recallix
+      PG_HOST: ${PG_HOST:?set it in .env}
+      PG_PORT: "${PG_PORT:-5432}"
+      # Neon names its database `neondb`, not `recallix`. Parameterised rather
+      # than hardcoded because the failure is a connection error naming a
+      # database that was never meant to exist here.
+      PG_DATABASE: ${PG_DATABASE:-recallix}
       # Unprivileged, same reason as the backend: a superuser connection would
       # silently ignore every row-level security policy.
       PG_USER: ${APP_DB_USER:-recallix_app}
       PG_PASSWORD: ${APP_DB_PASSWORD:-recallix_app}
+      # "prefer" downgrades to plaintext when the server allows it, which the
+      # local container does. Neon refuses unencrypted connections outright.
+      PG_SSLMODE: ${PG_SSLMODE:-prefer}
       # Encrypts voice templates at rest (V53). Unset means speaker
       # identification is switched off entirely -- no embedding is computed and
       # nothing is stored -- which is the correct failure for a deployment that
@@ -223,11 +192,6 @@ services:
       # and recomputed. Generate one with:
       #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
       SPEAKER_PROFILE_KEY: ${SPEAKER_PROFILE_KEY:-zTCIlJAzhDnULzS5z_IBhDcx4YQpVWtfRbKX2sVVNpI=}
-    depends_on:
-      kafka:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
 
   frontend:
     build:
@@ -256,5 +220,4 @@ services:
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
 
 volumes:
-  pgdata:
   miniodata:
