@@ -3,8 +3,8 @@ package com.recallix.dto;
 import com.recallix.domain.MeetingStatus;
 
 /**
- * Status payload pushed to the frontend over STOMP and mirrored into Redis
- * (api-contracts §6/§7). Also the shape of the Kafka status topics.
+ * Status payload pushed to the frontend over STOMP (api-contracts §7), and the
+ * body of the internal status callback the AI worker posts on every stage.
  */
 public record StatusEvent(
         String meetingId,

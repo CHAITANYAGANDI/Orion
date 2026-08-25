@@ -13,11 +13,11 @@ It conforms exactly to the shared contracts in
 
 - **HTTP API** (`/ai/*`) — synchronous transcription / summarization /
   extraction and a one-shot `/ai/process-meeting`.
-- **Kafka worker** — consumes `meeting_uploaded`, runs the pipeline, emits
-  `StatusEvent`s to `transcription_started` / `transcription_completed` /
-  `summary_generated` / `action_items_extracted` (and `meeting_processing_failed`
-  on error), and posts progress + the final `MeetingBriefResult` back to Spring's
-  internal callback.
+- **Kafka worker** — consumes `meeting_uploaded` (the only topic) and runs the
+  pipeline, posting a `StatusEvent` per stage and the final `MeetingBriefResult`
+  back to Spring's internal HTTP callback. A failure is reported the same way,
+  as a FAILED status. Consume-only: it used to publish a topic per stage as
+  well, which nothing consumed but a logger.
 - **Providers** — swap between a **deterministic mock** (default, no API key) and
   **OpenAI** via a single env var, using Strategy + Factory + Adapter patterns.
 

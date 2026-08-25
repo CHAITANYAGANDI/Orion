@@ -14,9 +14,9 @@ these contracts so they interoperate.
 | backend-spring | Spring Boot        | 8080  | http://localhost:8080     |
 | ai-service     | FastAPI            | 8000  | http://localhost:8000     |
 
-No infrastructure runs locally. Postgres, Kafka, Redis and object storage are
-Neon, Confluent Cloud, Redis Cloud and Cloudflare R2, reached over the internet
-and configured from `.env`. Only the three application containers above are
+No infrastructure runs locally. Postgres, Kafka and object storage are Neon,
+Confluent Cloud and Cloudflare R2, reached over the internet and configured
+from `.env`. Only the three application containers above are
 built and run here.
 
 The frontend talks **only** to Spring Boot (`/api/v1/**`) and the WebSocket.
@@ -1267,7 +1267,7 @@ readable.
 ### Internal callback (FastAPI -> Spring, `X-Internal-Token`)
 | Method | Endpoint | Body | Purpose |
 |---|---|---|---|
-| POST | `/internal/meetings/{id}/status` | `{ "status", "progress", "message" }` | Push status; Spring relays to WS + Redis |
+| POST | `/internal/meetings/{id}/status` | `{ "status", "progress", "message" }` | Push status; Spring persists it and relays to WS |
 | POST | `/internal/meetings/{id}/result` | `MeetingBriefResult` | Persist transcript/summary/actions/decisions/risks |
 
 ### Health
@@ -1438,18 +1438,22 @@ capped is minutes and imports.
 
 ---
 
-## 6. Kafka topics (JSON values, key = meetingId)
+## 6. Kafka topic (JSON value, key = meetingId)
+
+One topic. It dispatches work; every report comes back over the internal HTTP
+callbacks in §5.
 
 | Topic | Produced by | Consumed by | Payload |
 |---|---|---|---|
 | `meeting_uploaded` | Spring | FastAPI | `{ meetingId, userId, audioUrl, objectKey, sourceType, sourceUrl, summaryTemplate, language, context, speakers }` |
-| `transcription_started` | FastAPI | Spring | `StatusEvent` |
-| `transcription_completed` | FastAPI | Spring | `StatusEvent` |
-| `summary_generated` | FastAPI | Spring | `StatusEvent` |
-| `action_items_extracted` | FastAPI | Spring | `StatusEvent` |
-| `meeting_processing_failed` | FastAPI | Spring | `{ meetingId, error }` |
-| `payment_successful` | Spring | Spring | `{ userId, plan }` |
-| `usage_limit_reached` | Spring | Spring | `{ userId }` |
+
+There were eight. `transcription_started`, `transcription_completed`,
+`summary_generated`, `action_items_extracted` and `meeting_processing_failed`
+were published by FastAPI beside the HTTP callback that carried the same event,
+and the only subscriber wrote a log line — the transcript, the summary and the
+FAILED state were always persisted from the callback. `payment_successful` and
+`usage_limit_reached` had no producer at all after Stripe was removed in V49.
+All seven were deleted; nothing that reaches a user changed.
 
 `StatusEvent`:
 ```jsonc
@@ -1472,10 +1476,10 @@ the browser also refuses to let the number fall.
 | Reported by | Status | `progress` | Constant |
 |---|---|---|---|
 | Spring, on create | `CREATED` / `UPLOADED` / `QUEUED` | 1 / 2 / 3 | `statusProgress` |
-| `transcription_started` | `TRANSCRIBING` | 5 | `PROGRESS_TRANSCRIBING` |
-| `transcription_completed` | `TRANSCRIBING` | 55 | `PROGRESS_TRANSCRIBED` |
-| `summary_generated` | `SUMMARIZING` | 60 | `PROGRESS_SUMMARIZING` |
-| `action_items_extracted` | `EXTRACTING` | 90 | `PROGRESS_EXTRACTING` |
+| status callback, transcription start | `TRANSCRIBING` | 5 | `PROGRESS_TRANSCRIBING` |
+| status callback, transcript ready | `TRANSCRIBING` | 55 | `PROGRESS_TRANSCRIBED` |
+| status callback, summarizing | `SUMMARIZING` | 60 | `PROGRESS_SUMMARIZING` |
+| status callback, extracting | `EXTRACTING` | 90 | `PROGRESS_EXTRACTING` |
 | final status callback | `READY` / `FAILED` | 100 | `PROGRESS_DONE` |
 
 `FAILED` reports 100, not 0: it is where this meeting's progress ended, and an
@@ -1492,7 +1496,7 @@ Python constants directly so the two halves cannot drift apart unnoticed.
 - STOMP over SockJS at `ws://localhost:8080/ws`.
 - Client subscribes to `/topic/meetings/{meetingId}`.
 - Server pushes `StatusEvent` payloads.
-- Also mirrored into Redis key `meeting:status:{meetingId}` (TTL 1h) for polling fallback
+- The polling fallback is `GET /api/v1/meetings/{id}`, which reads the status column this callback wrote
   via `GET /api/v1/meetings/{id}` (status field) — no extra endpoint needed.
 - Client also subscribes to `/topic/users/{channel}/notifications`, where `channel`
   comes from `GET /api/v1/notifications/unread-count` (the browser is

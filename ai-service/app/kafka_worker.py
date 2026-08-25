@@ -1,9 +1,14 @@
 """Resilient Kafka worker (aiokafka).
 
-Consumes `meeting_uploaded`, runs the full pipeline, and for every stage emits a
-`StatusEvent` to the matching topic (§6) AND posts it to Spring's status
-callback. On completion it posts the `MeetingBriefResult` to Spring's result
-callback. On failure it emits `meeting_processing_failed`.
+Consumes `meeting_uploaded`, runs the full pipeline, and posts every stage to
+Spring's status callback. On completion it posts the `MeetingBriefResult` to
+Spring's result callback; on failure it posts a FAILED status the same way.
+
+Consume-only. The worker used to also produce a `StatusEvent` to a topic per
+stage, and `meeting_processing_failed` on the way out. Nothing consumed them
+except a Spring listener that logged them, while the HTTP callbacks beside each
+one did the actual work -- persisting the transcript, the summary, and the
+FAILED state. The topics were deleted; the callbacks are untouched.
 
 Connection is resilient: if the broker is unreachable at startup the worker logs
 and retries with exponential backoff — it never crashes the app.
@@ -17,22 +22,15 @@ import logging
 
 from app.callback import SpringCallbackClient
 from app.config import Settings
-from app.pipeline import PROGRESS_DONE, TOPIC_TRANSCRIPTION_STARTED, Pipeline
+from app.pipeline import PROGRESS_DONE, Pipeline
 from app.schemas import (
     MeetingUploadedEvent,
-    ProcessingFailedEvent,
     StatusEvent,
 )
 from app.providers.assemblyai_adapter import AudioUnreachableError, TranscriptionRequest
 from app.storage import fetch_audio, presigned_get_url
 
 logger = logging.getLogger("ai-service.kafka")
-
-TOPIC_PROCESSING_FAILED = "meeting_processing_failed"
-
-
-def _json_serializer(value: dict) -> bytes:
-    return json.dumps(value).encode("utf-8")
 
 
 def _default_ssl_context():
@@ -62,7 +60,6 @@ class KafkaWorker:
         self._callback = callback
         self._rag = rag
         self._consumer = None  # type: ignore[var-annotated]
-        self._producer = None  # type: ignore[var-annotated]
         self._task: asyncio.Task | None = None
         self._stopped = asyncio.Event()
 
@@ -84,14 +81,9 @@ class KafkaWorker:
                 await self._consumer.stop()
             except Exception:  # noqa: BLE001
                 pass
-        if self._producer is not None:
-            try:
-                await self._producer.stop()
-            except Exception:  # noqa: BLE001
-                pass
 
     def _security_kwargs(self) -> dict:
-        """Broker auth, shared by the consumer and the producer.
+        """Broker auth for the consumer.
 
         Returns nothing at all for a plaintext broker, so the local path builds
         exactly the client it built before. SASL credentials are attached only
@@ -114,16 +106,10 @@ class KafkaWorker:
 
     # --- resilient connect -------------------------------------------------- #
     async def _connect(self) -> bool:
-        """Try to start consumer + producer. Returns True on success."""
-        from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+        """Try to start the consumer. Returns True on success."""
+        from aiokafka import AIOKafkaConsumer
 
         security = self._security_kwargs()
-        self._producer = AIOKafkaProducer(
-            bootstrap_servers=self._settings.kafka_bootstrap_servers,
-            value_serializer=_json_serializer,
-            key_serializer=lambda k: (k or "").encode("utf-8"),
-            **security,
-        )
         self._consumer = AIOKafkaConsumer(
             self._settings.kafka_topic_meeting_uploaded,
             bootstrap_servers=self._settings.kafka_bootstrap_servers,
@@ -133,7 +119,6 @@ class KafkaWorker:
             auto_offset_reset="earliest",
             **security,
         )
-        await self._producer.start()
         await self._consumer.start()
         return True
 
@@ -164,14 +149,12 @@ class KafkaWorker:
                 delay = min(delay * 2, max_delay)
 
     async def _cleanup_clients(self) -> None:
-        for client in (self._consumer, self._producer):
-            if client is not None:
-                try:
-                    await client.stop()
-                except Exception:  # noqa: BLE001
-                    pass
+        if self._consumer is not None:
+            try:
+                await self._consumer.stop()
+            except Exception:  # noqa: BLE001
+                pass
         self._consumer = None
-        self._producer = None
 
     async def _consume_loop(self) -> None:
         assert self._consumer is not None
@@ -185,14 +168,6 @@ class KafkaWorker:
                 logger.exception("Failed handling meeting_uploaded message: %s", exc)
 
     # --- message handling --------------------------------------------------- #
-    async def _emit(self, topic: str, key: str, value: dict) -> None:
-        if self._producer is None:
-            return
-        try:
-            await self._producer.send_and_wait(topic, value=value, key=key)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to emit to %s: %s", topic, exc)
-
     async def _process_source(self, event, progress_hook, transcript_hook):
         """Fetch the recording and run it through the pipeline.
 
@@ -283,9 +258,7 @@ class KafkaWorker:
         meeting_id = event.meeting_id
         logger.info("Processing meeting_uploaded for %s.", meeting_id)
 
-        async def progress_hook(topic: str, status_event: StatusEvent) -> None:
-            payload = status_event.model_dump(by_alias=True)
-            await self._emit(topic, meeting_id, payload)
+        async def progress_hook(status_event: StatusEvent) -> None:
             await self._callback.post_status(meeting_id, status_event)
 
         # Index into pgvector the moment the transcript exists, concurrently with
@@ -323,8 +296,9 @@ class KafkaWorker:
             if index_task is not None and not index_task.done():
                 index_task.cancel()
             logger.exception("Processing failed for %s: %s", meeting_id, exc)
-            failed = ProcessingFailedEvent(meeting_id=meeting_id, error=str(exc))
-            await self._emit(TOPIC_PROCESSING_FAILED, meeting_id, failed.model_dump(by_alias=True))
+            # The only report of a failure. This is what sets FAILED in
+            # Postgres, records the message, raises the bell notification and
+            # pushes the status frame -- see CallbackService.applyStatus.
             await self._callback.post_status(
                 meeting_id,
                 # 100, not 0. A failure is where this meeting's progress ends,

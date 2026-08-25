@@ -27,14 +27,6 @@ services:
       FLYWAY_URL: ${FLYWAY_URL:?set it in .env}
       FLYWAY_USER: ${FLYWAY_USER:-recallix}
       FLYWAY_PASSWORD: ${FLYWAY_PASSWORD:-recallix}
-      # Redis Cloud. SSL is off because that endpoint does not speak TLS --
-      # a handshake against it returns "wrong version number", meaning the
-      # server answered in plaintext.
-      SPRING_DATA_REDIS_HOST: ${REDIS_HOST:?set it in .env}
-      SPRING_DATA_REDIS_PORT: ${REDIS_PORT:-6379}
-      SPRING_DATA_REDIS_USERNAME: ${REDIS_USERNAME:-}
-      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:-}
-      SPRING_DATA_REDIS_SSL: ${REDIS_SSL:-false}
       # Defaults to the compose broker. Set KAFKA_BOOTSTRAP_SERVERS plus the
       # SASL vars in .env to point local dev at a managed broker instead —
       # worth doing once before a deploy, because credentials that are wrong

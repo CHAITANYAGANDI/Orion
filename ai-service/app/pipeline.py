@@ -2,7 +2,7 @@
 
 The pipeline is provider-agnostic (it depends only on the ports) and is used by
 both the synchronous HTTP endpoints and the async Kafka worker. Progress is
-surfaced through an optional `progress_hook(topic, StatusEvent)` so the worker
+surfaced through an optional `progress_hook(StatusEvent)` so the worker
 can fan each stage out to Kafka + the Spring callback, while HTTP callers can
 ignore it.
 
@@ -42,15 +42,9 @@ from app.templates import resolve
 
 logger = logging.getLogger("ai-service.pipeline")
 
-ProgressHook = Callable[[str, StatusEvent], Awaitable[None]]
+ProgressHook = Callable[[StatusEvent], Awaitable[None]]
 # Fired as soon as the transcript is ready, before analysis starts.
 TranscriptHook = Callable[[TranscriptResponse], Awaitable[None]]
-
-# Kafka topics emitted per stage (api-contracts.md §6).
-TOPIC_TRANSCRIPTION_STARTED = "transcription_started"
-TOPIC_TRANSCRIPTION_COMPLETED = "transcription_completed"
-TOPIC_SUMMARY_GENERATED = "summary_generated"
-TOPIC_ACTION_ITEMS_EXTRACTED = "action_items_extracted"
 
 # The percentage each stage reports, and one half of a contract.
 #
@@ -230,11 +224,10 @@ class Pipeline:
         — nothing is downloaded unless there is a turn worth examining.
         """
 
-        async def emit(topic: str, status: str, progress: int, message: str) -> None:
+        async def emit(status: str, progress: int, message: str) -> None:
             if progress_hook is None:
                 return
             await progress_hook(
-                topic,
                 StatusEvent(meeting_id=meeting_id, status=status, progress=progress, message=message),
             )
 
@@ -242,7 +235,7 @@ class Pipeline:
 
         # 1) Transcription
         await emit(
-            TOPIC_TRANSCRIPTION_STARTED, "TRANSCRIBING", PROGRESS_TRANSCRIBING,
+            "TRANSCRIBING", PROGRESS_TRANSCRIBING,
             "Generating transcript from audio...",
         )
         transcript = await self._transcription.transcribe(
@@ -296,7 +289,7 @@ class Pipeline:
         # its own floor, and the reason the browser clamps rather than trusts
         # whichever of the socket and the poll spoke last.
         await emit(
-            TOPIC_TRANSCRIPTION_COMPLETED, "TRANSCRIBING", PROGRESS_TRANSCRIBED,
+            "TRANSCRIBING", PROGRESS_TRANSCRIBED,
             "Transcript ready; preparing summary...",
         )
 
@@ -327,17 +320,16 @@ class Pipeline:
         player and without transcript deep-links.
         """
 
-        async def emit(topic: str, status: str, progress: int, message: str) -> None:
+        async def emit(status: str, progress: int, message: str) -> None:
             if progress_hook is None:
                 return
             await progress_hook(
-                topic,
                 StatusEvent(meeting_id=meeting_id, status=status, progress=progress, message=message),
             )
 
         started = time.perf_counter()
         await emit(
-            TOPIC_TRANSCRIPTION_COMPLETED, "TRANSCRIBING", PROGRESS_TRANSCRIBED,
+            "TRANSCRIBING", PROGRESS_TRANSCRIBED,
             "Document read; preparing summary...",
         )
         transcript = TranscriptResponse(transcript=text, language=language, segments=[])
@@ -369,7 +361,7 @@ class Pipeline:
         # The detected language rides along so the brief comes back in the
         # language the meeting was actually held in.
         await emit(
-            TOPIC_SUMMARY_GENERATED, "SUMMARIZING", PROGRESS_SUMMARIZING,
+            "SUMMARIZING", PROGRESS_SUMMARIZING,
             "Summarizing and extracting insights...",
         )
         text = transcript.transcript
@@ -389,7 +381,7 @@ class Pipeline:
             self._llm.extract_action_items(text, language),
         )
         await emit(
-            TOPIC_ACTION_ITEMS_EXTRACTED, "EXTRACTING", PROGRESS_EXTRACTING,
+            "EXTRACTING", PROGRESS_EXTRACTING,
             "Insights extracted; finalizing brief...",
         )
 

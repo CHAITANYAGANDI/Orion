@@ -12,7 +12,7 @@ respect. It authorises opening one streaming session, it expires in under a
 minute, and it cannot read a transcript, submit a job or spend anything else on
 the account.
 
-**Nothing about the token is stored.** Not in Postgres, not in Redis, not in a
+**Nothing about the token is stored.** Not in Postgres, not in a cache, not in a
 log line. There is no revocation list because there is nothing worth revoking
 for the seconds it lives, and a token written down somewhere is a token that
 outlives its own expiry.

@@ -1,47 +1,35 @@
 package com.recallix.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.recallix.dto.StatusEvent;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
-
 /**
  * Fans a {@link StatusEvent} out to the frontend over STOMP
- * ({@code /topic/meetings/{id}}) and mirrors the latest status into Redis
- * ({@code meeting:status:{id}}, TTL 1h) for a polling fallback (api-contracts §7).
+ * ({@code /topic/meetings/{id}}).
+ *
+ * <p>This used to also mirror the event into Redis under
+ * {@code meeting:status:{id}} with a one-hour TTL, described as a polling
+ * fallback. Nothing ever read it — the fallback is real, but it is
+ * {@code GET /api/v1/meetings/{id}}, which reads Postgres, where the status was
+ * already written by {@link CallbackService} in the same transaction that
+ * recorded the result. The mirror was a network write per status change feeding
+ * nothing, so it went with Redis itself.
+ *
+ * <p>Postgres remains the source of truth. A dropped STOMP frame costs latency
+ * rather than correctness: the browser polls the meeting anyway, and reads the
+ * committed row.
  */
 @Service
 public class StatusPublisher {
 
-    private static final Logger log = LoggerFactory.getLogger(StatusPublisher.class);
-    private static final Duration TTL = Duration.ofHours(1);
-
     private final SimpMessagingTemplate messaging;
-    private final StringRedisTemplate redis;
-    private final ObjectMapper mapper;
 
-    public StatusPublisher(SimpMessagingTemplate messaging,
-                           StringRedisTemplate redis,
-                           ObjectMapper mapper) {
+    public StatusPublisher(SimpMessagingTemplate messaging) {
         this.messaging = messaging;
-        this.redis = redis;
-        this.mapper = mapper;
     }
 
     public void publish(StatusEvent event) {
         messaging.convertAndSend("/topic/meetings/" + event.meetingId(), event);
-        try {
-            redis.opsForValue().set(
-                    "meeting:status:" + event.meetingId(),
-                    mapper.writeValueAsString(event),
-                    TTL);
-        } catch (Exception e) {
-            log.debug("Redis status mirror failed for {}: {}", event.meetingId(), e.getMessage());
-        }
     }
 }

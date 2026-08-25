@@ -12,7 +12,6 @@ tracks commitments and decision drift *across* meetings.
 
 ```
 Next.js Frontend ──Clerk JWT──▶ Spring Boot API ──┬── PostgreSQL + pgvector
-   ▲  (STOMP/WS status)                            ├── Redis (status/rate limit)
    └───────────────── WebSocket ◀──────────────────┤── Cloudflare R2 (audio)
                                                     │
                                     Kafka: meeting_uploaded
@@ -29,7 +28,7 @@ Next.js Frontend ──Clerk JWT──▶ Spring Boot API ──┬── Postgr
 | `frontend/` | Next.js 14, React, TypeScript, Redux Toolkit, Tailwind, shadcn/ui | 3000 |
 | `backend-spring/` | Java 21, Spring Boot 3, Spring Security, Spring Kafka, JPA, Flyway | 8080 |
 | `ai-service/` | Python 3.12, FastAPI, OpenAI, aiokafka | 8000 |
-| infra | Neon (Postgres 18 + pgvector), Confluent Cloud (Kafka), Redis Cloud, Cloudflare R2 | — |
+| infra | Neon (Postgres 18 + pgvector), Confluent Cloud (Kafka), Cloudflare R2 | — |
 
 Transcription is chosen separately from the LLM, because the two are not the
 same decision: AssemblyAI and Deepgram diarize, Whisper does not. `auto` follows
@@ -143,7 +142,7 @@ so it takes a fourth upload to see.
 | Feature | Status |
 |---|---|
 | Kafka async processing + Outbox | ✅ |
-| Redis rate limiting + status cache | ✅ |
+| In-process rate limiting on the streaming-token endpoint | ✅ |
 | WebSocket live progress | ✅ |
 | Row-level security, per-user data isolation | ✅ |
 | Audit log | ✅ |
@@ -154,9 +153,9 @@ so it takes a fourth upload to see.
 The ai-service has its own README with local (non-Docker) run instructions:
 [ai-service](ai-service/README.md). The other two run with `npm run dev` and
 `mvn spring-boot:run`, against the infra services from
-nothing -- there are no infrastructure containers left. Postgres, Kafka, Redis
-and object storage are Neon, Confluent Cloud, Redis Cloud and Cloudflare R2,
-all configured from `.env`.
+nothing -- there are no infrastructure containers left. Postgres, Kafka and
+object storage are Neon, Confluent Cloud and Cloudflare R2, all configured from
+`.env`.
 
 ### Tests
 

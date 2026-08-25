@@ -6,19 +6,27 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.TopicBuilder;
 
 /**
- * Declares the Kafka topics from api-contracts §6 so they are created on
- * startup (KafkaAdmin is non-fatal if the broker is briefly unavailable).
+ * Declares the Kafka topic used to dispatch work to the AI service, so it is
+ * created on startup (KafkaAdmin is non-fatal if the broker is briefly
+ * unavailable).
+ *
+ * <p>There were eight. Seven carried stage and billing events that only
+ * {@code KafkaStatusConsumer} subscribed to, and all it did with them was write
+ * a log line — the transcript, the summary and the FAILED state all arrive over
+ * the internal HTTP callback and are persisted by {@link
+ * com.recallix.service.CallbackService}, so the topics duplicated nothing and
+ * drove nothing. Two of them, {@code payment_successful} and
+ * {@code usage_limit_reached}, had no producer at all once Stripe was removed
+ * in V49.
+ *
+ * <p>{@code meeting_uploaded} stays, because it is the one that does work:
+ * enqueued through the transactional outbox and consumed by the worker that
+ * runs the pipeline.
  */
 @Configuration
 public class KafkaTopicsConfig {
 
     public static final String MEETING_UPLOADED = "meeting_uploaded";
-    public static final String TRANSCRIPTION_STARTED = "transcription_started";
-    public static final String TRANSCRIPTION_COMPLETED = "transcription_completed";
-    public static final String SUMMARY_GENERATED = "summary_generated";
-    public static final String ACTION_ITEMS_EXTRACTED = "action_items_extracted";
-    public static final String MEETING_PROCESSING_FAILED = "meeting_processing_failed";
-    public static final String USAGE_LIMIT_REACHED = "usage_limit_reached";
 
     /**
      * One partition, broker-default replication.
@@ -35,10 +43,4 @@ public class KafkaTopicsConfig {
     }
 
     @Bean NewTopic meetingUploadedTopic() { return topic(MEETING_UPLOADED); }
-    @Bean NewTopic transcriptionStartedTopic() { return topic(TRANSCRIPTION_STARTED); }
-    @Bean NewTopic transcriptionCompletedTopic() { return topic(TRANSCRIPTION_COMPLETED); }
-    @Bean NewTopic summaryGeneratedTopic() { return topic(SUMMARY_GENERATED); }
-    @Bean NewTopic actionItemsExtractedTopic() { return topic(ACTION_ITEMS_EXTRACTED); }
-    @Bean NewTopic meetingProcessingFailedTopic() { return topic(MEETING_PROCESSING_FAILED); }
-    @Bean NewTopic usageLimitReachedTopic() { return topic(USAGE_LIMIT_REACHED); }
 }

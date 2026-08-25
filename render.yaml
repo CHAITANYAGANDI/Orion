@@ -1,7 +1,6 @@
 # Recallix on Render — three Docker services against managed backing stores.
 #
 #   Postgres  Neon          (already provisioned)
-#   Redis     managed URL   (already provisioned)
 #   Kafka     Confluent Cloud
 #   Storage   Cloudflare R2
 #
@@ -10,9 +9,10 @@
 # blueprint stays committable. See docs/deploy.md for how each one is obtained
 # and for the one-time database setup, which this file cannot do.
 #
-# Deliberately NOT declared here: `databases:` and a Render Redis. Both already
-# exist elsewhere, and declaring them would have Render provision a second,
-# empty copy alongside the ones actually holding the data.
+# Deliberately NOT declared here: `databases:`. Neon already holds the data, and
+# declaring one would have Render provision a second, empty copy alongside it.
+# There is no Redis at all any more -- the rate limiter it backed is in-process,
+# which is exactly as correct while the backend runs as a single instance.
 
 services:
   # ---------------------------------------------------------------------------
@@ -57,10 +57,6 @@ services:
         sync: false        # neondb_owner — the schema owner
       - key: FLYWAY_PASSWORD
         sync: false
-
-      # --- Redis ------------------------------------------------------------
-      - key: SPRING_DATA_REDIS_URL
-        sync: false        # rediss://...  (TLS)
 
       # --- Kafka (Confluent Cloud) ------------------------------------------
       - key: SPRING_KAFKA_BOOTSTRAP_SERVERS

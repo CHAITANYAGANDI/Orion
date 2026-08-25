@@ -1,7 +1,7 @@
 # Deploying Recallix
 
 Target: **Render** for the three services, with **Neon** (Postgres), **Confluent
-Cloud** (Kafka), **Cloudflare R2** (object storage) and a managed **Redis**.
+Cloud** (Kafka) and **Cloudflare R2** (object storage).
 
 [`render.yaml`](../render.yaml) declares the services. It cannot do the one-time
 provisioning below, and several steps here are the difference between a
@@ -105,11 +105,11 @@ ALTER ROLE recallix_app BYPASSRLS;      -- MUST be denied
 
 ## 2. Confluent Cloud
 
-Only **one** of the eight topics is load-bearing. `meeting_uploaded` carries job
-dispatch from the backend's outbox to the ai-service worker; break it and nothing
-transcribes. The other seven are consumed by `KafkaStatusConsumer`, which only
-logs — the status updates the UI actually shows travel over the internal HTTP
-callbacks, not Kafka. Worth knowing when you are deciding how much to spend here.
+One topic, and it is load-bearing. `meeting_uploaded` carries job dispatch from
+the backend's outbox to the ai-service worker; break it and nothing transcribes.
+Everything the UI shows — each stage, the transcript, the summary and a failure
+— travels over the internal HTTP callbacks instead, so Kafka volume here is one
+message per meeting.
 
 ### Create the cluster
 
@@ -117,16 +117,17 @@ A **Basic** cluster in the region nearest the Render services. Basic bills on
 consumption and costs nothing at rest, which for one message per meeting is the
 right shape.
 
-### Create the topics
+### Create the topic
 
-Create all eight with **1 partition** each, leaving the replication factor at the
-default:
+One topic, **1 partition**, replication factor left at the default:
 
 ```
-meeting_uploaded            transcription_started      transcription_completed
-summary_generated           action_items_extracted     meeting_processing_failed
-payment_successful          usage_limit_reached
+meeting_uploaded
 ```
+
+An older build created eight. The other seven carried stage and billing events
+that nothing consumed except a logger, and they were removed — if your cluster
+still has them, they are inert and can be deleted at your convenience.
 
 Confluent Cloud enforces a replication factor of **3** and rejects an explicit 1
 with `POLICY_VIOLATION`, so `KafkaTopicsConfig` asks for `replicas(-1)` — Kafka's
@@ -240,8 +241,14 @@ mailed to it either way; Recallix sends no email (V56).
 
 ## 5. Redis
 
-Set `SPRING_DATA_REDIS_URL` to the `rediss://` URL. Boot parses host, port,
-password and TLS from it and ignores the `SPRING_DATA_REDIS_HOST`/`PORT` pair.
+None. There is no Redis to provision.
+
+It backed one thing: a fixed-window counter in front of the streaming-token
+endpoint. That counter is now a map inside the backend, which is exactly as
+correct while the backend runs as a single instance — and it must, for the
+outbox reason in "What is not covered" below. The limit is unchanged at 30
+requests per user per 10 minutes, and it no longer fails open, because there is
+no longer a connection that can fail.
 
 ---
 

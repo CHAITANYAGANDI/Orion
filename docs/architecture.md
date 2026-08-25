@@ -11,9 +11,9 @@ slices; RTK Query for the API client.
 ### 2. `backend-spring/` — Spring Boot (system of record + orchestrator)
 Owns all business data and rules. Validates auth, enforces usage limits, generates
 presigned URLs, persists meetings, and **kicks off processing by publishing a
-`meeting_uploaded` Kafka event** (via the transactional Outbox). Relays FastAPI
-status back to the browser over WebSocket and caches it in Redis. Handles Stripe
-billing. Never runs AI itself.
+`meeting_uploaded` Kafka event** (via the transactional Outbox). Persists each
+FastAPI status callback and relays it to the browser over WebSocket. Never runs
+AI itself.
 
 ### 3. `ai-service/` — FastAPI (AI worker)
 Stateless compute. Consumes `meeting_uploaded`, downloads audio from S3,
@@ -28,17 +28,22 @@ Also exposes the same steps as synchronous HTTP endpoints for testing.
 User picks audio ─▶ POST /meetings/upload-url ─▶ presigned PUT to S3
                  ─▶ POST /meetings (metadata, status=UPLOADED)
 Spring: check usage limit ─▶ write outbox row ─▶ publish meeting_uploaded
-FastAPI consumer:
-   status TRANSCRIBING ─▶ Whisper ─▶ transcription_completed
-   status SUMMARIZING  ─▶ GPT summary ─▶ summary_generated
-   status EXTRACTING   ─▶ GPT actions/decisions/risks ─▶ action_items_extracted
+FastAPI consumer (each stage POSTs /internal/meetings/{id}/status):
+   status TRANSCRIBING ─▶ transcribe
+   status SUMMARIZING  ─▶ GPT summary
+   status EXTRACTING   ─▶ GPT action items
    POST /internal/meetings/{id}/result  (persist everything, status=READY)
-Spring: relay each status to /topic/meetings/{id} (WS) + Redis cache
+Spring: persist each status, relay to /topic/meetings/{id} (WS)
 Browser: live timeline ─▶ Meeting Brief Ready
 ```
 
-Failure at any step → `meeting_processing_failed` → Spring marks meeting FAILED,
-stores `error_message`, WS pushes FAILED. User can `POST /meetings/{id}/reprocess`.
+Failure at any step → the worker POSTs status FAILED to the same callback →
+Spring marks the meeting FAILED, stores `error_message`, raises a notification
+and pushes FAILED over WS. User can `POST /meetings/{id}/reprocess`.
+
+`meeting_uploaded` is the only Kafka topic. The stage events above were once
+published to a topic each as well; nothing consumed them but a logger, so they
+were removed and the HTTP callback beside each one is now the only report.
 
 ## Why this shape
 - **Two languages on purpose**: Java for transactional business/billing/security,
@@ -47,8 +52,11 @@ stores `error_message`, WS pushes FAILED. User can `POST /meetings/{id}/reproces
   survives worker restarts, gives an event log. Outbox pattern guarantees the
   event is published iff the DB write commits.
 - **Presigned uploads**: large media bypasses the JVM; the API only handles metadata.
-- **Redis**: rate limiting (token bucket per user/plan), status cache (polling
-  fallback + fast dashboard), usage counters.
+- **No Redis**: the one counter it held — burst protection on the
+  streaming-token endpoint — is a map in the backend, which is exactly as
+  correct while the backend runs as a single instance, and cannot be
+  unavailable. Status is read from Postgres, which always was the source of
+  truth.
 
 ## Design patterns (where)
 | Pattern | Location |

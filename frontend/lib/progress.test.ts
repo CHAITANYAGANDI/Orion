@@ -29,10 +29,10 @@ import type { MeetingStatus } from "@/lib/types";
  * these tests are what says so.
  */
 const WORKER_EVENTS: Array<[MeetingStatus, number]> = [
-  ["TRANSCRIBING", 5], // PROGRESS_TRANSCRIBING - transcription_started
-  ["TRANSCRIBING", 55], // PROGRESS_TRANSCRIBED  - transcription_completed
-  ["SUMMARIZING", 60], // PROGRESS_SUMMARIZING  - summary_generated
-  ["EXTRACTING", 90], // PROGRESS_EXTRACTING   - action_items_extracted
+  ["TRANSCRIBING", 5], // PROGRESS_TRANSCRIBING - transcription starts
+  ["TRANSCRIBING", 55], // PROGRESS_TRANSCRIBED  - transcript ready
+  ["SUMMARIZING", 60], // PROGRESS_SUMMARIZING  - summarizing
+  ["EXTRACTING", 90], // PROGRESS_EXTRACTING   - extracting action items
   ["READY", 100], // PROGRESS_DONE
 ];
 

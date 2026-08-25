@@ -619,11 +619,6 @@ class MeetingUploadedEvent(CamelModel):
     multichannel: bool = False
 
 
-class ProcessingFailedEvent(CamelModel):
-    meeting_id: str
-    error: str
-
-
 # --------------------------------------------------------------------------- #
 # Speaker identification
 # --------------------------------------------------------------------------- #
