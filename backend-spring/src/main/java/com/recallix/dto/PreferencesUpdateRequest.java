@@ -34,6 +34,17 @@ public record PreferencesUpdateRequest(
         @Size(max = 40, message = "Pronouns are shorter than that")
         String pronouns,
         /**
+         * The account address itself, not {@code recapEmail}.
+         *
+         * <p>Accepted only where Recallix owns it. Under an identity provider
+         * the column is a cache of the provider's fact and is rewritten from
+         * the token on the next request, so an edit is refused there rather
+         * than accepted and quietly undone.
+         */
+        @Email(message = "That doesn't look like an email address")
+        @Size(max = 320, message = "That email address is too long")
+        String email,
+        /**
          * A profile picture as a {@code data:image/...;base64,...} URL, or an
          * empty string to remove it.
          *

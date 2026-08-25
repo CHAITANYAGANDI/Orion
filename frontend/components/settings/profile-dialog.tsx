@@ -1,18 +1,19 @@
 "use client";
 
 /**
- * "Your Profile" — everything a person says about themselves, in one place.
+ * "Your Profile" — the four things a person can say about themselves here.
  *
- * A dialog rather than inline fields, and that is the point of it: the settings
- * page is read far more often than it is edited, and a page whose every field
- * is an input invites somebody to change one by accident while scanning it.
- * Editing is a thing you decide to start.
+ * <p>A dialog rather than inline fields, and that is the point of it: the
+ * settings page is read far more often than it is edited, and a page whose
+ * every field is an input invites somebody to change one by accident while
+ * scanning it. Editing is a thing you decide to start.
  *
- * The password is shown and cannot be typed into. Recallix never holds one —
- * Clerk does, and a development session is identified by a header and has none
- * at all — so an editable box here would be a control that silently does
- * nothing. Showing the dots with a sentence saying who does hold it is the
- * honest version of the same row.
+ * <p>The password is not typed into this form. It is not Recallix's to hold —
+ * there is no password column and no login form; the identity provider owns
+ * sign-in — so the row shows dots and opens a dialog that hands the change to
+ * the provider. Putting an editable box here instead would mean either storing
+ * a credential this product has deliberately never stored, or a control that
+ * silently did nothing.
  */
 
 import * as React from "react";
@@ -29,38 +30,42 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CameraCapture } from "@/components/settings/camera-capture";
+import { ChangePasswordDialog } from "@/components/settings/change-password-dialog";
 import { AvatarError, avatarFromFile, initialsOf } from "@/lib/avatar";
-import { DEPARTMENTS, ROLES, withCurrent } from "@/lib/profile-options";
+import {
+  AccountActionError,
+  canChangePassword,
+  changePassword,
+} from "@/lib/account-actions";
 import { cn } from "@/lib/utils";
 
 export interface ProfileForm {
   displayName: string;
-  pronouns: string;
-  department: string;
-  jobRole: string;
+  email: string;
   avatarUrl: string;
 }
 
 export function ProfileDialog({
   open,
   initial,
-  email,
-  passwordNote,
+  /** "clerk" or "dev". Decides whether either credential can be changed at all. */
+  mode,
   saving,
   onClose,
   onSave,
 }: {
   open: boolean;
   initial: ProfileForm;
-  /** From the sign-in provider, so it is shown and not edited. */
-  email: string | null;
-  passwordNote: string;
+  mode: string;
   saving?: boolean;
   onClose: () => void;
   onSave: (form: ProfileForm) => void;
 }) {
   const [form, setForm] = React.useState<ProfileForm>(initial);
   const [camera, setCamera] = React.useState(false);
+  const [password, setPassword] = React.useState(false);
+  const [changing, setChanging] = React.useState(false);
+  const [passwordError, setPasswordError] = React.useState<string | null>(null);
   const fileRef = React.useRef<HTMLInputElement | null>(null);
 
   // Reset from props each time it opens, so cancelling really discards. Keyed
@@ -70,6 +75,8 @@ export function ProfileDialog({
     if (open) setForm(initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  const providerOwnsSignIn = canChangePassword(mode);
 
   function set<K extends keyof ProfileForm>(key: K, value: ProfileForm[K]) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -88,6 +95,24 @@ export function ProfileDialog({
     }
   }
 
+  async function submitPassword(current: string, next: string) {
+    setChanging(true);
+    setPasswordError(null);
+    try {
+      await changePassword(current, next);
+      setPassword(false);
+      toast.success("Password changed. Other sessions have been signed out.");
+    } catch (err) {
+      setPasswordError(
+        err instanceof AccountActionError
+          ? err.message
+          : "That password could not be changed.",
+      );
+    } finally {
+      setChanging(false);
+    }
+  }
+
   return (
     <>
       <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
@@ -95,7 +120,7 @@ export function ProfileDialog({
           <DialogHeader>
             <DialogTitle>Your Profile</DialogTitle>
             <DialogDescription className="sr-only">
-              Your name, photo and how you are described across Recallix.
+              Your name, photo and how you sign in.
             </DialogDescription>
           </DialogHeader>
 
@@ -148,56 +173,71 @@ export function ProfileDialog({
             </div>
 
             {/* ---- name ---- */}
-            <Text
-              id="profile-name"
-              label="Full Name"
-              value={form.displayName}
-              onChange={(v) => set("displayName", v)}
-              placeholder="Priya Raman"
-              hint="Spell it the way your transcripts do — that is what action items are matched against."
-            />
-
-            {/* ---- pronouns ---- */}
-            <Text
-              id="profile-pronouns"
-              label="Pronouns"
-              value={form.pronouns}
-              onChange={(v) => set("pronouns", v)}
-              placeholder="e.g. she/her, he/him, they/them"
-              hint="Shown beside your name. Recallix never guesses this from anything."
-            />
-
-            {/* ---- email: theirs, not ours ---- */}
             <div className="space-y-1.5">
-              <Label htmlFor="profile-email">Email</Label>
-              <Input id="profile-email" value={email ?? ""} readOnly disabled
-                     placeholder="No address from your sign-in provider" />
+              <Label htmlFor="profile-name">Full Name</Label>
+              <Input
+                id="profile-name"
+                value={form.displayName}
+                placeholder="Priya Raman"
+                onChange={(e) => set("displayName", e.target.value)}
+              />
               <p className="text-xs text-muted-foreground">
-                From your sign-in provider. Change it there and it changes here.
+                Spell it the way your transcripts do — that is what action items are
+                matched against.
               </p>
             </div>
 
-            {/* ---- password: shown, never held ---- */}
+            {/* ---- email ---- */}
             <div className="space-y-1.5">
-              <Label htmlFor="profile-password">Password</Label>
-              <Input id="profile-password" type="password" value="••••••••••" readOnly disabled />
-              <p className="text-xs text-muted-foreground">{passwordNote}</p>
+              <Label htmlFor="profile-email">Email</Label>
+              <Input
+                id="profile-email"
+                type="email"
+                value={form.email}
+                disabled={providerOwnsSignIn}
+                placeholder="you@example.com"
+                onChange={(e) => set("email", e.target.value)}
+              />
+              {providerOwnsSignIn && (
+                // Not merely disabled: the server refuses it too, because the
+                // column is rewritten from the sign-in token on the next
+                // request and an accepted edit would silently revert.
+                <p className="text-xs text-muted-foreground">
+                  Managed by your sign-in provider. Change it there and it changes here.
+                </p>
+              )}
             </div>
 
-            <Choice
-              id="profile-department"
-              label="Department"
-              value={form.department}
-              options={withCurrent(DEPARTMENTS, form.department)}
-              onChange={(v) => set("department", v)}
-            />
-            <Choice
-              id="profile-role"
-              label="Role"
-              value={form.jobRole}
-              options={withCurrent(ROLES, form.jobRole)}
-              onChange={(v) => set("jobRole", v)}
-            />
+            {/* ---- password ---- */}
+            <div className="space-y-1.5">
+              <Label htmlFor="profile-password">Password</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="profile-password"
+                  type="password"
+                  value="••••••••••"
+                  readOnly
+                  disabled
+                  className="flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!providerOwnsSignIn}
+                  onClick={() => {
+                    setPasswordError(null);
+                    setPassword(true);
+                  }}
+                >
+                  Change
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {providerOwnsSignIn
+                  ? "Changing it signs out your other sessions."
+                  : "Development session — there is no password to change."}
+              </p>
+            </div>
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
@@ -220,6 +260,14 @@ export function ProfileDialog({
           setCamera(false);
         }}
       />
+
+      <ChangePasswordDialog
+        open={password}
+        busy={changing}
+        error={passwordError}
+        onClose={() => setPassword(false)}
+        onSubmit={(current, next) => void submitPassword(current, next)}
+      />
     </>
   );
 }
@@ -234,89 +282,17 @@ export function Avatar({
   name?: string | null;
   className?: string;
 }) {
-  const base = "flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary font-bold text-primary-foreground";
+  const base =
+    "flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary font-bold text-primary-foreground";
   if (url) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={url}
-        alt=""
-        className={cn(base, "h-14 w-14 object-cover", className)}
-      />
+      <img src={url} alt="" className={cn(base, "h-14 w-14 object-cover", className)} />
     );
   }
   return (
     <span className={cn(base, "h-14 w-14 text-lg", className)} aria-hidden="true">
       {initialsOf(name)}
     </span>
-  );
-}
-
-function Text({
-  id,
-  label,
-  value,
-  onChange,
-  placeholder,
-  hint,
-}: {
-  id: string;
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  hint?: string;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <Label htmlFor={id}>{label}</Label>
-      <Input id={id} value={value} placeholder={placeholder}
-             onChange={(e) => onChange(e.target.value)} />
-      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-    </div>
-  );
-}
-
-/**
- * A list, plus whatever was already stored.
- *
- * These were free text before, so a real account may hold "Platform
- * Engineering" — a list that quietly dropped it would rewrite somebody's
- * profile the first time they opened this dialog to change something else.
- */
-function Choice({
-  id,
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  id: string;
-  label: string;
-  value: string;
-  options: string[];
-  onChange: (v: string) => void;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <Label htmlFor={id}>{label}</Label>
-      <select
-        id={id}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={cn(
-          "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm",
-          "ring-offset-background focus-visible:outline-none focus-visible:ring-2",
-          "focus-visible:ring-ring focus-visible:ring-offset-2",
-        )}
-      >
-        <option value="">Not set</option>
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
-    </div>
   );
 }

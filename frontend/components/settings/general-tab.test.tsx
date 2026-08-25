@@ -164,13 +164,20 @@ beforeEach(() => {
 });
 
 describe("who you are", () => {
-  it("shows the name, address, department and role", () => {
+  it("shows the name and the address", () => {
     render(<GeneralTab />);
 
     expect(screen.getByText("Priya Raman")).toBeInTheDocument();
     expect(screen.getByText("priya@example.com")).toBeInTheDocument();
-    expect(screen.getByText("IT")).toBeInTheDocument();
-    expect(screen.getByText("Individual contributor")).toBeInTheDocument();
+  });
+
+  it("no longer shows a department or a role", () => {
+    // Both were descriptive only -- nothing routed by either -- and a profile
+    // that asks for facts it never uses is a form people fill in for nothing.
+    render(<GeneralTab />);
+
+    expect(screen.queryByText("IT")).not.toBeInTheDocument();
+    expect(screen.queryByText("Individual contributor")).not.toBeInTheDocument();
   });
 
   it("says where the password lives rather than pretending to hold one", () => {
@@ -188,13 +195,12 @@ describe("who you are", () => {
     ).toBeInTheDocument();
   });
 
-  it("says so when the provider gave no address", () => {
+  it("says so when there is no address yet", () => {
     prefs = { ...prefs, email: null };
     render(<GeneralTab />);
 
-    // Dev sessions have no provider, and "no email" reads as a broken feature
-    // unless the page says why.
-    expect(screen.getByText(/No address from your sign-in provider/)).toBeInTheDocument();
+    // A blank line where an address should be reads as a broken feature.
+    expect(screen.getByText(/No email address yet/)).toBeInTheDocument();
   });
 
   it("is read-only until Edit is pressed", () => {
@@ -214,19 +220,22 @@ describe("editing", () => {
     await openEditor();
 
     expect(screen.getByLabelText("Full Name")).toHaveValue("Priya Raman");
-    expect(screen.getByLabelText("Department")).toHaveValue("IT");
-    expect(screen.getByLabelText("Role")).toHaveValue("Individual contributor");
+    expect(screen.getByLabelText("Email")).toHaveValue("priya@example.com");
   });
 
-  it("shows the two it cannot change, and refuses to let them be edited", async () => {
+  it("asks for nothing it does not use", async () => {
     await openEditor();
 
-    // Shown, because a profile that omits your own address reads as broken.
-    // Disabled, because Recallix does not hold either: the address is the
-    // sign-in provider's fact and the password is only ever Clerk's. An
-    // editable box would be a control that silently does nothing.
-    expect(screen.getByLabelText("Email")).toBeDisabled();
-    expect(screen.getByLabelText("Password")).toBeDisabled();
+    expect(screen.queryByLabelText("Department")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Role")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Pronouns")).not.toBeInTheDocument();
+  });
+
+  it("lets the address be edited in a session Recallix owns", async () => {
+    await openEditor();
+
+    // Dev has no provider, so the column is Recallix's own and an edit sticks.
+    expect(screen.getByLabelText("Email")).toBeEnabled();
   });
 
   it("never puts a real password in the DOM", async () => {
@@ -234,47 +243,23 @@ describe("editing", () => {
 
     // Dots are a drawing of a password, not one. Recallix has never held it,
     // and rendering anything else here would mean it had started to.
+    expect(screen.getByLabelText("Password")).toBeDisabled();
     expect(screen.getByLabelText("Password")).toHaveValue("••••••••••");
   });
 
   it("saves every field together, so changing one cannot clear another", async () => {
     await openEditor();
 
-    await userEvent.selectOptions(screen.getByLabelText("Department"), "Engineering");
+    await userEvent.clear(screen.getByLabelText("Email"));
+    await userEvent.type(screen.getByLabelText("Email"), "new@example.com");
     await userEvent.click(screen.getByRole("button", { name: "Finish" }));
 
     await waitFor(() =>
       expect(update).toHaveBeenCalledWith({
         displayName: "Priya Raman",
-        pronouns: "",
-        department: "Engineering",
-        jobRole: "Individual contributor",
+        email: "new@example.com",
         avatarUrl: "",
       }),
-    );
-  });
-
-  it("keeps a department that is not on the list", async () => {
-    // Both fields were free text before the pickers existed. A select whose
-    // value is absent from its options renders the first option instead, so
-    // opening this to change a photo would silently rewrite somebody\'s
-    // department -- data loss with no prompt and no undo.
-    prefs = { ...prefs, department: "Platform Engineering" };
-    await openEditor();
-
-    expect(screen.getByLabelText("Department")).toHaveValue("Platform Engineering");
-  });
-
-  it("records pronouns rather than inferring them", async () => {
-    await openEditor();
-
-    await userEvent.type(screen.getByLabelText("Pronouns"), "they/them");
-    await userEvent.click(screen.getByRole("button", { name: "Finish" }));
-
-    await waitFor(() =>
-      expect(update).toHaveBeenCalledWith(
-        expect.objectContaining({ pronouns: "they/them" }),
-      ),
     );
   });
 

@@ -34,7 +34,7 @@ public class PreferencesController {
                 new UserService.PreferencesPatch(
                         req.autoEmailRecap(), req.recapEmail(), req.displayName(),
                         req.department(), req.jobRole(),
-                        req.pronouns(), req.avatarUrl(), req.defaultLanguage(),
+                        req.pronouns(), req.email(), req.avatarUrl(), req.defaultLanguage(),
                         req.chatHistoryDays(), req.chatReadsEverything(),
                         req.taskReminders(), req.weeklyDigest(),
                         req.emailsEnabled(), req.recapForImports(),

@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { avatarFromFile, AvatarError, initialsOf } from "@/lib/avatar";
-import { DEPARTMENTS, ROLES, withCurrent } from "@/lib/profile-options";
 
 /**
  * The parts of the profile picture that are decidable without a canvas.
@@ -53,27 +52,5 @@ describe("initialsOf", () => {
   it("admits it does not know rather than showing a stray character", () => {
     expect(initialsOf(null, null)).toBe("?");
     expect(initialsOf("   ")).toBe("?");
-  });
-});
-
-describe("withCurrent", () => {
-  it("leaves a listed value alone", () => {
-    expect(withCurrent(DEPARTMENTS, "IT")).toEqual(DEPARTMENTS);
-    expect(withCurrent(ROLES, "Manager")).toEqual(ROLES);
-  });
-
-  it("keeps a value the list does not have", () => {
-    // These were free text before the pickers existed. Dropping the stored
-    // value would make a <select> render the first option instead, silently
-    // rewriting somebody's department the moment they opened the dialog.
-    const options = withCurrent(DEPARTMENTS, "Platform Engineering");
-    expect(options[0]).toBe("Platform Engineering");
-    expect(options).toHaveLength(DEPARTMENTS.length + 1);
-  });
-
-  it("adds nothing for an empty value", () => {
-    expect(withCurrent(ROLES, "")).toEqual(ROLES);
-    expect(withCurrent(ROLES, null)).toEqual(ROLES);
-    expect(withCurrent(ROLES, "   ")).toEqual(ROLES);
   });
 });

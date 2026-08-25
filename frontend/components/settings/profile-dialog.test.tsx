@@ -3,20 +3,28 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 /**
- * The profile dialog, and mostly the photo.
+ * The profile dialog: the photo, the email, and the way into a password change.
  *
- * The text fields are covered through the settings tab, which is where a person
- * actually reaches them. What is pinned here is the picture: jsdom has no 2D
- * canvas, so the downscale itself is stubbed and what is tested is the wiring
- * around it — that a pick becomes the avatar, that a failure says so instead of
- * silently keeping the old one, and that removing it really removes it.
+ * jsdom has no 2D canvas, so the image downscale itself is stubbed and what is
+ * tested is the wiring around it — that a pick becomes the avatar, that a
+ * failure says so instead of silently keeping the old one, and that removing it
+ * really removes it.
+ *
+ * The rest is about restraint. Neither credential belongs to Recallix, and the
+ * dialog has to be clear about which of them this deployment can change at all.
  */
 const { avatarFromFile } = vi.hoisted(() => ({ avatarFromFile: vi.fn() }));
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
+const { changePassword } = vi.hoisted(() => ({ changePassword: vi.fn() }));
 
 vi.mock("@/lib/avatar", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/avatar")>();
   return { ...real, avatarFromFile };
+});
+
+vi.mock("@/lib/account-actions", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/account-actions")>();
+  return { ...real, changePassword };
 });
 
 vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
@@ -34,21 +42,18 @@ const PNG = "data:image/png;base64,iVBORw0KGgo=";
 
 const EMPTY: ProfileForm = {
   displayName: "Priya Raman",
-  pronouns: "",
-  department: "IT",
-  jobRole: "Individual contributor",
+  email: "priya@example.com",
   avatarUrl: "",
 };
 
-function show(initial: ProfileForm = EMPTY) {
+function show(initial: ProfileForm = EMPTY, mode = "dev") {
   const onSave = vi.fn();
   const onClose = vi.fn();
   render(
     <ProfileDialog
       open
       initial={initial}
-      email="priya@example.com"
-      passwordNote="Managed by your sign-in provider."
+      mode={mode}
       onClose={onClose}
       onSave={onSave}
     />,
@@ -59,6 +64,30 @@ function show(initial: ProfileForm = EMPTY) {
 beforeEach(() => {
   vi.clearAllMocks();
   avatarFromFile.mockResolvedValue(PNG);
+  changePassword.mockResolvedValue(undefined);
+});
+
+describe("what it asks for", () => {
+  it("no longer asks for a department, a role or pronouns", () => {
+    show();
+    expect(screen.queryByLabelText("Department")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Role")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Pronouns")).not.toBeInTheDocument();
+  });
+
+  it("saves the name, email and photo together", async () => {
+    const { onSave } = show();
+
+    await userEvent.clear(screen.getByLabelText("Email"));
+    await userEvent.type(screen.getByLabelText("Email"), "new@example.com");
+    await userEvent.click(screen.getByRole("button", { name: "Finish" }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      displayName: "Priya Raman",
+      email: "new@example.com",
+      avatarUrl: "",
+    });
+  });
 });
 
 describe("the photo", () => {
@@ -137,16 +166,77 @@ describe("the photo", () => {
   });
 });
 
-describe("what it will not let you change", () => {
-  it("shows the email and the password without letting either be typed into", () => {
-    show();
+describe("the email", () => {
+  it("can be edited where Recallix owns it", async () => {
+    show(EMPTY, "dev");
+    expect(screen.getByLabelText("Email")).toBeEnabled();
+  });
+
+  it("cannot be edited when a provider owns it", () => {
+    // Not politeness: the server refuses it too, because the column is
+    // rewritten from the sign-in token on the next request, so an accepted
+    // edit would appear to work and silently revert.
+    show(EMPTY, "clerk");
+
     expect(screen.getByLabelText("Email")).toBeDisabled();
+    expect(screen.getByText(/Managed by your sign-in provider/)).toBeInTheDocument();
+  });
+});
+
+describe("the password", () => {
+  it("is never a typed field on this form", () => {
+    show(EMPTY, "clerk");
     expect(screen.getByLabelText("Password")).toBeDisabled();
   });
 
-  it("says who holds the password", () => {
-    show();
-    expect(screen.getByText("Managed by your sign-in provider.")).toBeInTheDocument();
+  it("cannot be changed in a session that has no password", () => {
+    show(EMPTY, "dev");
+
+    expect(screen.getByRole("button", { name: "Change" })).toBeDisabled();
+    expect(screen.getByText(/no password to change/)).toBeInTheDocument();
+  });
+
+  it("opens the change dialog under a provider", async () => {
+    show(EMPTY, "clerk");
+
+    await userEvent.click(screen.getByRole("button", { name: "Change" }));
+
+    expect(screen.getByRole("heading", { name: "Change Password" })).toBeInTheDocument();
+  });
+
+  it("hands the current and new password to the provider", async () => {
+    show(EMPTY, "clerk");
+    await userEvent.click(screen.getByRole("button", { name: "Change" }));
+
+    await userEvent.type(screen.getByLabelText("Current password"), "OldPass1");
+    await userEvent.type(screen.getByLabelText("New password"), "NewPass99");
+    await userEvent.type(screen.getByLabelText("Confirm new password"), "NewPass99");
+    await userEvent.click(screen.getByRole("button", { name: "Update" }));
+
+    await waitFor(() =>
+      expect(changePassword).toHaveBeenCalledWith("OldPass1", "NewPass99"),
+    );
+  });
+
+  it("shows the provider's own refusal rather than a generic one", async () => {
+    const { AccountActionError } = await import("@/lib/account-actions");
+    changePassword.mockRejectedValue(
+      new AccountActionError("That password has appeared in a data breach."),
+    );
+    show(EMPTY, "clerk");
+    await userEvent.click(screen.getByRole("button", { name: "Change" }));
+
+    await userEvent.type(screen.getByLabelText("Current password"), "OldPass1");
+    await userEvent.type(screen.getByLabelText("New password"), "NewPass99");
+    await userEvent.type(screen.getByLabelText("Confirm new password"), "NewPass99");
+    await userEvent.click(screen.getByRole("button", { name: "Update" }));
+
+    // Its errors are the only part of this a person can act on.
+    await waitFor(() =>
+      expect(screen.getByText(/appeared in a data breach/)).toBeInTheDocument(),
+    );
+    // And the dialog stays open so they can try another one.
+    expect(screen.getByRole("heading", { name: "Change Password" })).toBeInTheDocument();
   });
 });
 
@@ -154,7 +244,7 @@ describe("discarding", () => {
   it("does not save on cancel", async () => {
     const { onSave, onClose } = show();
 
-    await userEvent.type(screen.getByLabelText("Pronouns"), "she/her");
+    await userEvent.type(screen.getByLabelText("Full Name"), " and more");
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(onSave).not.toHaveBeenCalled();

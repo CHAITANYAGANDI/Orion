@@ -59,7 +59,7 @@ class UserPreferencesTest {
                                                         String jobRole, String language) {
         return new UserService.PreferencesPatch(
                 null, null, displayName, department, jobRole,
-                null, null,  // pronouns, avatarUrl -- their own helper below
+                null, null, null,  // pronouns, email, avatarUrl -- their own helpers
                 language,
                 null, null, null, null, null, null, null, null, null);
     }
@@ -67,19 +67,26 @@ class UserPreferencesTest {
     /** Pronouns and the profile picture, which nothing else here touches. */
     private static UserService.PreferencesPatch person(String pronouns, String avatarUrl) {
         return new UserService.PreferencesPatch(
-                null, null, null, null, null, pronouns, avatarUrl, null,
+                null, null, null, null, null, pronouns, null, avatarUrl, null,
+                null, null, null, null, null, null, null, null, null);
+    }
+
+    /** Just the account address. */
+    private static UserService.PreferencesPatch address(String email) {
+        return new UserService.PreferencesPatch(
+                null, null, null, null, null, null, email, null, null,
                 null, null, null, null, null, null, null, null, null);
     }
 
     private static UserService.PreferencesPatch chatWindow(Integer days, Boolean everything) {
         return new UserService.PreferencesPatch(
-                null, null, null, null, null, null, null, null, days, everything,
+                null, null, null, null, null, null, null, null, null, days, everything,
                 null, null, null, null, null, null, null);
     }
 
     private static UserService.PreferencesPatch muting(List<String> kinds) {
         return new UserService.PreferencesPatch(
-                null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null,
                 null, null, null, null, null, null, kinds);
     }
 
@@ -97,20 +104,73 @@ class UserPreferencesTest {
                                                       Boolean emailsEnabled, Boolean recapForImports,
                                                       Boolean commentEmail, Boolean highlightEmail) {
         return new UserService.PreferencesPatch(
-                null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null, null,
                 taskReminders, weeklyDigest, emailsEnabled, recapForImports,
                 commentEmail, highlightEmail, null);
     }
 
     @BeforeEach
     void setUp() {
-        service = new UserService(users);
+        service = new UserService(users, "dev");
         user = new UserEntity();
         user.setId(USER);
         user.setClerkUserId("clerk_1");
         user.setDisplayName("Priya");
         when(users.findById(anyString())).thenAnswer(inv ->
                 USER.equals(inv.getArgument(0)) ? Optional.of(user) : Optional.empty());
+    }
+
+    @Nested
+    @DisplayName("the account address")
+    class TheAddress {
+
+        @Test
+        @DisplayName("is editable when Recallix owns it")
+        void editable() {
+            service.updatePreferences(USER, address("  new@example.com  "));
+
+            assertThat(user.getEmail()).isEqualTo("new@example.com");
+        }
+
+        @Test
+        @DisplayName("cannot be emptied")
+        void notCleared() {
+            user.setEmail("old@example.com");
+
+            assertThatThrownBy(() -> service.updatePreferences(USER, address("   ")))
+                    .isInstanceOf(ApiException.class)
+                    .hasMessageContaining("needs an email address");
+        }
+
+        @Test
+        @DisplayName("is refused under an identity provider, rather than silently reverted")
+        void refusedUnderProvider() {
+            // `provision` rewrites this column from the sign-in token on the
+            // very next request, so accepting the edit would be a control that
+            // appeared to work and undid itself a second later.
+            var clerk = new UserService(users, "clerk");
+            user.setEmail("old@example.com");
+
+            assertThatThrownBy(() -> clerk.updatePreferences(USER, address("new@example.com")))
+                    .isInstanceOf(ApiException.class)
+                    .hasMessageContaining("managed by your sign-in provider");
+
+            assertThat(user.getEmail()).isEqualTo("old@example.com");
+        }
+
+        @Test
+        @DisplayName("resending the address unchanged is not an edit")
+        void unchangedIsFine() {
+            // The profile form sends every field it shows. Somebody renaming
+            // themselves under a provider must not be told they cannot change
+            // an address they never touched.
+            var clerk = new UserService(users, "clerk");
+            user.setEmail("same@example.com");
+
+            clerk.updatePreferences(USER, address("same@example.com"));
+
+            assertThat(user.getEmail()).isEqualTo("same@example.com");
+        }
     }
 
     @Nested

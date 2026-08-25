@@ -214,6 +214,12 @@ export interface PreferencesUpdateRequest {
   jobRole?: string;
   /** Blank clears it. */
   pronouns?: string;
+  /**
+   * The account address itself, not `recapEmail`. Accepted only where Recallix
+   * owns it; under an identity provider the server refuses it, because the
+   * column is rewritten from the sign-in token on the next request.
+   */
+  email?: string;
   /** A `data:image/...;base64,...` URL; blank removes the picture. */
   avatarUrl?: string;
   /** ISO-639-1 code; blank restores auto-detect. */

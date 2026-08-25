@@ -6,6 +6,7 @@ import com.recallix.domain.Language;
 import com.recallix.domain.NotificationKind;
 import com.recallix.entity.UserEntity;
 import com.recallix.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,8 +21,26 @@ public class UserService {
 
     private final UserRepository users;
 
-    public UserService(UserRepository users) {
+    /**
+     * {@code clerk} or {@code dev}, and the only thing that decides whether the
+     * account address may be edited here.
+     *
+     * <p>Under a provider the column is a cache of the provider's fact:
+     * {@link #provision} rewrites it from the token on the very next request.
+     * Accepting an edit there would be a control that appeared to work and
+     * silently reverted, which is worse than one that says no.
+     */
+    private final String authMode;
+
+    public UserService(UserRepository users,
+                       @Value("${recallix.auth-mode:dev}") String authMode) {
         this.users = users;
+        this.authMode = authMode == null ? "dev" : authMode;
+    }
+
+    /** True when sign-in belongs to somebody else, so the address does too. */
+    private boolean addressOwnedByProvider() {
+        return "clerk".equalsIgnoreCase(authMode);
     }
 
     /** Upsert a local user for the given Clerk (or dev) subject; returns local user id. */
@@ -73,6 +92,9 @@ public class UserService {
         }
         if (patch.pronouns() != null) {
             user.setPronouns(patch.pronouns().isBlank() ? null : patch.pronouns().trim());
+        }
+        if (patch.email() != null) {
+            user.setEmail(cleanAccountEmail(patch.email(), user.getEmail()));
         }
         if (patch.avatarUrl() != null) {
             user.setAvatarUrl(cleanAvatar(patch.avatarUrl()));
@@ -155,6 +177,29 @@ public class UserService {
     }
 
     /**
+     * The account address, when this deployment is allowed to change it.
+     *
+     * <p>Unchanged input is waved through rather than refused, because the
+     * profile form sends every field it shows: a person editing their name
+     * under an identity provider would otherwise be told they cannot change an
+     * address they did not touch.
+     */
+    private String cleanAccountEmail(String raw, String current) {
+        String value = raw.trim();
+        if (value.equalsIgnoreCase(current == null ? "" : current)) {
+            return current;
+        }
+        if (addressOwnedByProvider()) {
+            throw ApiException.badRequest(
+                    "Your email address is managed by your sign-in provider — change it there");
+        }
+        if (value.isBlank()) {
+            throw ApiException.badRequest("An account needs an email address");
+        }
+        return value;
+    }
+
+    /**
      * A profile picture, or nothing, and never anything else.
      *
      * <p>This string is rendered straight into an {@code <img src>}, so what it
@@ -205,6 +250,8 @@ public class UserService {
             String jobRole,
             /** How this person asks to be referred to. Blank clears it. */
             String pronouns,
+            /** The account address. Rejected when a provider owns it. */
+            String email,
             /** A data-URL image, or blank to remove the picture. */
             String avatarUrl,
             String defaultLanguage,

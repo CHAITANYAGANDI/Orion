@@ -7,17 +7,21 @@
  * language your meetings are held in, what Recallix does and does not do with a
  * recording, how long it keeps one, and the button that ends the account.
  *
- * Two of the fields here are descriptive and two are not, and the difference is
- * worth stating. Department and Role are yours to record and nothing reads them
- * — there are no teams for a department to route to. Your name is matched
- * against the owner of every action item, which is the only thing that turns a
- * list of promises into "my tasks". Language is sent with each transcription
- * job: detection is good and not perfect, and a wrong guess on a short or
- * bilingual recording is a transcript in a language nobody spoke.
+ * Every field here is read by something. Your name is matched against the owner
+ * of every action item, which is the only thing that turns a list of promises
+ * into "my tasks". Language is sent with each transcription job: detection is
+ * good and not perfect, and a wrong guess on a short or bilingual recording is a
+ * transcript in a language nobody spoke. Department and Role used to sit here
+ * too and were read by nothing at all — a form that asks for facts it never uses
+ * is one people fill in for nothing, so they are gone.
  *
- * Email and password are shown and not editable, because neither is Recallix's
- * to change — they belong to the sign-in provider, and a development session has
- * no provider at all.
+ * Email and password are the two Recallix may not own. The address is editable
+ * only where there is no identity provider, because `provision` rewrites that
+ * column from the sign-in token on the very next request and an edit under Clerk
+ * would appear to save and revert a second later. The password is never
+ * Recallix's: there is no password column, so the change is handed to the
+ * provider, and a development session has no provider and therefore nothing to
+ * rotate.
  *
  * The last two sections are the ones that delete things, and they are on this
  * page rather than behind a tab of their own because there is no longer a tab of
@@ -85,7 +89,7 @@ export function GeneralTab() {
 }
 
 /**
- * Name, email, password, department, role.
+ * Name, photo, email and password.
  *
  * <p>Read-only until Edit is pressed. A settings page whose every field is an
  * input invites somebody to change one by accident while reading it, and this
@@ -106,9 +110,7 @@ function IdentityBlock() {
 
   const initial: ProfileForm = {
     displayName: name,
-    pronouns: prefs.data?.pronouns ?? "",
-    department: prefs.data?.department ?? "",
-    jobRole: prefs.data?.jobRole ?? "",
+    email: email ?? "",
     avatarUrl: prefs.data?.avatarUrl ?? "",
   };
 
@@ -127,47 +129,26 @@ function IdentityBlock() {
       <div className="flex items-start gap-4">
         <Avatar url={prefs.data?.avatarUrl} name={name || userId} />
 
-        <div className="grid min-w-0 flex-1 gap-x-8 gap-y-1 sm:grid-cols-2">
-          <div className="min-w-0">
-            <p className="flex min-w-0 items-baseline gap-2">
-              <span className="truncate text-lg font-semibold">
-                {name || <span className="text-muted-foreground">No name yet</span>}
-              </span>
-              {prefs.data?.pronouns && (
-                <span className="shrink-0 text-sm text-muted-foreground">
-                  ({prefs.data.pronouns})
-                </span>
-              )}
-            </p>
-            <p className="truncate text-sm">
-              {email ? (
-                <a href={`mailto:${email}`} className="text-primary underline-offset-2 hover:underline">
-                  {email}
-                </a>
-              ) : (
-                <span className="text-muted-foreground">
-                  No address from your sign-in provider
-                </span>
-              )}
-            </p>
-            {/* Dots, and a sentence saying whose password they are. Recallix
-                never sees it: Clerk holds it, and a development session is
-                identified by a header and has none at all. */}
-            <p className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
-              <span className="tracking-[0.2em]">•••••••••</span>
-              <span className="text-xs">{passwordNote}</span>
-            </p>
-          </div>
-          <div className="min-w-0 text-sm">
-            <p className="truncate">
-              {prefs.data?.department || (
-                <span className="text-muted-foreground">No department</span>
-              )}
-            </p>
-            <p className="truncate text-muted-foreground">
-              {prefs.data?.jobRole || "No role"}
-            </p>
-          </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-lg font-semibold">
+            {name || <span className="text-muted-foreground">No name yet</span>}
+          </p>
+          <p className="truncate text-sm">
+            {email ? (
+              <a href={`mailto:${email}`} className="text-primary underline-offset-2 hover:underline">
+                {email}
+              </a>
+            ) : (
+              <span className="text-muted-foreground">No email address yet</span>
+            )}
+          </p>
+          {/* Dots, and a sentence saying whose password they are. Recallix
+              never sees it: Clerk holds it, and a development session is
+              identified by a header and has none at all. */}
+          <p className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
+            <span className="tracking-[0.2em]">•••••••••</span>
+            <span className="text-xs">{passwordNote}</span>
+          </p>
         </div>
 
         <Button
@@ -183,8 +164,7 @@ function IdentityBlock() {
       <ProfileDialog
         open={editing}
         initial={initial}
-        email={email}
-        passwordNote={passwordNote}
+        mode={mode}
         saving={isLoading}
         onClose={() => setEditing(false)}
         onSave={(form) => void save(form)}
