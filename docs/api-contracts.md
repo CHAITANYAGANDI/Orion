@@ -1551,6 +1551,28 @@ capped is minutes and imports.
 One topic. It dispatches work; every report comes back over the internal HTTP
 callbacks in §5.
 
+**The relay is safe to run on every instance.** Each tick claims its rows with
+
+```sql
+... WHERE published = false
+  AND NOT EXISTS (an earlier unpublished row for the same topic + partition_key)
+ORDER BY created_at, id LIMIT 100 FOR UPDATE SKIP LOCKED
+```
+
+so two backends divide the backlog instead of both publishing all of it. The
+lock *is* the claim — there is no lease column, so a rollback or a killed
+instance releases its rows with nothing to expire and nobody to sweep.
+
+The `NOT EXISTS` buys **per-key FIFO**: a meeting's events are published in
+order and never concurrently, while different meetings proceed in parallel.
+Global FIFO across all meetings is gone, and it had to be — it is precisely the
+property a second relay cannot preserve. Nothing depends on it: every event
+carries its `processingAttempt`, and an out-of-order attempt is refused by the
+checks in §3 rather than applied.
+
+`SKIP LOCKED` stops two relays owning the same row. It does **not** make
+outbox → Kafka exactly-once.
+
 **Delivery is at-least-once, in both directions.** The outbox relay republishes
 a row whose `published` flag did not commit, and the worker commits its Kafka
 offset only after Spring has accepted a terminal outcome — the result callback
