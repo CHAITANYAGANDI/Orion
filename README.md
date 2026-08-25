@@ -173,9 +173,10 @@ and did not.
 ## Tech / design highlights
 
 - **Design patterns**: Strategy + Factory + Adapter (AI and transcription
-  providers), Repository, DTO, Builder (brief response), Observer (Kafka
-  consumers), Outbox (reliable events), Circuit Breaker (Resilience4j around AI
-  calls).
+  providers), Repository, DTO, Builder (brief response), Observer (Spring
+  application events), Outbox (reliable events, claimed with `FOR UPDATE SKIP
+  LOCKED` so it is safe on every instance), Circuit Breaker (Resilience4j around
+  AI calls).
 - **Security**: Clerk JWT validation, Postgres row-level security, private S3
   buckets + short-lived presigned URLs, audit logs, plan-based file/usage limits.
 - **No email at all**: Recallix contacts nobody. The recap, the morning
@@ -189,8 +190,15 @@ and did not.
 
 ## What is not here, stated honestly
 
-- **No integration tests.** Testcontainers is declared in `backend-spring/pom.xml`
-  and no suite uses it. Every backend test is a unit test against mocks.
+- **Integration tests exist but are opt-in.** Three suites run against a real
+  PostgreSQL and are skipped unless `RECALLIX_IT_DB_URL` is set:
+  `OutboxClaimConcurrencyTest` (row claiming, retry, poison events, purge
+  safety, RLS), `MeetingAttemptAllocationTest` (concurrent reprocess) and
+  `ApplicationContextSmokeTest` (the Spring context against a migrated schema).
+  Everything else is a unit test against mocks. Testcontainers is declared in
+  `backend-spring/pom.xml` and still unused — the suites take a database URL
+  instead, because the build itself runs inside a container with no Docker
+  socket.
 - **No load tests.** The k6 scripts described in
   [docs/load-testing-report.md](docs/load-testing-report.md) have not been written.
 - **No provider is exercised live.** The AssemblyAI and Deepgram adapters have

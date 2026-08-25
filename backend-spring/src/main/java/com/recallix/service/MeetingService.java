@@ -1092,13 +1092,25 @@ public class MeetingService {
         // policy choice about AI features -- it is the minute allowance doing
         // exactly what it counts.
         usage.requireAiOrThrow(userId, UsageLimitService.AiFeature.REPROCESS);
+        // Take the row before writing anything to it, and take the run number
+        // from the row rather than from the entity in memory. Two people
+        // pressing Reprocess at the same moment used to read the same N and
+        // both write N+1, handing two live pipeline runs a single identity --
+        // and every stale-callback check in the system is that identity. See
+        // MeetingRepository.lockAndReadAttempt.
+        //
+        // Everything after this point writes the meeting, so this is also where
+        // the row lock has to be taken: a flush before it would grab the row
+        // with the stale number already in hand.
+        int previousRun = meetings.lockAndReadAttempt(meetingId)
+                .orElse(meeting.getProcessingAttempt());
         meeting.setStatus(MeetingStatus.QUEUED);
         meeting.setErrorMessage(null);
         // A new run, and deliberately a new identity for it. Everything the
         // previous run's completion claimed -- its AI-minute charge, its
         // "Summary ready" -- was keyed to the old number, so this one charges
         // and notifies again while a late redelivery of the old one does not.
-        meeting.setProcessingAttempt(meeting.getProcessingAttempt() + 1);
+        meeting.setProcessingAttempt(previousRun + 1);
         // The cached voiceprints go with them, and this is not housekeeping.
         //
         // A voiceprint is filed under a meeting-local speaker key, and a

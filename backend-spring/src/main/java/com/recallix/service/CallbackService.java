@@ -226,6 +226,16 @@ public class CallbackService {
         }
 
         replaceTranscript(meetingId, result);
+        // The transcript exists again, so the meeting must stop claiming it was
+        // erased. Cleared here rather than when the reprocess was requested,
+        // which is the difference between "a transcript has been written" and
+        // "one has been asked for": a run that never lands, or lands stale and
+        // is refused above, leaves the erasure mark standing, which is the
+        // truth in both cases. The API, the meeting page and the privacy report
+        // all read this field, and a meeting that shows its transcript while
+        // reporting the transcript deleted is the kind of contradiction that
+        // makes people distrust the delete button that produced it.
+        meeting.setTranscriptDeletedAt(null);
         replaceSegments(meetingId, result.segmentsOrEmpty());
         replaceSummary(meetingId, result);
         replaceActionItems(meeting, result.actionItemsOrEmpty(), result.segmentsOrEmpty());

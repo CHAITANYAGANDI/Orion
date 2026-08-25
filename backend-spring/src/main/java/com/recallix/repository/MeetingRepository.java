@@ -41,6 +41,34 @@ public interface MeetingRepository extends JpaRepository<Meeting, String> {
     Optional<String> lockForWrite(@Param("id") String id);
 
     /**
+     * Take the meeting row and read the run it is on, in one statement.
+     *
+     * <p>For allocating the next processing attempt. Reading the number and
+     * writing number+1 as two separate steps is a lost update waiting for two
+     * people to press Reprocess at once, or one person to press it twice: both
+     * transactions read N, both write N+1, and two independent pipeline runs end
+     * up sharing one identity — which is precisely the thing every stale-callback
+     * check in the system is keyed on. One of the two runs is then
+     * indistinguishable from the other and both are accepted.
+     *
+     * <p>Locking and reading together closes it. The second caller blocks here
+     * until the first commits and then — because {@code FOR NO KEY UPDATE}
+     * re-reads the row it waited for rather than the snapshot it started with —
+     * sees N+1 and allocates N+2.
+     *
+     * <p>Deliberately not the entity's own {@code getProcessingAttempt()}: that
+     * value was loaded whenever the entity was, which for the language-correction
+     * path is before any of this, and a concurrent commit in between would not
+     * show up in it.
+     *
+     * <p>Same row, same lock mode and same order as {@link #lockForWrite}, so
+     * erasure and reprocess queue behind each other instead of deadlocking.
+     */
+    @Query(value = "SELECT processing_attempt FROM meetings WHERE id = :id FOR NO KEY UPDATE",
+            nativeQuery = true)
+    Optional<Integer> lockAndReadAttempt(@Param("id") String id);
+
+    /**
      * The most recent meeting a user owns, whatever its state.
      *
      * <p>Read only to date-stamp the workspace suggestion cache: if a meeting

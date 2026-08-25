@@ -132,6 +132,117 @@ class ProcessingAttemptRaceTest {
 
     // ----------------------------------------------------------------------- //
     @Nested
+    @DisplayName("a job that was never posted")
+    class NeverPosted {
+
+        /** The reconciler, wired to the real callback service above. */
+        private RetiredMeetingJobReconciler reconciler;
+        private final com.fasterxml.jackson.databind.ObjectMapper mapper =
+                new com.fasterxml.jackson.databind.ObjectMapper();
+
+        @org.junit.jupiter.api.BeforeEach
+        void wire() {
+            reconciler = new RetiredMeetingJobReconciler(service);
+        }
+
+        private com.recallix.event.OutboxEventRetired retired(int attempt) {
+            var payload = mapper.createObjectNode()
+                    .put("meetingId", MEETING)
+                    .put("processingAttempt", attempt);
+            return new com.recallix.event.OutboxEventRetired(
+                    "obx_1", "meeting_uploaded", MEETING, payload,
+                    "RecordTooLargeException: 2MB");
+        }
+
+        @Test
+        @DisplayName("the meeting stops waiting for it")
+        void failsTheCurrentRun() {
+            // Phase 3 gave the relay the ability to abandon an event that can
+            // never be published. Without this path the meeting it belonged to
+            // waits in QUEUED for a message nobody will ever send, and nothing
+            // in the system notices: every component did what it was told.
+            meeting.setStatus(MeetingStatus.QUEUED);
+            meeting.setProcessingAttempt(1);
+
+            reconciler.onRetired(retired(1));
+
+            assertThat(meeting.getStatus()).isEqualTo(MeetingStatus.FAILED);
+            assertThat(meeting.getErrorMessage()).contains("could not be started");
+            verify(notifications).processingFailed(eq(meeting), anyString(), eq(1));
+        }
+
+        @Test
+        @DisplayName("a dead old job does not take a live new one down with it")
+        void doesNotTouchANewerRun() {
+            // The order that makes this reachable: attempt 1's event cannot be
+            // published, the user gives up waiting and reprocesses, and only
+            // then does the relay give up on attempt 1. The retirement is about
+            // a run the meeting has already left behind.
+            meeting.setStatus(MeetingStatus.TRANSCRIBING);
+            meeting.setProcessingAttempt(2);
+
+            reconciler.onRetired(retired(1));
+
+            assertThat(meeting.getStatus()).isEqualTo(MeetingStatus.TRANSCRIBING);
+            assertThat(meeting.getErrorMessage()).isNull();
+            verify(notifications, never()).processingFailed(any(), anyString(), anyInt());
+        }
+
+        @Test
+        @DisplayName("and neither does one too broken to say which run it was")
+        void anAttemptlessEventCannotReachPastTheFirstRun() {
+            meeting.setStatus(MeetingStatus.TRANSCRIBING);
+            meeting.setProcessingAttempt(4);
+
+            reconciler.onRetired(new com.recallix.event.OutboxEventRetired(
+                    "obx_1", "meeting_uploaded", MEETING,
+                    mapper.createObjectNode(), "JsonParseException: unrenderable"));
+
+            // Read as attempt 1, which is stale against 4.
+            assertThat(meeting.getStatus()).isEqualTo(MeetingStatus.TRANSCRIBING);
+        }
+    }
+
+    // ----------------------------------------------------------------------- //
+    @Nested
+    @DisplayName("a transcript that comes back after an erasure")
+    class AfterErasure {
+
+        @Test
+        @DisplayName("stops the meeting claiming its transcript was deleted")
+        void clearsTheErasureMark() {
+            // Erasing the transcript sets the mark and bumps the attempt; a
+            // later reprocess produces a new transcript. The mark used to stay
+            // put, so the meeting showed its words on one line and reported
+            // them deleted on the next.
+            meeting.setProcessingAttempt(2);
+            meeting.setTranscriptDeletedAt(Instant.parse("2026-08-20T10:00:00Z"));
+
+            service.applyResult(MEETING, result("the new transcript", 2));
+
+            assertThat(meeting.getTranscriptDeletedAt()).isNull();
+            assertThat(meeting.getStatus()).isEqualTo(MeetingStatus.READY);
+        }
+
+        @Test
+        @DisplayName("but a stale run does not un-erase anything")
+        void aStaleRunLeavesTheMarkStanding() {
+            // The run that was invalidated BY the erasure reporting in. It
+            // writes nothing, so there is no transcript, so the mark is still
+            // the truth.
+            meeting.setProcessingAttempt(3);
+            Instant erased = Instant.parse("2026-08-20T10:00:00Z");
+            meeting.setTranscriptDeletedAt(erased);
+
+            service.applyResult(MEETING, result("the erased transcript", 2));
+
+            assertThat(meeting.getTranscriptDeletedAt()).isEqualTo(erased);
+            assertNothingWasWritten();
+        }
+    }
+
+    // ----------------------------------------------------------------------- //
+    @Nested
     @DisplayName("the run the meeting is on")
     class Current {
 

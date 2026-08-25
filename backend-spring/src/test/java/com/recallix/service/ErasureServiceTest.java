@@ -1,6 +1,8 @@
 package com.recallix.service;
 
 import com.recallix.common.ApiException;
+import com.recallix.domain.MeetingStatus;
+import com.recallix.dto.StatusEvent;
 import com.recallix.entity.Meeting;
 import com.recallix.entity.UserEntity;
 import com.recallix.repository.MeetingActionItemRepository;
@@ -18,6 +20,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -29,6 +32,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.inOrder;
@@ -64,6 +68,7 @@ class ErasureServiceTest {
     @Mock private UserRepository users;
     @Mock private StorageService storage;
     @Mock private AuditService audit;
+    @Mock private StatusPublisher statusPublisher;
     // Erasing a recording erases the voiceprints derived from it.
     @Mock private SpeakerIdentityService speakerIdentity;
 
@@ -73,13 +78,95 @@ class ErasureServiceTest {
     @BeforeEach
     void setUp() {
         service = new ErasureService(meetings, transcripts, segments, summaries, actionItems,
-                translations, moments, chunks, users, storage, audit, speakerIdentity);
+                translations, moments, chunks, users, storage, audit, statusPublisher,
+                speakerIdentity);
         meeting = new Meeting();
         meeting.setId(MEETING);
         meeting.setUserId(USER);
         meeting.setTitle("Sprint planning");
         meeting.setObjectKey("meetings/usr_1/mtg_1/audio.mp3");
         when(meetings.findByIdAndUserId(MEETING, USER)).thenReturn(Optional.of(meeting));
+    }
+
+    @Nested
+    @DisplayName("erasing the transcript of a meeting still being processed")
+    class ErasingMidRun {
+
+        @Test
+        @DisplayName("takes the meeting out of the state the invalidation emptied")
+        void doesNotLeaveItProcessingForever() {
+            // Bumping the attempt is what stops the running worker writing its
+            // transcript over the erasure -- every callback it makes from here
+            // is recognised as an overtaken run and ignored. Which leaves the
+            // status saying TRANSCRIBING with nothing left that will ever
+            // change it: a progress bar for a run whose every report is
+            // discarded on arrival.
+            meeting.setStatus(MeetingStatus.TRANSCRIBING);
+
+            service.eraseTranscript(USER, MEETING);
+
+            assertThat(meeting.getStatus()).isEqualTo(MeetingStatus.FAILED);
+            assertThat(meeting.getErrorMessage()).contains("transcript was erased");
+        }
+
+        @Test
+        @DisplayName("and tells the page that is open, so the spinner stops")
+        void publishesTheNewStatus() {
+            meeting.setStatus(MeetingStatus.TRANSCRIBING);
+
+            service.eraseTranscript(USER, MEETING);
+
+            ArgumentCaptor<StatusEvent> sent = ArgumentCaptor.forClass(StatusEvent.class);
+            verify(statusPublisher).publish(sent.capture());
+            assertThat(sent.getValue().meetingId()).isEqualTo(MEETING);
+            assertThat(sent.getValue().status()).isEqualTo(MeetingStatus.FAILED);
+        }
+
+        @Test
+        @DisplayName("every stage of the pipeline counts, not just transcription")
+        void coversTheWholePipeline() {
+            for (MeetingStatus running : new MeetingStatus[]{
+                    MeetingStatus.QUEUED, MeetingStatus.TRANSCRIBING,
+                    MeetingStatus.SUMMARIZING, MeetingStatus.EXTRACTING}) {
+                Meeting m = new Meeting();
+                m.setId(MEETING);
+                m.setUserId(USER);
+                m.setStatus(running);
+
+                service.eraseTranscript(m);
+
+                assertThat(m.getStatus()).as("from %s", running).isEqualTo(MeetingStatus.FAILED);
+            }
+        }
+
+        @Test
+        @DisplayName("a finished meeting stays finished")
+        void leavesAReadyMeetingAlone() {
+            // Nothing was in flight, so nothing was invalidated. The summary,
+            // the action items and the decisions are all still there and the
+            // meeting is exactly what it says it is -- only the words are gone.
+            meeting.setStatus(MeetingStatus.READY);
+
+            service.eraseTranscript(USER, MEETING);
+
+            assertThat(meeting.getStatus()).isEqualTo(MeetingStatus.READY);
+            assertThat(meeting.getErrorMessage()).isNull();
+            verify(statusPublisher, never()).publish(any());
+        }
+
+        @Test
+        @DisplayName("the meeting can still be reprocessed afterwards")
+        void staysReprocessable() {
+            // FAILED rather than a new status precisely so this remains true:
+            // it is a state the product already offers a way out of.
+            meeting.setStatus(MeetingStatus.TRANSCRIBING);
+            int before = meeting.getProcessingAttempt();
+
+            service.eraseTranscript(USER, MEETING);
+
+            assertThat(meeting.getStatus()).isEqualTo(MeetingStatus.FAILED);
+            assertThat(meeting.getProcessingAttempt()).isEqualTo(before + 1);
+        }
     }
 
     @Nested

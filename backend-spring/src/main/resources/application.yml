@@ -14,6 +14,29 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD:recallix_app}
     driver-class-name: org.postgresql.Driver
 
+  # How much scheduled work can happen at once.
+  #
+  # Boot's default is a single thread, which was fine when the only jobs were
+  # the relay's one-second tick and a nightly retention pass. It is not fine
+  # now: a tick that finds Kafka unreachable can sit inside a send for as long
+  # as the producer's delivery timeout, and on one thread every other scheduled
+  # job waits behind it -- so a broker outage would quietly postpone the pass
+  # that applies each account's data-retention policy.
+  #
+  # Three threads for three jobs: the relay, the retention pass, the outbox
+  # purge. They have no reason to overlap, but none of them should be able to
+  # hold the others up either.
+  #
+  # This does not weaken the outbox. A @Scheduled method with a fixed delay is
+  # never run concurrently with itself however large the pool is, and the row
+  # ownership boundary was never the thread in the first place -- it is
+  # FOR UPDATE SKIP LOCKED, which already holds across separate machines and so
+  # holds across threads for free.
+  task:
+    scheduling:
+      pool:
+        size: ${RECALLIX_SCHEDULER_THREADS:3}
+
   jpa:
     hibernate:
       ddl-auto: validate
@@ -59,6 +82,27 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties:
+        # How long send() may block before the record has been handed to the
+        # producer at all -- waiting for cluster metadata, or for buffer space.
+        # Sixty seconds is the client default and it is why a completely
+        # unreachable broker costs the relay a full minute per attempt.
+        #
+        # Ten is the right number here and the reason is specific: a timeout at
+        # THIS stage cannot produce a duplicate. Nothing has been transmitted --
+        # the record was never appended to a batch -- so giving up early costs
+        # one retry from a durable backoff and nothing else.
+        #
+        # Deliberately NOT the same reasoning as delivery.timeout.ms, which is
+        # left at its 120s default. That clock covers a record already in flight,
+        # and a record that times out there may well have reached the broker
+        # anyway; cutting it short would turn slow-but-working into a second
+        # publication, and a second publication of meeting_uploaded is a second
+        # transcription somebody pays for. Waiting two minutes is cheaper than
+        # that, so the wait stays. acks=all, enable.idempotence=true,
+        # retries=MAX_VALUE and request.timeout.ms=30s are all left at the
+        # client defaults, which are already the safe end of every trade-off.
+        max.block.ms: ${KAFKA_MAX_BLOCK_MS:10000}
     listener:
       missing-topics-fatal: false
 

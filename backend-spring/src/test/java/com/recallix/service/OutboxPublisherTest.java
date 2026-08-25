@@ -5,6 +5,7 @@ import com.recallix.entity.OutboxEvent;
 import com.recallix.repository.OutboxEventRepository;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.springframework.context.ApplicationEventPublisher;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.errors.RecordTooLargeException;
 import org.apache.kafka.common.errors.SaslAuthenticationException;
@@ -64,13 +65,16 @@ class OutboxPublisherTest {
 
     private OutboxPublisher publisher;
     private MeterRegistry metrics;
+    /** Retirements land here so a test can see what the relay announced. */
+    private List<Object> announced;
     private final ObjectMapper mapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
         metrics = new SimpleMeterRegistry();
+        announced = new ArrayList<>();
         publisher = new OutboxPublisher(repo, kafka, mapper, metrics,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                (ApplicationEventPublisher) announced::add, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     private OutboxEvent event(String id, String meetingId) {
@@ -352,7 +356,8 @@ class OutboxPublisherTest {
                 }
             };
             OutboxPublisher withBrokenMapper = new OutboxPublisher(
-                    repo, kafka, refuses, metrics, Clock.fixed(NOW, ZoneOffset.UTC));
+                    repo, kafka, refuses, metrics,
+                    (ApplicationEventPublisher) announced::add, Clock.fixed(NOW, ZoneOffset.UTC));
             when(repo.claimBatch(anyInt())).thenReturn(List.of(broken, fine));
             kafkaAccepts();
 

@@ -244,11 +244,19 @@ mailed to it either way; Recallix sends no email (V56).
 None. There is no Redis to provision.
 
 It backed one thing: a fixed-window counter in front of the streaming-token
-endpoint. That counter is now a map inside the backend, which is exactly as
-correct while the backend runs as a single instance — and it must, for the
-outbox reason in "What is not covered" below. The limit is unchanged at 30
-requests per user per 10 minutes, and it no longer fails open, because there is
-no longer a connection that can fail.
+endpoint. That counter is now a map inside the backend. The limit is unchanged
+at 30 requests per user per 10 minutes, and it no longer fails open, because
+there is no longer a connection that can fail.
+
+Being in-process makes it per-instance: two backends would allow 60 requests per
+user per 10 minutes rather than 30. That is the only thing left that a second
+instance changes — see "What is not covered". The outbox used to be on this list
+and no longer is.
+
+**If a Redis Cloud database still exists for this project, delete it or revoke
+its credentials.** Nothing has connected to it since the counter moved
+in-process, and an unused datastore with live credentials is worse than one in
+use: nobody is watching it.
 
 ---
 
@@ -288,15 +296,29 @@ the service status.
 
 ## What is not covered
 
-- **No CI.** Nothing runs the 156 backend tests or the ai-service suite before a
-  deploy. This blueprint deploys whatever is on the branch.
+- **No CI.** Nothing runs the backend or ai-service suites before a deploy.
+  This blueprint deploys whatever is on the branch.
 - **No email.** Not "not configured" — not implemented. Every sender was
   removed in V56, so there is no relay to provision and nothing that degrades
   without one.
-- **The backend must run as a single instance.** `OutboxPublisher.publishBatch()`
-  selects unpublished rows with a plain ordered query — no `FOR UPDATE SKIP
-  LOCKED`, no row lock. Two instances would select the same batch and both
-  publish it, so every event reaches Kafka twice and the pipeline pays for the
-  transcription twice. Scaling the backend horizontally needs that query to
-  claim rows first; until then, keep it at one instance.
+- **Rate limiting is per-instance.** The streaming-token counter is a map in
+  the backend, so two instances allow twice the limit. It is burst protection
+  rather than a quota — the thing that actually costs money is the AI-minute
+  allowance, which is a database row and unaffected — but it is the one piece of
+  correctness that a second backend changes.
+
+  The outbox is no longer on this list. `OutboxPublisher.publishBatch()` claims
+  its rows with `FOR UPDATE SKIP LOCKED`, so two backends divide the backlog
+  instead of both publishing it; proven against a real PostgreSQL in
+  `OutboxClaimConcurrencyTest` and against two live containers.
+
+- **One Kafka partition, one AI worker.** `meeting_uploaded` has a single
+  partition and the worker consumes it serially, so one slow meeting delays
+  every meeting behind it and a second worker would idle. More partitions is
+  the change, and it is a Confluent-side change first.
+
+- **No consumer-lag alert.** With one partition and one worker there is nothing
+  that notices a stuck message except somebody looking. Configure one in
+  Confluent Cloud: consumer group `ai-service`, topic `meeting_uploaded`, alert
+  when lag stays above 5 for 15 minutes.
 - **No backup policy** beyond whatever the Neon plan provides.

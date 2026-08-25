@@ -1,12 +1,14 @@
 package com.recallix.service;
 
 import com.recallix.entity.OutboxEvent;
+import com.recallix.event.OutboxEventRetired;
 import com.recallix.repository.OutboxEventRepository;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -58,6 +60,7 @@ public class OutboxPublisher {
     private final OutboxEventRepository repo;
     private final KafkaTemplate<String, String> kafka;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper;
+    private final ApplicationEventPublisher events;
     private final Clock clock;
 
     private final Counter published;
@@ -72,18 +75,21 @@ public class OutboxPublisher {
     public OutboxPublisher(OutboxEventRepository repo,
                            KafkaTemplate<String, String> kafka,
                            com.fasterxml.jackson.databind.ObjectMapper mapper,
-                           MeterRegistry metrics) {
-        this(repo, kafka, mapper, metrics, Clock.systemUTC());
+                           MeterRegistry metrics,
+                           ApplicationEventPublisher events) {
+        this(repo, kafka, mapper, metrics, events, Clock.systemUTC());
     }
 
     OutboxPublisher(OutboxEventRepository repo,
                     KafkaTemplate<String, String> kafka,
                     com.fasterxml.jackson.databind.ObjectMapper mapper,
                     MeterRegistry metrics,
+                    ApplicationEventPublisher events,
                     Clock clock) {
         this.repo = repo;
         this.kafka = kafka;
         this.mapper = mapper;
+        this.events = events;
         this.clock = clock;
         this.published = Counter.builder("recallix.outbox.published")
                 .description("Outbox events acknowledged by Kafka")
@@ -164,6 +170,13 @@ public class OutboxPublisher {
                 String payload = mapper.writeValueAsString(event.getPayload());
                 kafka.send(event.getTopic(), event.getPartitionKey(), payload).get();
                 event.setPublished(true);
+                // last_error describes a retry that is no longer pending, so it
+                // goes. attempt_count stays: "this one took four tries" is true
+                // forever and is the number worth having in front of you when
+                // the same key gives trouble again. next_attempt_at is left
+                // where it is and means nothing on a published row -- see the
+                // entity for the rule.
+                event.setLastError(null);
                 published.increment();
             } catch (Exception e) {
                 if (e instanceof InterruptedException) {
@@ -203,6 +216,13 @@ public class OutboxPublisher {
                             + "id={} topic={} key={} category={} error={}",
                     attempt, event.getId(), event.getTopic(), event.getPartitionKey(),
                     category, event.getLastError());
+            // Say so, in this transaction, and let whoever owns the topic decide
+            // what it means. Without this the row is honestly marked and the
+            // meeting behind it waits in QUEUED for a message that is never
+            // coming. See OutboxEventRetired for why it is synchronous.
+            events.publishEvent(new OutboxEventRetired(
+                    event.getId(), event.getTopic(), event.getPartitionKey(),
+                    event.getPayload(), event.getLastError()));
             return category;
         }
 

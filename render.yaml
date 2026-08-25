@@ -11,8 +11,10 @@
 #
 # Deliberately NOT declared here: `databases:`. Neon already holds the data, and
 # declaring one would have Render provision a second, empty copy alongside it.
-# There is no Redis at all any more -- the rate limiter it backed is in-process,
-# which is exactly as correct while the backend runs as a single instance.
+# There is no Redis at all any more -- the rate limiter it backed is in-process.
+# That makes it per-instance: a second backend would allow twice the burst limit,
+# which is the one thing scaling out still changes. The outbox is not: its relay
+# claims rows with FOR UPDATE SKIP LOCKED, so every instance can run one.
 
 services:
   # ---------------------------------------------------------------------------

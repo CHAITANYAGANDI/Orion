@@ -1,6 +1,8 @@
 package com.recallix.service;
 
 import com.recallix.common.ApiException;
+import com.recallix.domain.MeetingStatus;
+import com.recallix.dto.StatusEvent;
 import com.recallix.entity.Meeting;
 import com.recallix.repository.MeetingActionItemRepository;
 import com.recallix.repository.MeetingRepository;
@@ -63,6 +65,7 @@ public class ErasureService {
     private final UserRepository users;
     private final StorageService storage;
     private final AuditService audit;
+    private final StatusPublisher statusPublisher;
 
     private final SpeakerIdentityService speakerIdentity;
 
@@ -77,7 +80,9 @@ public class ErasureService {
                           UserRepository users,
                           StorageService storage,
                           AuditService audit,
+                          StatusPublisher statusPublisher,
                           SpeakerIdentityService speakerIdentity) {
+        this.statusPublisher = statusPublisher;
         this.speakerIdentity = speakerIdentity;
         this.meetings = meetings;
         this.transcripts = transcripts;
@@ -196,8 +201,57 @@ public class ErasureService {
         // erased without either side needing to know that erasure exists.
         meeting.setProcessingAttempt(meeting.getProcessingAttempt() + 1);
         meeting.setTranscriptDeletedAt(Instant.now());
+        stopAnyRunInFlight(meeting);
 
         return meeting.getTranscriptDeletedAt();
+    }
+
+    /**
+     * Take the meeting out of a processing state the increment above just
+     * emptied.
+     *
+     * <p>Bumping the attempt makes every callback from the run that is currently
+     * going stale, which is the point — it is what stops that run writing its
+     * transcript over the erasure. But the meeting was left saying
+     * {@code TRANSCRIBING}, and now nothing will ever say otherwise: the worker
+     * will finish, report in, be recognised as an overtaken run and ignored, and
+     * the status will sit there. A spinner with nothing behind it, permanently.
+     *
+     * <p>{@code FAILED} rather than a new {@code CANCELLED} status. The set of
+     * meeting states is small on purpose and every screen, filter and export
+     * knows it; adding a ninth for one corner would mean auditing all of them.
+     * FAILED is also honest about what happened — this run produced nothing —
+     * and it is the state the product already offers a way out of, so the meeting
+     * remains reprocessable. The message says who stopped it, because "failed"
+     * on its own about something the user deliberately did would be alarming.
+     *
+     * <p>Only a run actually in flight is touched. Erasing the transcript of a
+     * finished meeting leaves it {@code READY}, which is what it is: the summary,
+     * the action items and the decisions are all still there, and only the words
+     * are gone.
+     */
+    private void stopAnyRunInFlight(Meeting meeting) {
+        MeetingStatus status = meeting.getStatus();
+        boolean running = status == MeetingStatus.QUEUED
+                || status == MeetingStatus.TRANSCRIBING
+                || status == MeetingStatus.SUMMARIZING
+                || status == MeetingStatus.EXTRACTING;
+        if (!running) {
+            return;
+        }
+        meeting.setStatus(MeetingStatus.FAILED);
+        meeting.setErrorMessage("Processing stopped because the transcript was erased.");
+        // For the page that is open right now. There is deliberately no bell
+        // notification: the user pressed the button that caused this a moment
+        // ago, and telling them their own deletion failed something would be
+        // noise. The status frame is different — without it the tab they are
+        // looking at keeps its progress bar until they reload.
+        status(meeting);
+    }
+
+    private void status(Meeting meeting) {
+        statusPublisher.publish(new StatusEvent(
+                meeting.getId(), meeting.getStatus(), 100, meeting.getErrorMessage()));
     }
 
     /* ----------------------------- the meeting ------------------------------ */

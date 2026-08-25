@@ -517,6 +517,118 @@ class OutboxClaimConcurrencyTest {
         assertThat(retired).isNotNull();
     }
 
+    // --- the nightly sweep ---------------------------------------------------- //
+
+    @Nested
+    @DisplayName("purging published events")
+    class Purge {
+
+        /**
+         * The production statement, with one addition: it is pinned to this
+         * run's topic.
+         *
+         * <p>Not cosmetic. Without it a test run against a database that has a
+         * real deployment behind it would delete that deployment's published
+         * history, which is the one thing a test in this file must not be able
+         * to do. The guard has no bearing on what is being proven — every
+         * assertion below is about the {@code published = true} and
+         * {@code created_at} predicates, which are exactly as they ship.
+         */
+        private int purge(String olderThan, int batch) throws Exception {
+            try (Connection c = system();
+                 PreparedStatement ps = c.prepareStatement("""
+                         DELETE FROM outbox_events
+                          WHERE id IN (
+                              SELECT id FROM outbox_events
+                               WHERE published = true
+                                 AND created_at < now() + ?::interval
+                                 AND topic = ?
+                               LIMIT ?)
+                         """)) {
+                ps.setString(1, olderThan);
+                ps.setString(2, topic);
+                ps.setInt(3, batch);
+                int deleted = ps.executeUpdate();
+                c.commit();
+                return deleted;
+            }
+        }
+
+        private boolean stillThere(String id) throws Exception {
+            try (Connection c = system();
+                 PreparedStatement ps = c.prepareStatement(
+                         "SELECT 1 FROM outbox_events WHERE id = ?")) {
+                ps.setString(1, id);
+                try (ResultSet rs = ps.executeQuery()) {
+                    return rs.next();
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("takes old published rows and nothing else")
+        void takesOnlyWhatItShould() throws Exception {
+            String published = enqueue("mtg_a", -3600);
+            String pending = enqueue("mtg_b", -3600);
+            String retired = enqueue("mtg_c", -3600, "0 seconds", "-1 hour");
+            claim(relayA, 100);
+            markPublished(relayA, published);
+            relayA.commit();
+
+            purge("-1 second", 1000);
+
+            assertThat(stillThere(published)).as("published and old").isFalse();
+            // Work that has not happened yet. Deleting it would lose a meeting.
+            assertThat(stillThere(pending)).as("still pending").isTrue();
+            // Kept deliberately: a retired event is the record of a meeting that
+            // was never processed, and it is the one thing here somebody may
+            // need to read months later.
+            assertThat(stillThere(retired)).as("retired").isTrue();
+        }
+
+        @Test
+        @DisplayName("leaves published rows inside the retention window alone")
+        void respectsTheWindow() throws Exception {
+            String recent = enqueue("mtg_a", 0);
+            claim(relayA, 100);
+            markPublished(relayA, recent);
+            relayA.commit();
+
+            purge("-7 days", 1000);
+
+            assertThat(stillThere(recent)).isTrue();
+        }
+
+        @Test
+        @DisplayName("is bounded by its batch size")
+        void isBounded() throws Exception {
+            String first = enqueue("mtg_a", -3600);
+            String second = enqueue("mtg_b", -3600);
+            claim(relayA, 100);
+            markPublished(relayA, first);
+            markPublished(relayA, second);
+            relayA.commit();
+
+            assertThat(purge("-1 second", 1)).isEqualTo(1);
+            assertThat(purge("-1 second", 1)).isEqualTo(1);
+            assertThat(purge("-1 second", 1)).isZero();
+        }
+
+        @Test
+        @DisplayName("cannot touch a row a relay is holding")
+        void doesNotFightTheRelay() throws Exception {
+            // Not a lock-ordering argument: the two predicates are disjoint. The
+            // relay claims published = false and the purge deletes published =
+            // true, so they never want the same row and neither ever waits.
+            String held = enqueue("mtg_a", -3600);
+            assertThat(claim(relayA, 100)).containsExactly(held);
+
+            assertThat(purge("-1 second", 1000)).isZero();
+
+            assertThat(stillThere(held)).isTrue();
+        }
+    }
+
     // --- row-level security -------------------------------------------------- //
 
     @Test
