@@ -174,6 +174,10 @@ export interface PreferencesResponse {
   /** Descriptive only — nothing routes by either (V38). */
   department: string | null;
   jobRole: string | null;
+  /** How this person asks to be referred to. Free text; never inferred. */
+  pronouns: string | null;
+  /** Profile picture as a data URL, or null to fall back to initials. */
+  avatarUrl: string | null;
   /** ISO-639-1 spoken language for transcription; null means auto-detect. */
   defaultLanguage: string | null;
   /** Days until a new link expires, or null for never. */
@@ -208,6 +212,10 @@ export interface PreferencesUpdateRequest {
   displayName?: string;
   department?: string;
   jobRole?: string;
+  /** Blank clears it. */
+  pronouns?: string;
+  /** A `data:image/...;base64,...` URL; blank removes the picture. */
+  avatarUrl?: string;
   /** ISO-639-1 code; blank restores auto-detect. */
   defaultLanguage?: string;
   /** Omitted leaves the window; `chatReadsEverything` clears it. */

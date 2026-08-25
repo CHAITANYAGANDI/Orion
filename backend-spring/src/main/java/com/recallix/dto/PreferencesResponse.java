@@ -27,6 +27,10 @@ public record PreferencesResponse(
         /** Descriptive only — nothing routes by either. See V38. */
         String department,
         String jobRole,
+        /** "she/her", "they/them", or null. Free text, never inferred. */
+        String pronouns,
+        /** The profile picture as a data URL, or null for initials. */
+        String avatarUrl,
         /** ISO-639-1 spoken language, or null for auto-detect. */
         String defaultLanguage,
         /** How far back workspace chat reads transcripts; null is everything. */
@@ -56,6 +60,8 @@ public record PreferencesResponse(
                 user.getDisplayName(),
                 user.getDepartment(),
                 user.getJobRole(),
+                user.getPronouns(),
+                user.getAvatarUrl(),
                 user.getDefaultLanguage(),
                 user.getChatHistoryDays(),
                 user.isTaskReminders(),

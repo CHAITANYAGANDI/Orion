@@ -25,6 +25,25 @@ public record PreferencesUpdateRequest(
         @Size(max = 120, message = "That role is too long")
         String jobRole,
         /**
+         * How to refer to this person. Blank clears it.
+         *
+         * <p>Short by design: it holds "she/her", not a sentence. Nothing
+         * validates the shape beyond the length, because there is no correct
+         * list to check against.
+         */
+        @Size(max = 40, message = "Pronouns are shorter than that")
+        String pronouns,
+        /**
+         * A profile picture as a {@code data:image/...;base64,...} URL, or an
+         * empty string to remove it.
+         *
+         * <p>The size bound is the real check and it is generous on purpose:
+         * the browser downscales to 256px before sending, so anything near the
+         * ceiling did not come from this app's own uploader.
+         */
+        @Size(max = 262144, message = "That picture is too large")
+        String avatarUrl,
+        /**
          * ISO-639-1 code of the language meetings are held in; blank restores
          * auto-detect. Checked against the Language enum in the service, so an
          * unknown code is a 400 rather than a transcript in the wrong language.

@@ -59,6 +59,11 @@ import { settingsError } from "@/components/settings/shared";
 import { BUILD_LINE, LEGAL_LINKS } from "@/lib/build-info";
 import { cn } from "@/lib/utils";
 import {
+  Avatar,
+  ProfileDialog,
+  type ProfileForm,
+} from "@/components/settings/profile-dialog";
+import {
   RETENTION_CHOICES,
   DELETE_PHRASE,
   confirmsDeletion,
@@ -92,18 +97,22 @@ function IdentityBlock() {
   const [update, { isLoading }] = useUpdatePreferencesMutation();
   const [editing, setEditing] = React.useState(false);
 
-  const [form, setForm] = React.useState({ displayName: "", department: "", jobRole: "" });
+  const name = prefs.data?.displayName ?? "";
+  const email = prefs.data?.email ?? null;
+  const passwordNote =
+    mode === "clerk"
+      ? "Managed by your sign-in provider."
+      : "Development session — there is no password.";
 
-  function open() {
-    setForm({
-      displayName: prefs.data?.displayName ?? "",
-      department: prefs.data?.department ?? "",
-      jobRole: prefs.data?.jobRole ?? "",
-    });
-    setEditing(true);
-  }
+  const initial: ProfileForm = {
+    displayName: name,
+    pronouns: prefs.data?.pronouns ?? "",
+    department: prefs.data?.department ?? "",
+    jobRole: prefs.data?.jobRole ?? "",
+    avatarUrl: prefs.data?.avatarUrl ?? "",
+  };
 
-  async function save() {
+  async function save(form: ProfileForm) {
     try {
       await update(form).unwrap();
       setEditing(false);
@@ -113,99 +122,73 @@ function IdentityBlock() {
     }
   }
 
-  const name = prefs.data?.displayName;
-  const email = prefs.data?.email;
-  const initials = (name || userId || "me").slice(0, 2).toUpperCase();
-
   return (
     <div className="border-b py-6">
       <div className="flex items-start gap-4">
-        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-primary text-lg font-bold text-primary-foreground">
-          {initials}
-        </span>
+        <Avatar url={prefs.data?.avatarUrl} name={name || userId} />
 
-        {editing ? (
-          <div className="grid flex-1 gap-3 sm:grid-cols-2">
-            <Field
-              id="full-name"
-              label="Full Name"
-              value={form.displayName}
-              onChange={(v) => setForm({ ...form, displayName: v })}
-              placeholder="Priya Raman"
-              hint="Spell it the way your transcripts do — that is what action items are matched against."
-            />
-            <Field
-              id="department"
-              label="Department"
-              value={form.department}
-              onChange={(v) => setForm({ ...form, department: v })}
-              placeholder="IT"
-            />
-            <Field
-              id="job-role"
-              label="Role"
-              value={form.jobRole}
-              onChange={(v) => setForm({ ...form, jobRole: v })}
-              placeholder="Individual contributor"
-            />
-            <div className="flex items-end gap-2 sm:col-span-2">
-              <Button onClick={() => void save()} disabled={isLoading} className="gap-1.5">
-                {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-                Save
-              </Button>
-              <Button variant="ghost" onClick={() => setEditing(false)} disabled={isLoading}>
-                Cancel
-              </Button>
-            </div>
+        <div className="grid min-w-0 flex-1 gap-x-8 gap-y-1 sm:grid-cols-2">
+          <div className="min-w-0">
+            <p className="flex min-w-0 items-baseline gap-2">
+              <span className="truncate text-lg font-semibold">
+                {name || <span className="text-muted-foreground">No name yet</span>}
+              </span>
+              {prefs.data?.pronouns && (
+                <span className="shrink-0 text-sm text-muted-foreground">
+                  ({prefs.data.pronouns})
+                </span>
+              )}
+            </p>
+            <p className="truncate text-sm">
+              {email ? (
+                <a href={`mailto:${email}`} className="text-primary underline-offset-2 hover:underline">
+                  {email}
+                </a>
+              ) : (
+                <span className="text-muted-foreground">
+                  No address from your sign-in provider
+                </span>
+              )}
+            </p>
+            {/* Dots, and a sentence saying whose password they are. Recallix
+                never sees it: Clerk holds it, and a development session is
+                identified by a header and has none at all. */}
+            <p className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
+              <span className="tracking-[0.2em]">•••••••••</span>
+              <span className="text-xs">{passwordNote}</span>
+            </p>
           </div>
-        ) : (
-          <>
-            <div className="grid min-w-0 flex-1 gap-x-8 gap-y-1 sm:grid-cols-2">
-              <div className="min-w-0">
-                <p className="truncate text-lg font-semibold">
-                  {name || <span className="text-muted-foreground">No name yet</span>}
-                </p>
-                <p className="truncate text-sm">
-                  {email ? (
-                    <a href={`mailto:${email}`} className="text-primary underline-offset-2 hover:underline">
-                      {email}
-                    </a>
-                  ) : (
-                    <span className="text-muted-foreground">
-                      No address from your sign-in provider
-                    </span>
-                  )}
-                </p>
-                {/* Dots, and a sentence saying whose password they are. Recallix
-                    never sees it: Clerk holds it, and a development session is
-                    identified by a header and has none at all. */}
-                <p className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
-                  <span className="tracking-[0.2em]">•••••••••</span>
-                  <span className="text-xs">
-                    {mode === "clerk"
-                      ? "Managed by your sign-in provider"
-                      : "Development session — no password"}
-                  </span>
-                </p>
-              </div>
-              <div className="min-w-0 text-sm">
-                <p className="truncate">
-                  {prefs.data?.department || (
-                    <span className="text-muted-foreground">No department</span>
-                  )}
-                </p>
-                <p className="truncate text-muted-foreground">
-                  {prefs.data?.jobRole || "No role"}
-                </p>
-              </div>
-            </div>
+          <div className="min-w-0 text-sm">
+            <p className="truncate">
+              {prefs.data?.department || (
+                <span className="text-muted-foreground">No department</span>
+              )}
+            </p>
+            <p className="truncate text-muted-foreground">
+              {prefs.data?.jobRole || "No role"}
+            </p>
+          </div>
+        </div>
 
-            <Button variant="outline" size="sm" onClick={open} className="shrink-0 gap-1.5">
-              <Pencil className="h-3.5 w-3.5" /> Edit
-            </Button>
-          </>
-        )}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setEditing(true)}
+          className="shrink-0 gap-1.5"
+        >
+          <Pencil className="h-3.5 w-3.5" /> Edit
+        </Button>
       </div>
+
+      <ProfileDialog
+        open={editing}
+        initial={initial}
+        email={email}
+        passwordNote={passwordNote}
+        saving={isLoading}
+        onClose={() => setEditing(false)}
+        onSave={(form) => void save(form)}
+      />
     </div>
   );
 }

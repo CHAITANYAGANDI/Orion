@@ -58,19 +58,28 @@ class UserPreferencesTest {
     private static UserService.PreferencesPatch profile(String displayName, String department,
                                                         String jobRole, String language) {
         return new UserService.PreferencesPatch(
-                null, null, displayName, department, jobRole, language,
+                null, null, displayName, department, jobRole,
+                null, null,  // pronouns, avatarUrl -- their own helper below
+                language,
+                null, null, null, null, null, null, null, null, null);
+    }
+
+    /** Pronouns and the profile picture, which nothing else here touches. */
+    private static UserService.PreferencesPatch person(String pronouns, String avatarUrl) {
+        return new UserService.PreferencesPatch(
+                null, null, null, null, null, pronouns, avatarUrl, null,
                 null, null, null, null, null, null, null, null, null);
     }
 
     private static UserService.PreferencesPatch chatWindow(Integer days, Boolean everything) {
         return new UserService.PreferencesPatch(
-                null, null, null, null, null, null, days, everything,
+                null, null, null, null, null, null, null, null, days, everything,
                 null, null, null, null, null, null, null);
     }
 
     private static UserService.PreferencesPatch muting(List<String> kinds) {
         return new UserService.PreferencesPatch(
-                null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null,
                 null, null, null, null, null, null, kinds);
     }
 
@@ -88,7 +97,7 @@ class UserPreferencesTest {
                                                       Boolean emailsEnabled, Boolean recapForImports,
                                                       Boolean commentEmail, Boolean highlightEmail) {
         return new UserService.PreferencesPatch(
-                null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null, null, null, null,
                 taskReminders, weeklyDigest, emailsEnabled, recapForImports,
                 commentEmail, highlightEmail, null);
     }
@@ -102,6 +111,90 @@ class UserPreferencesTest {
         user.setDisplayName("Priya");
         when(users.findById(anyString())).thenAnswer(inv ->
                 USER.equals(inv.getArgument(0)) ? Optional.of(user) : Optional.empty());
+    }
+
+    @Nested
+    @DisplayName("pronouns and the profile picture")
+    class ThePerson {
+
+        @Test
+        @DisplayName("pronouns are stored as written, trimmed")
+        void pronounsStored() {
+            // Free text and no list: every fixed set is wrong for somebody, and
+            // the field exists precisely so the product stops guessing.
+            service.updatePreferences(USER, person("  they/them  ", null));
+
+            assertThat(user.getPronouns()).isEqualTo("they/them");
+        }
+
+        @Test
+        @DisplayName("blank clears them rather than storing an empty string")
+        void pronounsCleared() {
+            user.setPronouns("she/her");
+
+            service.updatePreferences(USER, person("   ", null));
+
+            assertThat(user.getPronouns()).isNull();
+        }
+
+        @Test
+        @DisplayName("omitting a field leaves it alone")
+        void omittedUnchanged() {
+            user.setPronouns("he/him");
+            user.setAvatarUrl(PNG);
+
+            service.updatePreferences(USER, person(null, null));
+
+            assertThat(user.getPronouns()).isEqualTo("he/him");
+            assertThat(user.getAvatarUrl()).isEqualTo(PNG);
+        }
+
+        @Test
+        @DisplayName("an inline image is stored")
+        void avatarStored() {
+            service.updatePreferences(USER, person(null, PNG));
+
+            assertThat(user.getAvatarUrl()).isEqualTo(PNG);
+        }
+
+        @Test
+        @DisplayName("blank removes the picture")
+        void avatarCleared() {
+            user.setAvatarUrl(PNG);
+
+            service.updatePreferences(USER, person(null, ""));
+
+            assertThat(user.getAvatarUrl()).isNull();
+        }
+
+        /**
+         * The reason this field is validated at all.
+         *
+         * <p>It is rendered straight into an {@code <img src>}. A remote URL is
+         * a tracking pixel that fires for every colleague who opens the page,
+         * reporting their IP and the time they looked to a host the account
+         * owner chose; {@code javascript:} and an SVG carrying a script are the
+         * sharper versions of the same hole.
+         */
+        @org.junit.jupiter.params.ParameterizedTest
+        @org.junit.jupiter.params.provider.ValueSource(strings = {
+                "https://tracker.example.com/pixel.png",
+                "http://tracker.example.com/pixel.png",
+                "javascript:alert(1)",
+                "data:text/html;base64,PHNjcmlwdD4=",
+                "data:image/svg+xml;base64,PHN2Zz48c2NyaXB0Lz48L3N2Zz4=",
+                "not a url at all",
+        })
+        @DisplayName("anything that is not an inline raster image is refused")
+        void avatarRefused(String hostile) {
+            assertThatThrownBy(() -> service.updatePreferences(USER, person(null, hostile)))
+                    .isInstanceOf(ApiException.class)
+                    .hasMessageContaining("not an image");
+
+            assertThat(user.getAvatarUrl()).isNull();
+        }
+
+        private static final String PNG = "data:image/png;base64,iVBORw0KGgo=";
     }
 
     @Nested

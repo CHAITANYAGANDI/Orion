@@ -19,6 +19,8 @@
 import Link from "next/link";
 import { ChevronDown, LogOut, Settings as SettingsIcon } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { useGetPreferencesQuery } from "@/lib/api";
+import { initialsOf } from "@/lib/avatar";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -30,7 +32,15 @@ import {
 
 export function AccountMenu() {
   const { userId, mode, signOut } = useAuth();
-  const initials = (userId || "me").slice(-2).toUpperCase();
+  // The profile is already fetched by the settings page and cached, so this
+  // costs nothing on any screen that has been there; elsewhere it is one small
+  // request for the thing a person most expects to recognise.
+  const prefs = useGetPreferencesQuery();
+  const name = prefs.data?.displayName || null;
+  const photo = prefs.data?.avatarUrl || null;
+  // Real initials, not the tail of an opaque id: "k5" said nothing about
+  // anybody, and a person who has told us their name should see it.
+  const initials = initialsOf(name, userId);
 
   return (
     <div className="px-3 pb-2">
@@ -40,11 +50,22 @@ export function AccountMenu() {
             type="button"
             className="group flex w-full items-center gap-2 rounded-lg border px-2 py-2 text-left transition-colors hover:bg-accent"
           >
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground">
-              {initials}
-            </span>
+            {photo ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={photo}
+                alt=""
+                className="h-7 w-7 shrink-0 rounded-full object-cover"
+              />
+            ) : (
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-primary-foreground">
+                {initials}
+              </span>
+            )}
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium">{userId || "user"}</span>
+              <span className="block truncate text-sm font-medium">
+                {name || userId || "user"}
+              </span>
               <span className="block truncate text-xs text-muted-foreground">
                 {mode === "dev" ? "Development session" : "Signed in"}
               </span>

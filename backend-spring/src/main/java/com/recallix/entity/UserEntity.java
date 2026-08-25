@@ -60,6 +60,28 @@ public class UserEntity {
     private String jobRole;
 
     /**
+     * How this person asks to be referred to: "she/her", "they/them".
+     *
+     * <p>Free text and not an enum, because every fixed list is wrong for
+     * somebody and the whole point of the field is to stop the product
+     * guessing. Shown beside the name; nothing infers it from anything.
+     */
+    @Column(name = "pronouns")
+    private String pronouns;
+
+    /**
+     * The profile picture, as a data URL.
+     *
+     * <p>Inline rather than a key into object storage. It is rendered on every
+     * page, so a presigned URL would either expire mid-session or need a public
+     * bucket, and both are worse than a few tens of kilobytes on one row per
+     * user. Downscaled in the browser before it is sent and capped on the way
+     * in {—} see {@code PreferencesService}.
+     */
+    @Column(name = "avatar_url", columnDefinition = "text")
+    private String avatarUrl;
+
+    /**
      * The language meetings are held in, or null to auto-detect.
      *
      * <p>Unlike the two above, this one changes the transcript. Detection is
@@ -241,6 +263,12 @@ public class UserEntity {
 
     public String getJobRole() { return jobRole; }
     public void setJobRole(String jobRole) { this.jobRole = jobRole; }
+
+    public String getPronouns() { return pronouns; }
+    public void setPronouns(String pronouns) { this.pronouns = pronouns; }
+
+    public String getAvatarUrl() { return avatarUrl; }
+    public void setAvatarUrl(String avatarUrl) { this.avatarUrl = avatarUrl; }
 
     public String getDefaultLanguage() { return defaultLanguage; }
     public void setDefaultLanguage(String defaultLanguage) { this.defaultLanguage = defaultLanguage; }

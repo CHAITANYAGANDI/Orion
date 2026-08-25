@@ -71,6 +71,12 @@ public class UserService {
         if (patch.jobRole() != null) {
             user.setJobRole(patch.jobRole().isBlank() ? null : patch.jobRole().trim());
         }
+        if (patch.pronouns() != null) {
+            user.setPronouns(patch.pronouns().isBlank() ? null : patch.pronouns().trim());
+        }
+        if (patch.avatarUrl() != null) {
+            user.setAvatarUrl(cleanAvatar(patch.avatarUrl()));
+        }
         if (patch.defaultLanguage() != null) {
             user.setDefaultLanguage(resolveLanguage(patch.defaultLanguage()));
         }
@@ -149,6 +155,43 @@ public class UserService {
     }
 
     /**
+     * A profile picture, or nothing, and never anything else.
+     *
+     * <p>This string is rendered straight into an {@code <img src>}, so what it
+     * is allowed to be matters more than what it is allowed to weigh. Only an
+     * inline base64 image passes.
+     *
+     * <p>An ordinary {@code https://} URL is rejected along with everything
+     * else, and that is the point rather than an oversight: a remote image in a
+     * profile is a tracking pixel that fires for every colleague who opens the
+     * page, reporting their IP and the time they looked, to a host the account
+     * owner chose. {@code javascript:} and {@code data:text/html} are the
+     * sharper versions of the same hole.
+     *
+     * <p>No SVG either. It is an image everywhere else in a product and a
+     * script host here: an uploaded SVG can carry a {@code script} element, and
+     * it would run against whoever viewed the profile.
+     */
+    private String cleanAvatar(String raw) {
+        String value = raw == null ? "" : raw.trim();
+        if (value.isBlank()) {
+            return null;  // an explicit "remove my picture"
+        }
+        for (String allowed : AVATAR_TYPES) {
+            if (value.startsWith(allowed)) {
+                return value;
+            }
+        }
+        throw ApiException.badRequest("That is not an image Recallix can store");
+    }
+
+    /** The inline image types a browser will render and this app produces. */
+    private static final List<String> AVATAR_TYPES = List.of(
+            "data:image/png;base64,",
+            "data:image/jpeg;base64,",
+            "data:image/webp;base64,");
+
+    /**
      * The mutable half of the preferences, as its own type.
      *
      * <p>Twenty nullable arguments in a row is a call nobody can read and a
@@ -160,6 +203,10 @@ public class UserService {
             String displayName,
             String department,
             String jobRole,
+            /** How this person asks to be referred to. Blank clears it. */
+            String pronouns,
+            /** A data-URL image, or blank to remove the picture. */
+            String avatarUrl,
             String defaultLanguage,
             /** Null leaves the window; {@code chatReadsEverything} clears it. */
             Integer chatHistoryDays,

@@ -147,6 +147,8 @@ beforeEach(() => {
     recapEmail: null,
     effectiveRecapEmail: "priya@example.com",
     displayName: "Priya Raman",
+    pronouns: null,
+    avatarUrl: null,
     department: "IT",
     jobRole: "Individual contributor",
     defaultLanguage: null,
@@ -175,13 +177,15 @@ describe("who you are", () => {
     mode = "clerk";
     render(<GeneralTab />);
 
-    expect(screen.getByText("Managed by your sign-in provider")).toBeInTheDocument();
+    expect(screen.getByText("Managed by your sign-in provider.")).toBeInTheDocument();
   });
 
   it("is honest that a development session has no password", () => {
     render(<GeneralTab />);
 
-    expect(screen.getByText("Development session — no password")).toBeInTheDocument();
+    expect(
+      screen.getByText("Development session — there is no password."),
+    ).toBeInTheDocument();
   });
 
   it("says so when the provider gave no address", () => {
@@ -214,26 +218,63 @@ describe("editing", () => {
     expect(screen.getByLabelText("Role")).toHaveValue("Individual contributor");
   });
 
-  it("offers no field for the two it cannot change", async () => {
+  it("shows the two it cannot change, and refuses to let them be edited", async () => {
     await openEditor();
 
-    expect(screen.queryByLabelText(/Email/)).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/Password/)).not.toBeInTheDocument();
+    // Shown, because a profile that omits your own address reads as broken.
+    // Disabled, because Recallix does not hold either: the address is the
+    // sign-in provider's fact and the password is only ever Clerk's. An
+    // editable box would be a control that silently does nothing.
+    expect(screen.getByLabelText("Email")).toBeDisabled();
+    expect(screen.getByLabelText("Password")).toBeDisabled();
   });
 
-  it("saves all three together, so changing one cannot clear another", async () => {
+  it("never puts a real password in the DOM", async () => {
     await openEditor();
 
-    await userEvent.clear(screen.getByLabelText("Department"));
-    await userEvent.type(screen.getByLabelText("Department"), "Platform");
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    // Dots are a drawing of a password, not one. Recallix has never held it,
+    // and rendering anything else here would mean it had started to.
+    expect(screen.getByLabelText("Password")).toHaveValue("••••••••••");
+  });
+
+  it("saves every field together, so changing one cannot clear another", async () => {
+    await openEditor();
+
+    await userEvent.selectOptions(screen.getByLabelText("Department"), "Engineering");
+    await userEvent.click(screen.getByRole("button", { name: "Finish" }));
 
     await waitFor(() =>
       expect(update).toHaveBeenCalledWith({
         displayName: "Priya Raman",
-        department: "Platform",
+        pronouns: "",
+        department: "Engineering",
         jobRole: "Individual contributor",
+        avatarUrl: "",
       }),
+    );
+  });
+
+  it("keeps a department that is not on the list", async () => {
+    // Both fields were free text before the pickers existed. A select whose
+    // value is absent from its options renders the first option instead, so
+    // opening this to change a photo would silently rewrite somebody\'s
+    // department -- data loss with no prompt and no undo.
+    prefs = { ...prefs, department: "Platform Engineering" };
+    await openEditor();
+
+    expect(screen.getByLabelText("Department")).toHaveValue("Platform Engineering");
+  });
+
+  it("records pronouns rather than inferring them", async () => {
+    await openEditor();
+
+    await userEvent.type(screen.getByLabelText("Pronouns"), "they/them");
+    await userEvent.click(screen.getByRole("button", { name: "Finish" }));
+
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith(
+        expect.objectContaining({ pronouns: "they/them" }),
+      ),
     );
   });
 
@@ -241,7 +282,7 @@ describe("editing", () => {
     failure = { data: { message: "That name is too long" } };
     await openEditor();
 
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await userEvent.click(screen.getByRole("button", { name: "Finish" }));
 
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("That name is too long"));
     expect(screen.getByLabelText("Full Name")).toBeInTheDocument();
