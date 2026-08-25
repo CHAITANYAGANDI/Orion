@@ -85,9 +85,6 @@ const ICONS: Record<NotificationKind, React.ComponentType<{ className?: string }
   TRANSCRIPT_READY: FileText,
   SUMMARY_READY: Sparkles,
   PROCESSING_FAILED: AlertTriangle,
-  RECAP_SENT: Mail,
-  ACTION_ITEM_DUE: Clock,
-  ACTION_ITEM_OVERDUE: AlarmClock,
   MENTIONED_IN_MEETING: AtSign,
   SHARE_VIEWED: Eye,
 };

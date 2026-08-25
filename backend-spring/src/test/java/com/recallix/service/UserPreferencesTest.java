@@ -13,7 +13,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
-import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
@@ -52,61 +51,40 @@ class UserPreferencesTest {
      *
      * <p>Positional nulls at every call site is how a transposition gets written
      * and never noticed — the record exists to be named, and these helpers are
-     * where the naming happens for tests. There were five; `sharing` went with
-     * the share links it configured.
+     * where the naming happens for tests. There were six: `sharing` went with
+     * the share links it configured, and `email` with the mail itself (V56).
      */
     private static UserService.PreferencesPatch profile(String displayName, String department,
                                                         String jobRole, String language) {
         return new UserService.PreferencesPatch(
-                null, null, displayName, department, jobRole,
+                displayName, department, jobRole,
                 null, null, null,  // pronouns, email, avatarUrl -- their own helpers
                 language,
-                null, null, null, null, null, null, null, null, null);
+                null, null, null);
     }
 
     /** Pronouns and the profile picture, which nothing else here touches. */
     private static UserService.PreferencesPatch person(String pronouns, String avatarUrl) {
         return new UserService.PreferencesPatch(
-                null, null, null, null, null, pronouns, null, avatarUrl, null,
-                null, null, null, null, null, null, null, null, null);
+                null, null, null, pronouns, null, avatarUrl, null,
+                null, null, null);
     }
 
     /** Just the account address. */
     private static UserService.PreferencesPatch address(String email) {
         return new UserService.PreferencesPatch(
-                null, null, null, null, null, null, email, null, null,
-                null, null, null, null, null, null, null, null, null);
+                null, null, null, null, email, null, null,
+                null, null, null);
     }
 
     private static UserService.PreferencesPatch chatWindow(Integer days, Boolean everything) {
         return new UserService.PreferencesPatch(
-                null, null, null, null, null, null, null, null, null, days, everything,
-                null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, days, everything, null);
     }
 
     private static UserService.PreferencesPatch muting(List<String> kinds) {
         return new UserService.PreferencesPatch(
-                null, null, null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, null, kinds);
-    }
-
-    /**
-     * The six email switches, in the order the settings page listed them.
-     *
-     * <p>Six positional booleans is past the point where a call site can be
-     * read, so every test below passes them by name through this one helper and
-     * a transposition shows up here rather than in each test.
-     *
-     * <p>There were seven. "Conversation shared" mailed the owner when somebody
-     * opened a published link, and there are no links to open.
-     */
-    private static UserService.PreferencesPatch email(Boolean taskReminders, Boolean weeklyDigest,
-                                                      Boolean emailsEnabled, Boolean recapForImports,
-                                                      Boolean commentEmail, Boolean highlightEmail) {
-        return new UserService.PreferencesPatch(
-                null, null, null, null, null, null, null, null, null, null, null,
-                taskReminders, weeklyDigest, emailsEnabled, recapForImports,
-                commentEmail, highlightEmail, null);
+                null, null, null, null, null, null, null, null, null, kinds);
     }
 
     @BeforeEach
@@ -419,117 +397,24 @@ class UserPreferencesTest {
     }
 
     /**
-     * The seven email switches (V40, widened in V43, trimmed in V44).
+     * Nothing here mails anybody.
      *
-     * <p>The one that needs guarding is the master. A master switch that cleared
-     * the switches underneath it would turn "mute me for a fortnight" into a
-     * one-way door: everything would come back off, and the person would have to
-     * remember what they had chosen — which is exactly what nobody does.
-     *
-     * <p>The rest are guarded as a group rather than one test each, because the
-     * failure they share is a positional one: twenty-two fields in a record
-     * and one wire crossed in the controller, so switching on "Highlights" turns
-     * on "Comments" instead. A test that moves one switch cannot see that; a
-     * test that moves them apart can.
+     * <p>Six switches used to live in this record — the recap, the recap for
+     * imports, the master, the morning reminder, the Monday review, and the
+     * comment and highlight notices. They were removed in V56 along with the
+     * senders behind them: the settings tab that reached them was deleted from
+     * the frontend, which left a subsystem nobody could turn on and nobody
+     * could turn off.
      */
-    @Nested
-    class EmailSwitches {
+    @Test
+    @DisplayName("the patch carries no way to ask for email")
+    void noMailSwitchesSurvive() {
+        var names = java.util.Arrays.stream(UserService.PreferencesPatch.class.getRecordComponents())
+                .map(java.lang.reflect.RecordComponent::getName)
+                .toList();
 
-        @Test
-        @DisplayName("the master leaves every switch underneath it alone")
-        void masterDoesNotRewriteTheRest() {
-            user.setAutoEmailRecap(true);
-            user.setRecapForImports(true);
-            user.setTaskReminders(true);
-            user.setCommentEmail(true);
-            user.setHighlightEmail(true);
-
-            service.updatePreferences(USER,
-                    email(null, null, false, null, null, null));
-
-            assertThat(user.isEmailsEnabled()).isFalse();
-            assertThat(user.isAutoEmailRecap()).isTrue();
-            assertThat(user.isRecapForImports()).isTrue();
-            assertThat(user.isTaskReminders()).isTrue();
-            assertThat(user.isCommentEmail()).isTrue();
-            assertThat(user.isHighlightEmail()).isTrue();
-        }
-
-        @Test
-        @DisplayName("each switch moves on its own")
-        void switchesAreIndependent() {
-            service.updatePreferences(USER,
-                    email(null, true, null, true, null, null));
-
-            assertThat(user.isWeeklyDigest()).isTrue();
-            assertThat(user.isRecapForImports()).isTrue();
-            // Untouched by a patch that did not mention them.
-            assertThat(user.isTaskReminders()).isFalse();
-            assertThat(user.isCommentEmail()).isFalse();
-            assertThat(user.isHighlightEmail()).isFalse();
-        }
-
-        @Test
-        @DisplayName("the two V43 switches land on the two V43 fields")
-        void newSwitchesAreNotCrossed() {
-            // One at a time, each with the other explicitly false, so a crossed
-            // wire in the controller shows up as the wrong field moving rather
-            // than as a value that happens to agree.
-            service.updatePreferences(USER,
-                    email(null, null, null, null, true, false));
-            assertThat(user.isCommentEmail()).isTrue();
-            assertThat(user.isHighlightEmail()).isFalse();
-
-            service.updatePreferences(USER,
-                    email(null, null, null, null, false, true));
-            assertThat(user.isCommentEmail()).isFalse();
-            assertThat(user.isHighlightEmail()).isTrue();
-        }
-
-        @Test
-        @DisplayName("an omitted switch is not a switch set to false")
-        void omittedMeansUnchanged() {
-            user.setWeeklyDigest(true);
-            user.setHighlightEmail(true);
-
-            service.updatePreferences(USER,
-                    email(true, null, null, null, null, null));
-
-            assertThat(user.isTaskReminders()).isTrue();
-            assertThat(user.isWeeklyDigest()).isTrue();
-            assertThat(user.isHighlightEmail()).isTrue();
-        }
-
-        @Test
-        @DisplayName("switching the weekly digest on clears the stamp, so its Monday is not skipped")
-        void weeklyOnCatchesUpToday() {
-            // The two digests share one sent-on stamp. Somebody who switches the
-            // review on during a Monday morning should get that Monday's rather
-            // than wait a week for the next one.
-            user.setTaskReminderSentOn(LocalDate.of(2026, 8, 17));
-
-            service.updatePreferences(USER,
-                    email(null, true, null, null, null, null));
-
-            assertThat(user.getTaskReminderSentOn()).isNull();
-        }
-
-        @Test
-        @DisplayName("switching the comment or highlight mail on does not backdate it")
-        void dailyStampsSurviveSwitchOn() {
-            // The opposite of the digest, deliberately. These two report
-            // something that just happened, so nothing is owed from earlier
-            // today — and clearing the stamp would mail about a comment written
-            // before anybody asked to hear about comments.
-            LocalDate today = LocalDate.of(2026, 8, 18);
-            user.setCommentEmailedOn(today);
-            user.setHighlightEmailedOn(today);
-
-            service.updatePreferences(USER,
-                    email(null, null, null, null, true, true));
-
-            assertThat(user.getCommentEmailedOn()).isEqualTo(today);
-            assertThat(user.getHighlightEmailedOn()).isEqualTo(today);
-        }
+        assertThat(names).doesNotContain(
+                "autoEmailRecap", "recapEmail", "recapForImports", "emailsEnabled",
+                "taskReminders", "weeklyDigest", "commentEmail", "highlightEmail");
     }
 }

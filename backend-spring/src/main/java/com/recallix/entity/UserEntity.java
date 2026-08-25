@@ -8,7 +8,6 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
-import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -26,14 +25,6 @@ public class UserEntity {
 
     @Column(nullable = false)
     private String plan = "FREE";
-
-    /** Mail the recap automatically when a meeting finishes processing. */
-    @Column(name = "auto_email_recap", nullable = false)
-    private boolean autoEmailRecap = false;
-
-    /** Overrides {@link #email} as the recap destination when set. */
-    @Column(name = "recap_email")
-    private String recapEmail;
 
     /**
      * The name this user is called by in their own meetings.
@@ -104,88 +95,6 @@ public class UserEntity {
     private Integer chatHistoryDays;
 
     /**
-     * Mail every morning about what is overdue or due soon ("Event reminder").
-     *
-     * <p>Every morning, full stop, since V43. It used to carry a cadence — see
-     * {@link #weeklyDigest} for why that stopped being a mode of this switch and
-     * became a switch of its own.
-     */
-    @Column(name = "task_reminders", nullable = false)
-    private boolean taskReminders = false;
-
-    /**
-     * The Monday review of the week (V43).
-     *
-     * <p>Independent of {@link #taskReminders} rather than a cadence for it. The
-     * two are different messages, not two settings of one: a daily reminder is a
-     * prompt to act this morning, a Monday review is a look back. As a mode they
-     * were mutually exclusive, so somebody who wanted both could have neither.
-     *
-     * <p>When both are on and it is a Monday, one message goes out — this one.
-     * See {@code TaskReminderService}.
-     */
-    @Column(name = "weekly_digest", nullable = false)
-    private boolean weeklyDigest = false;
-
-    /** The last day a digest went out — the guard against sending two. */
-    @Column(name = "task_reminder_sent_on")
-    private LocalDate taskReminderSentOn;
-
-    /**
-     * Mail when a comment lands on an action item ("Comments", V43).
-     *
-     * <p>At most one a day — see {@link #commentEmailedOn}. Working through a
-     * meeting's tasks produces a burst of notes in one sitting, and a message
-     * per note is how somebody builds a filter rule and stops reading the
-     * sender entirely.
-     */
-    @Column(name = "comment_email", nullable = false)
-    private boolean commentEmail = false;
-
-    /** The day the comment mail last went out; null if never. */
-    @Column(name = "comment_emailed_on")
-    private LocalDate commentEmailedOn;
-
-    /**
-     * Mail when a highlight is added to a transcript ("Highlights", V43).
-     *
-     * <p>At most one a day, for the same reason as {@link #commentEmail}:
-     * reading a transcript through and marking it up is one activity, not
-     * fifteen events.
-     */
-    @Column(name = "highlight_email", nullable = false)
-    private boolean highlightEmail = false;
-
-    /** The day the highlight mail last went out; null if never. */
-    @Column(name = "highlight_emailed_on")
-    private LocalDate highlightEmailedOn;
-
-    /**
-     * The master switch over automatic email (V40).
-     *
-     * <p>On by default, because it governs messages that are each already
-     * opt-in — arriving with everything pre-suppressed would mean a switch
-     * somebody turned on doing nothing, which is worse than either state.
-     *
-     * <p>Automatic only. Sharing a meeting by email is something the account
-     * holder just did on purpose, and refusing to send it because of a
-     * preference about notifications would make the button a liar.
-     */
-    @Column(name = "emails_enabled", nullable = false)
-    private boolean emailsEnabled = true;
-
-    /**
-     * Recap email for meetings that arrived as a file or a link (V40).
-     *
-     * <p>The counterpart of {@link #autoEmailRecap}, which now covers only
-     * meetings recorded here. Split because importing an archive and recording
-     * a call are different acts at wildly different volumes, and one switch
-     * over both meant anybody doing the first had to give up the second.
-     */
-    @Column(name = "recap_for_imports", nullable = false)
-    private boolean recapForImports = false;
-
-    /**
      * Email when somebody opens a link you published (V40).
      *
      * <p>Off by default, unlike the bell notification it accompanies. A link
@@ -249,11 +158,7 @@ public class UserEntity {
     public String getPlan() { return plan; }
     public void setPlan(String plan) { this.plan = plan; }
 
-    public boolean isAutoEmailRecap() { return autoEmailRecap; }
-    public void setAutoEmailRecap(boolean autoEmailRecap) { this.autoEmailRecap = autoEmailRecap; }
 
-    public String getRecapEmail() { return recapEmail; }
-    public void setRecapEmail(String recapEmail) { this.recapEmail = recapEmail; }
 
     public String getDisplayName() { return displayName; }
     public void setDisplayName(String displayName) { this.displayName = displayName; }
@@ -276,32 +181,14 @@ public class UserEntity {
     public Integer getChatHistoryDays() { return chatHistoryDays; }
     public void setChatHistoryDays(Integer chatHistoryDays) { this.chatHistoryDays = chatHistoryDays; }
 
-    public boolean isTaskReminders() { return taskReminders; }
-    public void setTaskReminders(boolean taskReminders) { this.taskReminders = taskReminders; }
 
-    public boolean isWeeklyDigest() { return weeklyDigest; }
-    public void setWeeklyDigest(boolean weeklyDigest) { this.weeklyDigest = weeklyDigest; }
 
-    public boolean isCommentEmail() { return commentEmail; }
-    public void setCommentEmail(boolean commentEmail) { this.commentEmail = commentEmail; }
 
-    public LocalDate getCommentEmailedOn() { return commentEmailedOn; }
-    public void setCommentEmailedOn(LocalDate commentEmailedOn) { this.commentEmailedOn = commentEmailedOn; }
 
-    public boolean isHighlightEmail() { return highlightEmail; }
-    public void setHighlightEmail(boolean highlightEmail) { this.highlightEmail = highlightEmail; }
 
-    public LocalDate getHighlightEmailedOn() { return highlightEmailedOn; }
-    public void setHighlightEmailedOn(LocalDate highlightEmailedOn) { this.highlightEmailedOn = highlightEmailedOn; }
 
-    public boolean isEmailsEnabled() { return emailsEnabled; }
-    public void setEmailsEnabled(boolean emailsEnabled) { this.emailsEnabled = emailsEnabled; }
 
-    public boolean isRecapForImports() { return recapForImports; }
-    public void setRecapForImports(boolean recapForImports) { this.recapForImports = recapForImports; }
 
-    public LocalDate getTaskReminderSentOn() { return taskReminderSentOn; }
-    public void setTaskReminderSentOn(LocalDate taskReminderSentOn) { this.taskReminderSentOn = taskReminderSentOn; }
 
     public List<String> getMutedNotifications() {
         return mutedNotifications == null ? new ArrayList<>() : mutedNotifications;
@@ -323,11 +210,6 @@ public class UserEntity {
     /** Whether either dial is set — the one question the settings page asks. */
     public boolean hasRetentionPolicy() {
         return audioRetentionDays != null || meetingRetentionDays != null;
-    }
-
-    /** Where recaps go: the override when set, otherwise the account address. */
-    public String effectiveRecapEmail() {
-        return recapEmail != null && !recapEmail.isBlank() ? recapEmail.trim() : email;
     }
 
     public Instant getCreatedAt() { return createdAt; }

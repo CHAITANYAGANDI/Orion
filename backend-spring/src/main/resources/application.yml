@@ -73,31 +73,12 @@ spring:
 # with "jwkSetUri cannot be empty". AuthenticationFilter builds the Clerk
 # JwtDecoder itself, lazily, from recallix.clerk.jwks-url below.
 
-  # Mailpit in dev (docker-compose), so recaps are captured locally and never
-  # reach a real inbox. `host` must always be set: Spring only auto-configures
-  # JavaMailSender when it is present, and EmailService needs that bean to
-  # exist even when nothing is listening on the other end.
-  mail:
-    host: ${SPRING_MAIL_HOST:localhost}
-    port: ${SPRING_MAIL_PORT:1025}
-    username: ${SPRING_MAIL_USERNAME:}
-    password: ${SPRING_MAIL_PASSWORD:}
-    properties:
-      mail.smtp.auth: ${SPRING_MAIL_AUTH:false}
-      mail.smtp.starttls.enable: ${SPRING_MAIL_STARTTLS:false}
-      mail.smtp.connectiontimeout: 5000
-      mail.smtp.timeout: 5000
-      mail.smtp.writetimeout: 5000
-
 recallix:
   auth-mode: ${RECALLIX_AUTH_MODE:dev}
   internal-token: ${RECALLIX_INTERNAL_TOKEN:dev-internal-token}
   clerk:
     issuer: ${CLERK_ISSUER:}
     jwks-url: ${CLERK_JWKS_URL:}
-  mail:
-    from: ${RECALLIX_MAIL_FROM:recallix@localhost}
-    enabled: ${RECALLIX_MAIL_ENABLED:true}
   # The nightly pass that applies each account's retention policy. Written out
   # here rather than left to an inline default because it is the one scheduled
   # job that deletes data: an environment restored from a backup should be able

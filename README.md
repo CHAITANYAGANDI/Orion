@@ -29,7 +29,7 @@ Next.js Frontend ──Clerk JWT──▶ Spring Boot API ──┬── Postgr
 | `frontend/` | Next.js 14, React, TypeScript, Redux Toolkit, Tailwind, shadcn/ui | 3000 |
 | `backend-spring/` | Java 21, Spring Boot 3, Spring Security, Spring Kafka, JPA, Flyway | 8080 |
 | `ai-service/` | Python 3.12, FastAPI, OpenAI, aiokafka | 8000 |
-| infra | Postgres 16 + pgvector, Redis 7, Kafka (KRaft), MinIO (S3), Mailpit | — |
+| infra | Postgres 16 + pgvector, Redis 7, Kafka (KRaft), MinIO (S3) | — |
 
 Transcription is chosen separately from the LLM, because the two are not the
 same decision: AssemblyAI and Deepgram diarize, Whisper does not. `auto` follows
@@ -46,7 +46,6 @@ docker compose up --build
 - Spring API: http://localhost:8080/actuator/health · Swagger: http://localhost:8080/swagger-ui.html
 - AI service: http://localhost:8000/health · Docs: http://localhost:8000/docs
 - MinIO console: http://localhost:9001 (minioadmin / minioadmin)
-- **Mailpit** (catches every email the product sends): http://localhost:8025
 
 The stack runs end-to-end out of the box: **dev auth** (no Clerk account needed)
 and **mock AI** (deterministic transcript/summary, no OpenAI key). To enable the
@@ -156,7 +155,7 @@ so it takes a fourth upload to see.
 The ai-service has its own README with local (non-Docker) run instructions:
 [ai-service](ai-service/README.md). The other two run with `npm run dev` and
 `mvn spring-boot:run`, against the infra services from
-`docker compose up postgres redis kafka minio minio-init mailpit`.
+`docker compose up postgres redis kafka minio minio-init`.
 
 ### Tests
 
@@ -179,9 +178,11 @@ and did not.
   calls).
 - **Security**: Clerk JWT validation, Postgres row-level security, private S3
   buckets + short-lived presigned URLs, audit logs, plan-based file/usage limits.
-- **Email in dev**: `docker compose` runs [Mailpit](http://localhost:8025), so
-  every automatic message is demoable with no SMTP account and no test ever mails
-  a real person. Point `SMTP_HOST`/`SMTP_PORT` at a real relay to send for real.
+- **No email at all**: Recallix contacts nobody. The recap, the morning
+  deadline reminder, the Monday review and the comment/highlight notices were
+  removed in V56 — the settings tab that switched them on had already gone, which
+  left senders nobody could reach. The notification bell is the only channel, and
+  it is the one that never needed an address.
 - **Server-side request forgery**: one user-supplied URL is fetched server-side,
   and it is defended by a host allowlist enforced twice — in `MeetingService`
   before the event is published, and in `app/ingest.py` before yt-dlp sees it.

@@ -57,7 +57,7 @@ class MomentServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new MomentService(moments, meetings, audit, events);
+        service = new MomentService(moments, meetings, audit);
         Meeting m = new Meeting();
         m.setId(MEETING);
         m.setUserId(USER);

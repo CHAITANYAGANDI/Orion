@@ -143,9 +143,6 @@ beforeEach(() => {
   };
   prefs = {
     email: "priya@example.com",
-    autoEmailRecap: false,
-    recapEmail: null,
-    effectiveRecapEmail: "priya@example.com",
     displayName: "Priya Raman",
     pronouns: null,
     avatarUrl: null,
@@ -153,12 +150,6 @@ beforeEach(() => {
     jobRole: "Individual contributor",
     defaultLanguage: null,
     chatHistoryDays: null,
-    taskReminders: false,
-    weeklyDigest: false,
-    emailsEnabled: true,
-    recapForImports: false,
-    commentEmail: false,
-    highlightEmail: false,
     mutedNotifications: [],
   };
 });

@@ -185,14 +185,6 @@ public class NotificationService {
                 meeting.getId(), null, link(meeting), null);
     }
 
-    @Transactional
-    public void recapSent(Meeting meeting, String to) {
-        emit(meeting.getUserId(), NotificationKind.RECAP_SENT,
-                meeting.getTitle(),
-                "Recap emailed to " + to + ".",
-                meeting.getId(), null, link(meeting), null);
-    }
-
     /**
      * A meeting handed you work by name.
      *
@@ -219,31 +211,6 @@ public class NotificationService {
                 meeting.getId(), mine.get(0).getId(), link(meeting) + "?tab=actions",
                 // One per meeting: a reprocess must not say it again.
                 "meeting:" + meeting.getId());
-    }
-
-    /** Work due today or in the next few days. One a day, whatever the count. */
-    @Transactional
-    public void tasksDue(String userId, int count, LocalDate today) {
-        if (count <= 0) {
-            return;
-        }
-        emit(userId, NotificationKind.ACTION_ITEM_DUE,
-                count == 1 ? "1 action item due soon" : count + " action items due soon",
-                "Due today or in the next few days.",
-                null, null, "/home",
-                "day:" + today);
-    }
-
-    @Transactional
-    public void tasksOverdue(String userId, int count, LocalDate today) {
-        if (count <= 0) {
-            return;
-        }
-        emit(userId, NotificationKind.ACTION_ITEM_OVERDUE,
-                count == 1 ? "1 action item is overdue" : count + " action items are overdue",
-                "Past their deadline and still open.",
-                null, null, "/home",
-                "day:" + today);
     }
 
     /**

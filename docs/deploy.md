@@ -231,10 +231,10 @@ Set the instance to production, add the frontend domain, and take:
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` (frontend, **build-time**)
 - `CLERK_ISSUER` and `CLERK_JWKS_URL` (backend)
 
-If recap email should address users automatically, add an `email` claim to the
-JWT template — Clerk's default session token carries no email, and without it
-every Clerk-authenticated user lands with a null address and recaps quietly do
-not send.
+Add an `email` claim to the JWT template. Clerk's default session token
+carries no email, and without it every Clerk-authenticated user lands with a
+null address — which is the address shown on their own profile page. Nothing is
+mailed to it either way; Recallix sends no email (V56).
 
 ---
 
@@ -283,8 +283,9 @@ the service status.
 
 - **No CI.** Nothing runs the 156 backend tests or the ai-service suite before a
   deploy. This blueprint deploys whatever is on the branch.
-- **No SMTP relay.** `RECALLIX_MAIL_ENABLED` is `false`; recap email is off until
-  a relay exists.
+- **No email.** Not "not configured" — not implemented. Every sender was
+  removed in V56, so there is no relay to provision and nothing that degrades
+  without one.
 - **The backend must run as a single instance.** `OutboxPublisher.publishBatch()`
   selects unpublished rows with a plain ordered query — no `FOR UPDATE SKIP
   LOCKED`, no row lock. Two instances would select the same batch and both

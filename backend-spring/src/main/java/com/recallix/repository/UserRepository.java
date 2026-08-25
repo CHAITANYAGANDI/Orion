@@ -14,21 +14,6 @@ public interface UserRepository extends JpaRepository<UserEntity, String> {
     Optional<UserEntity> findByClerkUserId(String clerkUserId);
 
     /**
-     * Who is owed a reminder digest today.
-     *
-     * <p>The date check is in the query rather than in the loop so that a
-     * restart mid-run cannot re-mail the users already done: the second pass
-     * simply does not select them. Runs under the system connection, which is
-     * the only place a query across every tenant is legitimate.
-     */
-    @Query("""
-            SELECT u FROM UserEntity u
-             WHERE (u.taskReminders = true OR u.weeklyDigest = true)
-               AND (u.taskReminderSentOn IS NULL OR u.taskReminderSentOn < :today)
-            """)
-    List<UserEntity> findAwaitingTaskReminder(@Param("today") LocalDate today);
-
-    /**
      * Everyone who has asked for their data to be thrown away eventually.
      *
      * <p>Selected here rather than filtered in the loop so that a workspace with

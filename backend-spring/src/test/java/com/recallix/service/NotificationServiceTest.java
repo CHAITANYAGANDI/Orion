@@ -120,20 +120,19 @@ class NotificationServiceTest {
         @Test
         void saysNothingTwiceInADay() {
             when(notifications.existsByUserIdAndKindAndDedupeKey(
-                    USER, NotificationKind.ACTION_ITEM_OVERDUE, "day:" + TODAY)).thenReturn(true);
+                    USER, NotificationKind.RETENTION_APPLIED, "day:" + TODAY)).thenReturn(true);
 
-            service.tasksOverdue(USER, 3, TODAY);
+            service.retentionApplied(USER, 3, 0, TODAY);
 
             verify(notifications, never()).save(any());
         }
 
         @Test
-        void saysNothingWhenNothingIsDue() {
-            service.tasksDue(USER, 0, TODAY);
-            service.tasksOverdue(USER, 0, TODAY);
+        void saysNothingWhenNothingHappened() {
+            service.retentionApplied(USER, 0, 0, TODAY);
 
-            // "You have 0 tasks" every morning is how a daily notification
-            // becomes a filter rule.
+            // "Retention deleted 0 items" every night is how a daily
+            // notification becomes a filter rule.
             verify(notifications, never()).save(any());
         }
 
@@ -206,12 +205,12 @@ class NotificationServiceTest {
         }
 
         @Test
-        void countsDeadlinesRatherThanNamingThem() {
-            service.tasksOverdue(USER, 3, TODAY);
+        void countsWhatWentRatherThanNamingIt() {
+            service.retentionApplied(USER, 3, 0, TODAY);
 
-            // Deliberately not a list: the digest email is the place for that,
-            // and a bell that has to be read is a bell nobody glances at.
-            assertThat(written().getTitle()).isEqualTo("3 action items are overdue");
+            // Deliberately not a list: a bell that has to be read is a bell
+            // nobody glances at.
+            assertThat(written().getTitle()).isEqualTo("Retention deleted 3 items");
         }
 
         @Test

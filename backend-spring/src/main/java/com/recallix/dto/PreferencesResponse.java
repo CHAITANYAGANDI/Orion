@@ -7,18 +7,14 @@ import java.util.List;
 /** Server-side user preferences (settings page). */
 public record PreferencesResponse(
         /**
-         * The address the sign-in provider gave us, or null.
+         * The account address.
          *
-         * <p>Read-only here on purpose: it is Clerk's fact, not ours, and a dev
-         * session has no provider and therefore no address at all. The editable
-         * one is {@code recapEmail} — where mail should actually go.
+         * <p>Editable only where Recallix owns it. Under an identity provider
+         * {@code provision} rewrites this column from the sign-in token on the
+         * next request, so an edit made there would appear to save and undo
+         * itself a second later.
          */
         String email,
-        boolean autoEmailRecap,
-        /** The override address, or null when recaps go to the account email. */
-        String recapEmail,
-        /** Where recaps would actually be sent — shown so the choice is unambiguous. */
-        String effectiveRecapEmail,
         /**
          * What this user is called in their own meetings, or null if never said.
          * The only thing that can turn a list of owners into "my tasks".
@@ -35,28 +31,15 @@ public record PreferencesResponse(
         String defaultLanguage,
         /** How far back workspace chat reads transcripts; null is everything. */
         Integer chatHistoryDays,
-        /** "Event reminder": every morning, what is overdue or due soon. */
-        boolean taskReminders,
-        /** "Weekly digest": the Monday review. Independent of taskReminders since V43. */
-        boolean weeklyDigest,
-        /** The master switch over automatic email (V40). */
-        boolean emailsEnabled,
-        /** Recap for meetings imported as a file or link; autoEmailRecap covers recorded ones. */
-        boolean recapForImports,
-        /** "Conversation shared": somebody outside opened a link you published. */
-        /** "Comments": a comment landed on an action item. At most one a day (V43). */
-        boolean commentEmail,
-        /** "Highlights": a highlight was added to a transcript. At most one a day (V43). */
-        boolean highlightEmail,
-        /** Notification kinds switched off. Everything absent from this is on. */
+        /**
+         * Notification kinds switched off — the bell, which is the only channel
+         * left. Recallix sends no email; see V56.
+         */
         List<String> mutedNotifications
 ) {
     public static PreferencesResponse from(UserEntity user) {
         return new PreferencesResponse(
                 user.getEmail(),
-                user.isAutoEmailRecap(),
-                user.getRecapEmail(),
-                user.effectiveRecapEmail(),
                 user.getDisplayName(),
                 user.getDepartment(),
                 user.getJobRole(),
@@ -64,12 +47,6 @@ public record PreferencesResponse(
                 user.getAvatarUrl(),
                 user.getDefaultLanguage(),
                 user.getChatHistoryDays(),
-                user.isTaskReminders(),
-                user.isWeeklyDigest(),
-                user.isEmailsEnabled(),
-                user.isRecapForImports(),
-                user.isCommentEmail(),
-                user.isHighlightEmail(),
                 user.getMutedNotifications());
     }
 }

@@ -80,7 +80,7 @@ class ActionItemServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new ActionItemService(actionItems, comments, meetings, users, events);
+        service = new ActionItemService(actionItems, comments, meetings, users);
         stored.clear();
         log.clear();
 

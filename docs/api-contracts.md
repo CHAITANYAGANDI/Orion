@@ -1229,12 +1229,11 @@ carries the tab counts, the owner names actually assigned work (with counts, so
 the filter is a pick rather than a spelling test) and `me`, which is what lets the
 page offer that pick.
 
-**Task reminders** (`taskReminders` in preferences, off by default) send one
-digest a morning — 08:00 UTC, `TaskReminderJob` — listing what is overdue, due
-today, and due within `DueStatus.SOON_DAYS`. Nothing is sent on a day when
-nothing is due, and `users.task_reminder_sent_on` is stamped only on a successful
-send, so a redeploy at the wrong minute cannot mail the same digest twice and an
-SMTP outage costs a day rather than being silently swallowed.
+**Task reminders** were a digest mailed at 08:00 UTC listing what was overdue,
+due today, and due within `DueStatus.SOON_DAYS`. Removed in V56 with the rest of
+the mail, along with the `ACTION_ITEM_DUE` and `ACTION_ITEM_OVERDUE` bell
+notifications the same job raised. Deadlines are read from the tab counts and
+`DueStatus` above; nothing pushes them at anybody.
 
 ### Usage
 | Method | Endpoint | Body | Response |

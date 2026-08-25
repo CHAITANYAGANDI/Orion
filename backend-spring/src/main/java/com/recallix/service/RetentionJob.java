@@ -13,15 +13,15 @@ import java.time.ZoneOffset;
 /**
  * Fires the nightly retention pass.
  *
- * <p>Separate from the service it calls for the reasons {@link TaskReminderJob}
- * gives: the scheduler thread has no authenticated user, so the work needs
- * {@link TenantContext#runAsSystem}, and a bean that both schedules itself and
- * establishes its own tenant is one whose transaction boundary is easy to get
- * quietly wrong. It also means a test can apply a policy without a clock.
+ * <p>Separate from the service it calls: the scheduler thread has no
+ * authenticated user, so the work needs {@link TenantContext#runAsSystem}, and
+ * a bean that both schedules itself and establishes its own tenant is one whose
+ * transaction boundary is easy to get quietly wrong. It also means a test can
+ * apply a policy without a clock.
  *
- * <p>Three in the morning UTC, an hour chosen only to be far from the eight
- * o'clock digest — two passes over every account in the same minute is a
- * needless spike, and this one deletes things while that one reads them.
+ * <p>Three in the morning UTC. It is now the only scheduled pass over every
+ * account — the eight o'clock digest it was timed away from went with the mail
+ * in V56 — so the hour is free to be simply a quiet one.
  *
  * <p>{@code recallix.retention.enabled=false} switches it off entirely, which is
  * what a restored-from-backup environment wants before anybody has looked at it:

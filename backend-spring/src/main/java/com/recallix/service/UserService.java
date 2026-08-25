@@ -75,12 +75,6 @@ public class UserService {
     @Transactional
     public UserEntity updatePreferences(String userId, PreferencesPatch patch) {
         UserEntity user = require(userId);
-        if (patch.autoEmailRecap() != null) {
-            user.setAutoEmailRecap(patch.autoEmailRecap());
-        }
-        if (patch.recapEmail() != null) {
-            user.setRecapEmail(patch.recapEmail().isBlank() ? null : patch.recapEmail().trim());
-        }
         if (patch.displayName() != null) {
             user.setDisplayName(patch.displayName().isBlank() ? null : patch.displayName().trim());
         }
@@ -106,42 +100,6 @@ public class UserService {
             user.setChatHistoryDays(null);
         } else if (patch.chatHistoryDays() != null) {
             user.setChatHistoryDays(patch.chatHistoryDays());
-        }
-        if (patch.taskReminders() != null) {
-            user.setTaskReminders(patch.taskReminders());
-            // Turning them back on should send today's digest rather than wait
-            // for tomorrow, so the switch visibly does something.
-            if (patch.taskReminders()) {
-                user.setTaskReminderSentOn(null);
-            }
-        }
-        if (patch.weeklyDigest() != null) {
-            user.setWeeklyDigest(patch.weeklyDigest());
-            // Same reasoning as above: the two switches share one sent-on stamp,
-            // so clearing it is what lets a Monday switch-on send this Monday.
-            if (patch.weeklyDigest()) {
-                user.setTaskReminderSentOn(null);
-            }
-        }
-        // The master leaves the switches underneath it alone. Turning email off
-        // for a fortnight and back on again should return somebody to the
-        // choices they made, not to the defaults.
-        if (patch.emailsEnabled() != null) {
-            user.setEmailsEnabled(patch.emailsEnabled());
-        }
-        if (patch.recapForImports() != null) {
-            user.setRecapForImports(patch.recapForImports());
-        }
-        // The daily stamps are not cleared on switch-on, unlike the digest's.
-        // These two mail about something that just happened rather than about a
-        // standing state, so there is nothing owed from earlier today to catch
-        // up on — and clearing the stamp would mail about a comment somebody
-        // wrote before they asked to hear about comments.
-        if (patch.commentEmail() != null) {
-            user.setCommentEmail(patch.commentEmail());
-        }
-        if (patch.highlightEmail() != null) {
-            user.setHighlightEmail(patch.highlightEmail());
         }
         if (patch.mutedNotifications() != null) {
             // Stored as the enum's own spelling and nothing else. An unknown
@@ -243,8 +201,6 @@ public class UserService {
      * transposition nobody can see; this one is named at the call site.
      */
     public record PreferencesPatch(
-            Boolean autoEmailRecap,
-            String recapEmail,
             String displayName,
             String department,
             String jobRole,
@@ -258,19 +214,7 @@ public class UserService {
             /** Null leaves the window; {@code chatReadsEverything} clears it. */
             Integer chatHistoryDays,
             Boolean chatReadsEverything,
-            /** "Event reminder": the every-morning deadline mail. */
-            Boolean taskReminders,
-            /** "Weekly digest": the Monday review. Its own switch since V43. */
-            Boolean weeklyDigest,
-            /** The master over automatic email. Never rewrites the switches below it. */
-            Boolean emailsEnabled,
-            /** Recap for imported meetings; {@code autoEmailRecap} covers recorded ones. */
-            Boolean recapForImports,
-            /** "Comments": email when a comment lands on an action item (V43). */
-            Boolean commentEmail,
-            /** "Highlights": email when a highlight is added (V43). */
-            Boolean highlightEmail,
-            /** Notification kinds to switch off. Null leaves them; empty turns all on. */
+            /** Bell kinds to switch off. Null leaves them; empty turns all on. */
             List<String> mutedNotifications
     ) {
     }

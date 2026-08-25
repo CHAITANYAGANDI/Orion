@@ -156,16 +156,13 @@ export interface MeetingResponse {
 
 export interface PreferencesResponse {
   /**
-   * The address the sign-in provider gave us, or null.
+   * The account address.
    *
-   * Read-only: it is the provider's fact, and a development session has no
-   * provider and therefore no address at all. `recapEmail` is the editable one.
+   * Editable only where Recallix owns it. Under an identity provider the
+   * server refuses a change, because the column is rewritten from the sign-in
+   * token on the next request and the edit would undo itself.
    */
   email: string | null;
-  autoEmailRecap: boolean;
-  recapEmail: string | null;
-  /** Where recaps actually go — the override, or the account address. */
-  effectiveRecapEmail: string | null;
   /**
    * What this user is called in their own meetings. The only thing that can
    * turn a list of owners into "my tasks"; null until they say.
@@ -180,34 +177,17 @@ export interface PreferencesResponse {
   avatarUrl: string | null;
   /** ISO-639-1 spoken language for transcription; null means auto-detect. */
   defaultLanguage: string | null;
-  /** Days until a new link expires, or null for never. */
   /** How far back workspace chat reads transcripts; null is every meeting. */
   chatHistoryDays: number | null;
-  /** "Event reminder": every morning, what is overdue or due soon. */
-  taskReminders: boolean;
-  /** "Weekly digest": the Monday review. Its own switch since V43. */
-  weeklyDigest: boolean;
   /**
-   * The server-side gate every sender checks first.
+   * Bell kinds switched off. Everything absent from this is on.
    *
-   * Not what the "All emails" checkbox reads any more — that is a select-all
-   * derived from the seven rows. This moves with it, and with any single row
-   * being switched on, so a ticked row is never blocked by a closed gate.
+   * The bell is the only channel there is — Recallix sends no email (V56).
    */
-  emailsEnabled: boolean;
-  /** Recap for imported meetings; `autoEmailRecap` covers recorded ones. */
-  recapForImports: boolean;
-  /** "Comments": a comment landed on an action item. At most one a day (V43). */
-  commentEmail: boolean;
-  /** "Highlights": a highlight was added to a transcript. At most one a day (V43). */
-  highlightEmail: boolean;
-  /** Notification kinds switched off. Everything absent from this is on. */
   mutedNotifications: string[];
 }
 
 export interface PreferencesUpdateRequest {
-  autoEmailRecap?: boolean;
-  recapEmail?: string;
   /** Blank clears it. */
   displayName?: string;
   department?: string;
@@ -215,9 +195,9 @@ export interface PreferencesUpdateRequest {
   /** Blank clears it. */
   pronouns?: string;
   /**
-   * The account address itself, not `recapEmail`. Accepted only where Recallix
-   * owns it; under an identity provider the server refuses it, because the
-   * column is rewritten from the sign-in token on the next request.
+   * Accepted only where Recallix owns it; under an identity provider the
+   * server refuses it, because the column is rewritten from the sign-in token
+   * on the next request.
    */
   email?: string;
   /** A `data:image/...;base64,...` URL; blank removes the picture. */
@@ -227,13 +207,6 @@ export interface PreferencesUpdateRequest {
   /** Omitted leaves the window; `chatReadsEverything` clears it. */
   chatHistoryDays?: number;
   chatReadsEverything?: boolean;
-  taskReminders?: boolean;
-  weeklyDigest?: boolean;
-  /** The master. Never rewrites the switches underneath it. */
-  emailsEnabled?: boolean;
-  recapForImports?: boolean;
-  commentEmail?: boolean;
-  highlightEmail?: boolean;
   /** The whole set, not a delta — the settings page holds every switch at once. */
   mutedNotifications?: string[];
 }
@@ -850,9 +823,6 @@ export type NotificationKind =
   | "TRANSCRIPT_READY"
   | "SUMMARY_READY"
   | "PROCESSING_FAILED"
-  | "RECAP_SENT"
-  | "ACTION_ITEM_DUE"
-  | "ACTION_ITEM_OVERDUE"
   | "MENTIONED_IN_MEETING"
   | "SHARE_VIEWED";
 

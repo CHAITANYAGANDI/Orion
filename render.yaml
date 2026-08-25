@@ -113,27 +113,6 @@ services:
           name: recallix-frontend
           property: host
 
-      # --- Mail -------------------------------------------------------------
-      # No SMTP relay is provisioned. Left disabled so the recap job logs and
-      # moves on instead of throwing on every completed meeting; set the host
-      # and flip this to true once a relay exists.
-      - key: RECALLIX_MAIL_ENABLED
-        value: "false"
-      - key: SPRING_MAIL_HOST
-        sync: false
-      - key: SPRING_MAIL_PORT
-        sync: false
-      - key: SPRING_MAIL_USERNAME
-        sync: false
-      - key: SPRING_MAIL_PASSWORD
-        sync: false
-      - key: SPRING_MAIL_AUTH
-        value: "true"
-      - key: SPRING_MAIL_STARTTLS
-        value: "true"
-      - key: RECALLIX_MAIL_FROM
-        sync: false
-
   # ---------------------------------------------------------------------------
   # AI service — private. It is reached only by the backend and by Kafka, and
   # exposing it publicly would expose /internal-shaped surface for no reason.

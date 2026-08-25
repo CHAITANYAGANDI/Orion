@@ -48,12 +48,6 @@ public enum NotificationKind {
     /** The pipeline gave up. Off by default is not an option worth offering. */
     PROCESSING_FAILED("Processing failed", "when a meeting fails to process"),
 
-    RECAP_SENT("Recap sent", "when a recap email goes out"),
-
-    ACTION_ITEM_DUE("Action items due", "when work is due today or soon"),
-
-    ACTION_ITEM_OVERDUE("Action items overdue", "when work goes past its deadline"),
-
     /**
      * A meeting named you as the owner of something.
      *
