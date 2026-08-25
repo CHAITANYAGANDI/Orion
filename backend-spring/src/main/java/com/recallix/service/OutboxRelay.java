@@ -15,6 +15,15 @@ import org.springframework.stereotype.Component;
  * no leader election and nothing to configure: an instance that is up relays,
  * an instance that is not simply does not.
  *
+ * <p><strong>A failure does not become a busy loop.</strong> A row that cannot
+ * be published records the attempt and a time to try again, and is not claimed
+ * before then — so an unreachable broker produces a handful of warnings that
+ * thin out to one every five minutes, rather than one per second per instance
+ * forever. The schedule is a column, so it is the same for every instance and
+ * survives a restart. An event that can never be published at all is retired
+ * rather than retried, and stops holding up the other events for its meeting.
+ * {@link OutboxPublisher} has the detail.
+ *
  * <p>Runs in system context: this is infrastructure with no user behind it, and
  * {@code outbox_events} is readable only by system under the V9 policies. The
  * context is established here, outside the transaction, because the connection

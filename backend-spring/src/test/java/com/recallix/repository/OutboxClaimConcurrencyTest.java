@@ -3,6 +3,7 @@ package com.recallix.repository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
@@ -19,13 +20,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Two relays, one outbox, against a real PostgreSQL.
  *
- * <p>Everything here is about {@code FOR UPDATE SKIP LOCKED}, and none of it can
- * be tested with a mock: a mocked repository will happily return whatever it is
- * told to, including two relays being handed the same row, which is the bug.
- * What has to be proven is what the database does when two transactions are open
- * at once, so these are two real JDBC connections with autocommit off, stepped
- * by hand. There are no sleeps and no threads — the overlap is created by
- * holding one transaction open, which is deterministic.
+ * <p>Everything here is about the claim query, and none of it can be tested with
+ * a mock: a mocked repository will happily return whatever it is told to,
+ * including two relays being handed the same row, which is the bug. What has to
+ * be proven is what the database does when two transactions are open at once, so
+ * these are two real JDBC connections with autocommit off, stepped by hand.
+ * There are no sleeps and no threads — the overlap is created by holding one
+ * transaction open, and the retry schedule is created by writing timestamps,
+ * both of which are deterministic.
  *
  * <p><strong>Skipped unless a database is offered.</strong> Set
  * {@code RECALLIX_IT_DB_URL} (plus user/password) and it runs; otherwise the
@@ -65,8 +67,7 @@ class OutboxClaimConcurrencyTest {
                 c.close();
             }
         }
-        try (Connection c = connect(env("RECALLIX_IT_DB_USER", "recallix_sys"),
-                env("RECALLIX_IT_DB_PASSWORD", ""))) {
+        try (Connection c = system()) {
             try (PreparedStatement ps = c.prepareStatement(
                     "DELETE FROM outbox_events WHERE topic = ?")) {
                 ps.setString(1, topic);
@@ -87,16 +88,36 @@ class OutboxClaimConcurrencyTest {
         return c;
     }
 
+    private static Connection system() throws Exception {
+        return connect(env("RECALLIX_IT_DB_USER", "recallix_sys"), env("RECALLIX_IT_DB_PASSWORD", ""));
+    }
+
     // --- the outbox, as the relay sees it ----------------------------------- //
 
     /** Enqueue one event, committed, exactly as a business transaction would leave it. */
     private String enqueue(String meetingId, int ordinal) throws Exception {
+        return enqueue(meetingId, ordinal, "0 seconds", null);
+    }
+
+    /**
+     * Enqueue one event with a retry schedule already on it.
+     *
+     * @param dueIn      offset for {@code next_attempt_at}: {@code "1 hour"}
+     *                   for a row that is backing off, {@code "-1 second"} for
+     *                   one that has come due. An interval rather than a sleep.
+     * @param failedIn   offset for {@code failed_at}, or null for a live row.
+     */
+    private String enqueue(String meetingId, int ordinal, String dueIn, String failedIn)
+            throws Exception {
         String id = "obx_it_" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
-        try (Connection c = connect(env("RECALLIX_IT_DB_USER", "recallix_sys"),
-                env("RECALLIX_IT_DB_PASSWORD", ""))) {
+        try (Connection c = system()) {
             try (PreparedStatement ps = c.prepareStatement("""
-                    INSERT INTO outbox_events (id, topic, partition_key, payload, published, created_at)
-                    VALUES (?, ?, ?, ?::jsonb, false, now() + (? * interval '1 second'))
+                    INSERT INTO outbox_events
+                        (id, topic, partition_key, payload, published, created_at,
+                         attempt_count, next_attempt_at, last_error, failed_at)
+                    VALUES (?, ?, ?, ?::jsonb, false, now() + (? * interval '1 second'),
+                            ?, now() + ?::interval, ?,
+                            CASE WHEN ?::text IS NULL THEN NULL ELSE now() + ?::interval END)
                     """)) {
                 ps.setString(1, id);
                 ps.setString(2, topic);
@@ -106,6 +127,11 @@ class OutboxClaimConcurrencyTest {
                 // created_at is transaction-start time and two inserts a
                 // millisecond apart can share it.
                 ps.setInt(5, ordinal);
+                ps.setInt(6, "0 seconds".equals(dueIn) ? 0 : 1);
+                ps.setString(7, dueIn);
+                ps.setString(8, "0 seconds".equals(dueIn) ? null : "TimeoutException: broker down");
+                ps.setString(9, failedIn);
+                ps.setString(10, failedIn);
                 ps.executeUpdate();
             }
             c.commit();
@@ -135,6 +161,52 @@ class OutboxClaimConcurrencyTest {
                 "UPDATE outbox_events SET published = true WHERE id = ?")) {
             ps.setString(1, id);
             ps.executeUpdate();
+        }
+    }
+
+    /** What the publisher writes when a send fails for an infrastructure reason. */
+    private void recordTransientFailure(Connection relay, String id, String backoff) throws Exception {
+        try (PreparedStatement ps = relay.prepareStatement("""
+                UPDATE outbox_events
+                   SET attempt_count = attempt_count + 1,
+                       next_attempt_at = now() + ?::interval,
+                       last_error = 'TimeoutException: broker down'
+                 WHERE id = ?
+                """)) {
+            ps.setString(1, backoff);
+            ps.setString(2, id);
+            ps.executeUpdate();
+        }
+    }
+
+    /** What it writes when the event can never be published. */
+    private void retire(Connection relay, String id) throws Exception {
+        try (PreparedStatement ps = relay.prepareStatement("""
+                UPDATE outbox_events
+                   SET attempt_count = attempt_count + 1,
+                       last_error = 'RecordTooLargeException: 2MB',
+                       failed_at = now()
+                 WHERE id = ?
+                """)) {
+            ps.setString(1, id);
+            ps.executeUpdate();
+        }
+    }
+
+    private record Row(boolean published, int attemptCount, String lastError, boolean terminal) { }
+
+    private Row read(String id) throws Exception {
+        try (Connection c = system();
+             PreparedStatement ps = c.prepareStatement("""
+                     SELECT published, attempt_count, last_error, failed_at
+                       FROM outbox_events WHERE id = ?
+                     """)) {
+            ps.setString(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertThat(rs.next()).isTrue();
+                return new Row(rs.getBoolean(1), rs.getInt(2), rs.getString(3),
+                        rs.getTimestamp(4) != null);
+            }
         }
     }
 
@@ -191,35 +263,6 @@ class OutboxClaimConcurrencyTest {
         relayA.commit();
 
         assertThat(claim(relayB, 100)).isEmpty();
-    }
-
-    @Test
-    @DisplayName("a failed send leaves the row exactly as it was, and claimable")
-    void aFailedSendKeepsTheRowPending() throws Exception {
-        // What the publisher's catch-and-break amounts to at this level: the
-        // transaction ends without the row being marked, and the next tick —
-        // this relay's or another's — finds it unchanged.
-        String only = enqueue("mtg_a", 0);
-        claim(relayA, 100);
-        relayA.rollback();                     // Kafka refused; nothing marked
-
-        List<String> retry = claim(relayB, 100);
-
-        assertThat(retry).containsExactly(only);
-        assertThat(publishedFlagOf(only)).isFalse();
-    }
-
-    private boolean publishedFlagOf(String id) throws Exception {
-        try (Connection c = connect(env("RECALLIX_IT_DB_USER", "recallix_sys"),
-                env("RECALLIX_IT_DB_PASSWORD", ""));
-             PreparedStatement ps = c.prepareStatement(
-                     "SELECT published FROM outbox_events WHERE id = ?")) {
-            ps.setString(1, id);
-            try (ResultSet rs = ps.executeQuery()) {
-                assertThat(rs.next()).isTrue();
-                return rs.getBoolean(1);
-            }
-        }
     }
 
     // --- one meeting, in order ---------------------------------------------- //
@@ -284,6 +327,196 @@ class OutboxClaimConcurrencyTest {
         assertThat(claim(relayB, 100)).containsExactly(otherMeeting);
     }
 
+    // --- backing off after a failure ---------------------------------------- //
+
+    @Nested
+    @DisplayName("a row that is backing off")
+    class Backoff {
+
+        @Test
+        @DisplayName("keeps what the failed attempt wrote down")
+        void retryMetadataIsDurable() throws Exception {
+            String only = enqueue("mtg_a", 0);
+            claim(relayA, 100);
+            recordTransientFailure(relayA, only, "5 seconds");
+            relayA.commit();
+
+            Row row = read(only);
+            assertThat(row.published()).isFalse();
+            assertThat(row.terminal()).isFalse();
+            assertThat(row.attemptCount()).isEqualTo(1);
+            assertThat(row.lastError()).isEqualTo("TimeoutException: broker down");
+        }
+
+        @Test
+        @DisplayName("is not claimed again until it is due")
+        void notClaimableBeforeItIsDue() throws Exception {
+            String only = enqueue("mtg_a", 0);
+            claim(relayA, 100);
+            recordTransientFailure(relayA, only, "1 hour");
+            relayA.commit();
+
+            // The old behaviour was to claim this row again one second later,
+            // and every second after that, forever.
+            assertThat(claim(relayB, 100)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("is claimed again once it is")
+        void claimableAfterwards() throws Exception {
+            String only = enqueue("mtg_a", 0);
+            claim(relayA, 100);
+            recordTransientFailure(relayA, only, "-1 second");   // the wait is over
+            relayA.commit();
+
+            assertThat(claim(relayB, 100)).containsExactly(only);
+        }
+
+        @Test
+        @DisplayName("still blocks the next event for its own meeting")
+        void stillBlocksItsOwnKey() throws Exception {
+            // The subtle one. A1 is not eligible — it is waiting out its backoff
+            // — but it has not gone anywhere, and A2 must not be published
+            // ahead of it. The claim query asks whether an earlier row is still
+            // ACTIVE, not whether it is DUE, precisely for this.
+            String first = enqueue("mtg_a", 0);
+            enqueue("mtg_a", 1);
+
+            claim(relayA, 100);
+            recordTransientFailure(relayA, first, "1 hour");
+            relayA.commit();
+
+            assertThat(claim(relayB, 100)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("does not block anybody else's")
+        void doesNotBlockOtherKeys() throws Exception {
+            String failing = enqueue("mtg_a", 0);
+            String unrelated = enqueue("mtg_b", 1);
+
+            claim(relayA, 1);                                    // A's head only
+            recordTransientFailure(relayA, failing, "1 hour");
+            relayA.commit();
+
+            assertThat(claim(relayB, 100)).containsExactly(unrelated);
+        }
+
+        @Test
+        @DisplayName("loses its schedule if the transaction that wrote it rolls back")
+        void rollbackDiscardsTheSchedule() throws Exception {
+            // Correct, not a bug: nothing was committed, so nothing happened.
+            // The row is exactly as it was and is due immediately, which is the
+            // same place a crashed relay leaves it. Worth pinning down, because
+            // the alternative — half-applied backoff — would be a row that is
+            // deferred without anybody having recorded why.
+            String only = enqueue("mtg_a", 0);
+            claim(relayA, 100);
+            recordTransientFailure(relayA, only, "1 hour");
+            relayA.rollback();
+
+            assertThat(claim(relayB, 100)).containsExactly(only);
+            assertThat(read(only).attemptCount()).isZero();
+        }
+    }
+
+    // --- events that will never be published --------------------------------- //
+
+    @Nested
+    @DisplayName("a retired event")
+    class Terminal {
+
+        @Test
+        @DisplayName("is never claimed again")
+        void neverClaimedAgain() throws Exception {
+            String poison = enqueue("mtg_a", 0);
+            claim(relayA, 100);
+            retire(relayA, poison);
+            relayA.commit();
+
+            assertThat(claim(relayB, 100)).isEmpty();
+            assertThat(claim(relayA, 100)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("stops blocking the next event for its meeting")
+        void stopsBlockingItsKey() throws Exception {
+            // The point of having a terminal state at all. Before it, an event
+            // that could never be published sat at the head of this meeting's
+            // queue and every later event for the meeting waited behind it
+            // forever — per-key rather than global, but still forever.
+            String poison = enqueue("mtg_a", 0);
+            String next = enqueue("mtg_a", 1);
+
+            claim(relayA, 100);
+            retire(relayA, poison);
+            relayA.commit();
+
+            assertThat(claim(relayB, 100)).containsExactly(next);
+        }
+
+        @Test
+        @DisplayName("is kept, with everything needed to work out what happened")
+        void isKeptForInspection() throws Exception {
+            String poison = enqueue("mtg_a", 0);
+            claim(relayA, 100);
+            retire(relayA, poison);
+            relayA.commit();
+
+            Row row = read(poison);
+            assertThat(row.terminal()).isTrue();
+            assertThat(row.published()).isFalse();
+            assertThat(row.attemptCount()).isEqualTo(1);
+            assertThat(row.lastError()).isEqualTo("RecordTooLargeException: 2MB");
+            // And the payload is still there — not deleted, not moved to a
+            // dead-letter topic that would need Kafka to be up to write to.
+            try (Connection c = system();
+                 PreparedStatement ps = c.prepareStatement(
+                         "SELECT payload FROM outbox_events WHERE id = ?")) {
+                ps.setString(1, poison);
+                try (ResultSet rs = ps.executeQuery()) {
+                    assertThat(rs.next()).isTrue();
+                    assertThat(rs.getString(1)).contains("mtg_a");
+                }
+            }
+        }
+
+        @Test
+        @DisplayName("that was already terminal never becomes the head again")
+        void staysOutOfTheChain() throws Exception {
+            // Both of this meeting's events are behind a row that is already
+            // retired, so the queue starts at the second one.
+            enqueue("mtg_a", 0, "0 seconds", "-1 minute");
+            String second = enqueue("mtg_a", 1);
+            String third = enqueue("mtg_a", 2);
+
+            assertThat(claim(relayA, 100)).containsExactly(second);
+            relayA.rollback();
+
+            // And nothing has quietly let the third one past the second either.
+            assertThat(claim(relayB, 100)).containsExactly(second);
+            assertThat(third).isNotNull();
+        }
+    }
+
+    // --- two relays, with retries in the mix --------------------------------- //
+
+    @Test
+    @DisplayName("two relays still cannot own the same due row")
+    void ownershipHoldsWithRetriesInPlay() throws Exception {
+        String backingOff = enqueue("mtg_a", 0, "1 hour", null);
+        String retired = enqueue("mtg_b", 1, "0 seconds", "-1 minute");
+        String due = enqueue("mtg_c", 2);
+
+        List<String> a = claim(relayA, 100);
+        List<String> b = claim(relayB, 100);
+
+        assertThat(a).containsExactly(due);       // the only eligible row
+        assertThat(b).isEmpty();
+        assertThat(backingOff).isNotNull();
+        assertThat(retired).isNotNull();
+    }
+
     // --- row-level security -------------------------------------------------- //
 
     @Test
@@ -294,7 +527,8 @@ class OutboxClaimConcurrencyTest {
         // outbox_events has forced row-level security and only an INSERT policy,
         // so a request-serving connection can write events and read none. This
         // is what stops an HTTP request — or SQL injection inside one — from
-        // draining the queue.
+        // draining the queue, or from retiring an event to stop it being
+        // delivered.
         enqueue("mtg_a", 0);
 
         try (Connection tenant = connect(System.getenv("RECALLIX_IT_APP_USER"),
@@ -305,5 +539,34 @@ class OutboxClaimConcurrencyTest {
             }
             assertThat(claim(tenant, 100)).isEmpty();
         }
+    }
+
+    @Test
+    @DisplayName("nor retire an event to stop it being delivered")
+    @EnabledIfEnvironmentVariable(named = "RECALLIX_IT_APP_USER", matches = ".+",
+            disabledReason = "needs the unprivileged role's credentials too")
+    void theTenantRoleCannotRetireAnything() throws Exception {
+        // The terminal state is new, and it is the one column whose value stops
+        // an event being delivered at all. There is no UPDATE policy either, so
+        // a request-serving connection cannot reach it — the update matches no
+        // rows rather than being refused, which is how RLS declines a write.
+        String live = enqueue("mtg_a", 0);
+
+        try (Connection tenant = connect(System.getenv("RECALLIX_IT_APP_USER"),
+                env("RECALLIX_IT_APP_PASSWORD", ""))) {
+            try (PreparedStatement ps = tenant.prepareStatement(
+                    "SELECT set_config('app.user_id', 'usr_anyone', false)")) {
+                ps.execute();
+            }
+            try (PreparedStatement ps = tenant.prepareStatement(
+                    "UPDATE outbox_events SET failed_at = now() WHERE id = ?")) {
+                ps.setString(1, live);
+                assertThat(ps.executeUpdate()).isZero();
+            }
+            tenant.commit();
+        }
+
+        assertThat(read(live).terminal()).isFalse();
+        assertThat(claim(relayA, 100)).containsExactly(live);
     }
 }

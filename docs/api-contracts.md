@@ -1555,7 +1555,9 @@ callbacks in §5.
 
 ```sql
 ... WHERE published = false
-  AND NOT EXISTS (an earlier unpublished row for the same topic + partition_key)
+  AND failed_at IS NULL
+  AND next_attempt_at <= now()
+  AND NOT EXISTS (an earlier ACTIVE row for the same topic + partition_key)
 ORDER BY created_at, id LIMIT 100 FOR UPDATE SKIP LOCKED
 ```
 
@@ -1572,6 +1574,41 @@ checks in §3 rather than applied.
 
 `SKIP LOCKED` stops two relays owning the same row. It does **not** make
 outbox → Kafka exactly-once.
+
+### Failure, retry and retirement
+
+A row is **pending** (`published = false`, `failed_at IS NULL`), **published**,
+or **terminal** (`failed_at` set). Which one a failed send produces depends
+entirely on *why* it failed, and the two answers are opposite:
+
+| | what it is | what happens |
+|---|---|---|
+| **Event-specific** | `RecordTooLargeException`, `SerializationException`, `InvalidTopicException`, `JsonProcessingException` | retired immediately — `failed_at` set, row kept with `last_error`, never claimed again, and lifted out of its key's ordering chain so the events behind it proceed. The batch continues. |
+| **Everything else** | timeouts, disconnects, unknown topics, **authentication and authorization**, anything unrecognised | `attempt_count` incremented, `next_attempt_at` set, retried indefinitely, never discarded. The batch stops; the next tick picks up the rest without the failed row. |
+
+The list of permanent conditions is closed and everything else retries, rather
+than the other way round. Kafka's own `RetriableException` flag is deliberately
+*not* the test: `SaslAuthenticationException`, `TopicAuthorizationException` and
+`UnsupportedVersionException` are all non-retriable, and all of them are
+somebody's expired API key rather than a bad event. A "non-retriable therefore
+dead" rule would discard the entire backlog during a credential rotation.
+
+Backoff is **5s doubling to a 5-minute ceiling** (5, 10, 20, 40, 80, 160, 300…),
+with no jitter — a row is owned by one relay at a time, so there is no stampede
+to spread out. It lives in `next_attempt_at`, so it is shared by every instance
+and survives restarts, failovers and deploys.
+
+**Per-key FIFO applies across *active* events.** A terminally failed event is
+removed from its key's chain, so its successors are not held behind an event
+that is never going to be published. That is safe for `meeting_uploaded`
+because ordering was never load-bearing there — `processingAttempt` travels with
+each event. A future topic that needs a gap to stop its key must say so with a
+policy of its own rather than inherit this one.
+
+Retired rows are **not** sent to a Kafka dead-letter topic: the failure being
+recorded is a failure to reach Kafka, so requiring Kafka to record it would be
+circular. They stay in `outbox_events` with their payload, attempt count and
+error, and are cleared by hand.
 
 **Delivery is at-least-once, in both directions.** The outbox relay republishes
 a row whose `published` flag did not commit, and the worker commits its Kafka
