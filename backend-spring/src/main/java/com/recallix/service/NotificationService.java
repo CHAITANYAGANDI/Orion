@@ -130,6 +130,25 @@ public class NotificationService {
     }
 
     /**
+     * The identity of one thing happening once, during one processing run.
+     *
+     * <p>Per event type, not per meeting: the unique index behind this is
+     * {@code (user_id, kind, dedupe_key)}, and a single shared key would still
+     * separate the kinds — but it would also mean that renaming or reusing a
+     * kind silently merged two different announcements. Naming the event in the
+     * key makes each one say what it is.
+     *
+     * <p>Per attempt, not per meeting, because a reprocess is entitled to say
+     * "Summary ready" again. {@code meetings.processing_attempt} moves only
+     * when somebody asks for the work to be redone, so a redelivery of one run
+     * produces the identical key and is refused, while a genuine second run
+     * produces a new one.
+     */
+    private static String once(String event, Meeting meeting) {
+        return event + ":" + meeting.getId() + ":" + meeting.getProcessingAttempt();
+    }
+
+    /**
      * A meeting entered the pipeline.
      *
      * @param because how it got here — "uploaded", "imported", "reprocessed"
@@ -139,7 +158,7 @@ public class NotificationService {
         emit(meeting.getUserId(), NotificationKind.PROCESSING_STARTED,
                 meeting.getTitle(),
                 "Being " + because + ". We'll tell you when the notes are ready.",
-                meeting.getId(), null, link(meeting), null);
+                meeting.getId(), null, link(meeting), once("processing-started", meeting));
     }
 
     @Transactional
@@ -147,7 +166,7 @@ public class NotificationService {
         emit(meeting.getUserId(), NotificationKind.TRANSCRIPT_READY,
                 meeting.getTitle(),
                 "The transcript is ready to read and search.",
-                meeting.getId(), null, link(meeting), null);
+                meeting.getId(), null, link(meeting), once("transcript-ready", meeting));
     }
 
     @Transactional
@@ -155,7 +174,7 @@ public class NotificationService {
         emit(meeting.getUserId(), NotificationKind.SUMMARY_READY,
                 meeting.getTitle(),
                 "The notes are written. Summary, decisions and action items are in.",
-                meeting.getId(), null, link(meeting), null);
+                meeting.getId(), null, link(meeting), once("summary-ready", meeting));
     }
 
     /**
@@ -182,7 +201,7 @@ public class NotificationService {
                         ? "Processing failed."
                         : "Processing failed: " + message.strip())
                         + " You can try again from the meeting page.",
-                meeting.getId(), null, link(meeting), null);
+                meeting.getId(), null, link(meeting), once("processing-failed", meeting));
     }
 
     /**

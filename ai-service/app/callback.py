@@ -1,8 +1,15 @@
 """Internal HTTP callbacks to Spring Boot (X-Internal-Token authenticated).
 
 FastAPI pushes status updates and the final result to Spring's internal
-endpoints (api-contracts.md §3). Failures are logged but never raised into the
-pipeline — Kafka events remain the source of truth for observability.
+endpoints (api-contracts.md §3).
+
+Every post reports whether it landed. Nothing here raises: a progress update
+that fails is genuinely not worth failing a meeting over, and the pipeline
+ignores those return values. The two that matter are the ones that establish a
+terminal outcome -- the result, and the READY or FAILED status beside it --
+because the Kafka worker now commits its offset only once Spring has taken
+them. Swallowing those silently, as this did, is what made a lost callback
+indistinguishable from a delivered one.
 """
 
 from __future__ import annotations
@@ -25,21 +32,25 @@ class SpringCallbackClient:
         self._headers = {"X-Internal-Token": settings.recallix_internal_token}
         self._timeout = 15.0
 
-    async def post_status(self, meeting_id: str, event: StatusEvent) -> None:
+    async def post_status(self, meeting_id: str, event: StatusEvent) -> bool:
+        """Report a stage. Returns whether Spring accepted it."""
         url = f"{self._base}/internal/meetings/{meeting_id}/status"
         payload = event.model_dump(by_alias=True, exclude={"meeting_id"})
-        await self._post(url, payload, label="status")
+        return await self._post(url, payload, label="status")
 
-    async def post_result(self, meeting_id: str, result: MeetingBriefResult) -> None:
+    async def post_result(self, meeting_id: str, result: MeetingBriefResult) -> bool:
+        """Hand over the brief. Returns whether Spring accepted it."""
         url = f"{self._base}/internal/meetings/{meeting_id}/result"
         payload = result.model_dump(by_alias=True)
-        await self._post(url, payload, label="result")
+        return await self._post(url, payload, label="result")
 
-    async def _post(self, url: str, payload: dict, *, label: str) -> None:
+    async def _post(self, url: str, payload: dict, *, label: str) -> bool:
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 resp = await client.post(url, json=payload, headers=self._headers)
                 resp.raise_for_status()
                 logger.info("Spring callback (%s) ok: %s", label, resp.status_code)
+                return True
         except Exception as exc:  # noqa: BLE001 — callbacks must not crash the pipeline.
             logger.warning("Spring callback (%s) to %s failed: %s", label, url, exc)
+            return False

@@ -109,6 +109,17 @@ public class Meeting {
     @Column(name = "error_message")
     private String errorMessage;
 
+    /**
+     * Which processing run this meeting is on (V57).
+     *
+     * <p>1 at creation, incremented by {@code reprocess}. It is what separates
+     * "the same run reported twice" from "the user asked for this again": the
+     * first must charge once and notify once, the second must do both afresh.
+     * Kafka delivery is at-least-once, so the first case is ordinary.
+     */
+    @Column(name = "processing_attempt", nullable = false)
+    private int processingAttempt = 1;
+
     /** Detected transcription language, denormalised so list views stay one query. */
     @Column(name = "language")
     private String language;
@@ -226,6 +237,9 @@ public class Meeting {
 
     public String getErrorMessage() { return errorMessage; }
     public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
+
+    public int getProcessingAttempt() { return processingAttempt; }
+    public void setProcessingAttempt(int processingAttempt) { this.processingAttempt = processingAttempt; }
 
 
     public String getLanguage() { return language; }

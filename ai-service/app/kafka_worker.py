@@ -10,6 +10,35 @@ except a Spring listener that logged them, while the HTTP callbacks beside each
 one did the actual work -- persisting the transcript, the summary, and the
 FAILED state. The topics were deleted; the callbacks are untouched.
 
+**Offsets are committed by hand, after the outcome is durable.**
+
+This used to run with `enable_auto_commit=True`, which was silent data loss.
+aiokafka's background committer advances the offset from the consumer position,
+and the position moves when a message is handed to the loop -- not when the loop
+finishes with it. A twelve-minute transcription was therefore acknowledged about
+five seconds in, so a worker that died at minute six came back with the offset
+already committed and never processed that meeting again. It stayed QUEUED
+forever: no retry, no FAILED state, nothing in the bell. The outbox went to real
+trouble to deliver the job at least once and the consumer threw it away.
+
+Now nothing is acknowledged until the meeting has reached a state Spring has
+written down:
+
+  * success  -- committed once `post_result` is accepted. That callback is what
+                persists the transcript, summary, action items and READY status,
+                so it *is* the terminal state. The READY status post after it is
+                a WebSocket courtesy, and its failure does not hold the offset:
+                the browser polls the meeting anyway, and redelivering a whole
+                transcription to re-send one frame would cost real money.
+  * failure  -- committed once the FAILED status callback is accepted, because
+                that is what records the error and tells the user.
+  * neither  -- not committed. The message is redelivered.
+
+That makes delivery honestly at-least-once, so the effects on the Spring side
+are idempotent per processing attempt (V57). This is not exactly-once and does
+not pretend to be: a redelivery re-runs transcription, and the provider bills
+for it.
+
 Connection is resilient: if the broker is unreachable at startup the worker logs
 and retries with exponential backoff — it never crashes the app.
 """
@@ -19,6 +48,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from enum import Enum
+
+import httpx
 
 from app.callback import SpringCallbackClient
 from app.config import Settings
@@ -27,10 +59,64 @@ from app.schemas import (
     MeetingUploadedEvent,
     StatusEvent,
 )
-from app.providers.assemblyai_adapter import AudioUnreachableError, TranscriptionRequest
+from app.providers.assemblyai_adapter import (
+    AudioUnreachableError,
+    TranscriptionConfigurationError,
+    TranscriptionRequest,
+)
 from app.storage import fetch_audio, presigned_get_url
 
 logger = logging.getLogger("ai-service.kafka")
+
+
+class Outcome(Enum):
+    """What the loop should do with the message it just handed over."""
+
+    #: A terminal state — READY or FAILED — is recorded in Postgres.
+    COMMIT = "commit"
+    #: Nothing durable was established. Leave the offset where it is.
+    RETRY = "retry"
+
+
+#: HTTP statuses worth another attempt. Everything else in the 4xx range is the
+#: request being wrong, and it will be wrong again in ten seconds.
+_RETRYABLE_STATUS = frozenset({408, 425, 429})
+
+
+def is_retryable(exc: BaseException) -> bool:
+    """Whether redelivering this message could plausibly do better.
+
+    The default is *retryable*. An unrecognised exception is far more often a
+    blip than a permanently poisoned recording, and the bounded attempt count in
+    the loop is what stops a genuinely broken message being retried forever —
+    which matters, because `meeting_uploaded` has one partition and a message
+    that is never committed blocks every meeting behind it.
+    """
+    if isinstance(exc, TranscriptionConfigurationError):
+        # Its own docstring: "The request Recallix built was refused. Retrying
+        # it will not help."
+        return False
+    if isinstance(exc, AudioUnreachableError):
+        # Only escapes when the byte-upload fallback has already been tried, so
+        # there is no second path left to take.
+        return False
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        return code >= 500 or code in _RETRYABLE_STATUS
+    if isinstance(exc, (httpx.TransportError, asyncio.TimeoutError, ConnectionError, OSError)):
+        return True
+    return True
+
+
+def _partition_of(msg):
+    """The TopicPartition a message came from.
+
+    aiokafka is imported lazily throughout this module so the service starts
+    without it installed; this keeps that property.
+    """
+    from aiokafka import TopicPartition
+
+    return TopicPartition(msg.topic, msg.partition)
 
 
 def _default_ssl_context():
@@ -54,6 +140,9 @@ class KafkaWorker:
         pipeline: Pipeline,
         callback: SpringCallbackClient,
         rag=None,
+        *,
+        max_attempts: int = 5,
+        retry_backoff_seconds: float = 5.0,
     ) -> None:
         self._settings = settings
         self._pipeline = pipeline
@@ -62,6 +151,14 @@ class KafkaWorker:
         self._consumer = None  # type: ignore[var-annotated]
         self._task: asyncio.Task | None = None
         self._stopped = asyncio.Event()
+        # How many times one message may fail retryably before it is treated as
+        # terminal. Bounded on purpose: the topic has a single partition, so an
+        # uncommitted message is not merely stuck itself, it is a queue head
+        # that every later meeting is waiting behind.
+        self._max_attempts = max(1, max_attempts)
+        self._retry_backoff_seconds = max(0.0, retry_backoff_seconds)
+        #: offset -> failures so far, cleared when the offset is committed.
+        self._attempts: dict[tuple[str, int, int], int] = {}
 
     # --- lifecycle ---------------------------------------------------------- #
     def start(self) -> None:
@@ -115,7 +212,9 @@ class KafkaWorker:
             bootstrap_servers=self._settings.kafka_bootstrap_servers,
             group_id=self._settings.kafka_consumer_group,
             value_deserializer=lambda v: json.loads(v.decode("utf-8")),
-            enable_auto_commit=True,
+            # Committed by hand in `_consume_loop`, once the outcome is
+            # durable. See the module docstring for what auto-commit did.
+            enable_auto_commit=False,
             auto_offset_reset="earliest",
             **security,
         )
@@ -161,11 +260,65 @@ class KafkaWorker:
         async for msg in self._consumer:
             if self._stopped.is_set():
                 break
+            key = (msg.topic, msg.partition, msg.offset)
+
             try:
                 event = MeetingUploadedEvent.model_validate(msg.value)
-                await self._handle(event)
+            except Exception as exc:  # noqa: BLE001
+                # Unreadable, and there is no meeting id to report a failure
+                # against. Committed rather than retried: it cannot ever
+                # succeed, and leaving it uncommitted on a single-partition
+                # topic would stop every meeting behind it.
+                logger.exception("Discarding unreadable meeting_uploaded message: %s", exc)
+                await self._commit(msg)
+                continue
+
+            attempt = self._attempts.get(key, 0)
+            try:
+                outcome = await self._handle(event, attempt=attempt)
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:  # noqa: BLE001 — one bad message must not kill the loop.
                 logger.exception("Failed handling meeting_uploaded message: %s", exc)
+                outcome = Outcome.RETRY
+
+            if outcome is Outcome.COMMIT:
+                self._attempts.pop(key, None)
+                await self._commit(msg)
+                continue
+
+            self._attempts[key] = attempt + 1
+            logger.warning(
+                "Leaving %s uncommitted for redelivery (failure %d of %d).",
+                event.meeting_id, attempt + 1, self._max_attempts,
+            )
+            if not await self._pause_before_retry():
+                break
+            # Rewind so this session re-reads the message. Without it the
+            # position has already moved on and the redelivery would only
+            # happen at the next rebalance or restart.
+            self._consumer.seek(_partition_of(msg), msg.offset)
+
+    async def _pause_before_retry(self) -> bool:
+        """Wait out the backoff. False when the worker is shutting down."""
+        if self._retry_backoff_seconds <= 0:
+            return not self._stopped.is_set()
+        try:
+            await asyncio.wait_for(self._stopped.wait(), timeout=self._retry_backoff_seconds)
+        except asyncio.TimeoutError:
+            return True
+        return False
+
+    async def _commit(self, msg) -> None:
+        """Acknowledge exactly this message, and nothing else in flight."""
+        if self._consumer is None:
+            return
+        try:
+            await self._consumer.commit({_partition_of(msg): msg.offset + 1})
+        except Exception as exc:  # noqa: BLE001
+            # The work is done and recorded in Postgres either way. A failed
+            # commit costs a redelivery, which the idempotent callbacks absorb.
+            logger.warning("Could not commit offset %d: %s", msg.offset, exc)
 
     # --- message handling --------------------------------------------------- #
     async def _process_source(self, event, progress_hook, transcript_hook):
@@ -254,7 +407,13 @@ class KafkaWorker:
                 audio_loader=load_audio,
             )
 
-    async def _handle(self, event: MeetingUploadedEvent) -> None:
+    async def _handle(self, event: MeetingUploadedEvent, *, attempt: int = 0) -> Outcome:
+        """Run one meeting, and say whether its offset may be acknowledged.
+
+        `attempt` is how many times this same message has already failed
+        retryably, so a message that cannot be made to work is eventually
+        reported as FAILED rather than blocking the partition for ever.
+        """
         meeting_id = event.meeting_id
         logger.info("Processing meeting_uploaded for %s.", meeting_id)
 
@@ -280,8 +439,19 @@ class KafkaWorker:
         try:
             result = await self._process_source(event, progress_hook, transcript_hook)
 
-            # Persist final result + READY status.
-            await self._callback.post_result(meeting_id, result)
+            # The durable terminal boundary. `CallbackService.applyResult`
+            # writes the transcript, segments, summary, action items and the
+            # READY status in one transaction, and charges the attempt. Until
+            # it is accepted, nothing about this run exists outside this
+            # process, so nothing may be acknowledged.
+            if not await self._callback.post_result(meeting_id, result):
+                if index_task is not None and not index_task.done():
+                    index_task.cancel()
+                logger.warning(
+                    "Result callback for %s was not accepted; leaving it for redelivery.",
+                    meeting_id,
+                )
+                return Outcome.RETRY
 
             # Indexing started during analysis; make sure it landed before READY.
             if index_task is not None:
@@ -290,16 +460,41 @@ class KafkaWorker:
                 meeting_id=meeting_id, status="READY", progress=PROGRESS_DONE,
                 message="Meeting brief ready.",
             )
-            await self._callback.post_status(meeting_id, ready)
+            # Best effort, deliberately. The meeting is already READY in
+            # Postgres; this frame only saves the browser a poll, and holding
+            # the offset for it would re-run a paid transcription to redeliver
+            # a notification.
+            if not await self._callback.post_status(meeting_id, ready):
+                logger.warning(
+                    "READY status frame for %s was not delivered; the meeting is "
+                    "READY in Postgres and the client will poll it.", meeting_id,
+                )
             logger.info("Finished processing meeting %s.", meeting_id)
+            return Outcome.COMMIT
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:  # noqa: BLE001
             if index_task is not None and not index_task.done():
                 index_task.cancel()
+
+            retryable = is_retryable(exc)
+            if retryable and attempt + 1 < self._max_attempts:
+                logger.warning(
+                    "Processing %s failed retryably (%s: %s); leaving it for redelivery.",
+                    meeting_id, type(exc).__name__, exc,
+                )
+                return Outcome.RETRY
+
+            if retryable:
+                logger.error(
+                    "Processing %s failed %d times; recording it as failed rather than "
+                    "holding the partition.", meeting_id, attempt + 1,
+                )
             logger.exception("Processing failed for %s: %s", meeting_id, exc)
             # The only report of a failure. This is what sets FAILED in
             # Postgres, records the message, raises the bell notification and
             # pushes the status frame -- see CallbackService.applyStatus.
-            await self._callback.post_status(
+            delivered = await self._callback.post_status(
                 meeting_id,
                 # 100, not 0. A failure is where this meeting's progress ends,
                 # and sending 0 asked the bar to rewind to empty and sit there
@@ -310,3 +505,12 @@ class KafkaWorker:
                     message=str(exc),
                 ),
             )
+            if not delivered:
+                # The failure is real but nobody has been told. Acknowledging
+                # now would lose it exactly the way auto-commit used to.
+                logger.warning(
+                    "FAILED status for %s was not accepted; leaving it for redelivery.",
+                    meeting_id,
+                )
+                return Outcome.RETRY
+            return Outcome.COMMIT

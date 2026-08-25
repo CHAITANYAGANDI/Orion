@@ -142,7 +142,14 @@ public class CallbackService {
         }
 
         if (meeting.getDurationSeconds() != null && meeting.getDurationSeconds() > 0) {
-            usage.addAiMinutes(meeting.getUserId(), Math.round(meeting.getDurationSeconds() / 60.0f));
+            // Once per processing attempt. This callback is at-least-once --
+            // the worker commits its Kafka offset only after Spring has taken
+            // the result, so anything that interrupts the acknowledgement
+            // replays the whole run -- and the allowance is for the life of the
+            // account, so a second charge is not recoverable by waiting.
+            usage.chargeAiMinutesOnce(
+                    meeting.getUserId(), meetingId, meeting.getProcessingAttempt(),
+                    Math.round(meeting.getDurationSeconds() / 60.0f));
         }
         announce(meeting, result);
         log.info("Persisted brief for meeting {} ({} actions).", meetingId, result.actionItemsOrEmpty().size());

@@ -5,8 +5,11 @@ import com.recallix.common.IdGenerator;
 import com.recallix.domain.Plan;
 import com.recallix.dto.UsageResponse;
 import com.recallix.entity.UsageLimit;
+import com.recallix.repository.MeetingUsageChargeRepository;
 import com.recallix.repository.UsageLimitRepository;
 import com.recallix.repository.UserRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -61,12 +64,17 @@ public class UsageLimitService {
     /** Files an account may import, ever. A browser recording is not one. */
     public static final int IMPORT_ALLOWANCE = 3;
 
+    private static final Logger log = LoggerFactory.getLogger(UsageLimitService.class);
+
     private final UsageLimitRepository usage;
     private final UserRepository users;
+    private final MeetingUsageChargeRepository charges;
 
-    public UsageLimitService(UsageLimitRepository usage, UserRepository users) {
+    public UsageLimitService(UsageLimitRepository usage, UserRepository users,
+                             MeetingUsageChargeRepository charges) {
         this.usage = usage;
         this.users = users;
+        this.charges = charges;
     }
 
     private Plan planOf(String userId) {
@@ -233,5 +241,35 @@ public class UsageLimitService {
     public void addAiMinutes(String userId, int minutes) {
         UsageLimit u = forUser(userId);
         u.setAiMinutesUsed(u.getAiMinutesUsed() + Math.max(0, minutes));
+    }
+
+    /**
+     * Charge one processing attempt, once, however many times it is reported.
+     *
+     * <p>{@link #addAiMinutes} is a read-modify-write accumulator, which was
+     * correct while a completed run was reported exactly once and became a
+     * quota leak the moment Kafka delivery was allowed to redeliver. The guard
+     * is the primary key of {@code meeting_usage_charges}, not a check here:
+     * two duplicate callbacks in flight together would both pass an existence
+     * check, and only one can win an insert.
+     *
+     * <p>A genuine reprocess arrives with a higher attempt number and is
+     * charged, which is the behaviour that existed before this and is
+     * deliberately kept — the allowance is for minutes transcribed, and
+     * reprocessing transcribes them again.
+     *
+     * @return true when this call charged, false when the attempt was already
+     *         billed and nothing was added.
+     */
+    @Transactional
+    public boolean chargeAiMinutesOnce(String userId, String meetingId, int attempt, int minutes) {
+        int billed = Math.max(0, minutes);
+        if (charges.claim(meetingId, attempt, userId, billed) == 0) {
+            log.debug("Attempt {} of meeting {} was already charged; adding nothing.", attempt, meetingId);
+            return false;
+        }
+        UsageLimit u = forUser(userId);
+        u.setAiMinutesUsed(u.getAiMinutesUsed() + billed);
+        return true;
     }
 }

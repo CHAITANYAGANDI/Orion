@@ -1443,6 +1443,23 @@ capped is minutes and imports.
 One topic. It dispatches work; every report comes back over the internal HTTP
 callbacks in §5.
 
+**Delivery is at-least-once, in both directions.** The outbox relay republishes
+a row whose `published` flag did not commit, and the worker commits its Kafka
+offset only after Spring has accepted a terminal outcome — the result callback
+for a success, the FAILED status callback for a failure. So one meeting can be
+processed more than once, and `applyResult` can be called more than once for the
+same run. It is not exactly-once and does not try to be.
+
+What makes that safe is that the durable effects are idempotent per *processing
+attempt* (`meetings.processing_attempt`, V57): the transcript, segments, summary
+and insights are replaced rather than appended, AI minutes are claimed through
+the primary key of `meeting_usage_charges`, and the four processing
+notifications carry an attempt-scoped dedupe key. Reprocessing increments the
+attempt, so it is charged and announced again — which is the intended
+behaviour, since it transcribes again.
+
+Redelivery still re-runs transcription, and the provider bills for it.
+
 | Topic | Produced by | Consumed by | Payload |
 |---|---|---|---|
 | `meeting_uploaded` | Spring | FastAPI | `{ meetingId, userId, audioUrl, objectKey, sourceType, sourceUrl, summaryTemplate, language, context, speakers }` |

@@ -1072,6 +1072,11 @@ public class MeetingService {
         usage.requireAiOrThrow(userId, UsageLimitService.AiFeature.REPROCESS);
         meeting.setStatus(MeetingStatus.QUEUED);
         meeting.setErrorMessage(null);
+        // A new run, and deliberately a new identity for it. Everything the
+        // previous run's completion claimed -- its AI-minute charge, its
+        // "Summary ready" -- was keyed to the old number, so this one charges
+        // and notifies again while a late redelivery of the old one does not.
+        meeting.setProcessingAttempt(meeting.getProcessingAttempt() + 1);
         // The cached voiceprints go with them, and this is not housekeeping.
         //
         // A voiceprint is filed under a meeting-local speaker key, and a
