@@ -151,6 +151,67 @@ public class SpeakerIdentityService {
     }
 
     /**
+     * The same deletion, for the caller that cannot proceed without it.
+     *
+     * <p>{@link #forgetMeeting} above is best-effort by design: it runs while a
+     * recording is being erased or an account closed, and those must finish even
+     * if the ai-service is down — the audio still goes, and a leftover vector is
+     * chased by the operator. Losing the erasure is worse than losing the
+     * confirmation.
+     *
+     * <p>Manual speaker correction inverts that. It is not a deletion the user
+     * asked for; it is the invalidation that keeps a correction from making
+     * things worse. A cached voiceprint is an average of the spans its speaker
+     * key owned when it was computed, so moving spans between keys is precisely
+     * the statement that the average is wrong. Save the correction while the
+     * stale vector survives and the next "Rematch speakers" compares a blended
+     * voice against the account's named profiles — and can put a real person's
+     * name on the wrong speaker, which is the failure the correction was meant
+     * to prevent. Swallowing that failure would leave the account quietly in the
+     * state the user was trying to leave.
+     *
+     * <p>So this one throws. Three outcomes from the client and only one of them
+     * proceeds: an exception (we do not know), an unconfirmed answer (it did not
+     * happen), or confirmation that a DELETE ran — after which this meeting has
+     * no cached voiceprints, whether it had five or none.
+     *
+     * <p>Named profiles are not reachable from here. The request carries a
+     * meeting id and no profile id, and the far end deletes only from
+     * {@code meeting_speaker_voiceprints}.
+     *
+     * @throws ApiException 503, with a sentence the caller can show, when the
+     *                      invalidation cannot be confirmed
+     */
+    public void invalidateMeetingVoiceprintsRequired(String userId, String meetingId) {
+        AiClient.ForgetResult result;
+        try {
+            result = ai.forgetMeetingVoiceprints(userId, meetingId);
+        } catch (RuntimeException e) {
+            log.error("Could not invalidate voiceprints for a corrected meeting: {}",
+                    e.getClass().getSimpleName());
+            throw ApiException.serviceUnavailable(INVALIDATION_FAILED);
+        }
+        if (!result.confirmed()) {
+            // Reached the service, got an answer, and the answer was "no
+            // deletion happened here". Same refusal: the difference between
+            // this and the throw above is only how much we know.
+            log.error("Voiceprint invalidation was not confirmed for a corrected meeting.");
+            throw ApiException.serviceUnavailable(INVALIDATION_FAILED);
+        }
+    }
+
+    /**
+     * Said to the user when a correction is refused.
+     *
+     * <p>Names the consequence rather than the component: "speaker matching"
+     * is the feature they can see, and "was not saved" is the fact they need,
+     * because the alternative is re-reading the line and believing it changed.
+     */
+    private static final String INVALIDATION_FAILED =
+            "Speaker matching data could not be updated just now, so that correction "
+            + "was not saved. Try again in a moment.";
+
+    /**
      * Group a meeting's segments into the shape the embedder needs.
      *
      * <p>Keyed on {@code speakerKey} — the meeting-local canonical identity that

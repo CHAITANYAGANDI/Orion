@@ -321,6 +321,23 @@ directly.
   Renaming a speaker does not do this — naming says *whose* a voice is and moves
   no spans, so the cache stays true and is what the account's profile is learned
   from.
+
+- **And the correction will not save unless that deletion is confirmed.** The
+  one place in the product where an edit can be refused because a *different*
+  service is down. `/ai/speakers/forget` returns `confirmed` alongside the row
+  count, because `deleted: 0` is the same answer for "there was nothing cached"
+  and "there is no database here", and only the first means the cache is empty.
+  Unconfirmed, or unreachable, and the correction is refused with a 503 having
+  written nothing — no segments, no flat transcript, no re-index. The reasoning
+  is that a correction saved over a surviving stale vector is invisible until
+  Rematch puts a real person's name on the wrong voice, and by then nothing in
+  the transcript records that it happened; a refusal costs a retry, and the
+  transcript stays exactly where the user could already see it.
+
+  Erasure and account closure deliberately do **not** work this way — they stay
+  best-effort, because a deletion that refuses to finish leaves the audio in
+  place, which is the outcome the user was trying to avoid. The asymmetry is the
+  point: there, finishing matters more than confirming.
 - **Enrolment quality depends on the meeting you happened to name somebody in.**
   A profile built from one short turn will match poorly. The sample count is
   shown in Settings for exactly this reason: it is the only thing that makes

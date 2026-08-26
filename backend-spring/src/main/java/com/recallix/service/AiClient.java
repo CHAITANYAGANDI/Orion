@@ -624,12 +624,50 @@ public class AiClient {
     }
 
     /**
+     * What the far end says it did with a deletion.
+     *
+     * @param deleted   rows removed, which is legitimately zero when there was
+     *                  nothing to remove
+     * @param confirmed the statement actually ran against a database and
+     *                  committed. False means "no deletion happened", not
+     *                  "nothing needed deleting" — the two are the same count
+     *                  and only this tells them apart.
+     */
+    public record ForgetResult(int deleted, boolean confirmed) {}
+
+    /**
      * Delete voice templates: one profile, one meeting's, or everything held.
      *
      * <p>Pass both ids as null to erase the lot, which is what switching speaker
      * learning off and closing an account both do.
+     *
+     * <p>Returns the count only. Callers that must know the deletion really
+     * happened — rather than merely that the request did not fail — want
+     * {@link #forgetMeetingVoiceprints} instead.
      */
     public int forgetSpeakers(String userId, String profileId, String meetingId) {
+        return postForget(userId, profileId, meetingId).deleted();
+    }
+
+    /**
+     * Drop one meeting's cached voiceprints and report whether it truly happened.
+     *
+     * <p>Same endpoint as {@link #forgetSpeakers}, read more carefully. The
+     * ai-service answers {@code deleted: 0} both for a meeting that had no
+     * cached vectors and for a deployment whose database is not there, so the
+     * count cannot be used as proof. {@code confirmed} can: it is only true when
+     * a DELETE ran and committed.
+     *
+     * <p>Still throws on a transport or HTTP failure, as before. So the caller
+     * has exactly three outcomes to handle: it threw (unknown, assume not
+     * deleted), it returned unconfirmed (definitely not deleted), or it returned
+     * confirmed (the meeting has no cached voiceprints now, whatever the count).
+     */
+    public ForgetResult forgetMeetingVoiceprints(String userId, String meetingId) {
+        return postForget(userId, null, meetingId);
+    }
+
+    private ForgetResult postForget(String userId, String profileId, String meetingId) {
         Map<String, Object> payload = new java.util.HashMap<>();
         payload.put("userId", userId);
         payload.put("profileId", profileId);
@@ -641,7 +679,17 @@ public class AiClient {
                     .body(payload)
                     .retrieve()
                     .body(JsonNode.class);
-            return body != null && body.hasNonNull("deleted") ? body.get("deleted").asInt() : 0;
+            if (body == null) {
+                return new ForgetResult(0, false);
+            }
+            int deleted = body.hasNonNull("deleted") ? body.get("deleted").asInt() : 0;
+            // Absent means unconfirmed, on purpose. An ai-service too old to
+            // send the field is one that cannot tell us whether it deleted
+            // anything, and the caller that cares must treat "cannot tell" the
+            // same as "did not" -- during a rolling deploy that costs a few
+            // refused corrections, where the alternative costs a wrong name on
+            // a real person's voice.
+            return new ForgetResult(deleted, body.path("confirmed").asBoolean(false));
         } catch (RuntimeException e) {
             // Logged loudly. Everything else here degrades quietly, but a
             // deletion that did not happen is the one failure a user must not

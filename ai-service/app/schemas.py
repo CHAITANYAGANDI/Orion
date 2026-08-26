@@ -721,4 +721,18 @@ class SpeakerForgetRequest(CamelModel):
 
 
 class SpeakerForgetResponse(CamelModel):
+    """How much went, and whether the deletion reached storage at all.
+
+    ``deleted`` alone cannot answer the second question: zero rows removed is
+    the right answer both for a meeting that had no cached voiceprints and for
+    a service with no database behind it, and a caller that has to *know* the
+    cache is now empty -- a manual speaker correction does -- cannot tell those
+    apart. ``confirmed`` says a DELETE really ran and committed.
+
+    It defaults to false so that any response which does not say otherwise is
+    read as unproven. A caller that needs certainty should refuse to proceed
+    rather than assume.
+    """
+
     deleted: int = 0
+    confirmed: bool = False

@@ -477,6 +477,17 @@ class SpeakerIdentityService:
         return IdentifyOutcome(matches, len(unresolved), len(profiles))
 
     # --- forgetting --------------------------------------------------------- #
+    @property
+    def storage_available(self) -> bool:
+        """Whether a deletion issued right now would actually reach a database.
+
+        The three ``forget`` methods below all return "nothing removed" when it
+        is false, and a count of zero is otherwise indistinguishable from "there
+        was nothing there" -- so this is what lets the endpoint tell a caller
+        whether its deletion is proven or merely unopposed.
+        """
+        return self._rag is not None and bool(getattr(self._rag, "enabled", False))
+
     async def forget_everything(self, user_id: str) -> int:
         """Delete every profile and every voiceprint this account holds.
 
@@ -485,7 +496,7 @@ class SpeakerIdentityService:
         a switch that only stopped new learning would leave the templates in
         place, which is not what "off" means to the person reading it.
         """
-        if self._rag is None or not getattr(self._rag, "enabled", False):
+        if not self.storage_available:
             return 0
         async with self._rag.connection(user_id) as conn:
             async with conn.cursor() as cur:
@@ -502,7 +513,7 @@ class SpeakerIdentityService:
 
     async def forget_profile(self, user_id: str, profile_id: str) -> bool:
         """Delete one named voice."""
-        if self._rag is None or not getattr(self._rag, "enabled", False):
+        if not self.storage_available:
             return False
         async with self._rag.connection(user_id) as conn:
             async with conn.cursor() as cur:
@@ -521,8 +532,20 @@ class SpeakerIdentityService:
         turned back into it, but it is derived from the voice on that recording,
         and answering "delete the recording of me" by keeping a durable
         identifier built from it would be a lie by omission.
+
+        Also called when a speaker is manually corrected, where the reason is
+        accuracy rather than privacy: the cached vector for a speaker key is an
+        average of the spans that key owned when it was computed, and moving
+        spans between keys is exactly the statement that the average was built
+        from the wrong audio.
+
+        The count is rows removed, and zero is a perfectly ordinary answer --
+        a meeting whose voiceprints were never computed has none to drop. It is
+        NOT proof the deletion ran: that is ``storage_available``, which the
+        endpoint reports separately, because a caller correcting a speaker needs
+        to know the cache is empty rather than merely uncontested.
         """
-        if self._rag is None or not getattr(self._rag, "enabled", False):
+        if not self.storage_available:
             return 0
         async with self._rag.connection(user_id) as conn:
             async with conn.cursor() as cur:

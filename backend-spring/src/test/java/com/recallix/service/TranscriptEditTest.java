@@ -333,7 +333,13 @@ class TranscriptEditTest {
         // for a typo.
         service.editSegments(USER, MEETING, List.of(new SegmentEdit("seg_1", "Corrected line.")));
 
+        // Neither route: not the best-effort one erasure uses, and not the
+        // strict one a speaker correction uses -- the second matters most,
+        // because it can refuse. A text edit that reached it would stop being
+        // saveable whenever the speaker service was down.
         verify(speakerIdentity, never()).forgetMeeting(anyString(), anyString());
+        verify(speakerIdentity, never())
+                .invalidateMeetingVoiceprintsRequired(anyString(), anyString());
     }
 
     @Test
@@ -345,6 +351,8 @@ class TranscriptEditTest {
         service.renameSpeakers(USER, MEETING, java.util.Map.of("Speaker 1", "Priya"));
 
         verify(speakerIdentity, never()).forgetMeeting(anyString(), anyString());
+        verify(speakerIdentity, never())
+                .invalidateMeetingVoiceprintsRequired(anyString(), anyString());
     }
 
     @Test

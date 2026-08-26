@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -35,6 +36,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -449,7 +452,7 @@ class SegmentSpeakerCorrectionTest {
             service.setSegmentSpeaker(USER, MEETING, "seg_1",
                     new SegmentSpeakerRequest("spk_1", null, null));
 
-            verify(speakerIdentity).forgetMeeting(USER, MEETING);
+            verify(speakerIdentity).invalidateMeetingVoiceprintsRequired(USER, MEETING);
         }
 
         @Test
@@ -459,7 +462,7 @@ class SegmentSpeakerCorrectionTest {
             // so both keys' voiceprints are now averages of the wrong audio.
             moveTheReply();
 
-            verify(speakerIdentity).forgetMeeting(USER, MEETING);
+            verify(speakerIdentity).invalidateMeetingVoiceprintsRequired(USER, MEETING);
         }
 
         @Test
@@ -471,7 +474,8 @@ class SegmentSpeakerCorrectionTest {
             service.setSegmentSpeaker(USER, MEETING, "seg_1",
                     new SegmentSpeakerRequest("spk_2", null, null));
 
-            verify(speakerIdentity, never()).forgetMeeting(anyString(), anyString());
+            verify(speakerIdentity, never())
+                    .invalidateMeetingVoiceprintsRequired(anyString(), anyString());
         }
 
         @Test
@@ -480,7 +484,8 @@ class SegmentSpeakerCorrectionTest {
             service.setSegmentSpeaker(USER, MEETING, "seg_1",
                     new SegmentSpeakerRequest("spk_2", 0, 9));
 
-            verify(speakerIdentity, never()).forgetMeeting(anyString(), anyString());
+            verify(speakerIdentity, never())
+                    .invalidateMeetingVoiceprintsRequired(anyString(), anyString());
         }
 
         @Test
@@ -500,7 +505,8 @@ class SegmentSpeakerCorrectionTest {
         @Test
         @DisplayName("and leaves the account's named profiles exactly where they were")
         void namedProfilesAreUntouched() {
-            // forgetMeeting drops voiceprints for one meeting and nothing else.
+            // The invalidation drops voiceprints for one meeting and nothing
+            // else: a meeting id, no profile id.
             // The named profiles were built by a separate, explicit act in other
             // meetings, and a correction here must not reach them.
             moveTheReply();
@@ -518,6 +524,117 @@ class SegmentSpeakerCorrectionTest {
 
             verify(ai).reindex(anyString(), anyString(), anyInt(), anyString(), any());
             verify(summaries).findFirstByMeetingIdOrderByCreatedAtDesc(MEETING);
+        }
+
+        @Test
+        @DisplayName("and it happens before a single row is written")
+        void invalidationComesFirst() {
+            // Order is the whole guarantee. Invalidate-then-write can fail with
+            // nothing saved; write-then-invalidate can fail with the correction
+            // committed and the stale vector still there, which is the state
+            // this entire nested class exists to prevent.
+            InOrder order = inOrder(speakerIdentity, segments, ai);
+
+            moveTheReply();
+
+            order.verify(speakerIdentity).invalidateMeetingVoiceprintsRequired(USER, MEETING);
+            order.verify(segments).saveAll(any());
+            order.verify(ai).reindex(anyString(), anyString(), anyInt(), anyString(), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("when the voiceprints cannot be invalidated")
+    class InvalidationFails {
+
+        /**
+         * The ai-service is unreachable, or reachable and unable to confirm.
+         *
+         * <p>Both arrive here as the same 503 from
+         * {@code SpeakerIdentityService}, because the caller's choice is the
+         * same either way: it does not know the cache is empty, so it must not
+         * save an edit that depends on it being empty.
+         */
+        @BeforeEach
+        void theInvalidationRefuses() {
+            doThrow(ApiException.serviceUnavailable("Speaker matching data could not be updated"))
+                    .when(speakerIdentity).invalidateMeetingVoiceprintsRequired(USER, MEETING);
+        }
+
+        @Test
+        @DisplayName("the correction is refused rather than quietly saved")
+        void theCorrectionIsRefused() {
+            assertThatThrownBy(SegmentSpeakerCorrectionTest.this::moveTheReply)
+                    .isInstanceOf(ApiException.class)
+                    .hasMessageContaining("Speaker matching data");
+
+            // Nothing split, nothing stored.
+            assertThat(rows).hasSize(2);
+            verify(segments, never()).saveAll(any());
+            verify(segments, never()).delete(any());
+        }
+
+        @Test
+        @DisplayName("a whole-line move leaves the line exactly as it was")
+        void theSegmentIsNotHalfMoved() {
+            // The one that catches an ordering regression. `moveWholeSegment`
+            // writes straight through to a managed entity, so if the invalidation
+            // were attempted after it, this line would already say spk_1 and the
+            // correction would survive as far as the persistence context --
+            // undone only by a rollback, and only if nothing had flushed.
+            assertThatThrownBy(() -> service.setSegmentSpeaker(USER, MEETING, "seg_1",
+                    new SegmentSpeakerRequest("spk_1", null, null)))
+                    .isInstanceOf(ApiException.class);
+
+            assertThat(merged.getSpeakerKey()).isEqualTo("spk_2");
+            assertThat(merged.getSpeaker()).isEqualTo("Speaker 2");
+            assertThat(merged.getSpeakerStatus()).isEqualTo("attributed");
+            assertThat(merged.getWords()).allMatch(w -> "spk_2".equals(w.speaker()));
+        }
+
+        @Test
+        @DisplayName("the flat transcript, the index and the summary are all left alone")
+        void nothingDownstreamMoves() {
+            String before = transcript.getTranscriptText();
+
+            assertThatThrownBy(SegmentSpeakerCorrectionTest.this::moveTheReply)
+                    .isInstanceOf(ApiException.class);
+
+            // A partial failure here is worse than the bug: the export would
+            // disagree with the segments, and chat would cite an attribution the
+            // transcript no longer shows.
+            assertThat(transcript.getTranscriptText()).isEqualTo(before);
+            verify(ai, never()).reindex(anyString(), anyString(), anyInt(), anyString(), any());
+            verify(summaries, never()).findFirstByMeetingIdOrderByCreatedAtDesc(anyString());
+            verify(audit, never()).record(anyString(), anyString(), anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("and the account's named profiles are still not touched")
+        void namedProfilesSurviveTheFailure() {
+            assertThatThrownBy(SegmentSpeakerCorrectionTest.this::moveTheReply)
+                    .isInstanceOf(ApiException.class);
+
+            // A failure path is exactly where an over-broad "clean up" would get
+            // written. There is no reach from here to a named voice, failing or
+            // succeeding.
+            verify(speakerIdentity, never()).forgetEverything(anyString());
+            verify(speakerIdentity, never()).deleteProfile(anyString(), anyString());
+            verify(ai, never()).forgetSpeakers(anyString(), any(), any());
+        }
+
+        @Test
+        @DisplayName("a no-op still succeeds, because it never needed the invalidation")
+        void aNoOpIsUnaffected() {
+            // Nothing moved, so nothing went stale, so there is nothing to
+            // confirm -- and refusing here would break editing for a whole
+            // deployment whenever the speaker service blinked.
+            var response = service.setSegmentSpeaker(USER, MEETING, "seg_1",
+                    new SegmentSpeakerRequest("spk_2", null, null));
+
+            assertThat(response).isNotNull();
+            verify(speakerIdentity, never())
+                    .invalidateMeetingVoiceprintsRequired(anyString(), anyString());
         }
     }
 }

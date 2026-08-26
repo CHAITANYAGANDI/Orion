@@ -2051,8 +2051,15 @@ function TranscriptPanel({
       setReassignFor(null);
       clearSelection();
       toast.success("Speaker corrected for that line.");
-    } catch {
-      toast.error("Could not change the speaker on that line.");
+    } catch (err) {
+      // A correction can be refused outright now: it invalidates this meeting's
+      // cached voiceprints first, and if that cannot be confirmed the server
+      // saves nothing rather than leave a later Rematch comparing against audio
+      // that no longer belongs to that speaker. That refusal is a 503 with a
+      // sentence worth showing -- "try again in a moment" is different advice
+      // from "that did not save", and only the server knows which one applies.
+      const message = (err as { data?: { message?: string } })?.data?.message;
+      toast.error(message || "Could not change the speaker on that line.");
     }
   }
 

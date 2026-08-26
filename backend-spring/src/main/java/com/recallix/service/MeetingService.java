@@ -837,6 +837,20 @@ public class MeetingService {
      * is marked stale rather than regenerated — it names speakers, so it may
      * now disagree, and silently spending a model call on a one-line fix is
      * worse than saying so.
+     *
+     * <h2>It can be refused</h2>
+     *
+     * <p>A correction that really moves something first invalidates this
+     * meeting's cached voiceprints, and it will not save unless that deletion
+     * is confirmed — a 503 if it cannot be, with nothing written. Unusual for an
+     * edit, and deliberate: the cache is keyed on speaker, so a correction that
+     * lands while a stale vector survives leaves a Rematch able to attach a real
+     * person's name to the wrong voice. Refusing costs the user a retry.
+     * Accepting costs them a wrong answer they have no way to see coming.
+     *
+     * @throws ApiException 503 when the voiceprint invalidation cannot be
+     *                      confirmed; the transaction rolls back and the
+     *                      transcript is untouched
      */
     @Transactional
     public TranscriptResponse setSegmentSpeaker(String userId, String meetingId,
@@ -861,11 +875,11 @@ public class MeetingService {
                 .orElseThrow(() -> ApiException.badRequest(
                         "There is no such speaker in this meeting"));
 
-        List<TranscriptSegment> replacement = req.isPartial()
-                ? splitForSpeaker(target, req, key, name)
-                : moveWholeSegment(target, key, name);
-
-        if (replacement.isEmpty()) {
+        // Asked before anything is touched, because the invalidation below has
+        // to come first and must not be spent on a request that changes nothing
+        // or is about to be refused. An invalid range is rejected here, so a bad
+        // request stays a bad request rather than becoming a wasted deletion.
+        if (!movesAnything(target, req, key)) {
             // The segment was already attributed that way. Nothing moved, so
             // nothing cached about this meeting has gone out of date -- and
             // throwing away good voiceprints costs a re-embed of the whole
@@ -903,7 +917,34 @@ public class MeetingService {
         // on screen and must not be confused here: learning from a diarization
         // correction would fold a span the user just disowned into a real
         // person's stored voice.
-        speakerIdentity.forgetMeeting(userId, meetingId);
+        //
+        // Required, not best-effort, and first. If the deletion cannot be
+        // confirmed this throws and the correction is refused: the transaction
+        // rolls back, nothing here has written anything yet, and the user is
+        // told to try again. That is a worse minute than a silent save and a
+        // better week -- a correction saved over a surviving stale vector is
+        // invisible until Rematch puts somebody's name on the wrong voice, and
+        // by then nothing in the transcript records that it happened.
+        // `forgetMeeting` (best-effort) is still what erasure and account
+        // closure use, where finishing matters more than confirming.
+        speakerIdentity.invalidateMeetingVoiceprintsRequired(userId, meetingId);
+
+        // Only now is anything mutated. `moveWholeSegment` writes through to a
+        // managed entity, so building the replacement before the line above
+        // would leave a failed correction holding half-changed rows in the
+        // persistence context and relying on rollback to undo them.
+        List<TranscriptSegment> replacement = req.isPartial()
+                ? splitForSpeaker(target, req, key, name)
+                : moveWholeSegment(target, key, name);
+
+        if (replacement.isEmpty()) {
+            // Belt and braces: `movesAnything` said this would move something,
+            // so reaching here means the two disagreed. Harmless if they ever
+            // do -- the cost is one wasted re-embed on the next rematch, not a
+            // wrong answer -- and quietly returning beats saving nothing while
+            // claiming otherwise.
+            return getTranscript(userId, meetingId);
+        }
 
         if (replacement.size() > 1) {
             // A split: the original row is replaced by the pieces. Deleted and
@@ -926,6 +967,56 @@ public class MeetingService {
         markSummaryStale(meetingId);
         audit.record(userId, "SEGMENT_SPEAKER_CORRECTED", "meeting", meetingId);
         return getTranscript(userId, meetingId);
+    }
+
+    /**
+     * Would this request actually move anything -- and is it even askable?
+     *
+     * <p>Separated from the movers below because the answer is needed before
+     * they run: this meeting's cached voiceprints are invalidated before a
+     * single segment is touched, and dropping them for a no-op would cost a
+     * re-embed of the whole recording for nothing.
+     *
+     * <p>The range validation lives in {@link #wordRange}, which the split
+     * itself also uses, so the two cannot drift into disagreeing about what a
+     * valid range is -- which would show up as a correction that invalidated
+     * the cache and then threw.
+     */
+    private boolean movesAnything(TranscriptSegment seg, SegmentSpeakerRequest req, String key) {
+        boolean alreadyTheirs = key.equals(seg.getSpeakerKey());
+        if (!req.isPartial()) {
+            return !alreadyTheirs;
+        }
+        int[] range = wordRange(seg, req);
+        boolean wholeLine = range[0] == 0 && range[1] == seg.getWords().size() - 1;
+        // A range covering every word is a whole-line move by another name, and
+        // moving a line to the speaker it already has does nothing. A sub-range
+        // is a split: even when those words keep the speaker they had, the row
+        // is replaced by pieces with their own ids and timings, which is a real
+        // change to the transcript and is treated as one.
+        return !(wholeLine && alreadyTheirs);
+    }
+
+    /**
+     * The words this request addresses, validated. {@code [from, to]}, inclusive.
+     *
+     * <p>Null ends mean the whole line. Refused rather than clamped: a range
+     * that runs past the end of the line is a client out of step with the
+     * transcript it is editing, and moving the nearest words instead would
+     * relabel something the user did not select.
+     */
+    private static int[] wordRange(TranscriptSegment seg, SegmentSpeakerRequest req) {
+        var words = seg.getWords();
+        if (words == null || words.isEmpty()) {
+            throw ApiException.badRequest(
+                    "This line has no word timings, so only the whole line can be moved");
+        }
+        int from = req.fromWord() == null ? 0 : req.fromWord();
+        int to = req.toWord() == null ? words.size() - 1 : req.toWord();
+        if (from > to || to >= words.size()) {
+            throw ApiException.badRequest("That is not a valid range of words in this line");
+        }
+        return new int[] {from, to};
     }
 
     /**
@@ -958,16 +1049,10 @@ public class MeetingService {
     private List<TranscriptSegment> splitForSpeaker(TranscriptSegment seg,
                                                     SegmentSpeakerRequest req,
                                                     String key, String name) {
+        int[] range = wordRange(seg, req);
         var words = seg.getWords();
-        if (words == null || words.isEmpty()) {
-            throw ApiException.badRequest(
-                    "This line has no word timings, so only the whole line can be moved");
-        }
-        int from = req.fromWord() == null ? 0 : req.fromWord();
-        int to = req.toWord() == null ? words.size() - 1 : req.toWord();
-        if (from > to || to >= words.size()) {
-            throw ApiException.badRequest("That is not a valid range of words in this line");
-        }
+        int from = range[0];
+        int to = range[1];
         if (from == 0 && to == words.size() - 1) {
             return moveWholeSegment(seg, key, name);
         }

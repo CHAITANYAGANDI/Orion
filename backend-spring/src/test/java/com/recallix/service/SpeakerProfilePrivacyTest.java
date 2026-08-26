@@ -15,6 +15,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
+import org.springframework.http.HttpStatus;
+
 import java.util.List;
 import java.util.Optional;
 
@@ -248,6 +250,97 @@ class SpeakerProfilePrivacyTest {
             service.forgetMeeting(USER, "mtg_1");
 
             verify(profiles, never()).deleteByUserId(anyString());
+        }
+
+        @Test
+        @DisplayName("a correction's invalidation is confirmed before it counts as done")
+        void confirmedInvalidationSucceeds() {
+            when(ai.forgetMeetingVoiceprints(USER, "mtg_1"))
+                    .thenReturn(new AiClient.ForgetResult(2, true));
+
+            service.invalidateMeetingVoiceprintsRequired(USER, "mtg_1");
+
+            verify(ai).forgetMeetingVoiceprints(USER, "mtg_1");
+        }
+
+        @Test
+        @DisplayName("nothing to delete is still a confirmed deletion")
+        void zeroRowsIsFine() {
+            // A meeting whose voiceprints were never computed has none to drop,
+            // and the caller's requirement is satisfied: there is no stale
+            // vector. Treating zero as a failure would refuse every correction
+            // on every meeting that had not been rematched yet.
+            when(ai.forgetMeetingVoiceprints(USER, "mtg_1"))
+                    .thenReturn(new AiClient.ForgetResult(0, true));
+
+            service.invalidateMeetingVoiceprintsRequired(USER, "mtg_1");
+
+            verify(ai).forgetMeetingVoiceprints(USER, "mtg_1");
+        }
+
+        @Test
+        @DisplayName("an unconfirmed answer is refused, not assumed")
+        void unconfirmedIsARefusal() {
+            // The ambiguity this whole contract exists for: `deleted: 0` from a
+            // service with no database behind it looks exactly like `deleted: 0`
+            // from a meeting that had nothing cached. Only `confirmed` separates
+            // them, and without it the honest answer is "we do not know".
+            when(ai.forgetMeetingVoiceprints(USER, "mtg_1"))
+                    .thenReturn(new AiClient.ForgetResult(0, false));
+
+            Throwable thrown = catchThrowable(
+                    () -> service.invalidateMeetingVoiceprintsRequired(USER, "mtg_1"));
+
+            assertThat(thrown).isInstanceOf(ApiException.class);
+            assertThat(((ApiException) thrown).getStatus())
+                    .isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+            // Says what did not happen, in the user's terms. "Upstream error"
+            // would leave them re-reading the line to see whether it saved.
+            assertThat(thrown).hasMessageContaining("was not saved");
+        }
+
+        @Test
+        @DisplayName("an unreachable service is refused the same way")
+        void aFailedRequestIsARefusal() {
+            doThrow(new RuntimeException("connection refused"))
+                    .when(ai).forgetMeetingVoiceprints(USER, "mtg_1");
+
+            Throwable thrown = catchThrowable(
+                    () -> service.invalidateMeetingVoiceprintsRequired(USER, "mtg_1"));
+
+            assertThat(thrown).isInstanceOf(ApiException.class);
+            assertThat(((ApiException) thrown).getStatus())
+                    .isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        }
+
+        @Test
+        @DisplayName("the strict path deletes voiceprints for one meeting and nothing else")
+        void strictInvalidationNeverTouchesNamedProfiles() {
+            when(ai.forgetMeetingVoiceprints(USER, "mtg_1"))
+                    .thenReturn(new AiClient.ForgetResult(1, true));
+
+            service.invalidateMeetingVoiceprintsRequired(USER, "mtg_1");
+
+            // No profile id crosses the wire, and the local profile table is not
+            // touched. A correction says a voice was in the wrong place, not
+            // that the account should forget who anyone is.
+            verify(profiles, never()).deleteByUserId(anyString());
+            verify(profiles, never()).delete(any());
+            verify(ai, never()).forgetSpeakers(anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("erasure stays best-effort, because finishing matters more there")
+        void erasureIsStillNotStrict() {
+            // The deliberate asymmetry. A recording erasure that refused to
+            // finish because the ai-service was down would leave the audio in
+            // place, which is the outcome the user was trying to avoid; a
+            // correction that refuses leaves the transcript as it was, which is
+            // where the user already is.
+            doThrow(new RuntimeException("ai-service down"))
+                    .when(ai).forgetSpeakers(eq(USER), isNull(), eq("mtg_1"));
+
+            service.forgetMeeting(USER, "mtg_1");
         }
 
         @Test

@@ -342,19 +342,34 @@ async def forget_speakers(
 ) -> SpeakerForgetResponse:
     """Delete voice templates: one profile, one meeting's, or everything.
 
-    Never reports a reason it could not run. Deletion has to be as close to
-    unconditional as the code can make it — a request to remove biometric data
-    that fails softly because a model is missing would be the worst possible
-    place for this service to be fussy.
+    Never refuses to run, and never asks why it was called. Deletion has to be
+    as close to unconditional as the code can make it — a request to remove
+    biometric data that fails softly because a model is missing would be the
+    worst possible place for this service to be fussy.
+
+    What it does report is whether the deletion actually reached storage.
+    ``deleted: 0`` is ambiguous on its own — nothing was there, or nothing could
+    be done — and one caller cannot live with the ambiguity: correcting a
+    speaker invalidates this meeting's cached voiceprints, and Spring refuses to
+    save the correction unless the invalidation is proven. So ``confirmed`` says
+    a DELETE ran against a real database and committed. A failure that is not a
+    "nothing happened" — a dead pool, a timeout, a database error mid-statement
+    — raises, and the caller sees a 5xx rather than a cheerful zero.
     """
+    # Read once, before the await, so the flag describes the same service state
+    # the deletion below ran against.
+    confirmed = speakers.storage_available
     if body.profile_id:
         gone = await speakers.forget_profile(body.user_id, body.profile_id)
-        return SpeakerForgetResponse(deleted=1 if gone else 0)
+        return SpeakerForgetResponse(deleted=1 if gone else 0, confirmed=confirmed)
     if body.meeting_id:
         return SpeakerForgetResponse(
-            deleted=await speakers.forget_meeting_voiceprints(body.user_id, body.meeting_id)
+            deleted=await speakers.forget_meeting_voiceprints(body.user_id, body.meeting_id),
+            confirmed=confirmed,
         )
-    return SpeakerForgetResponse(deleted=await speakers.forget_everything(body.user_id))
+    return SpeakerForgetResponse(
+        deleted=await speakers.forget_everything(body.user_id), confirmed=confirmed
+    )
 
 
 @router.post("/chat", response_model=ChatResponse)

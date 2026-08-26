@@ -45,4 +45,18 @@ public class ApiException extends RuntimeException {
     public static ApiException usageLimitReached(String message) {
         return new ApiException(HttpStatus.TOO_MANY_REQUESTS, "USAGE_LIMIT_REACHED", message);
     }
+
+    /**
+     * A dependency this request needed is not answering, so nothing was done.
+     *
+     * <p>503 rather than 500 because it says something true and useful: the
+     * request was well formed, nothing was written, and trying again later is
+     * the right response. Reserved for the case where refusing is the correct
+     * outcome — see {@code SpeakerIdentityService.invalidateMeetingVoiceprintsRequired},
+     * where saving the user's edit without the deletion that goes with it would
+     * leave the account in a state the edit was meant to prevent.
+     */
+    public static ApiException serviceUnavailable(String message) {
+        return new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE", message);
+    }
 }
