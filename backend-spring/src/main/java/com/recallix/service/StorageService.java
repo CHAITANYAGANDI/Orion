@@ -176,6 +176,18 @@ public class StorageService {
         }
     }
 
+    /**
+     * Remove an object, best-effort.
+     *
+     * <p>A failure is logged and swallowed, which is right for the callers that
+     * have already decided to proceed: deleting a whole meeting or a whole
+     * account must finish, and an account holder who asked to be forgotten and
+     * got "something went wrong" is worse off than one whose bucket needed a
+     * sweep afterwards. The leftover object is unreachable — no row points at
+     * it — and the operator can find it.
+     *
+     * <p>The caller that cannot live with that wants {@link #deleteOrThrow}.
+     */
     public void delete(String objectKey) {
         if (objectKey == null || objectKey.isBlank()) {
             return;
@@ -185,5 +197,26 @@ public class StorageService {
         } catch (Exception e) {
             log.warn("Failed to delete S3 object {}: {}", objectKey, e.getMessage());
         }
+    }
+
+    /**
+     * Remove an object, and say so if it did not happen.
+     *
+     * <p>Same call, without the catch. For the path where the deletion is the
+     * whole of what the user asked for and the row that records it is about to
+     * be written: swallowing a failure there produces a meeting that says "the
+     * recording was deleted on Tuesday" over an object still sitting in the
+     * bucket, which is the one outcome a privacy control must never have.
+     *
+     * <p>Nothing to delete is success, not silence — a null or blank key means
+     * there is no object, and "make sure this is gone" is already satisfied.
+     * S3 deletes are idempotent too, so a retry after a partial failure is safe
+     * and a key that has already gone does not raise.
+     */
+    public void deleteOrThrow(String objectKey) {
+        if (objectKey == null || objectKey.isBlank()) {
+            return;
+        }
+        s3.deleteObject(DeleteObjectRequest.builder().bucket(bucket).key(objectKey).build());
     }
 }

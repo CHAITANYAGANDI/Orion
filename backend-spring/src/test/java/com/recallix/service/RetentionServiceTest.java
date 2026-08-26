@@ -24,7 +24,9 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -156,6 +158,32 @@ class RetentionServiceTest {
             assertThat(done.meetings()).isZero();
             verify(erasure).eraseAudio(old);
             verify(erasure, never()).eraseMeeting(any(Meeting.class));
+        }
+
+        @Test
+        @DisplayName("does not count a recording whose erasure was refused")
+        void aRefusedErasureIsNotReported() {
+            // Audio erasure is allowed to refuse now: it deletes the voiceprints
+            // derived from the recording first, and will not delete the
+            // recording unless that is confirmed. The nightly pass must not
+            // report a deletion it did not achieve -- the count goes into the
+            // account holder's "we deleted 4 recordings last night" notification
+            // and into the audit log.
+            user.setAudioRetentionDays(30);
+            Meeting old = aged("mtg_old", 31);
+            owns(old);
+            doThrow(ApiException.serviceUnavailable("Speaker matching data could not be updated"))
+                    .when(erasure).eraseAudio(old);
+
+            // It propagates out of applyFor to the per-account catch in the
+            // caller, which logs it and moves on to the next account. Tonight's
+            // pass does nothing for this one; tomorrow's tries again, because
+            // the meeting is still past the window and still has its audio.
+            assertThatThrownBy(() -> service.applyFor(user, TODAY))
+                    .isInstanceOf(ApiException.class);
+
+            verify(notifications, never())
+                    .retentionApplied(anyString(), anyInt(), anyInt(), any(LocalDate.class));
         }
 
         @Test

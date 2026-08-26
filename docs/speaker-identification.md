@@ -233,8 +233,46 @@ The full statement is in `V53__speaker_profiles.sql`. In short:
 | **Encrypted at rest** | Fernet (AES-128-CBC + HMAC-SHA256), key from `SPEAKER_PROFILE_KEY`. Stored as `BYTEA`, not `vector(192)` — see below. |
 | **Fail-closed** | No key ⇒ the feature is off, not on and unencrypted. |
 | **Per-account** | Both tables carry `user_id` under FORCEd row-level security with **no system bypass**, so no future endpoint can acquire one by accident. Profiles are never pooled, shared or used to train anything. |
-| **Deletable** | One profile, or all of them. Switching learning off deletes everything held — withdrawal of consent removes the data, not just its use. Erasing a recording erases the voiceprints derived from it. Deleting a meeting or an account cascades. |
+| **Deletable** | One profile, or all of them. Switching learning off deletes everything held — withdrawal of consent removes the data, not just its use. Erasing a recording erases the voiceprints derived from it, and **refuses to erase the recording at all unless that deletion is confirmed** — see below. Deleting a meeting or an account cascades. |
 | **Never logged** | No waveform, no embedding, no ciphertext, no key. Enforced by a test that parses every logger call in the three modules and checks its arguments. |
+
+### Erasing a recording: the order, and why
+
+Three things have to happen — the derived voiceprints go, the object goes, and
+the meeting row says so — and object storage is not in the Postgres transaction,
+so some interleaving of done and not-done is reachable whatever the order. The
+only real choice is which leftover to have.
+
+**Voiceprints first, then the object, then the row.**
+
+| Fails at | Leftover | Reported |
+|---|---|---|
+| voiceprint deletion | nothing done: audio present, template present | 503, and the meeting still says it has its recording |
+| object deletion | audio present, template **gone** | 503, "the recording is still here" — accurate |
+| — | both gone, row written | success |
+
+The rejected order is object-first. Its failure leaves the recording gone from
+the bucket while the biometric-adjacent template derived from it survives, and
+the rolled-back row still claims the meeting has its recording: more sensitive
+data retained, less of it visible, and a key pointing at nothing. It is also
+unrecoverable in kind rather than degree — a voiceprint whose audio is gone can
+never be recomputed or checked against anything, whereas a missing cache is
+rebuilt by the next rematch from audio that is still there.
+
+Deleted voiceprints are deliberately **not** recreated when the object deletion
+then fails. Writing biometric-adjacent data back out in the middle of a failed
+deletion is not a repair.
+
+What this costs: a failing ai-service blocks audio erasure entirely. Taken
+deliberately — the erasure is refused and said so, not silently half-done, and
+pressing again completes it. The already-erased short circuit runs *after* the
+voiceprint deletion for exactly that reason, so a second press finishes an
+erasure that half-happened rather than returning the timestamp of the half that
+did. Deleting nothing is a confirmed success, so the repeat costs one round trip.
+
+Deleting a whole meeting or a whole account is unchanged and still relies on
+`ON DELETE CASCADE` from `meetings` and `users` — the rows go with their parent,
+in the same transaction, with nothing to confirm.
 
 ### Why `BYTEA` and not `vector(192)`
 

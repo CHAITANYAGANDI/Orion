@@ -13,6 +13,8 @@ import com.recallix.repository.TranscriptChunkRepository;
 import com.recallix.repository.TranscriptMomentRepository;
 import com.recallix.repository.TranscriptSegmentRepository;
 import com.recallix.repository.UserRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,13 +39,20 @@ import java.util.List;
  * false. The cost of that choice is that none of this can be undone, and every
  * caller says so before it happens.
  *
- * <p><strong>Storage first, then the row.</strong> The object store is not in
+     * <p><strong>Storage first, then the row.</strong> The object store is not in
  * the transaction. If it is deleted first and the transaction then rolls back,
  * the result is a meeting whose audio is gone but which still claims to have it —
  * recoverable, visible, and reported by the page. The other order leaves an
  * orphaned object no key in the database points at: invisible, unbilled to
  * anybody's attention, and still holding the voice somebody asked us to erase.
  * The first failure is the one worth having.
+ *
+ * <p><strong>And derived data before either.</strong> Erasing a recording
+ * also erases the voiceprints taken from it, and that deletion runs first
+ * and is required rather than best-effort — see {@link #eraseAudio(Meeting)}
+ * for the failure modes both ways round. The short version: a failure there
+ * leaves the audio in place and says so, and a failure after it leaves a
+ * cache missing rather than a template stranded.
  *
  * <p>Used by three callers with the same code path in each: the account holder
  * pressing a button, the nightly retention pass in {@link RetentionService}, and
@@ -53,6 +62,8 @@ import java.util.List;
  */
 @Service
 public class ErasureService {
+
+    private static final Logger log = LoggerFactory.getLogger(ErasureService.class);
 
     private final MeetingRepository meetings;
     private final MeetingTranscriptRepository transcripts;
@@ -103,7 +114,13 @@ public class ErasureService {
      * Erase the audio and keep everything drawn from it.
      *
      * <p>Idempotent: asking twice is not an error, because the honest answer to
-     * "delete this" when it is already gone is yes.
+     * "delete this" when it is already gone is yes. Asking twice will, however,
+     * re-confirm that the derived voiceprints are gone — see below — so a second
+     * press can finish an erasure that only half happened.
+     *
+     * @throws ApiException 503 when the derived voiceprints cannot be confirmed
+     *                      deleted, or when the object store refuses; in both
+     *                      cases the meeting still says it has its recording
      */
     @Transactional
     public Instant eraseAudio(String userId, String meetingId) {
@@ -113,30 +130,99 @@ public class ErasureService {
         return at;
     }
 
-    /** The same, for a meeting already loaded and already known to be the caller's. */
+    /**
+     * The same, for a meeting already loaded and already known to be the caller's.
+     *
+     * <h2>The order, and why it is this one</h2>
+     *
+     * <p>Three things have to happen: the derived voiceprints go, the object
+     * goes, and the row says so. The object store is not in the transaction, so
+     * some interleaving of "done" and "not done" is reachable no matter what,
+     * and the only real choice is which leftover to have.
+     *
+     * <p><strong>Voiceprints first.</strong>
+     *
+     * <ul>
+     *   <li>If the voiceprint deletion fails, nothing else has run: the audio is
+     *       still there, the row still says so, and the caller is told plainly
+     *       that the erasure did not happen. Nothing was retained behind a
+     *       claim that it was not.</li>
+     *   <li>If it succeeds and the object store then fails, the transaction
+     *       rolls back and the voiceprints stay deleted. The leftover state is
+     *       "audio present, derived data absent" — safe, self-correcting, and
+     *       cheap: the vectors are a cache and the next rematch rebuilds them
+     *       from the audio that is still there. They are deliberately not
+     *       recreated to compensate.</li>
+     * </ul>
+     *
+     * <p>The other order — object first, voiceprints second — fails the other
+     * way: a failure after the delete leaves the recording gone from the bucket
+     * while the biometric-adjacent template derived from it survives, and the
+     * row, rolled back, still claims the meeting has its recording. That is the
+     * worst of the reachable states: more sensitive data retained, less of it
+     * visible, and a dangling key. It is also unrecoverable in kind rather than
+     * degree — a voiceprint whose audio is gone cannot be recomputed or checked
+     * against anything.
+     *
+     * <p>So: least sensitive data retained on failure wins, and that is this
+     * order. What it costs is that a failing ai-service blocks audio erasure
+     * entirely. That is the trade taken deliberately — the erasure is refused
+     * and reported, not silently half-done, and a retry completes it.
+     *
+     * <p><strong>The object still goes before the row.</strong> Unchanged, and
+     * for the reason at the top of this class: a row written first and then
+     * rolled back leaves an orphan nobody can see.
+     */
     Instant eraseAudio(Meeting meeting) {
+        // The voiceprints computed from this recording. An ECAPA embedding is
+        // not audio and cannot be turned back into audio, so it is tempting to
+        // argue it survives a request to delete the recording. It should not: it
+        // is a durable identifier derived from the voices on that recording, and
+        // it is the specific thing that makes those voices findable again.
+        // Keeping it would answer "delete the recording of me" with a
+        // technicality.
+        //
+        // Required rather than best-effort. This used to be a swallowed failure
+        // at the end of the method, which meant the reachable state was: audio
+        // deleted, row says "erased", template still in the database, nobody
+        // told. A privacy control that reports a deletion it did not perform is
+        // worse than no control at all.
+        //
+        // Deliberately BEFORE the already-erased check below, so that pressing
+        // the button again on a meeting whose erasure half-completed finishes
+        // the job rather than returning the timestamp of the half that did.
+        // Deleting nothing is a confirmed success, so the repeat costs one
+        // round trip and changes nothing.
+        //
+        // Named profiles are untouched. Those were created by a separate,
+        // explicit act about a person, not about this file, and they are what
+        // the account holder switched the feature on for. Only this meeting's
+        // rows are in scope: the request carries a meeting id and no profile id.
+        speakerIdentity.invalidateMeetingVoiceprintsRequired(
+                meeting.getUserId(), meeting.getId());
+
         if (meeting.getAudioDeletedAt() != null) {
             return meeting.getAudioDeletedAt();
         }
-        storage.delete(meeting.getObjectKey());
+
+        try {
+            storage.deleteOrThrow(meeting.getObjectKey());
+        } catch (RuntimeException e) {
+            // Not swallowed, and not turned into a 500. The recording is still
+            // in the bucket, so the meeting must go on saying it has one --
+            // which is what rolling back achieves, since nothing below has run.
+            log.error("Could not delete the recording for meeting {}: {}",
+                    meeting.getId(), e.getClass().getSimpleName());
+            throw ApiException.serviceUnavailable(
+                    "The recording could not be deleted just now. It is still here, and "
+                    + "the meeting is unchanged; try again in a moment.");
+        }
         meeting.setObjectKey(null);
         // A YouTube import keeps its source URL — that is where the audio came
         // from, not a copy we hold — but the player must stop offering it, or
         // "the recording is deleted" is a claim the page immediately contradicts.
         meeting.setAudioUrl(null);
         meeting.setAudioDeletedAt(Instant.now());
-
-        // And the voiceprints computed from it. An ECAPA embedding is not audio
-        // and cannot be turned back into audio, so it is tempting to argue it
-        // survives a request to delete the recording. It should not: it is a
-        // durable identifier derived from the voices on that recording, and it
-        // is the specific thing that makes those voices findable again. Keeping
-        // it would answer "delete the recording of me" with a technicality.
-        //
-        // Named profiles are untouched. Those were created by a separate,
-        // explicit act about a person, not about this file, and they are what
-        // the account holder switched the feature on for.
-        speakerIdentity.forgetMeeting(meeting.getUserId(), meeting.getId());
 
         return meeting.getAudioDeletedAt();
     }
