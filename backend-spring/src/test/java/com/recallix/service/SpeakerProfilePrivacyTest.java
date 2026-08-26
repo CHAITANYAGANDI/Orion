@@ -295,8 +295,11 @@ class SpeakerProfilePrivacyTest {
             assertThat(((ApiException) thrown).getStatus())
                     .isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
             // Says what did not happen, in the user's terms. "Upstream error"
-            // would leave them re-reading the line to see whether it saved.
-            assertThat(thrown).hasMessageContaining("was not saved");
+            // would leave them re-reading the page to see whether it worked.
+            // Neutral about which operation, because a correction and a
+            // reprocess both land here and neither should be told about the
+            // other.
+            assertThat(thrown).hasMessageContaining("nothing was changed");
         }
 
         @Test

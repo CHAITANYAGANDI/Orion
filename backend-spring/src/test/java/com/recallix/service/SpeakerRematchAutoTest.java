@@ -1,5 +1,6 @@
 package com.recallix.service;
 
+import com.recallix.common.ApiException;
 import com.recallix.common.SpeakerLabels;
 import com.recallix.entity.Meeting;
 import com.recallix.entity.MeetingTranscript;
@@ -30,6 +31,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -488,10 +490,17 @@ class SpeakerRematchAutoTest {
     @DisplayName("11. reprocessing throws the cached voices away")
     class Reprocessing {
 
+        /** A far end that deleted what it was asked to and says so. */
+        private void theDeletionIsConfirmed() {
+            when(ai.forgetMeetingVoiceprints(USER, MEETING))
+                    .thenReturn(new AiClient.ForgetResult(2, true));
+        }
+
         @Test
         @DisplayName("drops this meeting's voiceprints, because the keys are about to move")
         void voiceprintsAreInvalidated() {
             when(storage.presignDownload(anyString())).thenReturn("https://example/audio");
+            theDeletionIsConfirmed();
 
             service.reprocess(USER, MEETING);
 
@@ -501,13 +510,34 @@ class SpeakerRematchAutoTest {
             // A stale cache would hand the previous occupant's voice to the new
             // one, and the next rematch would confidently name somebody after
             // a different person.
-            verify(ai).forgetSpeakers(eq(USER), isNull(), eq(MEETING));
+            //
+            // The confirmed path, not the best-effort one: the reprocess is
+            // refused outright if the deletion cannot be proven, because its
+            // result depends on the cache being gone.
+            verify(ai).forgetMeetingVoiceprints(USER, MEETING);
+        }
+
+        @Test
+        @DisplayName("and refuses to run at all if that deletion cannot be confirmed")
+        void anUnconfirmedDeletionStopsTheReprocess() {
+            when(storage.presignDownload(anyString())).thenReturn("https://example/audio");
+            // Reached the service, and it could not say a DELETE ran -- which is
+            // what "no database behind me" looks like from here, and is
+            // indistinguishable from "nothing was cached" by the count alone.
+            when(ai.forgetMeetingVoiceprints(USER, MEETING))
+                    .thenReturn(new AiClient.ForgetResult(0, false));
+
+            assertThatThrownBy(() -> service.reprocess(USER, MEETING))
+                    .isInstanceOf(ApiException.class);
+
+            verify(outbox, never()).enqueue(anyString(), anyString(), any());
         }
 
         @Test
         @DisplayName("keeps the named profiles, which belong to the account")
         void profilesSurvive() {
             when(storage.presignDownload(anyString())).thenReturn("https://example/audio");
+            theDeletionIsConfirmed();
 
             service.reprocess(USER, MEETING);
 
@@ -516,6 +546,7 @@ class SpeakerRematchAutoTest {
             // rematch can put them back.
             verify(profiles, never()).deleteByUserId(anyString());
             verify(ai, never()).forgetSpeakers(eq(USER), isNull(), isNull());
+            verify(ai, never()).forgetSpeakers(eq(USER), anyString(), any());
         }
     }
 

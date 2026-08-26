@@ -373,6 +373,12 @@ class AiAllowanceGateTest {
             // Forgetting them here would cost the user their speaker names for
             // an operation that did not happen.
             verify(speakerIdentity, never()).forgetMeeting(anyString(), anyString());
+            // Neither route. The strict one is what reprocess uses now, and it
+            // deliberately sits *after* this gate: deleting a good cache for a
+            // reprocess that is then refused would cost a re-embed of the whole
+            // recording for an operation that did not happen.
+            verify(speakerIdentity, never())
+                    .invalidateMeetingVoiceprintsRequired(anyString(), anyString());
             verify(translations, never()).markStaleByMeetingId(anyString());
         }
 

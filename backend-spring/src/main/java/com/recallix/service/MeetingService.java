@@ -1206,6 +1206,20 @@ public class MeetingService {
         return reprocess(userId, meetingId);
     }
 
+    /**
+     * Run the whole pipeline again over the same audio.
+     *
+     * <p>Refusable, and in three ways. No source to re-read is a 400; a spent
+     * minute allowance is a 429; and a meeting whose cached voiceprints cannot
+     * be dropped is a 503 — see the invalidation below for why that one is
+     * fatal rather than logged. All three refuse before the status moves, so a
+     * refused reprocess never leaves a meeting reading "Processing" over a job
+     * nobody started.
+     *
+     * @throws ApiException 503 when the voiceprint invalidation cannot be
+     *                      confirmed; the transaction rolls back and the meeting
+     *                      is left exactly as it was
+     */
     @Transactional
     public ReprocessResponse reprocess(String userId, String meetingId) {
         Meeting meeting = require(userId, meetingId);
@@ -1220,6 +1234,46 @@ public class MeetingService {
         // policy choice about AI features -- it is the minute allowance doing
         // exactly what it counts.
         usage.requireAiOrThrow(userId, UsageLimitService.AiFeature.REPROCESS);
+        // The cached voiceprints go now, and this is not housekeeping.
+        //
+        // A voiceprint is filed under a meeting-local speaker key, and a
+        // reprocess re-derives those keys from scratch by first appearance. The
+        // audio has not changed, but who ends up as spk_1 can: a re-clustering
+        // that splits an early interjection differently is enough.
+        //
+        //   before:  spk_1 = Alice   spk_2 = Cindy
+        //   after:   spk_1 = Cindy   spk_2 = Alice
+        //
+        // Left in place, the cache hands the previous occupant's voice to the
+        // new one and the next rematch names each of them after the other --
+        // confidently, because the vectors are perfectly good vectors filed
+        // under the wrong keys. The exact failure this feature is arranged to
+        // avoid, arriving through the back door.
+        //
+        // Required rather than best-effort, for the reason manual correction is:
+        // swallowing this failure saves a reprocess whose result depends on a
+        // deletion that did not happen. A confirmed deletion of zero rows is a
+        // success -- a meeting nobody ever rematched has nothing cached, and
+        // refusing that would refuse most reprocesses.
+        //
+        // Named profiles are untouched. They belong to the account, not to this
+        // meeting, which is why a rematch can put every name back afterwards.
+        //
+        // ORDERING, both halves deliberate:
+        //
+        // *After* the allowance check, so a reprocess that is about to be
+        // refused for a spent account does not cost the user their cached
+        // voiceprints on the way out. The check spends nothing and writes
+        // nothing, so running it first is free.
+        //
+        // *Before* the row lock below, because this is a call over the network
+        // to another service. Taking the lock first would hold `FOR NO KEY
+        // UPDATE` on the meeting row for the whole round trip -- and for the
+        // whole of a timeout, when the far end is the thing that is wrong --
+        // blocking every other reprocess and erasure of that meeting behind it.
+        // Nothing has been written yet at this point, so there is no dirty
+        // entity for a flush to sneak out ahead of the lock.
+        speakerIdentity.invalidateMeetingVoiceprintsRequired(userId, meetingId);
         // Take the row before writing anything to it, and take the run number
         // from the row rather than from the entity in memory. Two people
         // pressing Reprocess at the same moment used to read the same N and
@@ -1239,20 +1293,6 @@ public class MeetingService {
         // "Summary ready" -- was keyed to the old number, so this one charges
         // and notifies again while a late redelivery of the old one does not.
         meeting.setProcessingAttempt(previousRun + 1);
-        // The cached voiceprints go with them, and this is not housekeeping.
-        //
-        // A voiceprint is filed under a meeting-local speaker key, and a
-        // reprocess re-derives those keys from scratch by first appearance. The
-        // audio has not changed, but who ends up as spk_1 can: a re-clustering
-        // that splits an early interjection differently is enough. Left in
-        // place, the cache would hand the *previous* occupant's voice to the
-        // new one, and the next rematch would confidently name a person after
-        // somebody else ~ the exact failure this whole feature is arranged to
-        // avoid, arriving through the back door.
-        //
-        // Named profiles are untouched. They belong to the account, not to this
-        // meeting, which is why a rematch can put every name back afterwards.
-        speakerIdentity.forgetMeeting(userId, meetingId);
         // Everything downstream is about to be rewritten from the audio, so any
         // translation of it now describes text that is on its way out. Flagged
         // here rather than when the result lands, because from this moment on

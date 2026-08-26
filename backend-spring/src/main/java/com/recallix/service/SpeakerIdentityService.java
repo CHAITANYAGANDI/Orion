@@ -201,15 +201,19 @@ public class SpeakerIdentityService {
     }
 
     /**
-     * Said to the user when a correction is refused.
+     * Said to the user when an operation is refused for want of this deletion.
      *
-     * <p>Names the consequence rather than the component: "speaker matching"
-     * is the feature they can see, and "was not saved" is the fact they need,
-     * because the alternative is re-reading the line and believing it changed.
+     * <p>Names the consequence rather than the component: "speaker matching" is
+     * the feature they can see, and "nothing was changed" is the fact they need,
+     * because the alternative is re-reading the page and believing it worked.
+     *
+     * <p>Deliberately neutral about <em>what</em> did not happen, because both
+     * callers share it: a manual speaker correction and a reprocess. Naming one
+     * would tell half the users about an operation they did not perform.
      */
     private static final String INVALIDATION_FAILED =
-            "Speaker matching data could not be updated just now, so that correction "
-            + "was not saved. Try again in a moment.";
+            "Speaker matching data could not be updated just now, so nothing was "
+            + "changed. Try again in a moment.";
 
     /**
      * Group a meeting's segments into the shape the embedder needs.

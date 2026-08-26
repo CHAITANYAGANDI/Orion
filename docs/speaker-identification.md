@@ -354,3 +354,11 @@ directly.
   they are filed under meeting-local speaker keys, a reprocess re-derives those
   keys by first appearance, and a stale entry would hand the previous occupant's
   voice to whoever inherits the key.
+
+  That deletion is required, not best-effort — same 503 as a manual correction,
+  for the same reason. It runs *after* the minute-allowance check, so a reprocess
+  that is about to be refused does not cost the account a good cache on the way
+  out, and *before* the row lock, so a failing ai-service cannot hold
+  `FOR NO KEY UPDATE` on the meeting row for the length of a timeout. Refused,
+  nothing moves: no status change, no new attempt number, no stale translations,
+  no job.
