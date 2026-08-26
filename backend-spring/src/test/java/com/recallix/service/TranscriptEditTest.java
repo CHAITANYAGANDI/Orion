@@ -322,6 +322,32 @@ class TranscriptEditTest {
     }
 
     @Test
+    @DisplayName("correcting the words does not throw away the voiceprints")
+    void editingTextKeepsTheAcousticCache() {
+        // The boundary that makes the invalidation in `setSegmentSpeaker` safe
+        // to add. Voiceprints are averages of *audio spans*, chosen by which
+        // speaker key owns which stretch of the recording. Fixing a
+        // misheard word changes the text over a span and nothing about the span
+        // itself, so the cache is still an accurate description of who spoke
+        // when -- and dropping it would cost a full re-embed of the recording
+        // for a typo.
+        service.editSegments(USER, MEETING, List.of(new SegmentEdit("seg_1", "Corrected line.")));
+
+        verify(speakerIdentity, never()).forgetMeeting(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("renaming a speaker does not throw them away either")
+    void renamingKeepsTheAcousticCache() {
+        // Naming is the opposite operation to correcting: it says whose a voice
+        // is without moving a single span, so the cache stays true and is in
+        // fact what the account's named profile is learned from.
+        service.renameSpeakers(USER, MEETING, java.util.Map.of("Speaker 1", "Priya"));
+
+        verify(speakerIdentity, never()).forgetMeeting(anyString(), anyString());
+    }
+
+    @Test
     @DisplayName("an edit before the summary exists does not fail")
     void editWithNoSummaryIsFine() {
         when(summaries.findFirstByMeetingIdOrderByCreatedAtDesc(MEETING))

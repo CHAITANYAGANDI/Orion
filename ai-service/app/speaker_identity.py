@@ -231,9 +231,19 @@ class SpeakerIdentityService:
         """Voiceprints for the named speakers, computing whatever is missing.
 
         The audio is fetched once for all of them and dropped when this returns.
-        A meeting whose recording has been erased still works from the cache,
-        which is the case that matters: retention deletes recordings long before
-        anybody stops wanting to know who was in them.
+
+        Without an ``object_key`` the cache is the whole answer. That used to be
+        described here as the case that matters -- "retention deletes recordings
+        long before anybody stops wanting to know who was in them" -- and it was
+        wrong: erasing a recording also calls ``forget_meeting_voiceprints``, on
+        purpose, because a voiceprint is a durable identifier built from that
+        person's voice. So after an erasure there is no audio *and* no cache, and
+        this returns nothing. ``identify`` is where that is turned into an
+        honest answer rather than an empty match list.
+
+        The one state where a cache outlives its audio is a meeting that never
+        had an ``object_key`` to begin with. Matching from it is allowed and
+        unchanged; nothing here weakens erasure to make it happen.
         """
         self._require()
         cached = await self._cached_voiceprints(user_id, meeting_id)
@@ -427,6 +437,28 @@ class SpeakerIdentityService:
             for s in unresolved
             if s.speaker_key in prints
         ]
+
+        if not candidates and not object_key:
+            # Nothing was compared, and nothing could have been: there is no
+            # recording to embed and no voiceprint left over from when there was
+            # one. Erasing the audio erases this meeting's voiceprints too, by
+            # design, so this is the ordinary state of a meeting whose recording
+            # the user has erased -- and it used to fall through to an empty
+            # match list, which Spring reports as "No new speaker matches found."
+            #
+            # That sentence is a claim about the speakers: we listened, and none
+            # of them was anybody you know. Here we did not listen. Saying so is
+            # the difference between a result and a silence dressed up as one.
+            #
+            # Only when there is NO audio. With a recording present an empty
+            # candidate list means every unresolved speaker had too little
+            # speech to embed, which is a real comparison the matcher would have
+            # declined anyway -- that stays "no match".
+
+            raise SpeakerIdentityUnavailable(
+                "Speaker matching is unavailable for this meeting because its "
+                "recording has been deleted."
+            )
 
         matches = match_speakers(
             candidates,

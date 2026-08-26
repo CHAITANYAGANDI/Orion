@@ -597,6 +597,13 @@ public class MeetingService {
             // The outline names speakers by design, so it now refers to labels
             // the transcript no longer contains.
             markSummaryStale(meetingId);
+            // Speaker NAMING: the user has said *whose* a voice is, so the
+            // account's named profile for that person is updated from this
+            // meeting's audio. Deliberately the opposite of what
+            // `setSegmentSpeaker` does -- that one says *where* a voice belongs
+            // and therefore throws the meeting's voiceprints away rather than
+            // learning from them. Renaming does not move a single span, so the
+            // cache is still an accurate description of who said what.
             learnFromRename(userId, meetingId, segs, keyToName);
         }
         audit.record(userId, "SPEAKERS_RENAMED", "meeting", meetingId);
@@ -859,8 +866,44 @@ public class MeetingService {
                 : moveWholeSegment(target, key, name);
 
         if (replacement.isEmpty()) {
+            // The segment was already attributed that way. Nothing moved, so
+            // nothing cached about this meeting has gone out of date -- and
+            // throwing away good voiceprints costs a re-embed of the whole
+            // recording on the next rematch.
             return getTranscript(userId, meetingId);
         }
+
+        // Past this line the attribution really changed, so the acoustic cache
+        // is now wrong. Voiceprints are keyed on (meeting_id, speaker_key) and
+        // were built from the spans that key owned AT THE TIME -- which is
+        // exactly what the user has just told us was incorrect.
+        //
+        //   spk_1: [Alice] [Alice] [Cindy]   <-- the third span is misattributed
+        //   spk_2: [Cindy]
+        //
+        // A voiceprint for spk_1 is an average of two Alices and a Cindy. Moving
+        // that third span to spk_2 fixes the transcript and leaves the average
+        // untouched, so the next "Rematch speakers" compares a blended vector
+        // against the account's named profiles and can put a real person's name
+        // on the wrong voice -- the one failure the whole feature exists to
+        // avoid, arriving through the correction that was supposed to prevent it.
+        //
+        // Dropped rather than recomputed: recomputing needs the audio decoded
+        // and the model loaded, which is seconds of work for a correction the
+        // user expects to be instant. The next rematch rebuilds only what it
+        // actually needs.
+        //
+        // NOTE: this is speaker CORRECTION -- "that line was the other person".
+        // It invalidates the acoustic cache and teaches nothing, because the
+        // user has said where a voice belongs, not whose it is.
+        //
+        // Speaker NAMING -- "that person is Priya" -- is the other operation, in
+        // `rename` above: it feeds `learnSpeakers`, which updates the account's
+        // named speaker profile from this meeting's audio. The two look similar
+        // on screen and must not be confused here: learning from a diarization
+        // correction would fold a span the user just disowned into a real
+        // person's stored voice.
+        speakerIdentity.forgetMeeting(userId, meetingId);
 
         if (replacement.size() > 1) {
             // A split: the original row is replaced by the pieces. Deleted and

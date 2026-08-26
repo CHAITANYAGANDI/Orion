@@ -423,4 +423,101 @@ class SegmentSpeakerCorrectionTest {
             verify(ai, never()).reindex(anyString(), anyString(), anyInt(), anyString(), any());
         }
     }
+
+    @Nested
+    @DisplayName("the acoustic cache, after a correction")
+    class Voiceprints {
+
+        /**
+         * The bug this covers, in the shape it actually occurs.
+         *
+         * <p>Voiceprints are keyed on {@code (meeting_id, speaker_key)} and are
+         * an average of the spans that key owned when they were computed. If one
+         * of those spans was somebody else's — which is precisely what the user
+         * is here to correct — the average is a blend of two people. Correcting
+         * the transcript does not change the average, so the next rematch
+         * compares a blended vector against the account's real profiles and can
+         * put a real person's name on the wrong voice.
+         *
+         * <p>The reprocess path has always dropped them for the same reason.
+         * Manual correction changes which audio belongs to which key just as
+         * surely, and now says so.
+         */
+        @Test
+        @DisplayName("a whole-segment move drops this meeting's voiceprints")
+        void wholeSegmentMoveInvalidates() {
+            service.setSegmentSpeaker(USER, MEETING, "seg_1",
+                    new SegmentSpeakerRequest("spk_1", null, null));
+
+            verify(speakerIdentity).forgetMeeting(USER, MEETING);
+        }
+
+        @Test
+        @DisplayName("a partial move drops them too — it is the same corruption")
+        void partialMoveInvalidates() {
+            // "Yes, sir." leaves spk_2 and joins spk_1. Both keys' spans change,
+            // so both keys' voiceprints are now averages of the wrong audio.
+            moveTheReply();
+
+            verify(speakerIdentity).forgetMeeting(USER, MEETING);
+        }
+
+        @Test
+        @DisplayName("a no-op keeps them, because nothing moved")
+        void aNoOpKeepsThem() {
+            // Not pedantry: dropping them costs a full re-embed of the recording
+            // on the next rematch, and a request that changed nothing has not
+            // invalidated anything.
+            service.setSegmentSpeaker(USER, MEETING, "seg_1",
+                    new SegmentSpeakerRequest("spk_2", null, null));
+
+            verify(speakerIdentity, never()).forgetMeeting(anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("a partial move that covers the whole line is still a no-op if nothing changes")
+        void aFullRangeNoOpKeepsThem() {
+            service.setSegmentSpeaker(USER, MEETING, "seg_1",
+                    new SegmentSpeakerRequest("spk_2", 0, 9));
+
+            verify(speakerIdentity, never()).forgetMeeting(anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("correcting a speaker teaches the account nothing about that person")
+        void correctionNeverLearns() {
+            // The distinction the comments in setSegmentSpeaker now spell out.
+            // The user has said WHERE a voice belongs, not WHOSE it is; learning
+            // from it would fold a span they just disowned into a real person's
+            // stored voice. Naming is renameSpeakers, and that is the only path
+            // that enrols.
+            moveTheReply();
+
+            verify(ai, never()).learnSpeaker(anyString(), anyString(), any(),
+                    anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("and leaves the account's named profiles exactly where they were")
+        void namedProfilesAreUntouched() {
+            // forgetMeeting drops voiceprints for one meeting and nothing else.
+            // The named profiles were built by a separate, explicit act in other
+            // meetings, and a correction here must not reach them.
+            moveTheReply();
+
+            verify(speakerIdentity, never()).forgetEverything(anyString());
+            verify(speakerIdentity, never()).deleteProfile(anyString(), anyString());
+            verify(ai, never()).forgetSpeakers(anyString(), any(), any());
+        }
+
+        @Test
+        @DisplayName("the reindex and the stale summary still happen")
+        void theRestOfTheTailIsUnchanged() {
+            // The invalidation is an addition, not a replacement.
+            moveTheReply();
+
+            verify(ai).reindex(anyString(), anyString(), anyInt(), anyString(), any());
+            verify(summaries).findFirstByMeetingIdOrderByCreatedAtDesc(MEETING);
+        }
+    }
 }

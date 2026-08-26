@@ -234,14 +234,35 @@ async def test_learning_refuses_a_placeholder_name():
 
 @pytest.mark.asyncio
 async def test_identification_never_writes_a_profile():
-    """Structural: the read path has no INSERT or UPDATE in it.
+    """Structural: the read path issues no write, by SQL or by helper.
 
     If identification could also enrol, one confident mistake would be averaged
     into that person's template and make the next mistake likelier — a loop that
     degrades silently, because every individual step looks like it is working.
+
+    This used to look for the bare words INSERT, UPDATE and DELETE anywhere in
+    the source. That caught English as readily as SQL: the method now has to
+    tell a user their *recording has been deleted*, and a comment explaining why
+    tripped it too. Matching whole statements instead is narrower against prose
+    and strictly wider against code — a lowercase `delete from` was invisible to
+    the old check and is not to this one — and the second assertion closes the
+    hole both versions had, which is a write made through a helper rather than
+    inline.
     """
     import inspect
+    import re
 
     source = inspect.getsource(SpeakerIdentityService.identify)
-    for write in ("INSERT", "UPDATE", "DELETE"):
-        assert write not in source.upper(), write
+
+    statements = re.compile(
+        r"\b(INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|UPSERT|ON\s+CONFLICT)\b",
+        re.IGNORECASE | re.DOTALL,
+    )
+    found = statements.search(source)
+    assert found is None, f"identify() contains a write statement: {found.group(0)!r}"
+
+    # And nothing that writes on its behalf. `voiceprints_for` is the deliberate
+    # exception: it caches what it computed from audio it was going to read
+    # anyway, which is not a profile and not an identification decision.
+    for helper in ("_store_voiceprints", "_store_profile", "forget_", "commit("):
+        assert helper not in source, helper

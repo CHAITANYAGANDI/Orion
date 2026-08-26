@@ -283,6 +283,8 @@ speaker number would give the wrong answer.
 | Meeting B transcript | `spk_1 → Sarah`, `spk_2 → Speaker 2` |
 | Rematch again | `matched: 0, considered: 1` — Sarah is now protected, so only one speaker remains eligible |
 | Switch learning off | `profiles=0  voiceprints=0` |
+| Correct a line's speaker in B | B's voiceprints dropped; profiles untouched; nothing learned |
+| Erase B's recording, then rematch | `unavailable: "…because its recording has been deleted."` — erasure removed the audio *and* the voiceprints, so nothing was compared |
 
 Note the third row from the bottom: David stayed *Speaker 2*, because nobody
 ever named him. That is the feature declining to guess, which is the half that
@@ -303,6 +305,22 @@ directly.
   They are computed on demand from the recording, so rematch still works — until
   the recording is erased, after which that meeting can no longer be rematched.
   Correct, and worth knowing.
+
+  Rematch says so rather than shrugging. With no recording *and* no cached
+  voiceprint there is nothing to compare, so the answer is
+  `unavailable: "Speaker matching is unavailable for this meeting because its
+  recording has been deleted."` — not `matched: 0`, which is a claim that the
+  voices were listened to and recognised as nobody. The two are different facts
+  and used to produce the same sentence.
+
+- **Correcting who said a line throws that meeting's voiceprints away.** A
+  voiceprint is an average of the spans one speaker key owned when it was
+  computed; moving a span between keys is exactly the statement that the average
+  was built from the wrong audio. They are dropped rather than recomputed, so
+  the next rematch on that meeting re-embeds from the recording and is slower.
+  Renaming a speaker does not do this — naming says *whose* a voice is and moves
+  no spans, so the cache stays true and is what the account's profile is learned
+  from.
 - **Enrolment quality depends on the meeting you happened to name somebody in.**
   A profile built from one short turn will match poorly. The sample count is
   shown in Settings for exactly this reason: it is the only thing that makes
