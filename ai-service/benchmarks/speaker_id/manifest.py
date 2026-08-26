@@ -158,6 +158,106 @@ def load(directory: Path) -> list[Clip]:
     return clips
 
 
+# --------------------------------------------------------------------------- #
+# The canonical minimum dataset
+# --------------------------------------------------------------------------- #
+# Written once, here, and read by the README, by `--plan` and by the tests that
+# check the arithmetic. The first version of this benchmark listed six files per
+# person in prose and then computed its trial counts from seven, which is the
+# kind of mistake that survives review and is only found by somebody about to
+# spend an afternoon recording the wrong set.
+
+#: One person's recordings: (role, device, environment, day, seconds, extension).
+#: One enrolment and six tests, covering same-mic, laptop -> phone, laptop ->
+#: headset, quiet -> noisy, two lengths and the 6-second floor.
+MINIMUM_PER_PERSON: tuple[tuple[str, str, str, int, int, str], ...] = (
+    # The profile. Long, clean, and on the microphone this person normally uses.
+    ("enrol", "laptop", "quiet", 1, 45, "wav"),
+    # Same microphone, another day. The easy case, and the ceiling everything
+    # else is read against -- if this one scores badly nothing else will.
+    ("test", "laptop", "quiet", 2, 45, "wav"),
+    # The same again at a workaday length, so the duration effect has two real
+    # recordings behind it and not only truncation.
+    ("test", "laptop", "quiet", 2, 20, "wav"),
+    ("test", "phone", "quiet", 2, 20, "m4a"),
+    ("test", "headset", "quiet", 2, 20, "wav"),
+    ("test", "laptop", "noisy", 2, 20, "wav"),
+    # At the floor. Below 6s the matcher refuses to look at a candidate at all,
+    # so this is the shortest clip that can produce a decision.
+    ("test", "laptop", "quiet", 2, 6, "wav"),
+)
+
+#: Fewer people than this and the false-accept rate has no denominator worth
+#: quoting. See the README for the arithmetic.
+MINIMUM_PEOPLE = 6
+
+TESTS_PER_PERSON = sum(1 for row in MINIMUM_PER_PERSON if row[0] == "test")
+FILES_PER_PERSON = len(MINIMUM_PER_PERSON)
+
+
+def plan(people: int = MINIMUM_PEOPLE) -> list[str]:
+    """Every filename the minimum dataset needs, in the order to record them."""
+    names: list[str] = []
+    for n in range(1, people + 1):
+        person = f"p{n:02d}"
+        for role, device, environment, day, seconds, ext in MINIMUM_PER_PERSON:
+            names.append(
+                f"{person}_{role}_{device}_{environment}_d{day}_{seconds}s_01.{ext}"
+            )
+    return names
+
+
+@dataclass(frozen=True)
+class Expected:
+    """What a dataset of this shape will produce, before recording it.
+
+    Derived rather than quoted, so the README cannot drift from the harness.
+    """
+
+    people: int
+    files: int
+    enrolments: int
+    test_clips: int
+    genuine_trials: int
+    impostor_trials: int
+    same_person_comparisons: int
+    different_person_comparisons: int
+
+    @property
+    def far_upper_bound(self) -> float:
+        """The 95% bound on the false-accept rate if nothing goes wrong.
+
+        Computed on impostor trials alone -- the run where the speaker's own
+        profile has been removed, so the only available answer is a wrong one.
+        The closed-set trials are an easier test (a wrong match has to beat the
+        correct profile as well as the threshold), and folding them into the
+        denominator would halve the number without halving the risk.
+        """
+        if self.impostor_trials == 0:
+            return 100.0
+        return 300.0 / self.impostor_trials
+
+
+def expected(people: int = MINIMUM_PEOPLE,
+             tests_per_person: int = TESTS_PER_PERSON) -> Expected:
+    """The counts a dataset of this size yields, by the harness's own rules."""
+    test_clips = people * tests_per_person
+    return Expected(
+        people=people,
+        files=people * (tests_per_person + 1),
+        enrolments=people,
+        test_clips=test_clips,
+        # Every test clip is run twice: once against everybody (its own profile
+        # present) and once with its own profile removed.
+        genuine_trials=test_clips,
+        impostor_trials=test_clips,
+        # Comparisons come from the closed run only: one against its own
+        # profile, and one against each of the others.
+        same_person_comparisons=test_clips,
+        different_person_comparisons=test_clips * (people - 1),
+    )
+
+
 @dataclass(frozen=True)
 class Coverage:
     """What the dataset does and does not currently support measuring."""

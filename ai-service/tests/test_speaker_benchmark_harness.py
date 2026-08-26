@@ -308,6 +308,112 @@ def test_the_truncation_sweep_reuses_the_same_take():
     assert any(t.truncated_to is None for t in p01)
 
 
+# --- the canonical dataset, and its arithmetic ------------------------------- #
+
+def test_the_minimum_dataset_is_one_profile_and_six_tests():
+    roles = [row[0] for row in manifest.MINIMUM_PER_PERSON]
+
+    assert roles.count("enrol") == 1
+    assert roles.count("test") == 6
+    assert manifest.FILES_PER_PERSON == 7
+    assert manifest.TESTS_PER_PERSON == 6
+
+
+def test_six_people_is_forty_two_files():
+    # The inconsistency this test exists for: the README once listed six files
+    # per person in prose and computed its trial counts from seven. Both numbers
+    # now come from MINIMUM_PER_PERSON, so they cannot disagree again.
+    names = manifest.plan(manifest.MINIMUM_PEOPLE)
+
+    assert len(names) == 42
+    assert manifest.expected().files == 42
+    assert len(names) == manifest.expected().files
+
+
+def test_every_planned_filename_parses():
+    # A plan the harness would then refuse to read would be worse than no plan.
+    for name in manifest.plan(3):
+        manifest.parse(Path(name))
+
+
+def test_the_planned_dataset_has_no_coverage_gaps():
+    clips = [manifest.parse(Path(n)) for n in manifest.plan(manifest.MINIMUM_PEOPLE)]
+
+    assert manifest.coverage(clips).gaps() == []
+
+
+def test_the_minimum_covers_every_condition_the_brief_asks_for():
+    rows = manifest.MINIMUM_PER_PERSON
+    tests = [r for r in rows if r[0] == "test"]
+    enrol = next(r for r in rows if r[0] == "enrol")
+
+    # same mic, different recording
+    assert any(r[1] == enrol[1] and r[2] == enrol[2] for r in tests)
+    # laptop -> phone, laptop -> headset
+    assert any(r[1] == "phone" for r in tests)
+    assert any(r[1] == "headset" for r in tests)
+    # quiet -> noisy
+    assert any(r[2] == "noisy" for r in tests)
+    # different days: every test is a later session than the enrolment
+    assert all(r[3] > enrol[3] for r in tests)
+    # the floor, and lengths above it
+    assert {6, 20, 45}.issubset({r[4] for r in tests})
+
+
+def test_the_expected_counts_are_what_the_harness_actually_produces():
+    """The arithmetic in the README, executed rather than asserted in prose.
+
+    Six people, seven recordings each: 36 genuine trials, 36 impostor trials,
+    36 same-person comparisons and 180 different-person comparisons. If the
+    harness ever counts differently -- a mode added, a trial deduplicated -- this
+    fails rather than the README quietly becoming wrong.
+    """
+    names = manifest.plan(manifest.MINIMUM_PEOPLE)
+    # One vector per person, reused for their every recording. Identity is what
+    # is being counted here, not similarity.
+    voices = {f"p{n:02d}": unit(float(n) * 3.1) for n in range(1, manifest.MINIMUM_PEOPLE + 1)}
+    dataset = {name: voices[name.split("_", 1)[0]] for name in names}
+
+    _, (all_trials, comparisons) = _run(dataset)
+    want = manifest.expected()
+
+    assert len([t for t in all_trials if t.self_enrolled]) == want.genuine_trials == 36
+    assert len([t for t in all_trials if not t.self_enrolled]) == want.impostor_trials == 36
+    assert len([c for c in comparisons if c.same_person]) == want.same_person_comparisons == 36
+    assert (len([c for c in comparisons if not c.same_person])
+            == want.different_person_comparisons == 180)
+
+
+def test_the_false_accept_bound_is_computed_on_impostor_trials_alone():
+    # Not on every trial. A closed-set trial is an easier test -- a wrong match
+    # has to beat the correct profile as well as the threshold -- so folding
+    # those into the denominator would halve the number without halving the risk.
+    want = manifest.expected()
+
+    assert want.far_upper_bound == pytest.approx(300.0 / 36)
+    assert f"{want.far_upper_bound:.1f}" == "8.3"
+
+
+def test_more_people_tightens_the_bound():
+    assert manifest.expected(10).far_upper_bound < manifest.expected(6).far_upper_bound
+    assert manifest.expected(3).far_upper_bound > manifest.expected(6).far_upper_bound
+
+
+def test_the_printed_plan_says_what_it_will_measure():
+    from benchmarks.speaker_id.run import _plan
+
+    printed = _plan(manifest.MINIMUM_PEOPLE)
+
+    assert "42 files" in printed
+    assert "6 people x 7 recordings each" in printed
+    assert "36 genuine trials" in printed
+    assert "36 impostor trials" in printed
+    assert "180 different-person comparisons" in printed
+    # Every filename it tells somebody to record.
+    for name in manifest.plan(manifest.MINIMUM_PEOPLE):
+        assert name in printed
+
+
 # --- the canary -------------------------------------------------------------- #
 
 def test_the_harness_refuses_to_explain_a_decision_it_did_not_predict():

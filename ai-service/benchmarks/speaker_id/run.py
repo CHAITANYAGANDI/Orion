@@ -15,7 +15,15 @@ import csv
 import sys
 from pathlib import Path
 
-from .manifest import ManifestError, Clip, coverage, load
+from .manifest import (
+    MINIMUM_PEOPLE,
+    Clip,
+    ManifestError,
+    coverage,
+    expected,
+    load,
+    plan,
+)
 from .report import render
 
 
@@ -89,14 +97,55 @@ def _trial_rows(trials) -> list[dict]:
     return rows
 
 
+def _plan(people: int) -> str:
+    """The recording list, generated from the canonical dataset.
+
+    Printed rather than kept in prose so that the list somebody records and the
+    counts the report quotes come from one definition. They disagreed once.
+    """
+    want = expected(people)
+    lines = [
+        f"Record {want.files} files: {people} people x "
+        f"{want.files // people} recordings each.",
+        "",
+    ]
+    current = ""
+    for name in plan(people):
+        person = name.split("_", 1)[0]
+        if person != current:
+            lines.append(f"  {person}")
+            current = person
+        role = name.split("_")[1]
+        lines.append(f"    {'[profile]' if role == 'enrol' else '         '} {name}")
+
+    lines += [
+        "",
+        "What that measures:",
+        f"  {want.enrolments} profiles, {want.test_clips} test clips",
+        f"  {want.genuine_trials} genuine trials      (own profile present)",
+        f"  {want.impostor_trials} impostor trials     (own profile removed)",
+        f"  {want.same_person_comparisons} same-person comparisons",
+        f"  {want.different_person_comparisons} different-person comparisons "
+        f"({want.test_clips} candidates x {people - 1} wrong profiles)",
+        "",
+        f"With zero false accepts across {want.impostor_trials} impostor trials, the",
+        f"95% upper bound on the false-accept rate is {want.far_upper_bound:.1f}%.",
+        "That is the number to weigh before deciding this is enough.",
+        "",
+        "Every take must be different words. Enrol on one day, test on another.",
+        "See benchmarks/speaker_id/README.md before recording anybody.",
+    ]
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="benchmarks.speaker_id.run",
         description="Measure the shipped ECAPA speaker matcher against real voices.",
     )
-    parser.add_argument("--audio", required=True, type=Path,
+    parser.add_argument("--audio", type=Path,
                         help="directory of recordings, named by the rule in README.md")
-    parser.add_argument("--out", required=True, type=Path,
+    parser.add_argument("--out", type=Path,
                         help="directory for comparisons.csv, trials.csv and summary.md")
     parser.add_argument("--truncate", action="store_true",
                         help="also evaluate 6s/10s/20s/45s prefixes of every test clip, "
@@ -104,7 +153,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check", action="store_true",
                         help="validate the filenames and report coverage, then stop. "
                              "Loads no model and reads no audio.")
+    parser.add_argument("--plan", nargs="?", type=int, const=MINIMUM_PEOPLE, default=None,
+                        metavar="PEOPLE",
+                        help=f"print the exact list of recordings to make (default "
+                             f"{MINIMUM_PEOPLE} people) and what it will measure, then "
+                             f"stop. Reads nothing.")
     args = parser.parse_args(argv)
+
+    if args.plan is not None:
+        print(_plan(args.plan))
+        return 0
+
+    if args.audio is None or args.out is None:
+        parser.error("--audio and --out are required unless --plan is given")
 
     # ------------------------------------------------------------- the dataset
     try:

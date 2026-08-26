@@ -99,17 +99,31 @@ product actually receives.
 
 ### Per person — the minimum
 
+**Seven recordings: one profile and six tests.** Do not trim this list; the
+trial counts below are computed from it.
+
 | # | file | notes |
 |---|---|---|
-| 1 | `pNN_enrol_laptop_quiet_d1_45s_01.wav` | the profile. Your usual laptop, quiet room, 45 seconds of continuous speech |
-| 2 | `pNN_test_laptop_quiet_d2_20s_01.wav` | same mic, another day. The easy case, and the floor everything else is compared against |
-| 3 | `pNN_test_phone_quiet_d2_20s_01.m4a` | phone voice memo, held normally |
-| 4 | `pNN_test_headset_quiet_d2_20s_01.wav` | headset or earbuds |
-| 5 | `pNN_test_laptop_noisy_d2_20s_01.wav` | laptop again, with a fan, a café, a TV — real noise, not a noise file |
-| 6 | `pNN_test_laptop_quiet_d2_6s_01.wav` | a short one, at the 6-second floor |
+| 1 | `pNN_enrol_laptop_quiet_d1_45s_01.wav` | **the profile.** Your usual laptop, quiet room, 45 seconds of continuous speech |
+| 2 | `pNN_test_laptop_quiet_d2_45s_01.wav` | same mic, another day, same length. The easy case, and the ceiling everything else is read against — if this scores badly, nothing else will |
+| 3 | `pNN_test_laptop_quiet_d2_20s_01.wav` | the same again at a workaday length, so the duration effect rests on two real recordings and not only on truncation |
+| 4 | `pNN_test_phone_quiet_d2_20s_01.m4a` | phone voice memo, held normally |
+| 5 | `pNN_test_headset_quiet_d2_20s_01.wav` | headset or earbuds |
+| 6 | `pNN_test_laptop_noisy_d2_20s_01.wav` | laptop again, with a fan, a café, a TV — real noise, not a noise file |
+| 7 | `pNN_test_laptop_quiet_d2_6s_01.wav` | at the 6-second floor, the shortest clip that can produce a decision at all |
 
-Six files per person. That covers same-mic, laptop→phone, laptop→headset,
-quiet→noisy, different days and different sentences.
+That covers same-mic, laptop→phone, laptop→headset, quiet→noisy, three lengths,
+different days and different sentences.
+
+The list lives in `manifest.MINIMUM_PER_PERSON`, and
+
+```bash
+python -m benchmarks.speaker_id.run --plan
+```
+
+prints every filename to record plus what the set will measure. Use it rather
+than copying from this table — the two disagreed once already, which is why the
+list is now generated.
 
 ### Worth adding, in this order
 
@@ -118,8 +132,8 @@ quiet→noisy, different days and different sentences.
    the worst case rather than the normal one.
 2. **A third session of tests** (`d3`), which is the only way to see whether
    same-person similarity is stable or whether `d2` was lucky.
-3. **Explicit durations** (`10s`, `45s` takes) if you would rather measure the
-   duration effect from independent recordings than from `--truncate`.
+3. **A 10s take**, if you would rather measure that point of the duration curve
+   from an independent recording than from `--truncate`.
 
 ### Across people — the part that decides the answer
 
@@ -172,6 +186,7 @@ docker run --rm \
 
 | | |
 |---|---|
+| `--plan [PEOPLE]` | print the recording list and what it will measure, then stop. Reads nothing |
 | `--check` | validate names and report coverage, then stop. No model, no audio read |
 | `--truncate` | also evaluate 6s/10s/20s/45s prefixes of every test clip. Measures the duration effect from recordings you already have — the same take, cut shorter, so the only thing that changed is how much speech the model got |
 
@@ -208,14 +223,23 @@ A rate is only as good as the number of trials under it. With zero failures in
 *n* trials, the 95% upper bound on the true rate is about `3/n` — so the
 question is how small a false-accept rate you need to be able to rule out.
 
-| people | test clips each | genuine trials | impostor trials | cross-person comparisons | FAR you can rule out at 0 failures |
-|---|---|---|---|---|---|
-| 3 | 6 | 18 | 18 | 36 | ~17% — not a measurement |
-| **6** | **6** | **36** | **36** | **180** | **~8%** |
-| 10 | 6 | 60 | 60 | 540 | ~5% |
-| 20 | 6 | 120 | 120 | 2,280 | ~2.5% |
+Each person contributes 7 files — 1 profile and 6 test clips — and each test
+clip is run twice, so it is one genuine trial *and* one impostor trial.
 
-**The minimum before touching a threshold: 6 people × 6 clips = 42 files**
+| people | files | test clips | genuine trials | impostor trials | different-person comparisons | FAR ruled out at 0 failures |
+|---|---|---|---|---|---|---|
+| 3 | 21 | 18 | 18 | 18 | 36 | ~17% — not a measurement |
+| **6** | **42** | **36** | **36** | **36** | **180** | **~8%** |
+| 10 | 70 | 60 | 60 | 60 | 540 | ~5% |
+| 20 | 140 | 120 | 120 | 120 | 2,280 | ~2.5% |
+
+The last column is `3 / impostor trials`, computed on the impostor run alone —
+the one where the speaker's own profile has been removed, so the only available
+answer is a wrong one. Closed-set trials are an easier test (a wrong match has to
+beat the correct profile as well as the threshold), and folding them into the
+denominator would halve the number without halving the risk.
+
+**The minimum before touching a threshold: 6 people × 7 files = 42**
 (6 enrolment + 36 test). That is enough to see whether the current settings are
 badly placed, to produce a same-person and different-person distribution with a
 visible shape, and to name the hardest pair in each.
