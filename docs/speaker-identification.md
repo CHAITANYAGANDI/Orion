@@ -64,7 +64,7 @@ Checked against current documentation rather than assumed.
 | | Diarization | Cross-file identity |
 |---|---|---|
 | **AssemblyAI** | Yes, word-level | **No.** Its "Speaker Identification" is per-file: it maps that file's diarized labels onto a list of names you supply, using in-file context. There is no enrolment and no voiceprint. |
-| **Deepgram** | Yes | **No.** Labels do not persist across requests. |
+| **Deepgram** *(evaluated, no longer used)* | Yes | **No.** Labels do not persist across requests. Kept in this table because it is evidence for the conclusion below: no transcription provider offers cross-file identity, which is why Recallix owns this piece. |
 | **OpenAI Whisper** | No | No |
 
 AssemblyAI's own FAQ on the subject recommends the approach taken here: get

@@ -19,7 +19,7 @@ AiProvider = Literal["mock", "openai"]
 # for analysis — and during development, that vendor for speech with the mock
 # LLM, which costs nothing and still exercises the real audio path.
 # "auto" follows `ai_provider`, which is what every existing deployment expects.
-TranscriptionProvider = Literal["auto", "mock", "openai", "deepgram", "assemblyai"]
+TranscriptionProvider = Literal["auto", "mock", "openai", "assemblyai"]
 
 
 class Settings(BaseSettings):
@@ -78,21 +78,8 @@ class Settings(BaseSettings):
     ai_provider: AiProvider = "mock"
     transcription_provider: TranscriptionProvider = "auto"
 
-    # --- Deepgram (speech-to-text with speaker diarization) ---
-    deepgram_api_key: str | None = None
-    deepgram_model: str = "nova-3"
-    # Blank means auto-detect, which is what a multilingual user wants. Set an
-    # ISO code (e.g. "es") when every meeting is in one language — detection is
-    # good but not free of mistakes, and a wrong guess corrupts the transcript.
-    deepgram_language: str = ""
-    # Transcription of a long recording is a single long request; Deepgram runs
-    # faster than real time, but an hour of audio still needs generous headroom.
-    deepgram_timeout_seconds: float = 300.0
-    deepgram_max_retries: int = 2
-
     # --- AssemblyAI (speech-to-text with speaker diarization) ---
-    # Preferred over Deepgram for meetings: better speaker-attributed accuracy,
-    # and the whole recording is diarized in one pass, so speaker identity holds
+    # The whole recording is diarized in one pass, so speaker identity holds
     # across a long meeting instead of restarting per chunk.
     assemblyai_api_key: str | None = None
     assemblyai_model: str = "universal-3-5-pro"
@@ -286,33 +273,14 @@ class Settings(BaseSettings):
     # space and end up plausibly close to everybody.
     speaker_min_speech_seconds: float = 6.0
 
-    # --- Second-opinion diarization ---------------------------------------- #
-    # Which acoustic diarizer, if any, is allowed to overrule the transcription
-    # provider's speaker labels. "none" keeps the provider's segmentation plus
-    # the ECAPA refinement in app/rediarize.py, which is what has always
-    # shipped. "pyannote" additionally runs Community-1 over the whole
-    # recording and re-attributes each word by maximum temporal overlap.
-    #
-    # Defaulted OFF, and the reason is measurement rather than caution. On
-    # ground-truth audio Community-1 is exact: every boundary in a 105-second
-    # two-speaker file, including a 0.42-second "Good." -- but so is AssemblyAI
-    # on that file, so there is nothing to win. On the recording this work was
-    # commissioned for, a phone call captured through a speaker, it reported
-    # silence across 14.1 seconds the provider transcribed as 62 words, and the
-    # 13 words it did move sat a median 0.74s from a boundary the provider had
-    # already found. That is boundary jitter, not a repair, and turning it on
-    # would have made that meeting worse.
-    #
-    # Enabling it also needs `pip install pyannote.audio` and an HF_TOKEN whose
-    # account has accepted the model's terms; without either, the port reports
-    # itself unavailable and this setting has no effect. See
-    # docs/diarization.md for the numbers and how to re-run them.
-    diarization_provider: str = "none"
-
-    # Where Community-1's weights are cached. Baked at image build time in a
-    # deployment that enables it, so a container start does not depend on
-    # Hugging Face being reachable.
-    pyannote_cache: str = "/opt/models/pyannote"
+    # NOTE: there is no second-opinion diarizer setting any more. The only
+    # implementation was pyannote Community-1, and it was removed after being
+    # measured rather than after being forgotten: on ground-truth audio it was
+    # exact, but so was AssemblyAI, and on the recording the work was
+    # commissioned for it reported silence across 14.1 seconds the provider
+    # transcribed as 62 words. docs/diarization.md section 12 keeps the numbers.
+    # Speaker segmentation is now the transcription provider's, refined by
+    # ECAPA in app/rediarize.py -- which is what has always actually shipped.
 
 
 @lru_cache

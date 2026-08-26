@@ -83,27 +83,13 @@ services:
       # headroom, so it stops competing with the summary for the budget.
       OPENAI_EXTRACTION_MODEL: ${OPENAI_EXTRACTION_MODEL:-gpt-5.6-luna}
       OPENAI_EMBED_MODEL: ${OPENAI_EMBED_MODEL:-text-embedding-3-small}
-      # Speech-to-text is chosen separately from the LLM: AssemblyAI and
-      # Deepgram diarize, Whisper does not.
+      # Speech-to-text is chosen separately from the LLM: AssemblyAI
+      # diarizes, Whisper does not.
       TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER:-auto}
       ASSEMBLYAI_API_KEY: ${ASSEMBLYAI_API_KEY:-}
       ASSEMBLYAI_MODEL: ${ASSEMBLYAI_MODEL:-universal-3-5-pro}
       ASSEMBLYAI_FALLBACK_MODEL: ${ASSEMBLYAI_FALLBACK_MODEL:-universal-2}
       ASSEMBLYAI_LANGUAGE: ${ASSEMBLYAI_LANGUAGE:-}
-      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
-      # A second, acoustic opinion on who spoke, allowed to overrule the
-      # transcription provider's speaker labels. "none" keeps them, which is
-      # the default and what has always shipped -- see docs/diarization.md
-      # section 12 for the benchmark behind that. "pyannote" additionally needs
-      # pyannote.audio installed in the image and an HF_TOKEN below.
-      DIARIZATION_PROVIDER: ${DIARIZATION_PROVIDER:-none}
-      # Hugging Face read token. Only used by DIARIZATION_PROVIDER=pyannote:
-      # every pyannote checkpoint is gated and returns 401 without one. Blank
-      # is fine and is the normal case -- the port then reports itself
-      # unavailable and the provider's labels are kept.
-      HF_TOKEN: ${HF_TOKEN:-}
-      DEEPGRAM_MODEL: ${DEEPGRAM_MODEL:-nova-3}
-      DEEPGRAM_LANGUAGE: ${DEEPGRAM_LANGUAGE:-}
       S3_ENDPOINT: ${S3_ENDPOINT:?set it in .env}
       # Where AssemblyAI fetches a recording from when it fetches one itself,
       # which saves moving the whole file through this service twice. Distinct

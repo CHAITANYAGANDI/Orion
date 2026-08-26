@@ -110,9 +110,13 @@ class Pipeline:
         self._transcription = transcription
         self._refiner = refiner
         #: An acoustic DiarizationPort allowed to overrule the provider's
-        #: speaker labels outright, or None to keep them. None in every
-        #: deployment that has not opted in — see `Settings.diarization_provider`
-        #: and docs/diarization.md for why the default is off.
+        #: speaker labels outright, or None to keep them.
+        #:
+        #: None everywhere today: the only implementation was pyannote, removed
+        #: after measurement rather than neglect (docs/diarization.md §12). The
+        #: reconciliation this feeds — app/reconcile.py and app/reattribute.py —
+        #: is kept and still tested, so the port is the whole of what a future
+        #: diarizer would have to supply.
         self._diarizer = diarizer
         self._llm = llm
 

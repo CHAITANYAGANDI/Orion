@@ -42,10 +42,12 @@ async def lifespan(app: FastAPI):
     # degrades to "leave the provider's segmentation alone" without the
     # embedder.
     refiner = SpeakerRefiner()
-    # An acoustic second opinion, if this deployment configured one. Usually
-    # None; see Settings.diarization_provider.
-    diarizer = AiProviderFactory.create_diarization(settings)
-    pipeline = Pipeline(transcription, llm, refiner, diarizer)
+    # No acoustic second opinion. The only implementation was pyannote and it
+    # was removed after being benchmarked -- docs/diarization.md section 12 has
+    # the numbers. The seam it plugged into is still there and still tested
+    # (app/reconcile.py, app/reattribute.py), so a future diarizer is a
+    # constructor argument rather than a rewrite.
+    pipeline = Pipeline(transcription, llm, refiner, diarizer=None)
     app.state.pipeline = pipeline
 
     # RAG service (pgvector). Indexes transcripts + answers grounded questions.

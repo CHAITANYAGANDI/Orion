@@ -6,12 +6,12 @@ that is provisional and is replaced wholesale by whatever this returns. The two
 optimise different things on purpose: streaming buys latency at the cost of
 context, and this one has the entire recording to look at, so it wins.
 
-Three differences from the Deepgram adapter are load-bearing and easy to get
+Three properties of this provider's response are load-bearing and easy to get
 silently wrong:
 
-* **Timestamps are milliseconds here, seconds in Deepgram.** Everything
-  downstream — the audio player, word highlighting, citation deep-links,
-  `_duration_of` — reads `Segment.start/end` as seconds. A missed conversion
+* **Timestamps are milliseconds, and everything downstream wants seconds.**
+  The audio player, word highlighting, citation deep-links and `_duration_of`
+  all read `Segment.start/end` as seconds. A missed conversion
   does not raise; it makes a 40-minute meeting look 11 hours long.
 * **Speakers are letters ("A", "B"), and they are cluster ids, not positions.**
   "D" does not mean "the fourth person" — it means whichever cluster the

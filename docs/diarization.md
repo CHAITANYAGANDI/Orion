@@ -412,7 +412,18 @@ below the line where the evidence is good enough to act on.
 
 ---
 
-## 12. A second, acoustic diarizer — evaluated, and left off
+## 12. A second, acoustic diarizer — evaluated, and removed
+
+> **Status: removed.** This section is kept as the record of a decision, not as
+> documentation of a feature. The pyannote adapter, the `DIARIZATION_PROVIDER`
+> setting and the `HF_TOKEN` it needed are all gone from the codebase; the
+> numbers below are why, and they are the reason to read this before building
+> anything like it again.
+>
+> What survives is the *seam*: `app/diarize_port.py`, `app/reconcile.py` and
+> `app/reattribute.py` are still here and still tested, and `Pipeline` still
+> takes a `diarizer`. Nothing supplies one, so none of it runs today. A future
+> diarizer implements one port and is a constructor argument.
 
 Section 10's repair works inside the provider's answer: it can move a boundary
 the provider drew and it can reassign a turn to a speaker the provider already
@@ -421,15 +432,15 @@ turn shorter than six seconds. Both are structural, so the question was whether
 a real diarization model — audio in, speaker timeline out, no transcript
 involved — should sit behind the provider's labels instead.
 
-It was built, benchmarked and **left switched off**, because the benchmark said
-so. `DIARIZATION_PROVIDER` defaults to `none`.
+It was built, benchmarked and **left switched off**, and has since been deleted
+rather than left as a setting nobody would turn on.
 
 ### What was built
 
 | Module | Job |
 | --- | --- |
 | `app/diarize_port.py` | `DiarizationPort`: audio → `Timeline`, and nothing else |
-| `app/providers/pyannote_diarizer.py` | pyannote Community-1 behind that port |
+| `app/providers/pyannote_diarizer.py` | pyannote Community-1 behind that port — **deleted** |
 | `app/reconcile.py` | each word to whoever held most of it, by overlap |
 | `app/reattribute.py` | a reconciliation written back as segments |
 | `app/diareval.py` | attribution, cpWER, missed/false boundaries |
@@ -519,16 +530,17 @@ a separate queue, before it could be on by default for anyone.
 
 ### Reproducing this
 
-```bash
-pip install pyannote.audio            # not in requirements.txt; ~2GB with deps
-export HF_TOKEN=hf_...                # account must have accepted the terms
-export DIARIZATION_PROVIDER=pyannote
-```
+No longer possible from this repository as it stands: the adapter is deleted and
+there is no setting to switch on. Rebuilding it means writing a new
+`DiarizationPort` implementation (~200 lines against pyannote's API), adding
+`pyannote.audio` to the image (~2GB with its dependencies), obtaining a Hugging
+Face token on an account that has accepted the gated model's terms, and passing
+the diarizer into `Pipeline`. Everything downstream of the port is still here.
 
 `tests/test_reconcile.py`, `tests/test_reattribute.py` and
-`tests/test_diarization_eval.py` cover the join, the write-back and the
-comparison; none of them need the model, because the behaviour that matters is
-a pure function of times.
+`tests/test_diarization_eval.py` still cover the join, the write-back and the
+comparison, and still pass — none of them ever needed the model, because the
+behaviour that matters is a pure function of times. That is why they were kept.
 
 ## 11. Known limitations
 

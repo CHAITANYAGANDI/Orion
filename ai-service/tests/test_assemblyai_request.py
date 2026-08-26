@@ -55,13 +55,13 @@ def test_diarization_and_its_prerequisite_are_always_on():
     assert body["speech_models"] == U3
 
 
-def test_the_deepgram_diarizer_change_did_not_leak_into_this_request():
-    """AssemblyAI is the transcription source of truth and did not move.
+def test_no_foreign_diarization_parameters_leak_into_this_request():
+    """AssemblyAI asks for diarization in exactly two fields, and no others.
 
-    Deepgram's request switched to its current batch diarizer (`diarize_model`),
-    which is a Deepgram parameter and means nothing here. Asserted rather than
-    assumed because the two adapters are edited for the same reasons and a
-    stray field would be accepted quietly by neither provider's mock.
+    `diarize_model` and `diarize` belonged to the Deepgram adapter, which has
+    since been deleted. The assertion outlives it on purpose: AssemblyAI rejects
+    a request carrying parameters it does not know, and "a field from somewhere
+    else drifted in" is a mistake that survives the adapter that introduced it.
     """
     body = build_request(URL, U3, _request())
     assert "diarize_model" not in body

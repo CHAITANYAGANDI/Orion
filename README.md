@@ -17,7 +17,7 @@ Next.js Frontend ──Clerk JWT──▶ Spring Boot API ──┬── Postgr
                                     Kafka: meeting_uploaded
                                                     ▼
                                      Python FastAPI AI Worker
-                    ├── Transcription: AssemblyAI · Deepgram · Whisper · mock
+                    ├── Transcription: AssemblyAI · Whisper · mock
                     ├── LLM: summary + extraction, run in parallel
                     ├── pgvector (chunk + embed for RAG)
                     └── callback ──▶ Spring (persist result)
@@ -31,8 +31,8 @@ Next.js Frontend ──Clerk JWT──▶ Spring Boot API ──┬── Postgr
 | infra | Neon (Postgres 18 + pgvector), Confluent Cloud (Kafka), Cloudflare R2 | — |
 
 Transcription is chosen separately from the LLM, because the two are not the
-same decision: AssemblyAI and Deepgram diarize, Whisper does not. `auto` follows
-whatever `AI_PROVIDER` is set to.
+same decision: AssemblyAI diarizes, Whisper does not. `auto` follows whatever
+`AI_PROVIDER` is set to.
 
 ## Quick start
 
@@ -93,8 +93,8 @@ so it takes a fourth upload to see.
 | **YouTube import — paste a link, no upload** | ✅ |
 | **PDF import — summarise typed-up minutes** | ✅ |
 | **In-browser recording — docked bar with live text, survives navigation** | ✅ |
-| Transcription (AssemblyAI · Deepgram · Whisper · mock) | ✅ |
-| **Speaker diarization** (AssemblyAI / Deepgram) | ✅ |
+| Transcription (AssemblyAI · Whisper · mock) | ✅ |
+| **Speaker diarization** (AssemblyAI) | ✅ |
 | Speaker renaming | ✅ |
 | **Per-meeting spoken language, overriding the account default** | ✅ (no UI) |
 
@@ -201,10 +201,10 @@ and did not.
   socket.
 - **No load tests.** The k6 scripts described in
   [docs/load-testing-report.md](docs/load-testing-report.md) have not been written.
-- **No provider is exercised live.** The AssemblyAI and Deepgram adapters have
-  tests, but they cover response *mapping* — millisecond-to-second conversion,
-  speaker-label normalisation — against recorded payloads. No test makes a real
-  call to any provider, including OpenAI.
+- **No provider is exercised live.** The AssemblyAI adapter has tests, but they
+  cover response *mapping* — millisecond-to-second conversion, speaker-label
+  normalisation — against recorded payloads. No test makes a real call to any
+  provider, including OpenAI.
 - **Two capabilities have no interface.** The seven email switches and the
   notification mute switches are settable only through `PATCH /preferences`:
   recap mail, the weekly digest and task reminders still send on whatever is

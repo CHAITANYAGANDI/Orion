@@ -4,7 +4,7 @@ Neither transcription provider Recallix uses can do this. AssemblyAI's own
 documentation is explicit that it offers no cross-file speaker identification
 and that the way to get it is to "use a model like Nvidia Titanet to generate
 speaker embeddings from the audio, then match these embeddings against a vector
-database of known speakers". Deepgram's diarization is likewise per-file: its
+database of known speakers". Every other provider evaluated was the same: their
 labels are cluster ids for one request and carry no meaning into the next one.
 So this is the piece Recallix has to own, and this file is it.
 

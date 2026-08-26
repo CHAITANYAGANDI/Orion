@@ -10,9 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.config import Settings
 from app.diarize_port import SpeakerTurn, Timeline
-from app.providers.factory import AiProviderFactory
 from app.reattribute import reattribute
 from app.reconcile import assign
 from app.schemas import Segment, Word
@@ -148,29 +146,16 @@ def test_an_unresolved_run_is_marked_unknown_not_guessed():
 
 
 # ------------------------------------------------------------- the switch ----
+#
+# There used to be six tests here, covering every spelling of
+# `DIARIZATION_PROVIDER=none` and the warning a typo produced. The setting is
+# gone: pyannote was its only implementation and was removed after the benchmark
+# in docs/diarization.md section 12, so there is no switch left to get wrong.
+#
+# What replaces them is one assertion that nothing supplies a diarizer, which is
+# the property those six were protecting. `tests/test_provider_cleanup.py`
+# covers the absence of the setting itself.
 
-def test_diarization_is_off_by_default():
-    """The benchmark did not support turning this on. See docs/diarization.md.
-
-    Asserted rather than left to a default value nobody reads: switching it on
-    changes the speaker labels of every meeting a deployment processes.
-    """
-    assert Settings().diarization_provider == "none"
-    assert AiProviderFactory.create_diarization(Settings()) is None
-
-
-@pytest.mark.parametrize("value", ["none", "off", "", "  NONE  "])
-def test_every_spelling_of_off_is_off(value):
-    assert AiProviderFactory.create_diarization(
-        Settings(diarization_provider=value)) is None
-
-
-def test_an_unknown_provider_keeps_the_providers_labels(caplog):
-    """A typo must not silently disable diarization *and* say nothing."""
-    with caplog.at_level("WARNING"):
-        assert AiProviderFactory.create_diarization(
-            Settings(diarization_provider="pyannotte")) is None
-    assert "pyannotte" in caplog.text
 
 # ------------------------------------------------- through the real pipeline --
 
@@ -193,6 +178,16 @@ def _pipeline(diarizer):
     from app.providers.mock_adapter import MockLlmAdapter, MockTranscriptionAdapter
 
     return Pipeline(MockTranscriptionAdapter(), MockLlmAdapter(), None, diarizer)
+
+
+def test_the_pipeline_is_built_without_a_diarizer():
+    """Everything below this line is reachable only if one is passed in.
+
+    It never is, in any deployment. The tests that follow supply a fake, which
+    is what keeps the reconciliation path — kept deliberately for a future
+    diarizer — honest in the meantime.
+    """
+    assert _pipeline(None)._diarizer is None
 
 
 @pytest.mark.asyncio

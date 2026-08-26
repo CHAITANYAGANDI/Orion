@@ -52,14 +52,10 @@ RUN python -c "from speechbrain.inference.speaker import EncoderClassifier; \
 EncoderClassifier.from_hparams(source='speechbrain/spkrec-ecapa-voxceleb', \
 savedir='/opt/models/ecapa', run_opts={'device': 'cpu'})"
 
-# NOT installed: pyannote.audio, for DIARIZATION_PROVIDER=pyannote.
-#
-# It is ~2GB with its dependencies and the default is `none`, so an image that
-# carried it would be paying for a feature nothing switches on. A deployment
-# that wants it adds `pip install pyannote.audio` here plus a build-time
-# download into /opt/models/pyannote, exactly as the ECAPA layer above does.
-# Read docs/diarization.md section 12 first -- it is off because of what it
-# measured, not because it was never tried.
+# There is deliberately no second diarizer in this image. pyannote Community-1
+# was built, benchmarked and removed -- docs/diarization.md section 12 has the
+# numbers, and they are the reason. Speaker segmentation comes from AssemblyAI
+# and is refined by the ECAPA model above.
 
 # Copy application source.
 COPY app ./app
