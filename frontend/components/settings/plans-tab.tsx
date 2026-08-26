@@ -11,11 +11,7 @@
  * otherwise is a promise made on behalf of work that does not exist.
  *
  * What replaces it is the same shape as the Integrations tab, for the same
- * reason: what is included, at the limits actually enforced, followed by what
- * is not included and why. The second list is the one that earns the page. A
- * reader arriving from a competitor assumes a bot joins their calls and an app
- * sits on their phone, and both assumptions fail quietly and late — after a
- * meeting they expected to be recorded.
+ * reason: what is included, at the limits actually enforced.
  *
  * The usage figures are read from `/usage` rather than restated from the
  * feature list, because a limit somebody is near is the only number on this
@@ -23,15 +19,14 @@
  */
 
 import * as React from "react";
-import Link from "next/link";
-import { Check, Ban, Gauge } from "lucide-react";
+import { Check, Gauge } from "lucide-react";
 import { useGetUsageQuery } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDate } from "@/lib/format";
-import { INCLUDED, NOT_INCLUDED, PLAN_NAME, usageFraction, usageLabel } from "@/lib/plan";
+import { INCLUDED, PLAN_NAME, usageFraction, usageLabel } from "@/lib/plan";
 
 export function PlansTab() {
   return (
@@ -39,7 +34,6 @@ export function PlansTab() {
       <PlanCard />
       <UsageSection />
       <IncludedSection />
-      <NotIncludedSection />
     </div>
   );
 }
@@ -191,43 +185,3 @@ function IncludedSection() {
   );
 }
 
-/**
- * What is not here.
- *
- * Last, and not hidden behind a disclosure, because a reader who stops before
- * it is exactly the reader it was written for.
- */
-function NotIncludedSection() {
-  return (
-    <section aria-labelledby="not-included-heading" className="space-y-3">
-      <h2 id="not-included-heading" className="text-lg font-semibold">
-        What Recallix does not do
-      </h2>
-
-      <Card>
-        <CardContent className="space-y-4 pt-6">
-          {NOT_INCLUDED.map((item) => (
-            <div key={item.label} className="flex items-start gap-3 text-sm">
-              <Ban className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-              <span>
-                <span className="block font-medium">{item.label}</span>
-                {item.detail && (
-                  <span className="block text-muted-foreground">{item.detail}</span>
-                )}
-              </span>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-
-      <p className="text-xs text-muted-foreground">
-        What Recallix holds of yours, and how to take it with you or delete it,
-        is on the{" "}
-        <Link href="/settings/security" className="text-primary underline-offset-2 hover:underline">
-          Security tab
-        </Link>
-        .
-      </p>
-    </section>
-  );
-}

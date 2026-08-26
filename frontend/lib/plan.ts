@@ -13,11 +13,6 @@
  * `ProjectService.MAX_PROJECTS`, 2,000 marks from `MomentService.MAX_PER_MEETING`
  * — and the two a user can actually hit are `UsageLimitService.MINUTES_ALLOWANCE`
  * and `IMPORT_ALLOWANCE`.
- *
- * {@link NOT_INCLUDED} is the half of a plans page that is normally missing.
- * Somebody comparing Recallix to Otter will assume a bot joins their calls,
- * because every competitor has one; finding out after a meeting they expected
- * to be recorded is the worst possible moment.
  */
 
 export interface Feature {
@@ -117,40 +112,6 @@ export const INCLUDED: FeatureGroup[] = [
   },
 ];
 
-/**
- * What Recallix does not do.
- *
- * Written as flatly as the list above. Each of these is a thing a reader has a
- * live reason to expect, and every one of them is cheaper to learn here than
- * halfway through relying on it.
- */
-export const NOT_INCLUDED: Feature[] = [
-  {
-    label: "No meeting bot",
-    detail:
-      "Recallix never joins a Zoom, Teams or Meet call and never appears in a participant list. Recording happens in your own browser tab, which is also why nothing can start it for you.",
-  },
-  {
-    label: "Nothing live",
-    detail:
-      "Transcription starts when a recording stops. There are no captions during the call and no running transcript to watch.",
-  },
-  {
-    label: "No mobile apps",
-    detail:
-      "The web app is the whole product. Recording works in a phone browser; there is nothing in an app store.",
-  },
-  {
-    label: "One account, not a team",
-    detail:
-      "There are no seats, no shared workspace, no invitations and no share links. Everything you record is yours alone, and there is no way to let anybody else see it.",
-  },
-  {
-    label: "Nothing to upgrade to",
-    detail:
-      "There is no paid tier, so nothing above is being withheld from you and no limit here exists to sell you past it.",
-  },
-];
 
 /**
  * How a usage figure reads against its ceiling.

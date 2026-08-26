@@ -121,7 +121,7 @@ describe("PlansTab, this account", () => {
   });
 });
 
-describe("PlansTab, what it does and does not do", () => {
+describe("PlansTab, what it includes", () => {
   it("groups what is included", () => {
     render(<PlansTab />);
 
@@ -147,36 +147,13 @@ describe("PlansTab, what it does and does not do", () => {
     expect(screen.queryByText(/Up to 500 names/i)).toBeNull();
   });
 
-  it("warns that nothing joins your calls", () => {
+  it("no longer carries the list of what Recallix does not do", () => {
     render(<PlansTab />);
 
-    // The assumption a reader arrives with, and the one that fails latest —
-    // after a meeting they expected to be recorded.
-    expect(screen.getByText("No meeting bot")).toBeInTheDocument();
-    expect(screen.getByText(/never appears in a participant list/i)).toBeInTheDocument();
-  });
-
-  it("is straight about the other three absences", () => {
-    render(<PlansTab />);
-
-    expect(screen.getByText("Nothing live")).toBeInTheDocument();
-    expect(screen.getByText("No mobile apps")).toBeInTheDocument();
-    expect(screen.getByText("One account, not a team")).toBeInTheDocument();
-  });
-
-  it("says the absences are not a sales tactic", () => {
-    render(<PlansTab />);
-
-    expect(screen.getByText("Nothing to upgrade to")).toBeInTheDocument();
-    expect(screen.getByText(/no limit here exists to sell you past it/i)).toBeInTheDocument();
-  });
-
-  it("sends somebody asking about their data to the tab that answers it", () => {
-    render(<PlansTab />);
-
-    expect(screen.getByRole("link", { name: "Security tab" })).toHaveAttribute(
-      "href",
-      "/settings/security",
-    );
+    // Removed deliberately. Asserted rather than just deleted, so the section
+    // cannot drift back in unnoticed.
+    expect(screen.queryByText("What Recallix does not do")).toBeNull();
+    expect(screen.queryByText("No meeting bot")).toBeNull();
+    expect(screen.queryByText("Nothing to upgrade to")).toBeNull();
   });
 });
