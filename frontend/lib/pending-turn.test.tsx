@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { act, renderHook } from "@testing-library/react";
-import { usePendingTurn } from "@/lib/pending-turn";
+import { usePendingTurn, resetPendingTurns } from "@/lib/pending-turn";
 import type { ChatMessage } from "@/lib/types";
 
 /**
@@ -123,5 +123,96 @@ describe("usePendingTurn", () => {
 
     rerender({ m: [msg("msg_1", "user", "First ever question")] });
     expect(result.current.turn).toBeNull();
+  });
+});
+
+/**
+ * The half that makes an answer survive walking away.
+ *
+ * <p>Answers take a while — a grounded question over a long meeting is a
+ * retrieval, a rerank and a generation — and the natural thing to do while
+ * waiting is go and look at something else. That unmounted the chat, and with
+ * it the `useState` holding the question, so coming back showed an empty thread
+ * with no sign that anything had been asked. The request itself was never
+ * cancelled and the exchange was always persisted; it was the interface that
+ * forgot.
+ */
+describe("surviving the page it was asked on", () => {
+  beforeEach(() => resetPendingTurns());
+
+  it("is still there after the component that asked is unmounted", () => {
+    const first = renderHook(() => usePendingTurn([], "workspace:home"));
+    act(() => first.result.current.begin("What did we decide?"));
+
+    // Navigating away and back: a different component instance, same scope.
+    first.unmount();
+    const second = renderHook(() => usePendingTurn([], "workspace:home"));
+
+    expect(second.result.current.turn?.question).toBe("What did we decide?");
+    expect(second.result.current.turn?.status).toBe("asking");
+  });
+
+  it("keeps two surfaces' questions apart", () => {
+    // Home and /ask are two screens. One's unanswered question has no business
+    // appearing on the other, which is the same rule lib/active-chat applies to
+    // the thread itself.
+    const home = renderHook(() => usePendingTurn([], "workspace:home"));
+    act(() => home.result.current.begin("Asked on Home"));
+
+    const ask = renderHook(() => usePendingTurn([], "workspace:ask"));
+
+    expect(ask.result.current.turn).toBeNull();
+    expect(home.result.current.turn?.question).toBe("Asked on Home");
+  });
+
+  it("still reconciles against history fetched by a later mount", () => {
+    const first = renderHook(() => usePendingTurn([], "meeting:mtg_1"));
+    act(() => first.result.current.begin("What did we decide?"));
+    first.unmount();
+
+    // Coming back, the thread has been refetched and the question is in it.
+    const second = renderHook(
+      ({ m }) => usePendingTurn(m, "meeting:mtg_1"),
+      { initialProps: { m: [msg("msg_1", "user", "What did we decide?")] } },
+    );
+
+    // Not shown twice: the persisted copy is the one on screen.
+    expect(second.result.current.turn).toBeNull();
+  });
+
+  it("an unscoped turn still dies with its component", () => {
+    // The old behaviour, kept for anything genuinely throwaway — and for the
+    // tests above, which would otherwise leak into each other.
+    const first = renderHook(() => usePendingTurn([]));
+    act(() => first.result.current.begin("How can I register?"));
+    first.unmount();
+
+    const second = renderHook(() => usePendingTurn([]));
+
+    expect(second.result.current.turn).toBeNull();
+  });
+
+  it("two components on one scope see the same question", () => {
+    // The rail and the composer both read it, and a scope with two live readers
+    // must not be two different pending turns.
+    const a = renderHook(() => usePendingTurn([], "workspace:ask"));
+    const b = renderHook(() => usePendingTurn([], "workspace:ask"));
+
+    act(() => a.result.current.begin("Asked once"));
+
+    expect(b.result.current.turn?.question).toBe("Asked once");
+  });
+
+  it("a failure is visible to whoever comes back to it", () => {
+    const first = renderHook(() => usePendingTurn([], "workspace:home"));
+    act(() => first.result.current.begin("What did we decide?"));
+    act(() => first.result.current.fail());
+    first.unmount();
+
+    const second = renderHook(() => usePendingTurn([], "workspace:home"));
+
+    // Kept with the failure under it rather than dropped, so Retry has
+    // something to retry — the composer was cleared on send.
+    expect(second.result.current.turn?.status).toBe("failed");
   });
 });

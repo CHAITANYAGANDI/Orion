@@ -36,6 +36,7 @@ So almost every test below is a refusal.
 
 from __future__ import annotations
 
+import asyncio
 import math
 
 import pytest
@@ -441,9 +442,53 @@ async def test_the_refiner_reasons_only_about_vectors():
 
     import app.rediarize as module
 
-    source = inspect.getsource(module.SpeakerRefiner._refine)
-    for leaked in ("decode_to_pcm", "take_spans", "torch", "numpy", "pcm"):
-        assert leaked not in source, leaked
+    # Both halves. `_refine` awaits the audio and hands the rest to a thread;
+    # `_refine_blocking` is that rest, and it is where the decisions live -- so
+    # checking only the first would have let the seam break the moment the body
+    # moved, which is exactly what happened when the threading went in.
+    for name in ("_refine", "_refine_blocking"):
+        source = inspect.getsource(getattr(module.SpeakerRefiner, name))
+        for leaked in ("decode_to_pcm", "take_spans", "torch", "numpy", "pcm"):
+            assert leaked not in source, f"{name}: {leaked}"
+
+
+async def test_refinement_does_not_block_the_event_loop():
+    """The loop stays responsive while a meeting is being refined.
+
+    Not a performance test. Speaker refinement runs for minutes, and it shares
+    this loop with the chat handlers and with aiokafka's heartbeat coroutine --
+    which, when it was starved, got the consumer evicted and the meeting
+    redelivered and transcribed a second time. See the module docstring.
+    """
+    import time
+
+    ticks = 0
+
+    async def heartbeat():
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.01)
+            ticks += 1
+
+    def slow_sampler(_audio: bytes):
+        def sample(start: float, end: float):
+            # Stands in for the decode and the forward passes: synchronous,
+            # holds no lock this test can see, and long enough that a blocked
+            # loop would be obvious.
+            time.sleep(0.05)
+            return ALICE if start < 6.0 else BOB
+        return sample
+
+    beat = asyncio.create_task(heartbeat())
+    try:
+        await refine(transcript(seg(12.0, 30.0, "Speaker 2", "spk_2", n=20)),
+                     slow_sampler)
+    finally:
+        beat.cancel()
+
+    # On the event loop this was 0: the whole refinement ran between two
+    # scheduling points and the heartbeat never got a turn.
+    assert ticks > 0, "the event loop was blocked for the whole refinement"
 
 
 @pytest.mark.parametrize("reason", [

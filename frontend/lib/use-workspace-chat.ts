@@ -54,7 +54,7 @@ import {
   useGetProjectMeetingsQuery,
 } from "@/lib/api";
 import { NO_CONTEXT, type ChatContext } from "@/components/chat-composer";
-import { usePendingTurn } from "@/lib/pending-turn";
+import { usePendingTurn, announceAnswer } from "@/lib/pending-turn";
 import type { ChatMode } from "@/lib/types";
 
 /**
@@ -130,7 +130,11 @@ export function useWorkspaceChat(surface: ChatSurface) {
   const [ask, { isLoading: asking }] = useAskWorkspaceChatMutation();
   // The question, on screen from the click rather than from the refetch. See
   // lib/pending-turn for why this is not an optimistic cache patch.
-  const pending = usePendingTurn(messages);
+  // Scoped, so a question still being answered survives going to look at a
+  // meeting and coming back. Same key as the thread itself, for the same
+  // reason: Home and /ask are two screens, and one's question has no business
+  // appearing on the other.
+  const pending = usePendingTurn(messages, `workspace:${surface}`);
   const [newConversation, { isLoading: starting }] = useCreateWorkspaceConversationMutation();
   const [clear, { isLoading: clearing }] = useClearWorkspaceChatMutation();
   const [rename] = useRenameConversationMutation();
@@ -159,6 +163,18 @@ export function useWorkspaceChat(surface: ChatSurface) {
       // conversation — the worst of both, since it would not even look like
       // the thread it was joining.
       const target = conversationId ?? (await newConversation().unwrap()).id;
+      // Adopted *before* the answer is waited for, not after.
+      //
+      // It used to be set from the response, which meant a first question on a
+      // new thread had nowhere to belong for as long as the answer took. Leave
+      // during that window and the surface came back to a clean sheet: the
+      // question had been asked, the answer was written, and the only way to
+      // find either was the conversation picker. The thread exists from the
+      // line above, so this is simply when it becomes true.
+      setConversationId(target);
+      // Where the question was asked from, so the answer can say where to go
+      // back to if it lands while the user is somewhere else.
+      const askedOn = typeof window === "undefined" ? "" : window.location.pathname;
       const answer = await ask({
         question,
         conversationId: target,
@@ -166,6 +182,7 @@ export function useWorkspaceChat(surface: ChatSurface) {
         mode,
       }).unwrap();
       setConversationId(answer.conversationId);
+      announceAnswer(askedOn);
     } catch {
       // Kept on screen with the failure under it, rather than dropped with a
       // toast that leaves nothing to retry — the composer was cleared on send,

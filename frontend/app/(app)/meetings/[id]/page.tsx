@@ -73,6 +73,7 @@ import { SidePane, toggleSidePaneExpanded, useSidePane } from "@/components/side
 import { Button } from "@/components/ui/button";
 import { useRecordingJob } from "@/lib/recording-context";
 import { ProcessingCard } from "@/components/processing-card";
+import { trackProcessing } from "@/lib/processing-jobs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -126,7 +127,7 @@ import { ChatComposer } from "@/components/chat-composer";
 import { ChatDock, ChatRail } from "@/components/chat/chat-shell";
 import { ChatMessageBubble } from "@/components/chat-message";
 import { PendingTurn } from "@/components/chat/pending-turn";
-import { usePendingTurn } from "@/lib/pending-turn";
+import { usePendingTurn, announceAnswer } from "@/lib/pending-turn";
 import { useThreadScroll } from "@/lib/use-thread-scroll";
 import { MEETING_PROMPTS, toPrompts } from "@/lib/chat-prompts";
 import { useRotatingPrompts } from "@/lib/use-rotating-prompts";
@@ -294,6 +295,21 @@ export default function MeetingDetailPage() {
     const t = setInterval(() => meeting.refetch(), 4000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [terminal, id]);
+
+  /**
+   * Opening a meeting that is still being made is enough to start following it.
+   *
+   * <p>Without this the dock only knew about jobs started in this tab, so a
+   * recording made on a phone — or one whose tab was reloaded — showed a
+   * progress banner here and nothing anywhere else, and navigating away lost
+   * sight of it entirely. Tracking is idempotent and the dock drops the id
+   * itself once the meeting settles, so this is safe to run on every render
+   * where the meeting is unfinished.
+   */
+  React.useEffect(() => {
+    if (terminal) return;
+    trackProcessing(id);
   }, [terminal, id]);
 
   React.useEffect(() => {
@@ -1638,7 +1654,11 @@ function ChatPanel({
   const [ask, { isLoading: asking }] = useAskChatMutation();
   // The question, on screen from the click rather than from the refetch that
   // follows the answer. See lib/pending-turn.
-  const pending = usePendingTurn(messages);
+  // Scoped to this meeting, so a question still being answered survives going
+  // to look at another meeting and coming back. Not shared with the workspace
+  // chat: coming back to a meeting is coming back to one document, and what you
+  // were asking about it is part of reading it.
+  const pending = usePendingTurn(messages, `meeting:${meetingId}`);
   const [newConversation, { isLoading: starting }] = useCreateMeetingConversationMutation();
   const [rename] = useRenameConversationMutation();
   const [removeConversation] = useDeleteConversationMutation();
@@ -1701,6 +1721,14 @@ function ChatPanel({
       // recent, or start one", so a clean sheet on screen would otherwise file
       // the question into a conversation it is not showing.
       const target = conversationId ?? (await newConversation(meetingId).unwrap()).id;
+      // Adopted before the answer is waited for. Setting it from the response
+      // meant a first question on a new thread belonged nowhere until the answer
+      // landed, so leaving during that window came back to a clean sheet with
+      // the answer only findable through the history picker.
+      setConversationId(target);
+      // Where it was asked from, so an answer that lands while the user is on
+      // another page can offer the way back.
+      const askedOn = typeof window === "undefined" ? "" : window.location.pathname;
       const answer = await ask({
         id: meetingId,
         question,
@@ -1708,6 +1736,7 @@ function ChatPanel({
         mode,
       }).unwrap();
       setConversationId(answer.conversationId);
+      announceAnswer(askedOn);
     } catch {
       // Kept on screen with the failure under it and a Retry beside it. A toast
       // and an empty rail means retyping the question, which the composer has

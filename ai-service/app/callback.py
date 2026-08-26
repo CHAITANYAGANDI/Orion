@@ -27,6 +27,7 @@ run in flight from one that a reprocess has since replaced. See
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from enum import Enum
 
 import httpx
@@ -57,6 +58,41 @@ class Delivery(Enum):
         return self is Delivery.ACCEPTED
 
 
+#: Statuses that mean this run is over. A FAILED meeting is finished too: it has
+#: already reported itself and rung the bell, and redelivering it would either
+#: fail identically at the same cost or overwrite an error somebody has read.
+TERMINAL_STATUS = frozenset({"READY", "FAILED"})
+
+
+@dataclass(frozen=True)
+class JobState:
+    """Spring's answer to "is this job still worth running?"."""
+
+    status: str
+    attempt: int
+    #: There is no such meeting. Stop deletes it, and this is what that looks
+    #: like from here.
+    missing: bool = False
+
+    def pointless_for(self, run: int) -> str | None:
+        """Why running `run` would be wasted effort, or None to go ahead.
+
+        Returns the reason rather than a boolean so the log line says which of
+        the three it was, which is the difference between "the user cancelled",
+        "we already did this" and "a reprocess replaced it".
+        """
+        if self.missing:
+            return "the meeting no longer exists"
+        if self.attempt > run:
+            return f"a reprocess moved it to run {self.attempt}"
+        # Only for *this* run. A meeting sitting at READY on run 1 while run 2
+        # is in flight is a reprocess that has not reached TRANSCRIBING yet, and
+        # skipping it would strand the reprocess for ever.
+        if self.attempt == run and self.status.upper() in TERMINAL_STATUS:
+            return f"run {run} already finished as {self.status.upper()}"
+        return None
+
+
 class SpringCallbackClient:
     """Posts status + result callbacks to Spring's `/internal/**` endpoints."""
 
@@ -64,6 +100,39 @@ class SpringCallbackClient:
         self._base = settings.spring_callback_url.rstrip("/")
         self._headers = {"X-Internal-Token": settings.recallix_internal_token}
         self._timeout = 15.0
+
+    async def job_state(self, meeting_id: str) -> "JobState | None":
+        """Where Spring thinks this meeting's processing stands.
+
+        Asked once per delivery, before anything is spent. `None` is "no usable
+        answer" and means *carry on*: an unreachable Spring, a timeout, a body
+        that will not parse. That direction is deliberate — skipping work
+        because a health check flickered would leave a meeting QUEUED with
+        nobody coming back for it, which is the failure this whole worker was
+        rewritten to eliminate. Paying twice is bad; losing a meeting is worse.
+
+        `JobState(missing=True)` is different, and is a real answer: the meeting
+        is gone, so there is nothing to process.
+        """
+        url = f"{self._base}/internal/meetings/{meeting_id}/state"
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                resp = await client.get(url, headers=self._headers)
+                if resp.status_code == 404:
+                    return JobState(status="", attempt=0, missing=True)
+                resp.raise_for_status()
+                body = resp.json()
+            return JobState(
+                status=str(body.get("status") or ""),
+                attempt=int(body.get("processingAttempt") or 0),
+                missing=False,
+            )
+        except Exception as exc:  # noqa: BLE001 — an optimisation must not fail a meeting.
+            logger.warning(
+                "Could not read job state for %s (%s); processing it anyway.",
+                meeting_id, exc,
+            )
+            return None
 
     async def post_status(
         self, meeting_id: str, event: StatusEvent, *, attempt: int | None = None

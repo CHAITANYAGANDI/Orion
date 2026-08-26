@@ -1,9 +1,11 @@
 package com.recallix.controller;
 
 import com.recallix.dto.callback.MeetingBriefResult;
+import com.recallix.dto.callback.MeetingJobState;
 import com.recallix.dto.callback.StatusCallbackRequest;
 import com.recallix.service.CallbackService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -22,6 +24,25 @@ public class InternalCallbackController {
 
     public InternalCallbackController(CallbackService callback) {
         this.callback = callback;
+    }
+
+    /**
+     * Whether this job is still worth running.
+     *
+     * <p>The one read on this channel. The worker asks before it processes a
+     * delivery of {@code meeting_uploaded}, because delivery is at-least-once
+     * and the provider bills per transcription: a redelivered job that had
+     * already finished used to be transcribed and paid for a second time.
+     *
+     * <p>404 for a meeting that is not there, which is what Stop leaves behind.
+     * The worker reads that as "nothing to do" — the alternative is
+     * transcribing a recording somebody has already cancelled.
+     */
+    @GetMapping("/{id}/state")
+    public ResponseEntity<MeetingJobState> state(@PathVariable String id) {
+        return callback.jobState(id)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @PostMapping("/{id}/status")

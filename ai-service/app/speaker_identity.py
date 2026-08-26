@@ -41,6 +41,7 @@ every control described in V53.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import struct
 import uuid
@@ -268,28 +269,53 @@ class SpeakerIdentityService:
 
         try:
             audio, _ = await fetch_audio(self._settings, audio_url=None, object_key=object_key)
-            pcm = decode_to_pcm(audio)
-            del audio
-        except SpeakerEmbeddingUnavailable:
-            raise
         except Exception as exc:  # noqa: BLE001
             raise SpeakerIdentityUnavailable(
                 "The recording for this meeting could not be read."
             ) from exc
 
-        fresh: dict[str, tuple[list[float], float]] = {}
-        for speaker in needed:
-            picked = choose_spans(speaker.spans)
-            if not picked.spans:
-                continue
-            try:
-                vector = self.embedder.embed(take_spans(pcm, picked.spans))
-            except SpeakerEmbeddingUnavailable:
-                # One speaker with too little usable audio is not a failure of
-                # the request — it is that speaker staying unresolved, which is
-                # a correct outcome the matcher would have reached anyway.
-                continue
-            fresh[speaker.speaker_key] = (vector, picked.seconds)
+        def compute(raw: bytes) -> dict[str, tuple[list[float], float]]:
+            """Decode the recording and embed each speaker who needs it.
+
+            Synchronous and CPU-bound: an ffmpeg decode of the whole file, then
+            one ECAPA forward pass per unresolved speaker. Run in a thread by
+            the caller — this is reached from the `/speakers/identify` handler
+            and from Rematch, and on the event loop it would hold up every chat
+            request and starve the Kafka consumer's heartbeat. See the note in
+            `rediarize._refine` for what that cost.
+            """
+            pcm = decode_to_pcm(raw)
+            out: dict[str, tuple[list[float], float]] = {}
+            for speaker in needed:
+                picked = choose_spans(speaker.spans)
+                if not picked.spans:
+                    continue
+                try:
+                    vector = self.embedder.embed(take_spans(pcm, picked.spans))
+                except SpeakerEmbeddingUnavailable:
+                    # One speaker with too little usable audio is not a failure
+                    # of the request — it is that speaker staying unresolved,
+                    # which is a correct outcome the matcher would have reached
+                    # anyway.
+                    continue
+                out[speaker.speaker_key] = (vector, picked.seconds)
+            return out
+
+        try:
+            # Passed rather than closed over, so `del audio` below actually
+            # drops the recording instead of leaving it alive in a cell.
+            fresh = await asyncio.to_thread(compute, audio)
+        except SpeakerEmbeddingUnavailable:
+            # An undecodable recording, or a model that will not load. Both are
+            # reported rather than turned into "no speakers matched", which is
+            # the distinction this whole module exists to keep.
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise SpeakerIdentityUnavailable(
+                "The recording for this meeting could not be read."
+            ) from exc
+        finally:
+            del audio
 
         if fresh:
             await self._store_voiceprints(user_id, meeting_id, fresh)

@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { trackProcessing } from "@/lib/processing-jobs";
 import { UploadCloud, FileAudio, Loader2, X, Mic } from "lucide-react";
 import { useCreateUploadUrlMutation, useCreateMeetingMutation } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -77,6 +78,10 @@ export default function UploadPage() {
         projectId: projectId ?? undefined,
       }).unwrap();
 
+      // Watched from here on by the app-wide dock, so leaving this page --
+      // or closing the dialog, which happens on the next line -- does not mean
+      // the completion goes unnoticed. See lib/processing-jobs.
+      trackProcessing(meeting.id);
       toast.success("Uploaded — processing started.");
       router.push(`/meetings/${meeting.id}`);
     } catch (err) {

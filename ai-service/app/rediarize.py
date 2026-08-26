@@ -61,10 +61,32 @@ each candidate boundary costs two embeddings, and the search is coarse-to-fine
 so a sixty-second turn costs no more than a ten-second one. The whole thing is
 wrapped so that any failure leaves the provider's own segmentation exactly as it
 was.
+
+## Why this runs in a thread
+
+The work above is CPU-bound and synchronous, and on a real meeting it runs for
+minutes — one observed refinement took eight minutes and forty-one seconds.
+
+It used to run on the event loop, and that was not a latency nicety. The
+ai-service answers chat on the same loop and runs the Kafka consumer on it as an
+asyncio task, so a refinement in progress stopped both. Every question queued
+behind it. Worse, aiokafka's heartbeat is also a coroutine on that loop: it was
+never scheduled, the broker declared the consumer dead after ten seconds, the
+group rebalanced, and the hand-committed offset stayed where it was — so the
+meeting was redelivered and transcribed again, at full price, its status walking
+backwards from EXTRACTING to TRANSCRIBING in front of the person waiting for it.
+One upload was transcribed three times.
+
+No Kafka timeout can fix that, because the problem is a coroutine that is never
+given the loop. `_refine` hands the whole synchronous body to
+`asyncio.to_thread` instead. It releases the GIL where it matters — the model's
+forward pass is native code and the decode is a subprocess — so the loop stays
+free to heartbeat and to answer while a meeting is being examined.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Sequence
@@ -271,6 +293,20 @@ class SpeakerRefiner:
             report.skipped_reason = "no audio available"
             return segments, report
 
+        # Off the event loop. Everything past this point is synchronous and
+        # runs for minutes on a real meeting; see "Why this runs in a thread"
+        # in the module docstring for what it cost when it did not.
+        return await asyncio.to_thread(self._refine_blocking, segments, audio, report)
+
+    def _refine_blocking(
+        self, segments: list[Segment], audio: bytes, report: Report
+    ) -> tuple[list[Segment], Report]:
+        """The refinement itself. Runs in a worker thread; see `_refine`.
+
+        Touches nothing shared but the embedder, which is loaded once and only
+        read from here — one meeting is refined at a time, because the pipeline
+        awaits this before moving on.
+        """
         embed = (self._sampler_for or self._default_sampler)(audio)
         del audio
 

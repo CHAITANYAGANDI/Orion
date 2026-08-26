@@ -10,6 +10,7 @@ import com.recallix.dto.callback.AiActionItem;
 import com.recallix.dto.callback.AiInsight;
 import com.recallix.dto.callback.AiSegment;
 import com.recallix.dto.callback.MeetingBriefResult;
+import com.recallix.dto.callback.MeetingJobState;
 import com.recallix.dto.callback.StatusCallbackRequest;
 import com.recallix.entity.Meeting;
 import com.recallix.entity.MeetingActionItem;
@@ -38,6 +39,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 
 /**
  * Handles internal callbacks from the FastAPI worker: relays status updates to
@@ -169,6 +171,33 @@ public class CallbackService {
             return true;
         }
         return false;
+    }
+
+    /**
+     * Where a meeting's processing stands, for a worker deciding whether to run.
+     *
+     * <p>Read-only, and the only thing on this channel that is. The worker calls
+     * it once per delivery of {@code meeting_uploaded}, before it spends
+     * anything, because Kafka delivery is at-least-once and a redelivery of a
+     * finished job used to mean a second paid transcription of the same
+     * recording.
+     *
+     * <p>{@code Optional.empty()} means there is no such meeting — deleted,
+     * usually by Stop — and the worker treats that as "nothing to do" rather
+     * than as an error. That is the same conclusion {@code applyResult} reaches
+     * for a missing meeting today; it just reaches it after the transcription
+     * has been paid for instead of before.
+     *
+     * <p>Not transactional on purpose: one row read by primary key, and nothing
+     * downstream may rely on it still being true. It is an optimisation, and
+     * every guard that makes a late result safe — {@code isStale}, the attempt
+     * check in {@code applyResult} — is still where it was. A meeting that
+     * finishes in the moment between this read and the pipeline starting is
+     * simply processed again, exactly as it would have been without this.
+     */
+    public Optional<MeetingJobState> jobState(String meetingId) {
+        return meetings.findById(meetingId)
+                .map(m -> new MeetingJobState(m.getStatus(), m.getProcessingAttempt()));
     }
 
     @Transactional

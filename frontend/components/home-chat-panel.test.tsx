@@ -194,6 +194,7 @@ vi.mock("@/lib/api", () => {
 
 import { HomeChatPanel } from "@/components/home-chat-panel";
 import { resetActiveChats } from "@/lib/active-chat";
+import { resetPendingTurns } from "@/lib/pending-turn";
 import { resetPromptRotation } from "@/lib/use-rotating-prompts";
 
 const QUESTION = "How can I register?";
@@ -233,6 +234,11 @@ beforeEach(() => {
   // without this each test would start further into the pool than the last and
   // the chip it clicks would have scrolled off the row.
   resetPromptRotation();
+  // And the question in flight, for the same reason as the thread: it is held
+  // in a module store now so that leaving the page does not lose the answer,
+  // which means one test's unanswered question is still pending in the next --
+  // and a pending turn hides the starter chips this file clicks on.
+  resetPendingTurns();
   api.reset();
   api.settle = null;
   api.reject = null;

@@ -1,7 +1,6 @@
 "use client";
 
 import { Loader2, Square } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { statusLabel } from "@/lib/format";
@@ -10,19 +9,26 @@ import type { MeetingStatus } from "@/lib/types";
 /**
  * The wait, on the page the result will appear on.
  *
- * <p>Saving a recording lands on the meeting it just made, so this is what
- * somebody watches — and the docked bar stands down here rather than draw a
- * second percentage for the same wait. Two numbers for one job read as two
- * jobs.
+ * <p><b>A banner, where this used to be the page.</b> It was a full-width Card
+ * with a two-line header and a 2xl percentage, and because everything else on a
+ * meeting's page is gated on READY it was the *only* thing rendered — so saving
+ * a forty-minute recording turned the app into a progress screen for eight
+ * minutes. That was never what was happening underneath: the ai-service
+ * consumes from Kafka and has never once checked whether a browser is open.
+ * A page that fills itself with a percentage is telling the user their
+ * attention is load-bearing, and it is not.
  *
- * <p><b>Stop comes with that.</b> The bar carried the only way to call the
- * pipeline off, so a bar that yields without handing the control over would
- * leave a wait that cannot be ended on the one page somebody is sitting on.
+ * <p>So it is one row now: what stage, how far, and a way to call it off. The
+ * job itself is followed by the docked bar in the shell, which is what makes
+ * leaving this page free — see components/processing-dock.tsx. This stays
+ * because arriving at a meeting that is still being made should say so on the
+ * meeting, rather than showing an empty document and a bar in the corner.
  *
- * <p>It is offered only while this meeting is the one being saved. What "stop"
- * does is delete the meeting — the worker is mid-flight and cannot be recalled
- * — and that is not something to put beside a file somebody imported an hour
- * ago from a page that never mentioned it.
+ * <p><b>Stop comes with it.</b> This page carries the only way to call the
+ * pipeline off, and what "stop" does is delete the meeting — the worker is
+ * mid-flight and cannot be recalled. That is not something to put beside a file
+ * somebody imported an hour ago from a page that never mentioned it, so it is
+ * offered only while this meeting is the one being saved.
  */
 export function ProcessingCard({
   status,
@@ -43,49 +49,37 @@ export function ProcessingCard({
   const percent = Math.round(Math.min(100, Math.max(0, progress)));
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-end justify-between gap-4 space-y-0 pb-4">
-        <CardTitle className="flex items-center gap-2 text-base font-medium">
-          <Loader2 className="h-4 w-4 animate-spin text-primary" /> {statusLabel(status)}…
-        </CardTitle>
-        {/* The number, given the weight the wait actually has. A bar alone
-            says "something is happening"; a percentage says how much longer,
-            which is the question being asked. Tabular figures so it does not
-            jitter sideways as it counts up. */}
-        <span className="shrink-0 text-2xl font-semibold leading-none tracking-tight tabular-nums">
-          {percent}
-          <span className="ml-0.5 text-base font-normal text-muted-foreground">%</span>
-        </span>
-      </CardHeader>
-      <CardContent className="space-y-3 pb-6">
-        <Progress value={percent} className="h-2" />
-        <div className="flex items-center justify-between gap-4">
-          <p className="text-sm text-muted-foreground">
-            {message || "Working on your meeting brief. This updates live."}
-          </p>
-          {/* Moved down here from beside the title. It is the secondary
-              action on this card and it deletes the meeting, so it has no
-              business competing with the heading for first read — but it stays
-              on the card, because this page carries the only way to call the
-              pipeline off. */}
-          {onStop && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground hover:text-destructive"
-              disabled={stopping}
-              onClick={onStop}
-            >
-              {stopping ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Square className="h-3 w-3 fill-current" />
-              )}
-              Stop
-            </Button>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+    <div className="no-print rounded-lg border bg-muted/30 px-4 py-3">
+      <div className="flex items-center gap-3">
+        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+        <span className="shrink-0 text-sm font-medium">{statusLabel(status)}…</span>
+        {/* Takes the middle, so the row reads left to right as one sentence:
+            what is happening, how far along, how much is left. */}
+        <Progress value={percent} className="h-1.5 min-w-0 flex-1" />
+        <span className="shrink-0 text-sm font-medium tabular-nums">{percent}%</span>
+        {onStop && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground hover:text-destructive"
+            disabled={stopping}
+            onClick={onStop}
+          >
+            {stopping ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Square className="h-3 w-3 fill-current" />
+            )}
+            Stop
+          </Button>
+        )}
+      </div>
+      {/* The reassurance is the substance, not the decoration: the complaint
+          this whole change answers was somebody believing they had to sit on
+          the page for the transcription to continue. */}
+      <p className="mt-1.5 pl-7 text-xs text-muted-foreground">
+        {message || "This carries on in the background — you can close this page."}
+      </p>
+    </div>
   );
 }

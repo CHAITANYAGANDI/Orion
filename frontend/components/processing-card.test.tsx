@@ -4,17 +4,18 @@ import userEvent from "@testing-library/user-event";
 import { ProcessingCard } from "@/components/processing-card";
 
 /**
- * The wait, on the meeting's own page.
+ * The wait, on the meeting's own page, as a banner rather than as the page.
  *
- * <p>Saving a recording lands here now, so the docked bar stands down and this
- * carries the wait. The thing that has to survive that handover is Stop: the
- * bar held the only control that ends a pipeline, and a bar yielding without
- * passing it on leaves a wait nobody can call off on the one page they are
- * sitting on.
+ * <p>This used to be a full-width Card, and because everything else on a
+ * meeting's page is gated on READY it was the only thing rendered -- so saving a
+ * forty-minute recording turned the app into a progress screen. The job is
+ * followed by the docked bar in the shell now (components/processing-dock), and
+ * this is the one row that says so on the meeting itself.
  *
- * <p>The other half is that Stop must not appear where it does not belong. It
- * deletes the meeting — the worker is mid-flight and cannot be recalled — so on
- * a file somebody imported an hour ago it would be a delete button dressed as a
+ * <p>What had to survive the change is Stop: this page carries the only control
+ * that ends a pipeline. And Stop must not appear where it does not belong -- it
+ * deletes the meeting, the worker being mid-flight and unrecallable -- so on a
+ * file somebody imported an hour ago it would be a delete button dressed as a
  * cancel.
  */
 describe("ProcessingCard", () => {
@@ -25,7 +26,7 @@ describe("ProcessingCard", () => {
     expect(screen.getByRole("progressbar")).toBeInTheDocument();
     // In figures, not only as a length. A bar says "something is happening";
     // the number is the one that answers "how much longer".
-    expect(screen.getByText("37")).toBeInTheDocument();
+    expect(screen.getByText("37%")).toBeInTheDocument();
   });
 
   it("rounds the worker's estimate rather than printing it raw", () => {
@@ -33,12 +34,12 @@ describe("ProcessingCard", () => {
 
     // Stage estimates are not whole numbers, and "37.4999%" reads as a bug in
     // the one number somebody is watching.
-    expect(screen.getByText("37")).toBeInTheDocument();
+    expect(screen.getByText("37%")).toBeInTheDocument();
   });
 
   it.each([
-    [-10, "0"],
-    [140, "100"],
+    [-10, "0%"],
+    [140, "100%"],
   ])("clamps a progress of %s to %s", (progress, shown) => {
     render(<ProcessingCard status="SUMMARIZING" progress={progress} />);
 
@@ -50,7 +51,7 @@ describe("ProcessingCard", () => {
 
     // A bar with no words is a page that has stopped explaining itself.
     expect(
-      screen.getByText("Working on your meeting brief. This updates live."),
+      screen.getByText("This carries on in the background — you can close this page."),
     ).toBeInTheDocument();
   });
 

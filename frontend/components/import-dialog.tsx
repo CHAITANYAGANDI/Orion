@@ -43,6 +43,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { trackProcessing } from "@/lib/processing-jobs";
 import { UploadCloud, FileAudio, Loader2, X, Folder } from "lucide-react";
 import { useAllowance, importRefusal, lengthRefusal } from "@/lib/allowance";
 import {
@@ -158,6 +159,10 @@ export function ImportDialog({
         projectId: projectId ?? undefined,
       }).unwrap();
 
+      // Watched from here on by the app-wide dock, so leaving this page --
+      // or closing the dialog, which happens on the next line -- does not mean
+      // the completion goes unnoticed. See lib/processing-jobs.
+      trackProcessing(meeting.id);
       toast.success("Uploaded — processing started.");
       onOpenChange(false);
       reset();

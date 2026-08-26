@@ -22,7 +22,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from app.callback import Delivery
+from app.callback import Delivery, JobState
 from app.kafka_worker import KafkaWorker, Outcome, is_retryable
 from app.providers.assemblyai_adapter import (
     AudioUnreachableError,
@@ -46,12 +46,22 @@ class RecordingCallback:
         *,
         result: Delivery = Delivery.ACCEPTED,
         status: Delivery = Delivery.ACCEPTED,
+        state: "JobState | None" = None,
     ) -> None:
         self.result_delivery = result
         self.status_delivery = status
         self.statuses: list[str] = []
         self.attempts: list[int | None] = []
         self.results = 0
+        # What Spring says when asked whether the job is still worth running.
+        # The default is a meeting mid-flight on run 1, which is every test
+        # below that is not about the skip itself.
+        self.state = state if state is not None else JobState(status="QUEUED", attempt=1)
+        self.state_reads = 0
+
+    async def job_state(self, meeting_id) -> "JobState | None":
+        self.state_reads += 1
+        return self.state
 
     async def post_result(self, meeting_id, result, *, attempt=None) -> Delivery:
         self.results += 1
@@ -72,6 +82,8 @@ def worker(callback, *, max_attempts: int = 5) -> KafkaWorker:
             kafka_consumer_group="ai-service",
             kafka_security_protocol="PLAINTEXT",
             kafka_max_poll_interval_ms=6_000_000,
+            kafka_session_timeout_ms=45_000,
+            kafka_heartbeat_interval_ms=10_000,
         ),
         pipeline=None,
         callback=callback,
@@ -258,3 +270,105 @@ def test_an_unrecognised_failure_is_retryable_by_default():
 
 def test_a_refused_request_is_never_retried():
     assert is_retryable(TranscriptionConfigurationError("bad parameter")) is False
+
+
+# --------------------------------------------------------------------------- #
+# A redelivery must not cost a second transcription
+#
+# Delivery is at-least-once by design, and the provider bills per run. Before
+# this guard a redelivered job was re-transcribed in full: one 42-minute upload
+# was submitted to AssemblyAI three times (07:25, 07:29, 07:39) because the
+# consumer kept being evicted mid-run, and the meeting's status walked backwards
+# from EXTRACTING to TRANSCRIBING while somebody watched it.
+#
+# `_handle` now asks Spring what state the meeting is in before it spends
+# anything. `_never_runs` is the assertion that carries these: if the pipeline
+# is entered at all, the money is already gone.
+# --------------------------------------------------------------------------- #
+async def _never_runs(event, progress_hook, transcript_hook):
+    raise AssertionError("the pipeline ran for a job that was already settled")
+
+
+@pytest.mark.parametrize("status", ["READY", "FAILED"])
+def test_a_redelivery_of_a_finished_run_is_skipped_not_re_transcribed(status):
+    cb = RecordingCallback(state=JobState(status=status, attempt=1))
+
+    assert drive(worker(cb), _never_runs) is Outcome.COMMIT
+    assert cb.results == 0
+    # Not reported either. The run already said its piece; a second READY frame
+    # over a FAILED meeting would be worse than silence.
+    assert cb.statuses == []
+
+
+def test_a_meeting_that_was_deleted_is_not_transcribed():
+    # What Stop leaves behind. The worker used to transcribe the whole recording
+    # and only then discover, in applyResult, that there was nothing to write it
+    # to -- a full bill for a meeting the user had cancelled.
+    cb = RecordingCallback(state=JobState(status="", attempt=0, missing=True))
+
+    assert drive(worker(cb), _never_runs) is Outcome.COMMIT
+    assert cb.results == 0
+
+
+def test_a_run_a_reprocess_has_replaced_is_skipped():
+    # The reprocess enqueued its own message; finishing this one would produce a
+    # result applyResult is going to refuse anyway.
+    cb = RecordingCallback(state=JobState(status="TRANSCRIBING", attempt=4))
+
+    assert drive(worker(cb), _never_runs) is Outcome.COMMIT
+
+
+def test_a_reprocess_is_processed_rather_than_skipped():
+    """A reprocess of a meeting that has already been READY once.
+
+    `MeetingService.reprocess` moves the status to QUEUED and bumps the attempt
+    in one transaction, and the outbox publishes after that commits -- so the
+    row this reads says (QUEUED, 2), never (READY, 2). It has to be processed:
+    skipping it would leave the meeting on its old transcript with a QUEUED
+    badge and nobody coming back for it, having charged the user for the run.
+    """
+    cb = RecordingCallback(state=JobState(status="QUEUED", attempt=2))
+    event = MeetingUploadedEvent(
+        meetingId="mtg_1", userId="usr_1",
+        objectKey="meetings/usr_1/mtg_1/audio.m4a",
+        processingAttempt=2,
+    )
+
+    assert drive(worker(cb), _succeeds, event=event) is Outcome.COMMIT
+    assert cb.results == 1
+
+
+def test_terminal_is_judged_per_run_and_not_by_status_alone():
+    """Why `pointless_for` takes the run at all.
+
+    READY on the row is only a reason to stop if it is *this* run's READY. A
+    guard written as "status is terminal, skip" would read the previous run's
+    result and refuse to do the new one -- so this pins the pairing rather than
+    the status.
+    """
+    # Same status, opposite answers, and the run is the only difference.
+    assert JobState(status="READY", attempt=1).pointless_for(1) is not None
+    assert JobState(status="READY", attempt=1).pointless_for(2) is None
+
+
+def test_an_unreachable_spring_processes_the_meeting_anyway():
+    """Fails open, and the direction is the whole point.
+
+    A meeting billed twice is a cost. A meeting never processed is a bug that
+    leaves somebody's recording in QUEUED for ever with nothing coming back for
+    it -- which is the exact failure the hand-committed offset was introduced to
+    eliminate, and it must not be reintroduced by an optimisation.
+    """
+    cb = RecordingCallback(state=None)
+    cb.state = None  # what job_state returns when Spring cannot be reached
+
+    assert drive(worker(cb), _succeeds) is Outcome.COMMIT
+    assert cb.results == 1
+
+
+def test_the_state_is_read_once_per_delivery():
+    cb = RecordingCallback()
+
+    drive(worker(cb), _succeeds)
+
+    assert cb.state_reads == 1

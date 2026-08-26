@@ -47,13 +47,35 @@ are all the same run, and only `MeetingService.reprocess` ever starts a new one.
 The number is what lets Spring tell a result that is late from a result that is
 obsolete, which are the same HTTP request and opposite instructions.
 
-**The consumer stays in the group while a meeting is being processed.**
+**The consumer stays in the group while a meeting is being processed**, and
+there are two separate ways it used not to.
+
 `max_poll_interval_ms` is configured rather than defaulted, because aiokafka's
 default is five minutes and Recallix supports meetings that take longer than
 that. Its heartbeat task measures `fetcher_idle_time` — time since the last
 message was handed to this loop — and leaves the group once that passes the
 interval, so a long transcription used to be evicted mid-run, fail its commit,
 and be redelivered to be transcribed again, for ever. See `Settings`.
+
+That fixed the poll timer and left the *session* timer, which is a different
+clock and was the one that kept firing. The heartbeat is a coroutine on this
+event loop, and speaker refinement used to run its ffmpeg decode and its ECAPA
+forward passes synchronously on that same loop — nine minutes in one observed
+meeting. The heartbeat was never scheduled, the broker declared the member dead
+after ten seconds, the group rebalanced, and the offset went uncommitted: the
+meeting was redelivered and transcribed again. One upload was transcribed three
+times, and its status walked backwards from EXTRACTING to TRANSCRIBING in front
+of the person waiting for it. No timeout value can fix that, because the problem
+is a coroutine that is never given the loop; the blocking work runs in a thread
+now (`rediarize._refine`, `speaker_identity._voiceprints`), and
+`kafka_session_timeout_ms` is the margin beside it.
+
+**A redelivery no longer costs a transcription.** Before any work is done,
+`_handle` asks Spring what state the meeting is in — see
+`SpringCallbackClient.job_state`. A meeting that was deleted, that already
+finished this run, or that a reprocess has moved past is committed and skipped.
+The check fails open: if Spring cannot be reached the message is processed,
+because a meeting billed twice is a cost and a meeting never processed is a bug.
 
 Connection is resilient: if the broker is unreachable at startup the worker logs
 and retries with exponential backoff — it never crashes the app.
@@ -231,6 +253,12 @@ class KafkaWorker:
             # its default, aiokafka evicted the consumer five minutes into every
             # long transcription; see the module docstring.
             max_poll_interval_ms=self._settings.kafka_max_poll_interval_ms,
+            # The heartbeat pair, configured rather than defaulted. Blocking
+            # work is off the event loop now, so the heartbeat coroutine is
+            # scheduled; these give it room to be late without the group
+            # deciding this worker has died. See `Settings`.
+            session_timeout_ms=self._settings.kafka_session_timeout_ms,
+            heartbeat_interval_ms=self._settings.kafka_heartbeat_interval_ms,
             **security,
         )
         await self._consumer.start()
@@ -443,6 +471,28 @@ class KafkaWorker:
         # Read once, from the message. Every callback below quotes it, and it is
         # the same number on the fifth redelivery as on the first.
         run = event.processing_attempt
+
+        # Ask before spending anything. Delivery is at-least-once and
+        # transcription is billed per run, so a redelivery of a job that already
+        # finished used to cost a second full transcription of the same
+        # recording -- and the meeting's status walked backwards from EXTRACTING
+        # to TRANSCRIBING while somebody watched. Three things make this run
+        # pointless: the meeting was deleted, this run already reached a
+        # terminal state, or a reprocess replaced it. All three are cheap to
+        # find out and expensive to discover afterwards.
+        #
+        # Fails open. `job_state` returns None when Spring cannot be reached,
+        # and the answer to "I don't know" is to do the work: a meeting
+        # processed twice is a bill, a meeting never processed is a bug.
+        state = await self._callback.job_state(meeting_id)
+        pointless = state.pointless_for(run) if state is not None else None
+        if pointless:
+            logger.info(
+                "Skipping meeting_uploaded for %s (run %d): %s.",
+                meeting_id, run, pointless,
+            )
+            return Outcome.COMMIT
+
         logger.info("Processing meeting_uploaded for %s (run %d).", meeting_id, run)
 
         async def progress_hook(status_event: StatusEvent) -> None:

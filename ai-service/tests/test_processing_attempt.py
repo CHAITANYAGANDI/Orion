@@ -22,7 +22,7 @@ from types import ModuleType, SimpleNamespace
 import httpx
 import pytest
 
-from app.callback import Delivery
+from app.callback import Delivery, JobState
 from app.config import Settings
 from app.kafka_worker import KafkaWorker, Outcome
 from app.providers.assemblyai_adapter import TranscriptionConfigurationError
@@ -52,6 +52,11 @@ class RecordingCallback:
         #: (kind, status-or-None, attempt) in the order they were sent.
         self.sent: list[tuple[str, str | None, int | None]] = []
 
+    async def job_state(self, meeting_id):
+        # Mid-flight on run 1 unless a test says otherwise. `attempt=0` would be
+        # read as "behind every run", which is not a state Spring can be in.
+        return getattr(self, "state", JobState(status="QUEUED", attempt=1))
+
     async def post_result(self, meeting_id, result, *, attempt=None) -> Delivery:
         self.sent.append(("result", None, attempt))
         return self.result_delivery
@@ -72,6 +77,8 @@ def worker(callback, *, max_attempts: int = 5) -> KafkaWorker:
             kafka_consumer_group="ai-service",
             kafka_security_protocol="PLAINTEXT",
             kafka_max_poll_interval_ms=6_000_000,
+            kafka_session_timeout_ms=45_000,
+            kafka_heartbeat_interval_ms=10_000,
         ),
         pipeline=None,
         callback=callback,
@@ -295,6 +302,58 @@ def test_the_poll_interval_covers_the_worst_supported_meeting():
     assert s.kafka_max_poll_interval_ms / 1000 > worst_case
     # And with real margin, not by a second.
     assert s.kafka_max_poll_interval_ms / 1000 >= worst_case * 1.5
+
+
+def test_the_consumer_configures_its_heartbeat_rather_than_defaulting_it():
+    """The timer that actually evicted this worker.
+
+    `max_poll_interval_ms` above bounds time between messages. The session
+    timeout bounds time between *heartbeats*, and the heartbeat is a coroutine
+    on the same event loop as everything else -- so when speaker refinement ran
+    synchronously on that loop for nine minutes, it was never sent. The broker
+    declared the member dead after aiokafka's default ten seconds, the group
+    rebalanced, the offset went uncommitted, and one 42-minute recording was
+    transcribed three times.
+
+    The real fix is that the blocking work runs in a thread now. This pins the
+    margin beside it.
+    """
+    captured: dict = {}
+
+    class _Consumer:
+        def __init__(self, *topics, **kwargs):
+            captured.update(kwargs)
+
+        async def start(self):
+            return None
+
+    module = ModuleType("aiokafka")
+    module.AIOKafkaConsumer = _Consumer
+    module.TopicPartition = lambda topic, partition: (topic, partition)
+    sys.modules["aiokafka"] = module
+    try:
+        w = worker(RecordingCallback())
+        asyncio.run(w._connect())  # noqa: SLF001
+    finally:
+        sys.modules.pop("aiokafka", None)
+
+    session = captured["session_timeout_ms"]
+    heartbeat = captured["heartbeat_interval_ms"]
+
+    # Well clear of aiokafka's 10s default, so a garbage collection or a model
+    # load cannot cost a transcription.
+    assert session >= 30_000
+    # Kafka rejects a session timeout outside the broker's configured band;
+    # 30 minutes is the usual `group.max.session.timeout.ms`.
+    assert session <= 1_800_000
+    # Three missed heartbeats before eviction, not one. Kafka's own guidance is
+    # no more than a third of the session timeout.
+    assert heartbeat * 3 <= session
+    # And it must stay the *short* clock. A session timeout anywhere near the
+    # poll interval would mean a genuinely dead worker went unnoticed for an
+    # hour and a half, which is the opposite failure.
+    s = Settings()
+    assert session < s.kafka_max_poll_interval_ms / 10
 
 
 @pytest.mark.parametrize("attempt", [1, 2, 99])

@@ -12,31 +12,39 @@
  * be kept open; both were removed on request. Against local storage the upload
  * is over in milliseconds, so what either of them actually produced was a flash
  * between pressing Save and arriving at the meeting. Save goes straight there
- * now, and the wait somebody actually sits through is the pipeline, drawn full
- * width on the page they land on. See components/processing-card.tsx.
+ * now, and the wait somebody actually sits through is the pipeline — drawn as a
+ * banner on the page they land on and as a docked bar everywhere else, so
+ * leaving is free. See components/processing-card.tsx and
+ * components/processing-dock.tsx.
  *
- * <p><b>The phases past `creating` are still tracked</b>, and they are not
- * decoration. `processing` is what tells the meeting page that this is the
- * meeting being saved, and therefore the one whose pipeline can still be
- * stopped; `done` and `failed` are what invalidate the caches Home lists from,
- * so a finished meeting stops reading "Processing" in a list nobody refetched.
+ * <p><b>The phases past `creating` are still tracked</b>, and `processing` is
+ * the one that earns its keep: it is what tells the meeting page that this is
+ * the meeting being saved, and therefore the one whose pipeline can still be
+ * stopped. `done` and `failed` now only put the phase back.
+ *
+ * <p><b>Announcing a finished meeting is no longer done here.</b> The toast and
+ * the cache invalidation that stops Home listing a finished meeting as
+ * "Transcribing" moved to `ProcessingDock`, which watches every processing
+ * meeting rather than only the one this hook is holding — so a file somebody
+ * imported got neither, and a recording got them only for as long as the tab
+ * stayed on this hook's phase. What this hook still owes the dock is one call
+ * to `trackProcessing` the moment the meeting exists.
  */
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
-  api,
   useCreateUploadUrlMutation,
   useCreateMeetingMutation,
   useDeleteMeetingMutation,
   useGetMeetingQuery,
 } from "@/lib/api";
-import { useAppDispatch } from "@/lib/hooks";
 import { subscribeMeetingStatus } from "@/lib/ws";
 import { putWithProgress, uploadError } from "@/lib/uploads";
 import { statusProgress } from "@/lib/format";
 import { clampToStage } from "@/lib/progress";
+import { trackProcessing, untrackProcessing } from "@/lib/processing-jobs";
 import type { MeetingStatus } from "@/lib/types";
 import type { RecorderResult, UseRecorder } from "@/lib/use-recorder";
 
@@ -76,7 +84,6 @@ export interface UseSaveJob {
 
 export function useSaveJob(recorder: UseRecorder): UseSaveJob {
   const router = useRouter();
-  const dispatch = useAppDispatch();
   const [createUploadUrl] = useCreateUploadUrlMutation();
   const [createMeeting] = useCreateMeetingMutation();
   const [deleteMeeting] = useDeleteMeetingMutation();
@@ -224,6 +231,12 @@ export function useSaveJob(recorder: UseRecorder): UseSaveJob {
         message: "Queued for processing…",
       });
       setPhase("processing");
+      // Handed to the app-wide tracker, which is what draws the docked bar and
+      // what settles the job when it finishes. This hook still follows the
+      // pipeline -- the Stop control on the meeting page needs `job` -- but it
+      // is no longer the only thing that does, so leaving this page no longer
+      // means the completion goes unnoticed. See lib/processing-jobs.
+      trackProcessing(meeting.id);
       // The audio is on the server now. A second copy in the tab is one nothing
       // reads, and one the bar would go on offering to save.
       recorder.reset();
@@ -255,6 +268,9 @@ export function useSaveJob(recorder: UseRecorder): UseSaveJob {
     setStopping(true);
     try {
       await deleteMeeting(job.id).unwrap();
+      // Nothing left to watch. Without this the dock would poll a deleted
+      // meeting until the 404 resolved, under a toast saying it was stopped.
+      untrackProcessing(job.id);
       dismiss();
       toast.success("Stopped. The meeting and its recording were deleted.");
       return true;
@@ -266,16 +282,18 @@ export function useSaveJob(recorder: UseRecorder): UseSaveJob {
   }
 
   /**
-   * Clear the bar, and say so once.
+   * Clear the bar when the pipeline settles.
    *
-   * <p>Guarded by id rather than by a boolean, because `settle` clears the very
+   * <p>Guarded by id rather than by a boolean, because `dismiss` clears the very
    * phase this fires on — without the guard that clearing reads as a new state
    * and the whole thing runs a second time.
    *
-   * <p>The cache invalidation is the part that is not cosmetic. The poll above
-   * filled the meeting cache with the last thing it saw, which was
-   * mid-pipeline; Home lists from that same cache, so the meeting would sit
-   * there marked "Transcribing" until something else happened to refetch it.
+   * <p><b>It no longer announces anything.</b> The toast and the cache
+   * invalidation moved to `ProcessingDock`, which watches every processing
+   * meeting rather than only the one this hook is holding. Two owners meant an
+   * imported file got neither — nothing tracked it — while a recording got both
+   * twice over as soon as the dock existed. The dock is the one that survives
+   * leaving the page, so the dock is the one that tells you.
    */
   const settled = React.useRef<string | null>(null);
   React.useEffect(() => {
@@ -283,12 +301,8 @@ export function useSaveJob(recorder: UseRecorder): UseSaveJob {
     const id = job?.id;
     if (!id || settled.current === id) return;
     settled.current = id;
-    dispatch(api.util.invalidateTags([{ type: "Meeting", id }, "Meetings"]));
-    // Nothing navigates, so this is the only thing that says the wait is over.
-    if (phase === "failed") toast.error(job?.message || "Processing failed.");
-    else toast.success("Your meeting is ready.");
     dismiss();
-  }, [phase, job?.id, job?.message, dismiss, dispatch]);
+  }, [phase, job?.id, dismiss]);
 
   return { phase, job, busy, stopping, save, stop, dismiss };
 }

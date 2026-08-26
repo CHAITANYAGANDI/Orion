@@ -70,6 +70,34 @@ class Settings(BaseSettings):
     # flight is transcribed twice and paid for twice.
     kafka_max_poll_interval_ms: int = 6_000_000
 
+    # The *other* eviction timer, and the one that actually bit.
+    #
+    # `max_poll_interval_ms` above bounds how long the consumer may go without
+    # taking a message. This bounds how long the broker may go without hearing
+    # from it at all, and the two are independent: the heartbeat is its own
+    # coroutine on the event loop, so it stops being sent the moment something
+    # else refuses to yield. That is what happened -- ECAPA speaker refinement
+    # ran synchronously on the loop for nine minutes, the heartbeat coroutine
+    # was never scheduled, the broker declared the member dead at ten seconds,
+    # the group rebalanced, the hand-committed offset stayed put, and the
+    # meeting came back to be transcribed again. Twice, at full price.
+    #
+    # The real fix is that the blocking work now runs in a thread
+    # (`rediarize._refine`, `speaker_identity._voiceprints`), so the loop stays
+    # free. This is the belt beside it: 45 seconds rather than aiokafka's
+    # 10-second default, so a garbage collection, a model load or a burst of
+    # GIL contention cannot cost a transcription. It is still far below
+    # `max_poll_interval_ms`, so a worker that has genuinely died is still
+    # noticed in under a minute rather than in an hour and a half.
+    #
+    # Brokers reject a session timeout outside `group.min.session.timeout.ms`
+    # (6s) .. `group.max.session.timeout.ms` (30 min); 45s is comfortably
+    # inside both.
+    kafka_session_timeout_ms: int = 45_000
+    # Kafka's own guidance is no higher than a third of the session timeout, so
+    # three heartbeats have to be missed before eviction rather than one.
+    kafka_heartbeat_interval_ms: int = 10_000
+
     # --- Spring internal callback ---
     spring_callback_url: str = "http://localhost:8080"
     recallix_internal_token: str = "dev-internal-token"

@@ -91,6 +91,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 import { useSaveJob } from "@/lib/use-save-job";
+import { processingJobs, resetProcessingJobs } from "@/lib/processing-jobs";
 
 const reset = vi.fn();
 
@@ -116,6 +117,9 @@ beforeEach(() => {
   emit = null;
   polled.current = undefined;
   putWithProgress.mockResolvedValue(undefined);
+  // The tracker is a module store that outlives a render on purpose, so one
+  // test's saved meeting is still being watched in the next.
+  resetProcessingJobs();
 });
 
 async function stage(status: string, progress: number, message: string) {
@@ -292,22 +296,23 @@ describe("following the work", () => {
     });
 
     await waitFor(() => expect(result.current.job).toBeNull());
-    expect(toastSuccess).toHaveBeenCalled();
+    // The toast is not asserted here any more: announcing a finished meeting
+    // moved to ProcessingDock, which watches every processing meeting rather
+    // than only the one this hook is holding. See processing-dock.test.tsx.
   });
 
-  it("drops the mid-pipeline snapshot before opening the meeting", async () => {
+  it("hands the meeting to the app-wide tracker as soon as it exists", async () => {
     const { result } = setup();
     await act(async () => {
       await result.current.save(aResult(), "x");
     });
 
-    await stage("READY", 100, "Ready.");
-
-    // The poll fills the meeting cache with whatever it last saw, and Home
-    // lists from that same cache — so without this the finished meeting sits in
-    // the list marked "Transcribing" until something else happens to refetch.
-    expect(invalidateTags).toHaveBeenCalledWith([{ type: "Meeting", id: "mtg_9" }, "Meetings"]);
-    expect(dispatch).toHaveBeenCalled();
+    // This is what makes the wait survive leaving the page. Before it, the only
+    // thing following the pipeline was this hook — so navigating away lost the
+    // job, and the cache invalidation that stops Home listing a finished
+    // meeting as "Transcribing" never happened. Both belong to the dock now,
+    // and this is how the dock hears about the meeting.
+    expect(processingJobs()).toContain("mtg_9");
   });
 
   it("clears itself when the work is done, and goes nowhere", async () => {
@@ -325,7 +330,6 @@ describe("following the work", () => {
     expect(push).not.toHaveBeenCalled();
     expect(result.current.phase).toBe("idle");
     expect(result.current.job).toBeNull();
-    expect(toastSuccess).toHaveBeenCalledWith("Your meeting is ready.");
   });
 
   it("settles once, not again when the state is cleared", async () => {
@@ -336,10 +340,14 @@ describe("following the work", () => {
 
     await stage("READY", 100, "Ready.");
     await act(async () => {});
+    await act(async () => {});
 
     // Clearing the phase this fires on looks like a state change. Guarded by
-    // meeting id, or the whole thing runs a second time.
-    expect(toastSuccess).toHaveBeenCalledTimes(1);
+    // meeting id, or the effect runs again and re-dismisses a job that is
+    // already gone — which is harmless here and was not when it also fired a
+    // toast, so the guard is pinned rather than removed with the toast.
+    expect(result.current.phase).toBe("idle");
+    expect(result.current.job).toBeNull();
   });
 
   it("reports a failure with the reason the server gave", async () => {
@@ -350,10 +358,10 @@ describe("following the work", () => {
 
     await stage("FAILED", 0, "The audio could not be decoded.");
 
-    // Nothing navigates, so the toast is the only thing that says so. The
-    // meeting is in the Home list carrying the same failure.
-    expect(toastError).toHaveBeenCalledWith("The audio could not be decoded.");
+    // The hook lets go; the meeting stays tracked so the dock is the one that
+    // reports the failure, wherever the user happens to be by then.
     expect(result.current.job).toBeNull();
+    expect(processingJobs()).toContain("mtg_9");
   });
 });
 
@@ -371,6 +379,9 @@ describe("stopping", () => {
     expect(deleteMeeting).toHaveBeenCalledWith("mtg_9");
     expect(result.current.phase).toBe("idle");
     expect(result.current.job).toBeNull();
+    // Nothing left to watch. Without this the dock would poll a deleted meeting
+    // until the 404 resolved, under a toast saying it had been stopped.
+    expect(processingJobs()).not.toContain("mtg_9");
   });
 
   it("stays put when the delete fails, since it may have finished", async () => {

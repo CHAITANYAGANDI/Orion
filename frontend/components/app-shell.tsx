@@ -72,6 +72,7 @@ import { SearchCommand } from "@/components/search-command";
 import { closeSearch, openSearch, useSearchOverlay } from "@/lib/search-overlay";
 import { ImportDialog } from "@/components/import-dialog";
 import { RecordingBar } from "@/components/recording-bar";
+import { ProcessingDock } from "@/components/processing-dock";
 import { AccountMenu } from "@/components/account-menu";
 import { PlanUsage } from "@/components/plan-usage";
 import { FolderTree } from "@/components/folder-tree";
@@ -515,6 +516,10 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
           recorder is: it has to survive the navigation it is telling you is
           safe to make. Renders nothing when there is no recording. */}
       <RecordingBar />
+      {/* Beside it, and for the same reason: the pipeline outlives the page
+          that started it, so what reports on it has to outlive that page too.
+          Renders nothing when this tab is watching no jobs. */}
+      <ProcessingDock />
     </div>
   );
 }
