@@ -12,8 +12,6 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -38,17 +36,37 @@ public class AuthenticationFilter extends OncePerRequestFilter {
     private static final String DEV_FALLBACK_USER = "dev-user";
 
     private final UserService userService;
+    private final ClerkTokens tokens;
     private final String authMode;
-    private final String jwksUrl;
 
-    private volatile JwtDecoder jwtDecoder;
-
+    /**
+     * @param tokens what decides whether a token is real. Shared with
+     *     {@link StompAuthInterceptor}, so the socket and the API cannot come
+     *     to disagree about it — see {@link ClerkTokens}.
+     * @param authMode {@code dev} or {@code clerk}. <b>Defaults to clerk, and
+     *     that direction matters.</b> It used to default to dev, which meant an
+     *     unset or misspelt {@code RECALLIX_AUTH_MODE} put the service into the
+     *     mode that trusts an {@code X-Dev-User} header — an authentication
+     *     bypass available to anybody who can send one, arrived at by a missing
+     *     variable rather than by a decision. Failing closed costs a deployment
+     *     that forgot to configure Clerk a wall of 401s, which is the correct
+     *     failure and an obvious one.
+     */
     public AuthenticationFilter(UserService userService,
-                                @Value("${recallix.auth-mode:dev}") String authMode,
-                                @Value("${recallix.clerk.jwks-url:}") String jwksUrl) {
+                                ClerkTokens tokens,
+                                @Value("${recallix.auth-mode:clerk}") String authMode) {
         this.userService = userService;
+        this.tokens = tokens;
         this.authMode = authMode;
-        this.jwksUrl = jwksUrl;
+        if (!"clerk".equalsIgnoreCase(authMode)) {
+            // At WARN, on every start, and naming the consequence rather than
+            // the setting. Dev mode is a legitimate way to run the stack with
+            // no keys; it is not a legitimate way to run it in front of people,
+            // and the difference has to be visible in a log somebody skims.
+            log.warn("AUTH IS IN '{}' MODE: any caller may become any user by sending "
+                    + "an X-Dev-User header. This must never be a deployment that "
+                    + "real people can reach.", authMode);
+        }
     }
 
     @Override
@@ -125,13 +143,20 @@ public class AuthenticationFilter extends OncePerRequestFilter {
     private static final List<String> SECOND_FACTOR_CLAIMS = List.of(
             "two_factor_enabled", "twoFactorEnabled", "two_factor", "tfa", "mfa");
 
+    /**
+     * Who is calling.
+     *
+     * <p>Note which way round the branch reads: clerk is the fall-through and
+     * dev is the special case that has to be asked for by name. See the
+     * constructor for why.
+     */
     private Identity resolveIdentity(HttpServletRequest request) {
-        if ("clerk".equalsIgnoreCase(authMode)) {
+        if (!"dev".equalsIgnoreCase(authMode)) {
             String header = request.getHeader("Authorization");
             if (header == null || !header.startsWith("Bearer ")) {
                 return new Identity(null, null, null);
             }
-            Jwt jwt = decoder().decode(header.substring(7));
+            Jwt jwt = tokens.verify(header.substring(7));
             return new Identity(jwt.getSubject(), emailClaim(jwt), secondFactorClaim(jwt));
         }
         // dev mode
@@ -178,19 +203,4 @@ public class AuthenticationFilter extends OncePerRequestFilter {
         return null;
     }
 
-    private JwtDecoder decoder() {
-        JwtDecoder local = jwtDecoder;
-        if (local == null) {
-            synchronized (this) {
-                if (jwtDecoder == null) {
-                    if (jwksUrl == null || jwksUrl.isBlank()) {
-                        throw new IllegalStateException("clerk auth-mode requires CLERK_JWKS_URL");
-                    }
-                    jwtDecoder = NimbusJwtDecoder.withJwkSetUri(jwksUrl).build();
-                }
-                local = jwtDecoder;
-            }
-        }
-        return local;
-    }
 }

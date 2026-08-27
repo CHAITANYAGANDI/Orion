@@ -2,10 +2,40 @@
 
 import { Client, type IMessage } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
+import { buildAuthHeaders } from "@/lib/auth-store";
 import type { StatusEvent } from "@/lib/types";
 
 export const WS_URL =
   process.env.NEXT_PUBLIC_WS_URL || "http://localhost:8080/ws";
+
+/**
+ * Put this tab's credential on the CONNECT frame.
+ *
+ * <p>The SockJS handshake is a plain GET and cannot carry one — a browser will
+ * not let a page set headers on it — so the socket authenticates one frame
+ * later, on CONNECT, and the server refuses the connection without it. See
+ * `StompAuthInterceptor`.
+ *
+ * <p>Read per connection rather than once at construction, and that is the
+ * point of doing it in `beforeConnect`: stompjs reconnects on its own, a Clerk
+ * token lasts about a minute, and a header captured when the page loaded would
+ * be stale by the first reconnection. `buildAuthHeaders` asks Clerk for a fresh
+ * one each time, so a reconnect an hour later carries a valid token instead of
+ * an expired one — which is the difference between a socket that recovers and
+ * one that retries into a refusal for ever.
+ *
+ * <p>The same headers the REST client sends, from the same place, so the socket
+ * and the API cannot come to disagree about who this is.
+ */
+async function authenticated(client: Client): Promise<void> {
+  try {
+    client.connectHeaders = await buildAuthHeaders();
+  } catch {
+    // Connect without it and be refused, rather than not connecting at all:
+    // the refusal is visible in the logs and every caller polls anyway.
+    client.connectHeaders = {};
+  }
+}
 
 export interface StatusHandlers {
   onEvent: (event: StatusEvent) => void;
@@ -47,6 +77,7 @@ export function subscribeNotifications(
       reconnectDelay: 8000,
       heartbeatIncoming: 20000,
       heartbeatOutgoing: 20000,
+      beforeConnect: authenticated,
       onConnect: () => {
         client?.subscribe(`/topic/users/${channel}/notifications`, (msg: IMessage) => {
           try {
@@ -96,6 +127,7 @@ export function subscribeMeetingStatus(
       reconnectDelay: 4000,
       heartbeatIncoming: 10000,
       heartbeatOutgoing: 10000,
+      beforeConnect: authenticated,
       onConnect: () => {
         handlers.onConnect?.();
         client?.subscribe(`/topic/meetings/${meetingId}`, (msg: IMessage) => {

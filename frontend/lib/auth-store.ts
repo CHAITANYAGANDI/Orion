@@ -3,8 +3,22 @@
 
 export type AuthMode = "dev" | "clerk";
 
+/**
+ * Which of the two the browser is running under.
+ *
+ * <p><b>It fails closed.</b> This used to read "clerk if the variable says
+ * clerk, otherwise dev" — so an unset, misspelt or empty
+ * `NEXT_PUBLIC_AUTH_MODE` silently put the app into the mode that trusts an
+ * `X-Dev-User` header, which is an authentication bypass reachable by anyone
+ * who can send a header. A build arg that failed to reach the image was one
+ * typo away from that.
+ *
+ * <p>Now only the exact string `dev` selects dev mode, and everything else is
+ * clerk. The worst a missing variable can do is refuse to let people in. The
+ * same reversal is applied in middleware.ts and in AuthenticationFilter.
+ */
 export const AUTH_MODE: AuthMode =
-  (process.env.NEXT_PUBLIC_AUTH_MODE as AuthMode) === "clerk" ? "clerk" : "dev";
+  process.env.NEXT_PUBLIC_AUTH_MODE === "dev" ? "dev" : "clerk";
 
 export const DEV_USER_KEY = "recallix.devUserId";
 export const DEFAULT_DEV_USER = "usr_dev";

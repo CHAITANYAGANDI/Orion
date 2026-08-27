@@ -1,4 +1,21 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterAll, vi } from "vitest";
+
+/**
+ * Dev mode has to be asked for by name now.
+ *
+ * <p>`AUTH_MODE` used to be "clerk if the variable says clerk, otherwise dev",
+ * so an unset value selected the mode that trusts an `X-Dev-User` header — an
+ * authentication bypass arrived at by a missing environment variable. It fails
+ * closed now, which means these tests, which are *about* dev mode, have to say
+ * so rather than inherit it.
+ *
+ * <p>`vi.hoisted` because `AUTH_MODE` is computed when lib/auth-store is first
+ * evaluated, and ESM imports are hoisted above everything else in the file.
+ */
+vi.hoisted(() => {
+  process.env.NEXT_PUBLIC_AUTH_MODE = "dev";
+});
+
 import * as React from "react";
 import { render, screen, act } from "@testing-library/react";
 import { AuthProvider, useAuth } from "@/lib/auth";
@@ -73,5 +90,48 @@ describe("signing out of dev mode", () => {
     // Signing back in as the same dev user produces the same stamp, so nothing
     // but this would put the filter back to its default.
     expect(readPreferences("usr_dev")).toEqual({});
+  });
+});
+
+/**
+ * Which way the switch falls when nobody set it.
+ *
+ * <p>This is the security property, and it is one line of code that is easy to
+ * write backwards. Dev mode accepts an `X-Dev-User` header and becomes whoever
+ * it names; the difference between defaulting to it and defaulting away from it
+ * is the difference between a deployment that a missing build arg opens to
+ * anybody and one that a missing build arg locks everybody out of. The second
+ * is a bad afternoon. The first is not recoverable.
+ */
+describe("the mode a missing setting selects", () => {
+  async function modeWith(value: string | undefined) {
+    vi.resetModules();
+    if (value === undefined) delete process.env.NEXT_PUBLIC_AUTH_MODE;
+    else process.env.NEXT_PUBLIC_AUTH_MODE = value;
+    const fresh = await import("@/lib/auth-store");
+    return fresh.AUTH_MODE;
+  }
+
+  const restore = process.env.NEXT_PUBLIC_AUTH_MODE;
+  afterAll(() => {
+    process.env.NEXT_PUBLIC_AUTH_MODE = restore;
+  });
+
+  it("is clerk when the variable is absent", async () => {
+    expect(await modeWith(undefined)).toBe("clerk");
+  });
+
+  it("is clerk when the variable is empty", async () => {
+    // What a build arg that was declared and never given looks like.
+    expect(await modeWith("")).toBe("clerk");
+  });
+
+  it("is clerk when the variable is misspelt", async () => {
+    expect(await modeWith("development")).toBe("clerk");
+    expect(await modeWith("Dev ")).toBe("clerk");
+  });
+
+  it("is dev only for exactly that word", async () => {
+    expect(await modeWith("dev")).toBe("dev");
   });
 });

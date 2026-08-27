@@ -38,6 +38,14 @@ export function AccountMenu() {
   const prefs = useGetPreferencesQuery();
   const name = prefs.data?.displayName || null;
   const photo = prefs.data?.avatarUrl || null;
+  /*
+   * The address, where there is one. `userId` is `user_2abc…` — an opaque
+   * string that tells the reader nothing and cannot be checked against anything
+   * they know. With real accounts the useful answer to "who am I signed in as"
+   * is the email, and it is the one that catches signing in as the wrong
+   * person. The id is the fallback, not the label.
+   */
+  const account = prefs.data?.email || (mode === "dev" ? userId : "");
   // Real initials, not the tail of an opaque id: "k5" said nothing about
   // anybody, and a person who has told us their name should see it.
   const initials = initialsOf(name, userId);
@@ -67,7 +75,7 @@ export function AccountMenu() {
                 {name || userId || "user"}
               </span>
               <span className="block truncate text-xs text-muted-foreground">
-                {mode === "dev" ? "Development session" : "Signed in"}
+                {mode === "dev" ? "Development session" : account || "Signed in"}
               </span>
             </span>
             {/* Radix writes data-state on the trigger, which is the only thing
@@ -78,7 +86,7 @@ export function AccountMenu() {
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-56">
-          <DropdownMenuLabel className="truncate">{userId}</DropdownMenuLabel>
+          <DropdownMenuLabel className="truncate">{account || userId}</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
             <Link href="/settings">
