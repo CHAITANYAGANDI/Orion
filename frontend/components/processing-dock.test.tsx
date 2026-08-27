@@ -312,3 +312,83 @@ describe("watching where it does not draw", () => {
     expect(screen.getAllByRole("link")).toHaveLength(1);
   });
 });
+
+/**
+ * The bar that flashed.
+ *
+ * <p>Saving a recording tracks the meeting and pushes to its page at once. For
+ * the length of that route change `usePathname` still answers with the page
+ * being left, so the rule above could not tell that this was the meeting about
+ * to fill the screen: the dock drew a bar, the navigation landed, and the bar
+ * vanished. Under a second, in the corner, at the moment of a successful save
+ * — which reads as something having gone wrong.
+ *
+ * <p>The distinction is the same one the block above is about. Watching starts
+ * immediately and must; only the drawing waits.
+ */
+describe("a job the user is being taken to", () => {
+  it("draws no bar while the navigation to its own page is still in flight", () => {
+    usePathnameMock.mockReturnValue("/record");
+    trackProcessing("mtg_9", "/record");
+
+    const { container } = render(<ProcessingDock />);
+
+    expect(container.textContent).toBe("");
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+  });
+
+  it("watches it all the same, and settles it if it finishes first", async () => {
+    // A very short recording can be READY before the meeting page has mounted.
+    // Held back is not unwatched.
+    usePathnameMock.mockReturnValue("/record");
+    trackProcessing("mtg_9", "/record");
+    render(<ProcessingDock />);
+
+    await stage("READY", 100);
+
+    expect(invalidateTags).toHaveBeenCalledWith([{ type: "Meeting", id: "mtg_9" }, "Meetings"]);
+    await waitFor(() => expect(processingJobs()).not.toContain("mtg_9"));
+  });
+
+  it("draws it once the route lands somewhere that is not its page", async () => {
+    // The release valve, and the reason this needs no timer: a job held back
+    // for a navigation that went elsewhere must not stay hidden for ever.
+    usePathnameMock.mockReturnValue("/record");
+    trackProcessing("mtg_9", "/record");
+    const view = render(<ProcessingDock />);
+    expect(view.container.textContent).toBe("");
+
+    usePathnameMock.mockReturnValue("/ask");
+    await act(async () => {
+      view.rerender(<ProcessingDock />);
+    });
+
+    expect(screen.getByRole("progressbar")).toBeInTheDocument();
+  });
+
+  it("goes on hiding it after it arrives, because the page says it instead", async () => {
+    usePathnameMock.mockReturnValue("/record");
+    trackProcessing("mtg_9", "/record");
+    const view = render(<ProcessingDock />);
+
+    usePathnameMock.mockReturnValue("/meetings/mtg_9");
+    await act(async () => {
+      view.rerender(<ProcessingDock />);
+    });
+
+    // Hidden by the ordinary rule now, not by the hand-over.
+    expect(view.container.textContent).toBe("");
+  });
+
+  it("still draws every other job in the meantime", () => {
+    // Only the one being opened is held back. An import running alongside it is
+    // on screen nowhere else.
+    usePathnameMock.mockReturnValue("/record");
+    trackProcessing("mtg_9", "/record");
+    trackProcessing("mtg_8");
+
+    render(<ProcessingDock />);
+
+    expect(screen.getAllByRole("link")).toHaveLength(1);
+  });
+});

@@ -236,7 +236,16 @@ export function useSaveJob(recorder: UseRecorder): UseSaveJob {
       // pipeline -- the Stop control on the meeting page needs `job` -- but it
       // is no longer the only thing that does, so leaving this page no longer
       // means the completion goes unnoticed. See lib/processing-jobs.
-      trackProcessing(meeting.id);
+      //
+      // The pathname goes with it because of what happens on the next line but
+      // one. Watching has to start now -- a save followed by a wander elsewhere
+      // would otherwise lose the completion -- while the bar must not be drawn,
+      // because the user is already on their way to the page that draws this
+      // same job full width. Until that navigation lands, `usePathname` still
+      // answers with the page being left, so the dock cannot work it out on its
+      // own; without this it drew a bar for the length of the route change and
+      // dropped it on arrival, which on screen is a flash in the corner.
+      trackProcessing(meeting.id, window.location.pathname);
       // The audio is on the server now. A second copy in the tab is one nothing
       // reads, and one the bar would go on offering to save.
       recorder.reset();

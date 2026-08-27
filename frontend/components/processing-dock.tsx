@@ -30,7 +30,12 @@ import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, useGetMeetingQuery } from "@/lib/api";
 import { useAppDispatch } from "@/lib/hooks";
-import { useProcessingJobs, untrackProcessing } from "@/lib/processing-jobs";
+import {
+  useProcessingJobs,
+  untrackProcessing,
+  isOpening,
+  releaseOpening,
+} from "@/lib/processing-jobs";
 import { subscribeMeetingStatus } from "@/lib/ws";
 import { statusLabel, statusProgress, isTerminal } from "@/lib/format";
 import { useMeetingProgress } from "@/lib/progress";
@@ -50,6 +55,13 @@ import type { MeetingStatus } from "@/lib/types";
  *       still processing are not on screen anywhere else, so they stay.</li>
  *   <li>On Home, every processing meeting is already saying so inside its own
  *       row, so the dock draws nothing at all.</li>
+ *   <li>A job whose page the user is <em>on their way to</em> is not drawn
+ *       either, and that is a third case rather than a variation on the second:
+ *       the pathname is still the page being left, so the rule above cannot yet
+ *       see what is about to be on screen. Saving a recording is exactly this,
+ *       and without it the bar appeared for the length of the route change and
+ *       vanished on arrival — a flash in the corner, read as a fault. See
+ *       `opening` in lib/processing-jobs.</li>
  * </ul>
  *
  * <p>Exported for its own test: the rule is easier to get wrong than it looks,
@@ -60,7 +72,7 @@ export function visibleJobs(jobs: readonly string[], pathname: string): string[]
   if (pathname === "/home") return [];
   const onMeeting = /^\/meetings\/([^/]+)/.exec(pathname);
   const viewing = onMeeting?.[1];
-  return jobs.filter((id) => id !== viewing);
+  return jobs.filter((id) => id !== viewing && !isOpening(id, pathname));
 }
 
 /**
@@ -81,6 +93,19 @@ export function ProcessingDock() {
   // `?? ""` because `usePathname` is null during the first server pass, and a
   // dock that threw there would take the whole shell with it.
   const pathname = usePathname() ?? "";
+
+  /*
+   * The dock is the only thing mounted everywhere that watches the route, so it
+   * is where a finished navigation is noticed. Any pathname other than the one
+   * a job set off from means its route change is over and it may be drawn like
+   * any other; see `releaseOpening` in lib/processing-jobs for why landing
+   * anywhere is enough. No-ops when nothing was waiting, which is almost every
+   * navigation.
+   */
+  React.useEffect(() => {
+    releaseOpening(pathname);
+  }, [pathname]);
+
   const shown = new Set(visibleJobs(tracked, pathname));
   if (tracked.length === 0) return null;
 

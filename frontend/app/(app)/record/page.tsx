@@ -101,6 +101,17 @@ export default function RecordPage() {
    * is one tick away and it opens with the wait already on it; anything drawn
    * in between is a frame of something untrue.
    *
+   * <p><b>It governs the whole page, not one panel of it.</b> It used to
+   * suppress only the microphone half, which left the allowance notice below to
+   * render on its own terms — and its own terms are `!started`, which is
+   * precisely what releasing the audio makes true. Creating the meeting also
+   * invalidates the usage cache, so a recording that spent the last of the
+   * balance painted a destructive-tinted "There is nothing left to record with"
+   * across the middle of the page at the exact moment the save succeeded, and
+   * then navigated away from it. Every word of it true, and read as the save
+   * having failed. The same applies to anything else that might be added here:
+   * a page being handed over has nothing to say.
+   *
    * <p>Narrowed to a recording this page actually held, rather than to any
    * pipeline running anywhere. Opening /record while an earlier meeting is
    * still processing is an ordinary arrival — there is nothing stopping you
@@ -172,6 +183,9 @@ export default function RecordPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allowance.loading]);
 
+  // After every hook, and before every notice. See `handingOver` above.
+  if (handingOver) return null;
+
   return (
     // Clearance for the docked control bar is added by the shell, which knows
     // whether one is showing; adding it again here would leave a gap under the
@@ -205,9 +219,12 @@ export default function RecordPage() {
           is behind you. */}
       {started && <NoteHeading startedAt={recorder.startedAt} />}
 
+      {/* No `handingOver` arm here any more: the page returns before this when
+          it is handing over, so reaching this line means there is genuinely no
+          recording and no save in flight. */}
       {started ? (
         <InProgress state={recorder.state} />
-      ) : handingOver ? null : (
+      ) : (
         <Opening
           supported={recorder.supported}
           refused={recorder.error !== null}

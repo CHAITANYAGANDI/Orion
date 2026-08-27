@@ -303,6 +303,40 @@ describe("RecordPage on arrival", () => {
     expect(screen.queryByText(/Try again/)).not.toBeInTheDocument();
   });
 
+  it("does not announce the empty allowance over the save that just emptied it", async () => {
+    // The gap was that only the microphone half of the page respected the
+    // hand-over. The allowance notice below it renders on `!started` — which is
+    // precisely what releasing the audio makes true — and creating the meeting
+    // invalidates the usage cache, so a recording that spent the last of the
+    // balance put a destructive-tinted "There is nothing left to record with"
+    // across the middle of the page at the moment the save succeeded, and then
+    // navigated away from it. True, and read as the save having failed.
+    usage = { ...usage, minutesUsed: 100 };
+    const view = renderPage({
+      state: "stopped",
+      result: { file: new File(["x"], "take.webm"), durationSeconds: 12 },
+    });
+
+    recorder.current = { ...(recorder.current as UseRecorder), state: "idle", result: null };
+    savejob.current = aJob({ phase: "processing" });
+    view.rerender(<RecordPage />);
+
+    expect(screen.queryByText(/There is nothing left to record with/)).not.toBeInTheDocument();
+    // And nothing else either: a page being handed over has nothing to say.
+    expect(view.container).toBeEmptyDOMElement();
+  });
+
+  it("still says the allowance is spent when nothing is being handed over", async () => {
+    // The guard above must not swallow the refusal it exists to time.
+    usage = { ...usage, minutesUsed: 100 };
+
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByText(/There is nothing left to record with/)).toBeInTheDocument(),
+    );
+  });
+
   it("still asks for the microphone when nothing is being saved", () => {
     // The guard above must not swallow the ordinary arrival.
     renderPage();

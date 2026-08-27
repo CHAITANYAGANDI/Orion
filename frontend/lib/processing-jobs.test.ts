@@ -6,6 +6,8 @@ import {
   processingJobs,
   resetProcessingJobs,
   useProcessingJobs,
+  isOpening,
+  releaseOpening,
 } from "@/lib/processing-jobs";
 
 /**
@@ -138,3 +140,120 @@ describe("processing jobs", () => {
 });
 
 const KEY = "recallix:processing";
+
+/**
+ * The gap between tracking a job and arriving at its page.
+ *
+ * <p>Saving a recording does both in one breath, and it has to: watching must
+ * start the moment the meeting exists, or a save followed by a wander somewhere
+ * else loses the completion. But a route change is not instant, and until it
+ * lands the pathname is still the page being left — so the dock's rule ("not
+ * the meeting you are looking at") cannot yet see what is about to be on
+ * screen, and drew a bar for the length of the navigation. A flash in the
+ * corner, at the exact moment of a successful save.
+ *
+ * <p>The fix is a fact, not a delay: where the job set off from. Everything
+ * below is about it being released reliably, because a job stuck as "opening"
+ * would be a job that is watched and never shown.
+ */
+describe("a job whose page is being opened", () => {
+  beforeEach(() => {
+    resetProcessingJobs();
+    window.sessionStorage.clear();
+  });
+
+  it("is watched from the moment it is tracked, exactly as any other", () => {
+    // The half that must not be traded away for the half below.
+    trackProcessing("mtg_1", "/record");
+
+    expect(processingJobs()).toEqual(["mtg_1"]);
+  });
+
+  it("is held back only while the user is still standing where it set off", () => {
+    trackProcessing("mtg_1", "/record");
+
+    expect(isOpening("mtg_1", "/record")).toBe(true);
+    expect(isOpening("mtg_1", "/meetings/mtg_1")).toBe(false);
+  });
+
+  it("holds nothing back when no origin was given", () => {
+    // The meeting page tracks what it is already showing. There is no
+    // navigation in flight, so there is nothing to wait for.
+    trackProcessing("mtg_1");
+
+    expect(isOpening("mtg_1", "/record")).toBe(false);
+  });
+
+  it("does not forget the origin when the same job is tracked again", () => {
+    // The meeting page tracks the id again on arrival. That call must not be
+    // what decides whether the dock held it back on the way there.
+    trackProcessing("mtg_1", "/record");
+    trackProcessing("mtg_1");
+
+    expect(isOpening("mtg_1", "/record")).toBe(true);
+  });
+
+  it("lets go as soon as the route is anywhere else", () => {
+    trackProcessing("mtg_1", "/record");
+
+    releaseOpening("/meetings/mtg_1");
+
+    expect(isOpening("mtg_1", "/record")).toBe(false);
+  });
+
+  it("lets go even when the navigation went somewhere unexpected", () => {
+    // Released on any change, not on arrival at the meeting. A push that is
+    // overtaken by a back button must not leave the job hidden for ever, and
+    // there is no timer here to rescue it.
+    trackProcessing("mtg_1", "/record");
+
+    releaseOpening("/home");
+
+    expect(isOpening("mtg_1", "/record")).toBe(false);
+  });
+
+  it("holds on while the route has not moved", () => {
+    // Called on every render of the dock, including the ones before the push
+    // resolves. Releasing there would be releasing immediately.
+    trackProcessing("mtg_1", "/record");
+
+    releaseOpening("/record");
+
+    expect(isOpening("mtg_1", "/record")).toBe(true);
+  });
+
+  it("re-renders the dock when it lets go", () => {
+    // Otherwise a job released after the navigation would stay hidden until
+    // something unrelated happened to re-render.
+    const { result } = renderHook(() => useProcessingJobs());
+    act(() => trackProcessing("mtg_1", "/record"));
+    const held = result.current;
+
+    act(() => releaseOpening("/home"));
+
+    expect(result.current).not.toBe(held);
+  });
+
+  it("says nothing on a navigation with nothing waiting", () => {
+    // Which is almost every navigation. A fresh snapshot each time would be a
+    // re-render of the dock on every route change for nothing.
+    const { result } = renderHook(() => useProcessingJobs());
+    act(() => trackProcessing("mtg_1"));
+    const before = result.current;
+
+    act(() => releaseOpening("/home"));
+
+    expect(result.current).toBe(before);
+  });
+
+  it("forgets the origin when the job is dropped", () => {
+    trackProcessing("mtg_1", "/record");
+
+    untrackProcessing("mtg_1");
+    trackProcessing("mtg_1");
+
+    // Tracked again later from somewhere else: it is an ordinary job now, and
+    // a stale origin would hide it on any return to /record.
+    expect(isOpening("mtg_1", "/record")).toBe(false);
+  });
+});
