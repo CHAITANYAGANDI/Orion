@@ -18,18 +18,21 @@ import userEvent from "@testing-library/user-event";
  * That last one used to belong to `useSaveJob`, which meant an imported file
  * never got it.
  */
-const { invalidateTags, dispatch, toastSuccess, toastError, meeting } = vi.hoisted(() => ({
+const { invalidateTags, dispatch, toastSuccess, toastError, meeting, usePathnameMock } =
+  vi.hoisted(() => ({
   invalidateTags: vi.fn((tags: unknown) => ({ type: "invalidate", tags })),
   dispatch: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   meeting: { current: undefined as unknown },
+  usePathnameMock: vi.fn(() => "/ask"),
 }));
 
 let emit: ((e: unknown) => void) | null = null;
 const deactivate = vi.fn();
 
 vi.mock("@/lib/hooks", () => ({ useAppDispatch: () => dispatch }));
+vi.mock("next/navigation", () => ({ usePathname: usePathnameMock }));
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }));
 vi.mock("@/lib/ws", () => ({
   subscribeMeetingStatus: (_id: string, handlers: { onEvent: (e: unknown) => void }) => {
@@ -42,7 +45,7 @@ vi.mock("@/lib/api", () => ({
   useGetMeetingQuery: () => ({ data: meeting.current }),
 }));
 
-import { ProcessingDock } from "@/components/processing-dock";
+import { ProcessingDock, visibleJobs } from "@/components/processing-dock";
 import {
   trackProcessing,
   processingJobs,
@@ -53,6 +56,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   emit = null;
   meeting.current = { id: "mtg_9", title: "Standup", status: "TRANSCRIBING" };
+  // Somewhere that is neither Home nor a meeting page, so the existing tests
+  // below see the dock they were written against.
+  usePathnameMock.mockReturnValue("/ask");
   resetProcessingJobs();
 });
 
@@ -191,5 +197,118 @@ describe("ProcessingDock", () => {
     // Two cards, not one showing the most recent. Importing three files in a
     // row is three jobs and the user is owed all three.
     expect(screen.getAllByRole("link")).toHaveLength(2);
+  });
+});
+
+/**
+ * The rule that stops one job drawing two bars.
+ *
+ * <p>The complaint was seeing "a large processing indicator in the meeting page
+ * AND a floating bottom-right processing card" for the same meeting. The dock
+ * is the one that yields, because the inline banner is attached to the thing it
+ * is about; and on Home it yields entirely, because every processing meeting is
+ * already saying so inside its own row.
+ */
+describe("where the dock is allowed to draw", () => {
+  it("drops the meeting whose page is on screen", () => {
+    expect(visibleJobs(["mtg_9", "mtg_8"], "/meetings/mtg_9")).toEqual(["mtg_8"]);
+  });
+
+  it("still shows other meetings while one is being viewed", () => {
+    // They are not on screen anywhere else, so hiding them would lose them.
+    expect(visibleJobs(["mtg_8"], "/meetings/mtg_9")).toEqual(["mtg_8"]);
+  });
+
+  it("draws nothing at all on Home", () => {
+    // Home communicates processing through the meeting row itself.
+    expect(visibleJobs(["mtg_9", "mtg_8"], "/home")).toEqual([]);
+  });
+
+  it("still draws everywhere else", () => {
+    expect(visibleJobs(["mtg_9"], "/ask")).toEqual(["mtg_9"]);
+    expect(visibleJobs(["mtg_9"], "/folder/prj_1")).toEqual(["mtg_9"]);
+  });
+
+  it("is not confused by a sub-route of the meeting page", () => {
+    expect(visibleJobs(["mtg_9"], "/meetings/mtg_9/anything")).toEqual([]);
+  });
+
+  it("does not match a different meeting whose id starts the same", () => {
+    // A prefix compare would hide mtg_9 while viewing mtg_99.
+    expect(visibleJobs(["mtg_9"], "/meetings/mtg_99")).toEqual(["mtg_9"]);
+  });
+
+  it("draws everything when the pathname is not known yet", () => {
+    // `usePathname` is null on the server pass; the safe answer is the dock the
+    // user already expects rather than a blank corner.
+    expect(visibleJobs(["mtg_9"], "")).toEqual(["mtg_9"]);
+  });
+});
+
+it("renders nothing for the meeting currently being viewed", () => {
+  usePathnameMock.mockReturnValue("/meetings/mtg_9");
+  trackProcessing("mtg_9");
+
+  const { container } = render(<ProcessingDock />);
+
+  // Exactly one processing UI in this view, and it is the page's own banner.
+  //
+  // Asserted on what is drawn rather than on an empty container: the job is
+  // still mounted and still being watched -- that is the point, and hiding it
+  // by unmounting is the bug this replaced. The wrapper collapses via
+  // `empty:hidden`.
+  expect(container.textContent).toBe("");
+  expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+});
+
+/**
+ * Hidden is not the same as unwatched.
+ *
+ * <p>The bug: the dock returned null when there was nothing to draw, which also
+ * unmounted the watcher — no poll, no toast, no cache invalidation. A meeting
+ * that finished while the user sat on Home was never noticed, so its row went on
+ * saying "Processing" over a meeting that was ready.
+ */
+describe("watching where it does not draw", () => {
+  it("still settles a meeting that finishes while the user is on Home", async () => {
+    usePathnameMock.mockReturnValue("/home");
+    trackProcessing("mtg_9");
+    const { container } = render(<ProcessingDock />);
+
+    // Nothing on screen — Home says it in the row.
+    expect(container.textContent).toBe("");
+
+    await stage("READY", 100);
+
+    // But the job was watched all along: the list Home renders from is
+    // refetched, which is what stops the row claiming to still be processing.
+    expect(invalidateTags).toHaveBeenCalledWith([{ type: "Meeting", id: "mtg_9" }, "Meetings"]);
+    await waitFor(() => expect(processingJobs()).not.toContain("mtg_9"));
+  });
+
+  it("still settles the meeting whose own page is open", async () => {
+    // The page has its own banner and its own poll, but the tracker must still
+    // let go of the job — otherwise it is watched for the life of the tab.
+    usePathnameMock.mockReturnValue("/meetings/mtg_9");
+    trackProcessing("mtg_9");
+    const { container } = render(<ProcessingDock />);
+
+    expect(container.textContent).toBe("");
+
+    await stage("READY", 100);
+
+    await waitFor(() => expect(processingJobs()).not.toContain("mtg_9"));
+  });
+
+  it("draws the visible one and only watches the rest", async () => {
+    usePathnameMock.mockReturnValue("/meetings/mtg_9");
+    trackProcessing("mtg_9");
+    trackProcessing("mtg_8");
+
+    render(<ProcessingDock />);
+
+    // One card: the meeting being viewed says it on its own page.
+    expect(screen.getAllByRole("link")).toHaveLength(1);
   });
 });

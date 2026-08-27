@@ -124,18 +124,38 @@ interface Run {
  * detected as a meeting leaving a terminal status rather than by anyone
  * remembering to clear something.
  *
- * <p>One honest limitation: opening a page mid-transcription starts the stage
- * clock at that moment, so the estimate begins from the floor again. Nothing
- * stored says when the stage actually began, and the clamp means this can only
- * ever under-report.
+ * <p><b>The memory belongs to the meeting, not to the component.</b> It used to
+ * live in a `useRef`, which meant it died on unmount — and unmount is what a
+ * navigation is. Going Home and back put `shown` to 0 and restarted the stage
+ * clock, so the bar rewound to the stage floor every time: 6% → leave → return →
+ * 6%, on a meeting that had been running for four minutes. Worse, the same
+ * meeting drawn in two places at once (the list row and the docked bar) kept two
+ * unrelated numbers for one job.
+ *
+ * <p>Keyed by meeting id in a module map instead, so every surface reads the one
+ * number and none of them can rewind it. Same shape as lib/active-chat and
+ * lib/processing-jobs, and the same lifetime: it outlives a render, and it dies
+ * on reload.
+ *
+ * <p>One honest limitation remains, and it is deliberately not fixed here: a
+ * full page reload starts the stage clock again, because nothing stored says
+ * when the stage actually began. Persisting the elapsed time would let a tab
+ * reopened an hour later ease straight to the band ceiling and promise a finish
+ * that is not close. The clamp means this can only ever under-report.
  */
+const runs = new Map<string, Run>();
+
+/** Forget every meeting's bar. Exists so tests start from a clean sheet. */
+export function resetMeetingProgress(): void {
+  runs.clear();
+}
+
 export function useMeetingProgress(
   meetingId: string,
   status: MeetingStatus,
   reported: number,
 ): number {
   const terminal = isTerminal(status);
-  const run = React.useRef<Run>({ id: "", shown: 0, stage: null, since: 0, settled: false });
   const [, repaint] = React.useReducer((n: number) => n + 1, 0);
 
   // Only while something is moving. A finished meeting has nothing to redraw,
@@ -148,11 +168,20 @@ export function useMeetingProgress(
   }, [terminal]);
 
   const now = Date.now();
-  const state = run.current;
+  let state = runs.get(meetingId);
+  if (!state) {
+    state = { id: meetingId, shown: 0, stage: null, since: now, settled: false };
+    runs.set(meetingId, state);
+  }
 
-  const restarted = state.id !== meetingId || (state.settled && !terminal);
-  if (restarted) {
-    state.id = meetingId;
+  // A reprocess is the one case where the bar is *supposed* to rewind: a
+  // finished meeting put back to the beginning. Detected as a meeting leaving a
+  // terminal status rather than by anyone remembering to clear something.
+  //
+  // "A different meeting" is no longer one of these cases, because the map is
+  // keyed by meeting — which is what stops one job's number being handed to the
+  // next meeting the user happens to open.
+  if (state.settled && !terminal) {
     state.shown = 0;
     state.stage = null;
     state.since = now;

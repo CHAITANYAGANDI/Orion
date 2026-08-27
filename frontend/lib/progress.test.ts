@@ -1,8 +1,14 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { renderHook, act } from "@testing-library/react";
-import { clampToStage, easeWithin, stageBand, useMeetingProgress } from "@/lib/progress";
+import {
+  clampToStage,
+  easeWithin,
+  resetMeetingProgress,
+  stageBand,
+  useMeetingProgress,
+} from "@/lib/progress";
 import { statusProgress } from "@/lib/format";
 import type { MeetingStatus } from "@/lib/types";
 
@@ -199,6 +205,11 @@ function follow(id: string, status: MeetingStatus, reported: number) {
 }
 
 describe("useMeetingProgress", () => {
+  // The bar's memory belongs to the meeting rather than to the component that
+  // draws it, so it survives a navigation -- which means it also survives from
+  // one test into the next, and every test here uses "mtg_1".
+  beforeEach(() => resetMeetingProgress());
+
   it("never goes backwards across a real run, polls included", () => {
     const { result, rerender } = follow("mtg_1", "QUEUED", statusProgress("QUEUED"));
     const seen = [result.current];
@@ -288,5 +299,84 @@ describe("useMeetingProgress", () => {
       vi.advanceTimersByTime(10 * 60_000);
     });
     expect(result.current).toBe(100);
+  });
+});
+
+/**
+ * Leaving the page and coming back.
+ *
+ * <p>The bug, reported from a real meeting: the bar read 6%, the user went to
+ * Home and came back, and it read 6% again — on a job that had been running for
+ * minutes. Then Home showed 5%, then the meeting showed 5%, back and forth,
+ * because each surface started a fresh clock on mount.
+ *
+ * <p>The cause was that the memory lived in a `useRef`, and a navigation is an
+ * unmount. It is keyed by meeting id in a module map now, so every surface reads
+ * the same number and none of them can rewind it.
+ */
+describe("surviving a navigation", () => {
+  beforeEach(() => resetMeetingProgress());
+
+  it("does not rewind when the component is unmounted and mounted again", () => {
+    vi.useFakeTimers();
+    try {
+      const first = follow("mtg_nav", "TRANSCRIBING", statusProgress("TRANSCRIBING"));
+      // Four minutes into the stage, so the estimate has climbed well clear of
+      // the 5% floor.
+      act(() => void vi.advanceTimersByTime(240_000));
+      const before = first.result.current;
+      expect(before).toBeGreaterThan(20);
+
+      // Going to Home is an unmount; coming back is a fresh mount.
+      first.unmount();
+      const second = follow("mtg_nav", "TRANSCRIBING", statusProgress("TRANSCRIBING"));
+
+      expect(second.result.current).toBeGreaterThanOrEqual(before);
+      // The specific number from the report: it must not be the stage floor.
+      expect(second.result.current).not.toBe(statusProgress("TRANSCRIBING"));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows one number to two surfaces watching the same meeting", () => {
+    // The list row and the docked bar are both drawing the same job. Two
+    // independent clocks would put two different percentages on one meeting.
+    vi.useFakeTimers();
+    try {
+      const row = follow("mtg_two", "TRANSCRIBING", statusProgress("TRANSCRIBING"));
+      act(() => void vi.advanceTimersByTime(60_000));
+      const dock = follow("mtg_two", "TRANSCRIBING", statusProgress("TRANSCRIBING"));
+
+      expect(dock.result.current).toBe(row.result.current);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still gives a different meeting its own clock", () => {
+    // Sharing by id, not globally: opening a second meeting must not inherit
+    // the first one's percentage.
+    vi.useFakeTimers();
+    try {
+      const a = follow("mtg_a", "TRANSCRIBING", statusProgress("TRANSCRIBING"));
+      act(() => void vi.advanceTimersByTime(240_000));
+      expect(a.result.current).toBeGreaterThan(20);
+
+      const b = follow("mtg_b", "QUEUED", statusProgress("QUEUED"));
+
+      expect(b.result.current).toBeLessThanOrEqual(stageBand("QUEUED").ceiling);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still rewinds for a reprocess, which is the one time it should", () => {
+    const { result, rerender } = follow("mtg_re", "READY", 100);
+    expect(result.current).toBe(100);
+
+    rerender({ meetingId: "mtg_re", status: "QUEUED", reported: statusProgress("QUEUED") });
+
+    expect(result.current).toBeLessThanOrEqual(stageBand("QUEUED").ceiling);
   });
 });

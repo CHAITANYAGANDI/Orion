@@ -73,6 +73,13 @@ import { SidePane, toggleSidePaneExpanded, useSidePane } from "@/components/side
 import { Button } from "@/components/ui/button";
 import { useRecordingJob } from "@/lib/recording-context";
 import { ProcessingCard } from "@/components/processing-card";
+import {
+  ProcessingSummary,
+  ProcessingTranscript,
+  ProcessingActionItems,
+  ProcessingChatRail,
+} from "@/components/processing-placeholders";
+import { revealPlan } from "@/lib/processing-stages";
 import { trackProcessing } from "@/lib/processing-jobs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -388,9 +395,43 @@ export default function MeetingDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
 
-  const summary = useGetSummaryQuery(id, { skip: !ready });
-  const transcript = useGetTranscriptQuery(id, { skip: !ready });
-  const actions = useGetMeetingActionItemsQuery(id, { skip: !ready });
+  /*
+   * Asked for while the meeting is still being made, not only once it is READY.
+   *
+   * These three used to be skipped until `ready`, which is what made the page a
+   * progress card with nothing behind it: there was no data because nothing had
+   * asked for any. Skipping now means only "this meeting failed, there will
+   * never be anything" -- so whether a transcript exists is a question that gets
+   * answered rather than assumed, and the stage strip below is reading a fact.
+   *
+   * On today's backend `CallbackService.applyResult` writes the transcript, the
+   * summary, the action items and the READY status in one transaction, so in
+   * practice all three arrive together. That is deliberately not baked in here:
+   * the UI reveals whatever exists whenever it exists, so a backend that starts
+   * persisting the transcript earlier needs no change on this page.
+   */
+  const summary = useGetSummaryQuery(id, { skip: failed });
+  const transcript = useGetTranscriptQuery(id, { skip: failed });
+  const actions = useGetMeetingActionItemsQuery(id, { skip: failed });
+  // What actually exists, which is what every placeholder below keys off.
+  const hasTranscript = (transcript.data?.segments?.length ?? 0) > 0;
+  const hasSummary = Boolean(summary.data);
+  /** Still being made. Distinct from `failed`, which has its own screen. */
+  const processing = !terminal;
+  /*
+   * What each area shows, decided in one place from what actually exists.
+   *
+   * Pure and tested on its own (lib/processing-stages), because it is the part
+   * that regresses quietly: one `&&` in the wrong place turns "generating your
+   * summary" back into "No summary available", which is the message this whole
+   * change exists to stop showing over a summary that is being written.
+   */
+  const view = revealPlan({
+    status,
+    reported: live?.progress,
+    hasTranscript,
+    hasSummary,
+  });
   // The tab counts what is left, not what was found. "Action items 6" beside a
   // list where five are ticked off reads as six things to do.
   const openActions = (actions.data ?? []).filter((a) => a.status !== "DONE").length;
@@ -866,6 +907,11 @@ export default function MeetingDetailPage() {
         <ProcessingCard
           status={status}
           progress={percent}
+          // The *reported* progress, not the eased bar: the stage strip must
+          // never tick a stage because a timer moved. See lib/processing-stages.
+          reported={live?.progress}
+          hasTranscript={hasTranscript}
+          hasSummary={hasSummary}
           message={live?.message}
           onStop={stoppable ? () => void stopProcessing() : undefined}
           stopping={recordingJob.stopping}
@@ -883,7 +929,15 @@ export default function MeetingDetailPage() {
         </Card>
       )}
 
-      {ready && (
+      {/*
+        * Rendered while processing too, where this used to be `ready &&`.
+        *
+        * The layout, the tabs and the chat rail are the same components in the
+        * same places; only what each *shows* differs while its data is missing.
+        * A failed meeting still gets nothing -- it has its own card above, and
+        * skeletons over a failure are the "spinning for ever" case.
+        */}
+      {view.content && (
         /*
          * Two columns and two tabs, where there were four tabs and one column.
          *
@@ -906,7 +960,10 @@ export default function MeetingDetailPage() {
                 of it. Only on Summary: it rewrites the brief, and offering it
                 over a transcript it cannot change would be a control that does
                 nothing to what is on screen. */}
-            {tab === "summary" && (
+            {/* Only once there is a summary to rewrite. Offering a template
+                picker over a brief that does not exist yet is a control that
+                cannot do anything. */}
+            {tab === "summary" && hasSummary && (
               <TemplatePicker meetingId={id} current={summary.data?.templateSlug ?? "general"} />
             )}
 
@@ -956,6 +1013,9 @@ export default function MeetingDetailPage() {
             <SummaryPanel
               meetingId={id}
               loading={summary.isLoading}
+              // "No summary available" is a statement about a finished meeting.
+              // While one is being made it is not merely unhelpful, it is wrong.
+              pending={view.summary === "ready" || view.summary === "empty" ? undefined : view.summary}
               summary={summary.data}
               translation={showing}
               onSeek={playFrom}
@@ -1003,6 +1063,8 @@ export default function MeetingDetailPage() {
                       />
                     ))}
                   </ul>
+                ) : view.actionItems !== "ready" ? (
+                  <ProcessingActionItems ready={view.actionItems === "extracting"} />
                 ) : (
                   <EmptyText>No action items were extracted.</EmptyText>
                 )}
@@ -1063,6 +1125,11 @@ export default function MeetingDetailPage() {
                   </CardContent>
                 </Card>
               )
+            ) : view.transcript === "preparing" ? (
+              /* Not an empty TranscriptPanel. An empty transcript looks like a
+                 recording that captured nothing, which is the one conclusion
+                 that must not be drawn from a meeting still being transcribed. */
+              <ProcessingTranscript />
             ) : editingTranscript ? (
               <TranscriptEditor
                 ref={transcriptEditor}
@@ -1099,6 +1166,20 @@ export default function MeetingDetailPage() {
             wants, instead of approximating both with a sticky offset and a
             clamp this page had to keep in step with the header's. */}
         <SidePane>
+          {/* The chat answers questions *about this transcript*, and on today's
+              backend the transcript does not exist until the meeting is READY --
+              `applyResult` writes it with the summary and the status in one
+              transaction. So there is nothing for it to ground an answer in
+              before then, and offering a composer would invite a question it
+              could only answer wrongly or not at all.
+
+              Keyed off the transcript rather than off the status, so this
+              unlocks the moment a transcript exists rather than the moment some
+              enum says READY. If the backend starts persisting it earlier, the
+              chat opens earlier with no change here. */}
+          {view.chat === "locked" ? (
+            <ProcessingChatRail />
+          ) : (
           <MeetingRail
             meetingId={id}
             title={m.title}
@@ -1111,6 +1192,7 @@ export default function MeetingDetailPage() {
             // brief is on screen and the player does not exist yet.
             onSeek={playFrom}
           />
+          )}
         </SidePane>
         </>
       )}
@@ -1367,12 +1449,22 @@ function SummarySectionView({
 function SummaryPanel({
   meetingId,
   loading,
+  pending,
   summary,
   translation,
   onSeek,
 }: {
   meetingId: string;
   loading: boolean;
+  /**
+   * Why there is no summary yet, while the meeting is still being made.
+   *
+   * <p>`"waiting"` is before the transcript exists -- there is nothing to
+   * summarise. `"generating"` is after it, while the model is writing. Undefined
+   * on a finished meeting, which is the only state in which "No summary
+   * available" is a true sentence.
+   */
+  pending?: "waiting" | "generating";
   summary?: SummaryResponse;
   /** The brief in the reading language, when one has been chosen. */
   translation?: MeetingTranslation;
@@ -1568,6 +1660,8 @@ function SummaryPanel({
               </>
             )}
           </>
+        ) : pending ? (
+          <ProcessingSummary stage={pending} />
         ) : (
           <EmptyText>No summary available.</EmptyText>
         )}

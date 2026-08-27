@@ -35,6 +35,8 @@ import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/status-badge";
+import { Badge } from "@/components/ui/badge";
+import { ProcessingRow, useLiveMeetingStatus } from "@/components/processing-row";
 import { ActionItemsPanel } from "@/components/action-items-panel";
 import {
   DateFilter,
@@ -45,7 +47,7 @@ import {
 import { useStickyPreference, type PreferenceCodec } from "@/lib/preferences";
 import { HomeChatPanel } from "@/components/home-chat-panel";
 import { SidePane } from "@/components/side-pane";
-import { formatDuration } from "@/lib/format";
+import { formatDuration, isTerminal } from "@/lib/format";
 import { groupByDay } from "@/lib/days";
 import type { MeetingResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -153,7 +155,24 @@ export default function HomePage() {
       // parameter is what the query actually does to it. One seam, here.
       unfiled: scope === "recent",
     },
-    { skip: !restored },
+    {
+      skip: !restored,
+      /*
+       * Ask again every time Home is opened.
+       *
+       * A meeting's status is the one field in this list that changes without
+       * anybody touching the list, and the cached copy is whatever was true
+       * when it was last fetched. Arriving back on Home after a meeting
+       * finished elsewhere would otherwise show it still "Processing" -- the
+       * row's socket only carries *changes*, so subscribing after the fact
+       * hears nothing at all.
+       *
+       * One request per visit, against a page of fifty rows. The docked
+       * watcher covers meetings this tab started or opened; this covers the
+       * rest, including one processed on another device.
+       */
+      refetchOnMountOrArgChange: true,
+    },
   );
   // Derived from `data` rather than from a `?? []` above it: the fallback array
   // is a new value on every render, which would make the grouping below rerun
@@ -340,6 +359,18 @@ function ScopePicker({
   );
 }
 
+/**
+ * One meeting in the list — and, while it is being made, how far along it is.
+ *
+ * <p>The processing row is the *same* row, not a separate section and not a
+ * card of its own: a meeting has one place in this list and keeps it from the
+ * moment it is saved. What is added is a status pill, the stage, a slim bar and
+ * a percentage, plus a warning-tinted border so it is findable among nine
+ * finished meetings without being a different kind of object. See
+ * components/processing-row.
+ *
+ * <p>Clicking it opens the normal meeting route, exactly as a finished one does.
+ */
 function ConversationRow({ meeting }: { meeting: MeetingResponse }) {
   const Icon =
     meeting.sourceType === "YOUTUBE"
@@ -348,11 +379,20 @@ function ConversationRow({ meeting }: { meeting: MeetingResponse }) {
         ? FileText
         : FileAudio;
 
+  // Live, because Home does not poll its list. Terminal meetings open no
+  // subscription -- see the hook.
+  const { status, reported } = useLiveMeetingStatus(meeting.id, meeting.status);
+  const processing = !isTerminal(status);
+
   return (
     <li>
       <Link
         href={`/meetings/${meeting.id}`}
-        className="flex gap-3 rounded-lg border p-3 transition-colors hover:bg-accent/40"
+        className={cn(
+          "flex gap-3 rounded-lg border p-3 transition-colors hover:bg-accent/40",
+          // Slightly more prominent, still plainly one of the rows around it.
+          processing && "border-warning/40 bg-warning/5",
+        )}
       >
         <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
           <Icon className="h-4 w-4" />
@@ -360,7 +400,14 @@ function ConversationRow({ meeting }: { meeting: MeetingResponse }) {
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-2">
             <span className="truncate font-medium">{meeting.title}</span>
-            {meeting.status !== "READY" && <StatusBadge status={meeting.status} />}
+            {/* One word while it runs. The stage is said in full underneath,
+                and a pill that changed from "Transcribing" to "Summarizing"
+                would be a second, competing statement of the same thing. */}
+            {processing ? (
+              <Badge variant="warning">Processing</Badge>
+            ) : (
+              status !== "READY" && <StatusBadge status={status} />
+            )}
           </span>
           <span className="mt-0.5 block text-xs text-muted-foreground">
             {new Date(meeting.createdAt).toLocaleTimeString(undefined, {
@@ -370,6 +417,9 @@ function ConversationRow({ meeting }: { meeting: MeetingResponse }) {
             {meeting.durationSeconds ? ` · ${formatDuration(meeting.durationSeconds)}` : ""}
             {meeting.tags.length > 0 ? ` · ${meeting.tags.slice(0, 3).join(", ")}` : ""}
           </span>
+          {processing && (
+            <ProcessingRow meetingId={meeting.id} status={status} reported={reported} />
+          )}
         </span>
       </Link>
     </li>

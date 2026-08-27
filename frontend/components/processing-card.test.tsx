@@ -49,9 +49,19 @@ describe("ProcessingCard", () => {
   it("says what is happening rather than leaving the bar to speak for itself", () => {
     render(<ProcessingCard status="QUEUED" progress={5} />);
 
-    // A bar with no words is a page that has stopped explaining itself.
+    // A bar with no words is a page that has stopped explaining itself. The
+    // stage sentence is derived from the reported status, not from the bar --
+    // see lib/processing-stages.
+    expect(screen.getByText("Preparing to process…")).toBeInTheDocument();
+  });
+
+  it("says the work does not need this page to stay open", () => {
+    // The complaint this whole change answers was somebody believing they had
+    // to sit on the page for transcription to continue.
+    render(<ProcessingCard status="TRANSCRIBING" progress={30} />);
+
     expect(
-      screen.getByText("This carries on in the background — you can close this page."),
+      screen.getByText("You can leave this page. Processing continues automatically."),
     ).toBeInTheDocument();
   });
 

@@ -25,6 +25,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, useGetMeetingQuery } from "@/lib/api";
@@ -37,9 +38,51 @@ import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import type { MeetingStatus } from "@/lib/types";
 
+/**
+ * Which jobs this dock is allowed to draw, given where the user is standing.
+ *
+ * <p>One rule, and it is the whole reason this function exists: **the same
+ * processing job must never draw two progress indicators in one view.**
+ *
+ * <ul>
+ *   <li>On a meeting's own page, that meeting's inline banner is the statement
+ *       — see components/processing-card — so the dock drops it. Other meetings
+ *       still processing are not on screen anywhere else, so they stay.</li>
+ *   <li>On Home, every processing meeting is already saying so inside its own
+ *       row, so the dock draws nothing at all.</li>
+ * </ul>
+ *
+ * <p>Exported for its own test: the rule is easier to get wrong than it looks,
+ * and it is invisible in a screenshot of the case that works.
+ */
+export function visibleJobs(jobs: readonly string[], pathname: string): string[] {
+  // Home lists them all with a bar in each row.
+  if (pathname === "/home") return [];
+  const onMeeting = /^\/meetings\/([^/]+)/.exec(pathname);
+  const viewing = onMeeting?.[1];
+  return jobs.filter((id) => id !== viewing);
+}
+
+/**
+ * Watching and drawing are different things, and conflating them was a bug.
+ *
+ * <p>This used to `return null` when there was nothing to draw — on Home, and
+ * for the meeting whose page was open. That did hide the duplicate bar, and it
+ * also unmounted the watcher: no poll, no completion toast, and no cache
+ * invalidation. So a meeting that finished while the user sat on Home was never
+ * noticed, and its row went on saying "Processing" over a meeting that was
+ * ready, until something unrelated happened to refetch the list.
+ *
+ * <p>Every tracked job is mounted now. `visible` decides only whether it puts
+ * anything on screen.
+ */
 export function ProcessingDock() {
-  const jobs = useProcessingJobs();
-  if (jobs.length === 0) return null;
+  const tracked = useProcessingJobs();
+  // `?? ""` because `usePathname` is null during the first server pass, and a
+  // dock that threw there would take the whole shell with it.
+  const pathname = usePathname() ?? "";
+  const shown = new Set(visibleJobs(tracked, pathname));
+  if (tracked.length === 0) return null;
 
   return (
     /*
@@ -47,10 +90,13 @@ export function ProcessingDock() {
      * `pointer-events-none` on the wrapper with a re-enabled child, the way the
      * audio player does it: every pixel of this is either a link or a button, so
      * there is nothing to click through to.
+     *
+     * `empty:hidden` because the wrapper is mounted whenever anything is being
+     * watched, including when every one of those is invisible here.
      */
-    <div className="no-print fixed bottom-4 right-4 z-40 flex w-[min(22rem,calc(100vw-2rem))] flex-col gap-2">
-      {jobs.map((id) => (
-        <JobCard key={id} meetingId={id} />
+    <div className="no-print fixed bottom-4 right-4 z-40 flex w-[min(22rem,calc(100vw-2rem))] flex-col gap-2 empty:hidden">
+      {tracked.map((id) => (
+        <JobCard key={id} meetingId={id} visible={shown.has(id)} />
       ))}
     </div>
   );
@@ -63,7 +109,7 @@ export function ProcessingDock() {
  * own query, its own socket subscription and its own progress clock — and hooks
  * cannot be called in a loop over a list that changes length.
  */
-function JobCard({ meetingId }: { meetingId: string }) {
+function JobCard({ meetingId, visible }: { meetingId: string; visible: boolean }) {
   const dispatch = useAppDispatch();
   const [live, setLive] = React.useState<{ status: MeetingStatus; progress: number } | null>(null);
 
@@ -122,6 +168,10 @@ function JobCard({ meetingId }: { meetingId: string }) {
   // Gone from the list on the next commit; drawing a finished bar for that
   // frame would flash "100% Ready" under a toast that already said so.
   if (done) return null;
+  // Every hook above has run: this job is still watched, polled and settled
+  // even where the bar is not wanted. Only the drawing is suppressed, and it is
+  // suppressed exactly where another part of the page is already saying it.
+  if (!visible) return null;
 
   return (
     <div className="rounded-lg border bg-card p-3 shadow-lg">

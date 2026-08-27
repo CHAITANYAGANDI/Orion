@@ -316,3 +316,81 @@ describe("filters that stay where you left them", () => {
     expect(lastQuery()?.unfiled).toBe(false);
   });
 });
+
+/**
+ * A meeting still being made, in the list it already belongs to.
+ *
+ * <p>The rule these hold: the processing row is the *same* row. Not a separate
+ * "Processing" section above the list, not a card of its own, and not a second
+ * bar floating over the corner of the page — one meeting, one place, which it
+ * keeps from the moment it is saved until it is ready.
+ */
+describe("a meeting that is still processing", () => {
+  it("says so in its own row, with the stage and how far along", () => {
+    rows = [aMeeting({ id: "mtg_p", title: "Recording — 8/26/2026", status: "SUMMARIZING" })];
+
+    render(<HomePage />);
+
+    // The pill is one word while it runs; the stage is said in full underneath.
+    expect(screen.getByText("Processing")).toBeInTheDocument();
+    expect(screen.getByText("Generating summary…")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Processing progress" }))
+      .toBeInTheDocument();
+  });
+
+  it("keeps the title, the time and the duration it always had", () => {
+    // Additive. The row does not become a different kind of object while it is
+    // being made.
+    rows = [aMeeting({ id: "mtg_p", title: "Recording — 8/26/2026",
+      status: "TRANSCRIBING", durationSeconds: 16 })];
+
+    render(<HomePage />);
+
+    expect(screen.getByText("Recording — 8/26/2026")).toBeInTheDocument();
+    expect(screen.getByText(/0m 16s/)).toBeInTheDocument();
+  });
+
+  it("still opens the normal meeting page when clicked", () => {
+    // Not a disabled row, and not a different route. The meeting exists and has
+    // a page from the moment it is created.
+    rows = [aMeeting({ id: "mtg_p", title: "Recording", status: "QUEUED" })];
+
+    render(<HomePage />);
+
+    expect(screen.getByRole("link", { name: /Recording/ })).toHaveAttribute(
+      "href",
+      "/meetings/mtg_p",
+    );
+  });
+
+  it("draws no processing UI on a finished meeting", () => {
+    rows = [aMeeting({ id: "mtg_r", title: "Done", status: "READY" })];
+
+    render(<HomePage />);
+
+    expect(screen.queryByText("Processing")).not.toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+  });
+
+  it("draws no processing UI on a failed meeting either", () => {
+    // FAILED is terminal. A bar over it would be a job that is going to finish.
+    rows = [aMeeting({ id: "mtg_f", title: "Broken", status: "FAILED" })];
+
+    render(<HomePage />);
+
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    expect(screen.getByText("Failed")).toBeInTheDocument();
+  });
+
+  it("shows one bar per processing meeting and none for the rest", () => {
+    rows = [
+      aMeeting({ id: "mtg_a", title: "One", status: "TRANSCRIBING" }),
+      aMeeting({ id: "mtg_b", title: "Two", status: "READY" }),
+      aMeeting({ id: "mtg_c", title: "Three", status: "EXTRACTING" }),
+    ];
+
+    render(<HomePage />);
+
+    expect(screen.getAllByRole("progressbar")).toHaveLength(2);
+  });
+});
