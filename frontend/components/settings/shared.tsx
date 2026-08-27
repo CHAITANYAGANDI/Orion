@@ -34,11 +34,17 @@ export function ToggleRow({
   );
 }
 
+/**
+ * Why a setting could not be saved.
+ *
+ * <p>The server's own message when it wrote one — those are sentences meant to
+ * be read. Never the `Error`: "Failed to fetch" and friends describe the
+ * transport, not the thing the user just tried to change.
+ */
 export function settingsError(err: unknown): string {
   if (typeof err === "object" && err && "data" in err) {
     const data = (err as { data?: { message?: string } }).data;
     if (data?.message) return data.message;
   }
-  if (err instanceof Error) return err.message;
   return "Couldn't save that.";
 }

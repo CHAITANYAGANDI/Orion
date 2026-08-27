@@ -109,6 +109,16 @@ export function save(blob: Blob, filename: string): void {
 }
 
 /**
+ * A failure the server explained in words.
+ *
+ * <p>Distinguished from every other export failure by its type rather than by
+ * inspecting the text, so a toast can show this one and refuse the rest.
+ * `UsageLimitService` and the export controller write these sentences to be
+ * read; a rejected fetch or a status code is not one of them.
+ */
+export class ExportError extends Error {}
+
+/**
  * Fetch an authenticated file and put it on the disk.
  *
  * <p>Shared by the two downloads that go through the API rather than through a
@@ -128,7 +138,12 @@ async function fetchAndSave(path: string, fallbackName: string): Promise<void> {
     } catch {
       message = "";
     }
-    throw new Error(message || `Download failed (${response.status})`);
+    // Two different failures, and they are thrown as two different types so
+    // the caller does not have to guess. `ExportError` carries a sentence the
+    // server wrote to be read; a plain Error carries a status code, which is
+    // not something to put in front of anybody.
+    if (message) throw new ExportError(message);
+    throw new Error(`Download failed (${response.status})`);
   }
   save(
     await response.blob(),

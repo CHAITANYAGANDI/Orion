@@ -79,8 +79,25 @@ function JobWatcher({ meetingId }: { meetingId: string }) {
     return () => sub.deactivate();
   }, [meetingId]);
 
-  const status: MeetingStatus = (live ?? data?.status ?? "QUEUED") as MeetingStatus;
-  const done = isTerminal(status);
+  const status: MeetingStatus | null = live ?? (data?.status as MeetingStatus | undefined) ?? null;
+  const done = status !== null && isTerminal(status);
+
+  /*
+   * Whether this tab ever saw the meeting running.
+   *
+   * <p>The toast announces a *transition*, and this is what makes it one. An id
+   * can arrive here already finished — the meeting page tracks whatever it
+   * opens, and `sessionStorage` hands back whatever the tab was watching before
+   * a reload — and without this the first poll came back READY and announced a
+   * meeting that had been ready for an hour. Opening a processed meeting
+   * greeted you with "it is ready", which is a notification about nothing
+   * having happened.
+   *
+   * <p>A ref rather than state: nothing renders from it, and a re-render in the
+   * same tick as the status arriving would race the effect below.
+   */
+  const sawRunning = React.useRef(false);
+  if (status !== null && !isTerminal(status)) sawRunning.current = true;
 
   /*
    * Settle once, then stop watching.
@@ -95,21 +112,23 @@ function JobWatcher({ meetingId }: { meetingId: string }) {
     if (!done || settled.current) return;
     settled.current = true;
     dispatch(api.util.invalidateTags([{ type: "Meeting", id: meetingId }, "Meetings"]));
-    const title = data?.title?.trim();
-    if (status === "FAILED") {
-      toast.error(
-        title ? `Processing failed for "${title}".` : "Processing failed.",
-        { description: data?.errorMessage || undefined },
-      );
-    } else {
-      toast.success(title ? `"${title}" is ready.` : "Your meeting is ready.", {
-        // The whole reason the toast is worth having: it arrives while you are
-        // somewhere else, so it has to carry the way back.
-        action: { label: "Open", onClick: () => { window.location.href = `/meetings/${meetingId}`; } },
-      });
-    }
+    // Untracked either way. A finished meeting is not something to keep
+    // polling, whether or not there was anything worth saying about it.
     untrackProcessing(meetingId);
-  }, [done, status, meetingId, data?.title, data?.errorMessage, dispatch]);
+    if (!sawRunning.current) return;
+    const title = data?.title?.trim();
+    // No `description` on the failure, and no Open button on the success.
+    // The server's `errorMessage` is written for a log -- it names providers
+    // and status codes -- and a button that appears over whatever is being read
+    // and vanishes on a timer is one nobody can rely on reaching. The meeting
+    // is in the list either way, and the page it opens says what went wrong in
+    // full.
+    if (status === "FAILED") {
+      toast.error(title ? `Couldn't process "${title}".` : "Couldn't process that recording.");
+    } else {
+      toast.success(title ? `"${title}" is ready.` : "Your meeting is ready.");
+    }
+  }, [done, status, meetingId, data?.title, dispatch]);
 
   return null;
 }

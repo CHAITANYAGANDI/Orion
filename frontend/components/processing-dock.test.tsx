@@ -93,36 +93,33 @@ describe("the processing watcher", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("says so when a meeting is ready, and carries the way back", async () => {
-    // It arrives while you are somewhere else, so a toast with no way into the
-    // meeting is a notification you have to go and act on from memory.
+  it("says so when a meeting becomes ready", async () => {
     trackProcessing("mtg_9");
     render(<ProcessingDock />);
 
     await stage("READY", 100);
 
-    expect(toastSuccess).toHaveBeenCalledWith(
-      '"Standup" is ready.',
-      expect.objectContaining({ action: expect.objectContaining({ label: "Open" }) }),
-    );
+    // One sentence and nothing else. It carried an Open button, which is a
+    // control appearing unannounced over whatever is being read and leaving on
+    // a timer -- and the meeting is one click away in the list regardless.
+    expect(toastSuccess).toHaveBeenCalledWith('"Standup" is ready.');
   });
 
-  it("says so when a meeting fails, with the reason the server gave", async () => {
+  it("says so when a meeting fails, without quoting the server at anybody", async () => {
     meeting.current = {
       id: "mtg_9",
       title: "Standup",
       status: "TRANSCRIBING",
-      errorMessage: "The audio could not be decoded.",
+      errorMessage: "AssemblyAI returned 422: unsupported sample rate",
     };
     trackProcessing("mtg_9");
     render(<ProcessingDock />);
 
     await stage("FAILED", 100);
 
-    expect(toastError).toHaveBeenCalledWith(
-      'Processing failed for "Standup".',
-      { description: "The audio could not be decoded." },
-    );
+    // `errorMessage` is written for a log. The meeting's own page shows it in
+    // full, where there is room for it and where somebody went looking.
+    expect(toastError).toHaveBeenCalledWith(`Couldn't process "Standup".`);
   });
 
   it("refreshes the list Home renders from", async () => {
@@ -160,10 +157,14 @@ describe("the processing watcher", () => {
   it("settles a meeting that finishes on the poll alone", async () => {
     // A proxy that drops the WebSocket leaves the socket silent for ever. The
     // poll is what makes the job finish rather than being watched all day.
-    meeting.current = { id: "mtg_9", title: "Standup", status: "READY" };
+    meeting.current = { id: "mtg_9", title: "Standup", status: "TRANSCRIBING" };
     trackProcessing("mtg_9");
+    const view = render(<ProcessingDock />);
 
-    render(<ProcessingDock />);
+    meeting.current = { id: "mtg_9", title: "Standup", status: "READY" };
+    await act(async () => {
+      view.rerender(<ProcessingDock />);
+    });
 
     await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
     expect(processingJobs()).not.toContain("mtg_9");
@@ -176,5 +177,67 @@ describe("the processing watcher", () => {
     await stage("READY", 100);
 
     await waitFor(() => expect(deactivate).toHaveBeenCalled());
+  });
+});
+
+/**
+ * A toast announces a change. Nothing changed here.
+ *
+ * <p>The complaint: opening a meeting that was processed days ago greeted you
+ * with "it is ready". Two things put it there. The meeting page tracks whatever
+ * it opens that is not finished — and `status` reads `CREATED` until the query
+ * answers, which is not finished — so a processed meeting was tracked for a
+ * frame. This watcher then took its first look, saw READY, and announced it.
+ *
+ * <p>The same thing happened to every id `sessionStorage` handed back after a
+ * reload, for meetings that had finished while the tab was closed.
+ *
+ * <p>So the rule is that a completion is announced only if this tab saw the
+ * meeting running first. Settling — untracking, and refreshing the list — still
+ * happens either way, because a finished meeting must not go on being polled.
+ */
+describe("announcing only what actually happened", () => {
+  it("says nothing about a meeting that was already finished when it arrived", async () => {
+    meeting.current = { id: "mtg_9", title: "Standup", status: "READY" };
+    trackProcessing("mtg_9");
+
+    render(<ProcessingDock />);
+
+    await waitFor(() => expect(processingJobs()).not.toContain("mtg_9"));
+    expect(toastSuccess).not.toHaveBeenCalled();
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it("says nothing about one that had already failed either", async () => {
+    meeting.current = { id: "mtg_9", title: "Standup", status: "FAILED" };
+    trackProcessing("mtg_9");
+
+    render(<ProcessingDock />);
+
+    await waitFor(() => expect(processingJobs()).not.toContain("mtg_9"));
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it("stops watching it all the same", async () => {
+    // The half that must survive the fix. A finished meeting left in the store
+    // is polled every five seconds for the life of the tab.
+    meeting.current = { id: "mtg_9", title: "Standup", status: "READY" };
+    trackProcessing("mtg_9");
+
+    render(<ProcessingDock />);
+
+    await waitFor(() => expect(processingJobs()).not.toContain("mtg_9"));
+    expect(invalidateTags).toHaveBeenCalled();
+  });
+
+  it("still announces one it watched cross the line", async () => {
+    // The guard must not swallow the case the toast exists for.
+    trackProcessing("mtg_9");
+    render(<ProcessingDock />);
+
+    await stage("SUMMARIZING", 70);
+    await stage("READY", 100);
+
+    expect(toastSuccess).toHaveBeenCalledWith('"Standup" is ready.');
   });
 });

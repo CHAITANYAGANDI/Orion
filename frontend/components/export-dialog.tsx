@@ -28,6 +28,7 @@ import { useLazyGetAudioDownloadQuery } from "@/lib/api";
 import {
   downloadExport,
   openSignedDownload,
+  ExportError,
   type CombineMode,
   type ExportFormat,
 } from "@/lib/exports";
@@ -170,7 +171,11 @@ export function ExportDialog({
       }
       onOpenChange(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not export this meeting.");
+      // The server's sentence when it wrote one -- "this meeting has not been
+      // translated into German" is the whole of what somebody needs. Never a
+      // bare `e.message`, which for a dropped connection or a 500 is "Failed to
+      // fetch" or "Download failed (500)": true, and no help to anyone.
+      toast.error(e instanceof ExportError ? e.message : "Couldn't export this meeting.");
     } finally {
       setBusy(false);
     }

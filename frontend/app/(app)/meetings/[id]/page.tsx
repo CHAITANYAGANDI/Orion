@@ -278,6 +278,14 @@ export default function MeetingDetailPage() {
   }, []);
 
   const status: MeetingStatus = (live?.status ?? meeting.data?.status ?? "CREATED") as MeetingStatus;
+  /**
+   * Whether that status is a fact or the placeholder above it.
+   *
+   * <p>`"CREATED"` is what this reads before the query resolves, which is every
+   * first render. It is a real status, so nothing downstream can tell it apart
+   * from the server having said so — see where this is used below.
+   */
+  const statusKnown = Boolean(live?.status ?? meeting.data?.status);
   const ready = status === "READY";
   const failed = status === "FAILED";
   const terminal = isTerminal(status);
@@ -307,17 +315,25 @@ export default function MeetingDetailPage() {
   /**
    * Opening a meeting that is still being made is enough to start following it.
    *
-   * <p>Without this the dock only knew about jobs started in this tab, so a
+   * <p>Without this the watcher only knew about jobs started in this tab, so a
    * recording made on a phone — or one whose tab was reloaded — showed a
    * progress banner here and nothing anywhere else, and navigating away lost
-   * sight of it entirely. Tracking is idempotent and the dock drops the id
+   * sight of it entirely. Tracking is idempotent and the watcher drops the id
    * itself once the meeting settles, so this is safe to run on every render
    * where the meeting is unfinished.
+   *
+   * <p><b>Not until the status is actually known.</b> `status` falls back to
+   * `CREATED` while the query is in flight, which is not terminal — so opening
+   * a meeting that finished last week tracked it for the frame before the
+   * server answered, and the watcher then announced "it is ready" about a
+   * meeting nobody had been waiting for. The watcher no longer announces a
+   * completion it did not see happen either; this is the other half, and it
+   * stops the pointless poll as well as the pointless toast.
    */
   React.useEffect(() => {
-    if (terminal) return;
+    if (!statusKnown || terminal) return;
     trackProcessing(id);
-  }, [terminal, id]);
+  }, [statusKnown, terminal, id]);
 
   React.useEffect(() => {
     const sub = subscribeMeetingStatus(id, {

@@ -23,7 +23,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <ReduxProvider store={storeRef.current}>
       <AuthProvider>
         {children}
-        <Toaster position="top-right" richColors />
+        {/* Position and styling live in the component, so there is one place
+            a toast is described rather than a prop here and classes there. */}
+        <Toaster />
       </AuthProvider>
     </ReduxProvider>
   );

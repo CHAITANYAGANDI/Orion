@@ -105,12 +105,19 @@ export function putWithProgress(
  * this account" beats "Something went wrong", and the allowance refusal is the
  * one somebody is most likely to hit here. The server writes those sentences
  * (UsageLimitService) precisely so this can pass them straight through.
+ *
+ * <p><b>An `Error` is not one of those sentences, and is no longer used as
+ * one.</b> A rejected fetch carries "Failed to fetch"; an aborted XHR carries
+ * "Upload cancelled"; a parse failure carries whatever the runtime called it.
+ * None of them tells somebody what to do, and all of them read as the app
+ * leaking. When the server has not written a message, the sentence below is
+ * the honest one: it says the upload did not happen and that trying again is
+ * the next move.
  */
 export function uploadError(err: unknown): string {
   if (typeof err === "object" && err && "data" in err) {
     const data = (err as { data?: { message?: string } }).data;
     if (data?.message) return data.message;
   }
-  if (err instanceof Error) return err.message;
-  return "Something went wrong";
+  return "That upload didn't go through. Please try again.";
 }

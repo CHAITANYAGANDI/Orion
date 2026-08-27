@@ -85,7 +85,7 @@ export function ActionItemRow({
   const [patch, { isLoading: saving }] = usePatchActionItemMutation();
   const done = item.status === "DONE";
 
-  async function update(body: Parameters<typeof patch>[0]["body"], failure = "Update failed.") {
+  async function update(body: Parameters<typeof patch>[0]["body"], failure = "Couldn't update that action item.") {
     try {
       await patch({ id: item.id, body }).unwrap();
     } catch {

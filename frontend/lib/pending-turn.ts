@@ -209,9 +209,13 @@ export function usePendingTurn(
  *
  * <p>The request is not aborted by leaving, so the answer lands whatever the
  * browser is showing — but landing silently in a thread nobody is looking at is
- * the same as not landing. This is the notification for exactly that case, and
- * it carries the way back, because a toast that says "your answer is ready"
- * without saying where is a worse version of saying nothing.
+ * the same as not landing. This is the notification for exactly that case.
+ *
+ * <p>It carried an Open button, and does not any more. A control that appears
+ * unannounced over whatever is being read and then disappears on a timer is one
+ * you cannot rely on reaching; the conversation is where it always was, in the
+ * rail, and it is one click from anywhere. The toast says the answer is there
+ * and stops.
  *
  * <p>Silent when the user never left. The answer is on screen; a toast on top
  * of it would fire on every question anybody ever asked.
@@ -224,13 +228,6 @@ export function announceAnswer(askedOn: string): void {
   // Imported here rather than at the top: this file is otherwise free of UI
   // dependencies and is used by hooks that tests render without a toaster.
   void import("sonner").then(({ toast }) => {
-    toast.success("Your answer is ready.", {
-      action: {
-        label: "Open",
-        onClick: () => {
-          window.location.href = askedOn;
-        },
-      },
-    });
+    toast.success("Your answer is ready.");
   });
 }

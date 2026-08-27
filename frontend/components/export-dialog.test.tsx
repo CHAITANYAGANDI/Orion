@@ -46,6 +46,7 @@ vi.mock("@/lib/api", () => ({
 vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
 
 import { ExportDialog } from "@/components/export-dialog";
+import { ExportError } from "@/lib/exports";
 import type { SummaryResponse, TranscriptSegment } from "@/lib/types";
 
 const SUMMARY = {
@@ -327,7 +328,11 @@ describe("ExportDialog language", () => {
 
 describe("ExportDialog when it fails", () => {
   it("says what the server said", async () => {
-    downloadExport.mockRejectedValue(new Error("This meeting has not been translated into German"));
+    // `ExportError` is the type the fetch layer throws when the API wrote a
+    // sentence meant to be read. Those are shown as they are.
+    downloadExport.mockRejectedValue(
+      new ExportError("This meeting has not been translated into German"),
+    );
     open();
 
     await userEvent.click(screen.getByRole("button", { name: "Export" }));
@@ -337,6 +342,18 @@ describe("ExportDialog when it fails", () => {
         "This meeting has not been translated into German",
       ),
     );
+  });
+
+  it("does not put a transport failure in front of anybody", async () => {
+    // "Failed to fetch", "Download failed (500)", "NetworkError when attempting
+    // to fetch resource" -- all true, none of them something to act on, and all
+    // of them read as the app leaking rather than as an answer.
+    downloadExport.mockRejectedValue(new Error("Download failed (500)"));
+    open();
+
+    await userEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Couldn't export this meeting."));
   });
 
   it("stays open so the choice is not lost", async () => {
