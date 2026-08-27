@@ -117,17 +117,26 @@ public class NotificationService {
 
     /* ------------------------------- writing ------------------------------ */
 
-    /** A recording began — useful on a second tab, or on a phone in a pocket. */
-    @Transactional
-    public void recordingStarted(String userId) {
-        emit(userId, NotificationKind.RECORDING_STARTED,
-                "Recording started",
-                "Recallix is capturing audio. It becomes a meeting when you stop.",
-                null, null, "/record",
-                // At most one an hour: starting, stopping and restarting while
-                // finding a quiet room should not be three notifications.
-                "hour:" + Instant.now().getEpochSecond() / 3600);
-    }
+    /*
+     * Two announcements used to live here and no longer do: "Recording started"
+     * and "Processing started".
+     *
+     * Both told the reader something they had just done, on the device they had
+     * just done it on. Pressing Record puts a timer, a waveform and a red Stop
+     * button on screen; pressing Save puts the meeting in the list with its own
+     * stage and its own bar. Neither was news, and "Processing started — we'll
+     * tell you when the notes are ready" spent a row of the bell promising the
+     * row that follows it.
+     *
+     * They were also the only two that fired on *every* meeting, so between
+     * them they were most of what an ordinary afternoon left in the list --
+     * which is what made the ones that matter, a failure or an assignment, hard
+     * to find. What is left is the set that says something the reader was not
+     * there for.
+     *
+     * The enum constants survive them, because the kind is stored as its name
+     * and old rows still have to map. See NotificationKind#retired.
+     */
 
     /**
      * The identity of one thing happening once, during one processing run.
@@ -152,22 +161,6 @@ public class NotificationService {
      */
     private static String once(String event, String meetingId, int attempt) {
         return event + ":" + meetingId + ":" + attempt;
-    }
-
-    /**
-     * A meeting entered the pipeline.
-     *
-     * @param because how it got here — "uploaded", "imported", "reprocessed"
-     */
-    @Transactional
-    public void processingStarted(Meeting meeting, String because) {
-        emit(meeting.getUserId(), NotificationKind.PROCESSING_STARTED,
-                meeting.getTitle(),
-                "Being " + because + ". We'll tell you when the notes are ready.",
-                // Raised at enqueue, by the operation that allocated the
-                // attempt, so the row is the run being announced.
-                meeting.getId(), null, link(meeting),
-                once("processing-started", meeting.getId(), meeting.getProcessingAttempt()));
     }
 
     /** @param attempt the processing run the worker is reporting, from its callback */

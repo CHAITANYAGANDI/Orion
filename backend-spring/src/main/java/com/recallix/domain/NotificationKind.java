@@ -35,11 +35,16 @@ import java.util.Optional;
  */
 public enum NotificationKind {
 
-    /** A recording began — worth knowing on a second tab or another device. */
-    RECORDING_STARTED("Recording started", "when a recording starts"),
+    /**
+     * A recording began. <strong>Retired — nothing emits this any more.</strong>
+     */
+    RECORDING_STARTED("Recording started", "when a recording starts", true),
 
-    /** A meeting entered the pipeline: uploaded, imported or reprocessed. */
-    PROCESSING_STARTED("Processing started", "when a meeting starts processing"),
+    /**
+     * A meeting entered the pipeline. <strong>Retired — nothing emits this any
+     * more.</strong>
+     */
+    PROCESSING_STARTED("Processing started", "when a meeting starts processing", true),
 
     TRANSCRIPT_READY("Transcript ready", "when a transcript is ready"),
 
@@ -70,10 +75,44 @@ public enum NotificationKind {
 
     private final String label;
     private final String setting;
+    private final boolean retired;
 
     NotificationKind(String label, String setting) {
+        this(label, setting, false);
+    }
+
+    NotificationKind(String label, String setting, boolean retired) {
         this.label = label;
         this.setting = setting;
+        this.retired = retired;
+    }
+
+    /**
+     * Kept so old rows still map, but never emitted and never offered.
+     *
+     * <p>Two of these announced things the reader had just done on the device
+     * they were doing them on: pressing Record, and pressing Save. Each one
+     * cost a row in the bell, and "Processing started — we'll tell you when the
+     * notes are ready" cost one <em>per meeting</em> to promise the
+     * notification that follows it. Between them they were most of what a
+     * normal afternoon put in the list, and none of it was news.
+     *
+     * <p>Deleting the constants was the obvious move and is the wrong one: the
+     * kind is stored as its name, so every notification already written with
+     * one of these would stop mapping and take the whole list down with it. The
+     * value stays and the emission goes.
+     *
+     * <p>The settings switch goes too. A switch for something that can never
+     * happen is worse than no switch — it implies the opposite state is
+     * reachable.
+     */
+    public boolean retired() {
+        return retired;
+    }
+
+    /** Every kind still worth offering on the settings page. */
+    public static java.util.List<NotificationKind> active() {
+        return Arrays.stream(values()).filter(k -> !k.retired()).toList();
     }
 
     public String label() {

@@ -197,7 +197,6 @@ public class MeetingService {
 
         enqueueProcessing(meeting);
         audit.record(userId, "MEETING_CREATED", "meeting", meeting.getId());
-        notifications.processingStarted(meeting, "uploaded");
         return toResponse(meeting);
     }
 
@@ -1300,7 +1299,6 @@ public class MeetingService {
         translations.markStaleByMeetingId(meetingId);
         enqueueProcessing(meeting);
         audit.record(userId, "MEETING_REPROCESS", "meeting", meetingId);
-        notifications.processingStarted(meeting, "reprocessed");
         return new ReprocessResponse(meetingId, MeetingStatus.QUEUED);
     }
 

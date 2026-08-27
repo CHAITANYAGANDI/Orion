@@ -35,11 +35,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { Mic, Loader2, AlertTriangle, User, FileText, CalendarDays, Folder } from "lucide-react";
-import {
-  useRecordingStartedMutation,
-  useGetPreferencesQuery,
-  useGetProjectQuery,
-} from "@/lib/api";
+import { useGetPreferencesQuery, useGetProjectQuery } from "@/lib/api";
 import { useRecording, useRecordingJob, useRecordingSession } from "@/lib/recording-context";
 import type { LiveTurn } from "@/lib/use-live-transcript";
 import { Button } from "@/components/ui/button";
@@ -53,7 +49,6 @@ export default function RecordPage() {
   const recorder = useRecording();
   const session = useRecordingSession();
   const job = useRecordingJob();
-  const [announceRecording] = useRecordingStartedMutation();
   const allowance = useAllowance();
   const refusal = recordRefusal(allowance);
 
@@ -123,17 +118,19 @@ export default function RecordPage() {
   const handingOver = !started && held.current && job.phase !== "idle";
 
   /**
-   * Begin, and tell the server we did.
+   * Begin.
    *
-   * The microphone is the one thing the server cannot observe, and the point of
-   * telling it is the other devices: a laptop recording and a phone in a pocket
-   * are the same account. Fired and forgotten on purpose — a notification that
-   * could not be written must never be the reason a recording did not start.
+   * <p>Nothing is told. There was a fire-and-forget POST to
+   * {@code /recordings/started} here, whose only purpose was a "Recording
+   * started" notification for the account's other devices — and that
+   * notification is gone, because on the device doing the recording it
+   * announced a timer, a waveform and a red Stop button that are already on
+   * screen. It was one more row in a bell that had too many. The endpoint went
+   * with it; see NotificationKind#retired.
    */
   async function onStart() {
     if (recordRefusal(allowanceRef.current)) return;
     await recorder.start();
-    void announceRecording();
   }
 
   // Read inside onStart rather than closed over, because the mount effect below

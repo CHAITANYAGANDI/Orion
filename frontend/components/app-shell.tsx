@@ -65,7 +65,6 @@ import { usePaneWidth, type PaneBounds } from "@/lib/pane-size";
 import { PaneResizer } from "@/components/pane-resizer";
 import { SIDE_PANE_ID, toggleSidePane, useSidePane } from "@/components/side-pane";
 import { RecordingProvider, useRecording, useRecordingSession } from "@/lib/recording-context";
-import { useRecordingStartedMutation } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { NotificationBell } from "@/components/notification-bell";
 import { SearchCommand } from "@/components/search-command";
@@ -545,7 +544,6 @@ function RecordButton({ from }: { from: string }) {
   const recorder = useRecording();
   const session = useRecordingSession();
   const router = useRouter();
-  const [announceRecording] = useRecordingStartedMutation();
   const allowance = useAllowance();
   const refusal = recordRefusal(allowance);
 
@@ -568,12 +566,12 @@ function RecordButton({ from }: { from: string }) {
     // the meeting is created. Set every time, so a recording started from Home
     // cannot inherit the last one's folder.
     session.setReturnTo(returnPath(from));
-    void recorder.start().then(() => {
-      // The server cannot observe a microphone, and the point of telling it is
-      // the account's other devices. Fired and forgotten: a notification that
-      // could not be written must never be why a recording did not start.
-      void announceRecording();
-    });
+    // Nothing is reported. There was a fire-and-forget POST here whose only
+    // purpose was a "Recording started" notification for the account's other
+    // devices, and on this device it announced a timer, a waveform and a red
+    // Stop button already on screen -- one more row in a bell that had too
+    // many. See NotificationKind#retired.
+    void recorder.start();
   }
 
   return (

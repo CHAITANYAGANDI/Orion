@@ -37,6 +37,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -228,7 +229,10 @@ class ReprocessInvalidationTest {
                     .isInstanceOf(ApiException.class);
 
             verify(outbox, never()).enqueue(anyString(), anyString(), any());
-            verify(notifications, never()).processingStarted(any(), anyString());
+            // Nothing is announced either, and there is no longer a
+            // "processing started" notification to check for -- see
+            // NotificationKind#retired. The outbox is the enqueue.
+            verifyNoInteractions(notifications);
         }
 
         @Test

@@ -807,18 +807,6 @@ export const api = createApi({
     }),
 
     /**
-     * Say that a recording has begun.
-     *
-     * <p>The server cannot know this any other way — the microphone and the
-     * decision to press record are both in the tab. Fire-and-forget: a failed
-     * ping must never stop somebody recording.
-     */
-    recordingStarted: builder.mutation<void, void>({
-      query: () => ({ url: "/recordings/started", method: "POST" }),
-      invalidatesTags: [{ type: "Notifications", id: "COUNT" }],
-    }),
-
-    /**
      * A short-lived link to the original recording.
      *
      * Asked for on click rather than loaded with the meeting, because the link
@@ -1187,7 +1175,6 @@ export const {
   useMarkAllNotificationsReadMutation,
   useDeleteNotificationMutation,
   useClearNotificationsMutation,
-  useRecordingStartedMutation,
   useEraseAudioMutation,
   useEraseTranscriptMutation,
   useGetPrivacyOverviewQuery,

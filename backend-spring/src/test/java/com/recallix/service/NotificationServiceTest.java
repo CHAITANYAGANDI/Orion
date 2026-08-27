@@ -95,9 +95,9 @@ class NotificationServiceTest {
 
         @Test
         void neverWritesAKindThatWasSwitchedOff() {
-            user.setMutedNotifications(new ArrayList<>(List.of("PROCESSING_STARTED")));
+            user.setMutedNotifications(new ArrayList<>(List.of("SUMMARY_READY")));
 
-            service.processingStarted(meeting(), "uploaded");
+            service.summaryReady(meeting(), 1);
 
             // Not written rather than hidden on read: filtering at render time
             // means switching a kind back on floods the bell with a month of
@@ -145,7 +145,10 @@ class NotificationServiceTest {
 
         @Test
         void ignoresARequestWithNoUser() {
-            service.recordingStarted("");
+            Meeting orphan = meeting();
+            orphan.setUserId("");
+
+            service.summaryReady(orphan, 1);
 
             verify(notifications, never()).save(any());
         }
@@ -224,12 +227,39 @@ class NotificationServiceTest {
         }
 
         @Test
-        void keepsARunOfRecordingsToOne() {
-            service.recordingStarted(USER);
+        void saysNothingAtAllWhenAMeetingStartsProcessing() {
+            // "Processing started -- we'll tell you when the notes are ready"
+            // spent a row of the bell, on every meeting, promising the row that
+            // follows it. Pressing Save already puts the meeting in the list
+            // with its own stage and its own bar; the reader is looking at it.
+            //
+            // Asserted here as the absence of a method rather than of a call,
+            // which is the strongest form this can take: there is nothing left
+            // to invoke. The same went for "Recording started", which announced
+            // a microphone that is running on the screen in front of you.
+            assertThat(NotificationKind.RECORDING_STARTED.retired()).isTrue();
+            assertThat(NotificationKind.PROCESSING_STARTED.retired()).isTrue();
+        }
 
-            // Finding a quieter room and starting again should not be three
-            // rows; the key is the hour.
-            assertThat(written().getDedupeKey()).startsWith("hour:");
+        @Test
+        void keepsRetiredKindsAroundSoOldRowsStillMap() {
+            // The kind is stored as its name. Deleting the constant would stop
+            // every notification already written with one of these from
+            // mapping, and take the whole list down with it.
+            assertThat(NotificationKind.find("RECORDING_STARTED")).isPresent();
+            assertThat(NotificationKind.find("PROCESSING_STARTED")).isPresent();
+        }
+
+        @Test
+        void offersNoSwitchForSomethingThatCannotHappen() {
+            // A control over an event nothing emits implies the opposite state
+            // is reachable.
+            assertThat(NotificationKind.active())
+                    .doesNotContain(NotificationKind.RECORDING_STARTED,
+                            NotificationKind.PROCESSING_STARTED)
+                    .contains(NotificationKind.SUMMARY_READY,
+                            NotificationKind.PROCESSING_FAILED,
+                            NotificationKind.MENTIONED_IN_MEETING);
         }
     }
 

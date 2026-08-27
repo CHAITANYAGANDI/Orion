@@ -29,7 +29,7 @@ import static org.mockito.Mockito.when;
 /**
  * One arrival, one bell — however many times the arrival is reported.
  *
- * <p>The four notifications raised by the processing pipeline passed a null
+ * <p>The notifications raised by the processing pipeline passed a null
  * dedupe key, which meant the unique index added in V34 —
  * {@code (user_id, kind, dedupe_key) WHERE dedupe_key IS NOT NULL} — did not
  * cover them. Redelivery of a result callback produced a second "Summary
@@ -118,26 +118,15 @@ class ProcessingNotificationDedupeTest {
     }
 
     @Test
-    @DisplayName("a processing-started delivered twice is stored once")
-    void processingStartedIsIdempotent() {
-        service.processingStarted(meeting(1), "uploaded");
-        service.processingStarted(meeting(1), "uploaded");
-
-        assertThat(countOf(NotificationKind.PROCESSING_STARTED)).isEqualTo(1);
-    }
-
-    @Test
     @DisplayName("different kinds about the same meeting all survive")
     void kindsDoNotSuppressEachOther() {
         // The reason the key names the event rather than being "meeting:{id}".
         // A shared key would let whichever arrived first silence the rest.
         Meeting m = meeting(1);
-        service.processingStarted(m, "uploaded");
         service.transcriptReady(m, 1);
         service.summaryReady(m, 1);
         service.processingFailed(m, "something went wrong afterwards", 1);
 
-        assertThat(countOf(NotificationKind.PROCESSING_STARTED)).isEqualTo(1);
         assertThat(countOf(NotificationKind.TRANSCRIPT_READY)).isEqualTo(1);
         assertThat(countOf(NotificationKind.SUMMARY_READY)).isEqualTo(1);
         assertThat(countOf(NotificationKind.PROCESSING_FAILED)).isEqualTo(1);

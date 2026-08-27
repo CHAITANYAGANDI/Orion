@@ -50,12 +50,6 @@ let usage = {
 
 vi.mock("@/lib/api", () => ({
   useGetUsageQuery: () => ({ data: usage, isLoading: false, isError: false }),
-  useRecordingStartedMutation: () => [
-    () => {
-      announceRecording();
-      return { unwrap: () => Promise.resolve({}) };
-    },
-  ],
   useGetPreferencesQuery: () => ({ data: { displayName: "Sam Okafor", defaultLanguage: null } }),
   useCreateUploadUrlMutation: () => [vi.fn()],
   useCreateMeetingMutation: () => [vi.fn()],
@@ -210,12 +204,16 @@ describe("RecordPage on arrival", () => {
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   });
 
-  it("tells the server, so the account's other devices know", async () => {
+  it("tells the server nothing about having started", async () => {
+    // There was a fire-and-forget POST here whose only purpose was a "Recording
+    // started" notification for the account's other devices. On the device
+    // doing the recording that announced a timer, a waveform and a red Stop
+    // button already on screen -- one more row in a bell that had too many. The
+    // notification went, so the endpoint went with it.
     renderPage();
 
-    // A laptop recording and a phone in a pocket are the same account, and the
-    // microphone is the one thing the server cannot observe for itself.
-    await waitFor(() => expect(announceRecording).toHaveBeenCalled());
+    await waitFor(() => expect(start).toHaveBeenCalled());
+    expect(announceRecording).not.toHaveBeenCalled();
   });
 
   it("remembers where it was opened from", async () => {

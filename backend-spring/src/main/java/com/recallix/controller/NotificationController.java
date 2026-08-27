@@ -52,7 +52,9 @@ public class NotificationController {
     /** What can be switched off, for the settings page — labels included. */
     @GetMapping("/kinds")
     public List<NotificationKindResponse> kinds() {
-        return Arrays.stream(NotificationKind.values())
+        // Retired kinds are excluded: nothing emits them, so a switch would be
+        // a control over something that cannot happen. See NotificationKind.
+        return NotificationKind.active().stream()
                 .map(NotificationKindResponse::from)
                 .toList();
     }
