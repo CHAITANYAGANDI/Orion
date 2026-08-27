@@ -22,9 +22,9 @@ import type { MeetingStatus } from "@/lib/types";
  * READY this does not render at all, and what is left is exactly what was there
  * before.
  *
- * <p><b>It is the only progress indicator on this route.</b> The docked bar in
- * the shell hides itself for whichever meeting is currently on screen — see
- * components/processing-dock — so one job never draws two bars in one view.
+ * <p><b>It is the only progress indicator on this route.</b> Nothing else in
+ * the shell draws one — see components/processing-dock, which watches jobs and
+ * renders nothing — so one job never draws two bars in one view.
  *
  * <p><b>Stop stays here.</b> This page carries the only control that ends a
  * pipeline, and what it does is delete the meeting — the worker is mid-flight

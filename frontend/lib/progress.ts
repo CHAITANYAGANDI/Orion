@@ -129,8 +129,8 @@ interface Run {
  * navigation is. Going Home and back put `shown` to 0 and restarted the stage
  * clock, so the bar rewound to the stage floor every time: 6% → leave → return →
  * 6%, on a meeting that had been running for four minutes. Worse, the same
- * meeting drawn in two places at once (the list row and the docked bar) kept two
- * unrelated numbers for one job.
+ * meeting drawn in two places at once (the list row on Home and the banner on
+ * its own page) kept two unrelated numbers for one job.
  *
  * <p>Keyed by meeting id in a module map instead, so every surface reads the one
  * number and none of them can rewind it. Same shape as lib/active-chat and

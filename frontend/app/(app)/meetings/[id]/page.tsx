@@ -177,10 +177,10 @@ export default function MeetingDetailPage() {
   /**
    * The save that is still running, if it is this meeting's.
    *
-   * <p>Saving a recording lands here, so the docked bar stands down and this
-   * page carries the wait — including the one control that ends it. Matched on
-   * the id: the bar may be following a different meeting entirely, and offering
-   * to stop that one from this page would delete something not on screen.
+   * <p>This page carries the wait for the meeting it is showing, including the
+   * one control that ends it. Matched on the id: the save may still be
+   * following a different meeting entirely, and offering to stop that one from
+   * this page would delete something not on screen.
    */
   const recordingJob = useRecordingJob();
   const stoppable = recordingJob.phase === "processing" && recordingJob.job?.id === id;

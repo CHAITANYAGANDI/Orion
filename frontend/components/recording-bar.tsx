@@ -131,15 +131,15 @@ export function RecordingBar() {
    * A recording, or audio in hand. Not the sending of it, and nothing after.
    *
    * <p>This used to stay up for the whole pipeline, following the reader from
-   * page to page with a percentage and a stop button. That was removed: the
-   * meeting's own page is where saving lands, it draws the same wait full
-   * width, and it carries the one control that ends it. See
-   * components/processing-card.tsx.
+   * page to page with a percentage and a stop button. That was removed: saving
+   * lands on Home, where the meeting's own row carries the same wait, and the
+   * meeting's page carries the one control that ends it. See
+   * components/processing-row.tsx and components/processing-card.tsx.
    *
    * <p><b>The upload went with it.</b> There is no percentage for it here and
    * none anywhere else: against local storage it is over in milliseconds, so
-   * anything drawn for it was a flash between pressing Save and arriving at the
-   * meeting -- read as a fault rather than as progress. The bar stands down
+   * anything drawn for it was a flash between pressing Save and the page
+   * changing -- read as a fault rather than as progress. The bar stands down
    * instead, and comes back only if the upload fails, when there is once again
    * a recording in hand and something to do with it.
    */

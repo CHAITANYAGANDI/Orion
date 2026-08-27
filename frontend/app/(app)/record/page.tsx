@@ -214,9 +214,9 @@ export default function RecordPage() {
         </Notice>
       )}
 
-      {/* No pipeline branch. Saving leaves for Home and the wait happens in the
-          docked bar there, so by the time there is anything to watch this page
-          is behind you. */}
+      {/* No pipeline branch. Saving leaves for Home and the wait happens in
+          the meeting's own row there, so by the time there is anything to
+          watch this page is behind you. */}
       {started && <NoteHeading startedAt={recorder.startedAt} />}
 
       {/* No `handingOver` arm here any more: the page returns before this when

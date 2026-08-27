@@ -1,38 +1,37 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, act } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 
 /**
- * The wait, following you around.
+ * The thing that notices a meeting has finished, wherever you happen to be.
  *
- * <p>The complaint this answers was "transcribing should carry on in the
- * background even when I am not on that page". It always did — the ai-service
- * consumes from Kafka and never checks whether a browser is open — but the
- * interface said otherwise: the meeting's page was a full-width progress card
- * with nothing else on it, and leaving lost sight of the job entirely.
+ * <p><b>It draws nothing.</b> There was a docked bar in the bottom-right corner
+ * carrying a title and a percentage, and it was removed on request: a meeting
+ * being processed already says so in its row on Home and in the banner on its
+ * own page, so the card was a third copy of the same fact floating over
+ * whatever was being read — and a job that never reached a terminal status sat
+ * there for the life of the tab, including over a new recording in progress.
  *
- * <p>So this is the piece that makes leaving free, and the things it owes are:
- * it keeps showing the job across a navigation, it says when the job is done
- * wherever you happen to be, and it invalidates the caches Home lists from so a
- * finished meeting stops reading "Transcribing" in a list nobody refetched.
- * That last one used to belong to `useSaveJob`, which meant an imported file
- * never got it.
+ * <p>What is under test is what could not go with it. The completion toast and
+ * the cache invalidation that stops Home listing a finished meeting as still
+ * processing have to be owned by something mounted on every route, or they only
+ * fire when you are already looking at the meeting. That used to be
+ * `useSaveJob`, which meant an imported file got neither.
+ *
+ * <p>So every test here is a pair: nothing is rendered, and the job is settled
+ * anyway.
  */
-const { invalidateTags, dispatch, toastSuccess, toastError, meeting, usePathnameMock } =
-  vi.hoisted(() => ({
+const { invalidateTags, dispatch, toastSuccess, toastError, meeting } = vi.hoisted(() => ({
   invalidateTags: vi.fn((tags: unknown) => ({ type: "invalidate", tags })),
   dispatch: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   meeting: { current: undefined as unknown },
-  usePathnameMock: vi.fn(() => "/ask"),
 }));
 
 let emit: ((e: unknown) => void) | null = null;
 const deactivate = vi.fn();
 
 vi.mock("@/lib/hooks", () => ({ useAppDispatch: () => dispatch }));
-vi.mock("next/navigation", () => ({ usePathname: usePathnameMock }));
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }));
 vi.mock("@/lib/ws", () => ({
   subscribeMeetingStatus: (_id: string, handlers: { onEvent: (e: unknown) => void }) => {
@@ -45,7 +44,7 @@ vi.mock("@/lib/api", () => ({
   useGetMeetingQuery: () => ({ data: meeting.current }),
 }));
 
-import { ProcessingDock, visibleJobs } from "@/components/processing-dock";
+import { ProcessingDock } from "@/components/processing-dock";
 import {
   trackProcessing,
   processingJobs,
@@ -56,9 +55,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   emit = null;
   meeting.current = { id: "mtg_9", title: "Standup", status: "TRANSCRIBING" };
-  // Somewhere that is neither Home nor a meeting page, so the existing tests
-  // below see the dock they were written against.
-  usePathnameMock.mockReturnValue("/ask");
   resetProcessingJobs();
 });
 
@@ -69,69 +65,49 @@ async function stage(status: string, progress = 50, message = "") {
   });
 }
 
-describe("ProcessingDock", () => {
-  it("draws nothing at all when this tab is watching no jobs", () => {
+describe("the processing watcher", () => {
+  it("puts nothing on screen when this tab is watching no jobs", () => {
     const { container } = render(<ProcessingDock />);
 
-    // Not an empty box in the corner of every page in the app.
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("shows the meeting it is watching, by name", () => {
+  it("puts nothing on screen when it is watching one", () => {
+    // The whole of the change. No card, no bar, no dismiss button, nowhere.
     trackProcessing("mtg_9");
 
-    render(<ProcessingDock />);
+    const { container } = render(<ProcessingDock />);
 
-    expect(screen.getByText("Standup")).toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
-  it("says the work carries on without you", () => {
-    // The whole point. A bar that only showed a percentage would leave the
-    // original misunderstanding exactly where it was.
+  it("puts nothing on screen when it is watching several", () => {
     trackProcessing("mtg_9");
+    trackProcessing("mtg_8");
 
-    render(<ProcessingDock />);
+    const { container } = render(<ProcessingDock />);
 
-    expect(screen.getByText(/keeps going if you leave/i)).toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
   });
 
-  it("links to the meeting, so the bar is a way back to it", () => {
+  it("says so when a meeting is ready, and carries the way back", async () => {
+    // It arrives while you are somewhere else, so a toast with no way into the
+    // meeting is a notification you have to go and act on from memory.
     trackProcessing("mtg_9");
-
     render(<ProcessingDock />);
 
-    expect(screen.getByRole("link", { name: "Standup" })).toHaveAttribute(
-      "href",
-      "/meetings/mtg_9",
+    await stage("READY", 100);
+
+    expect(toastSuccess).toHaveBeenCalledWith(
+      '"Standup" is ready.',
+      expect.objectContaining({ action: expect.objectContaining({ label: "Open" }) }),
     );
   });
 
-  it("announces a finished meeting and stops watching it", async () => {
-    trackProcessing("mtg_9");
-    render(<ProcessingDock />);
-
-    await stage("READY", 100);
-
-    expect(toastSuccess).toHaveBeenCalled();
-    // Dropped from the store, so the card goes with it rather than sitting at
-    // 100% under a toast that already said so.
-    await waitFor(() => expect(processingJobs()).not.toContain("mtg_9"));
-  });
-
-  it("refetches the lists a finished meeting appears in", async () => {
-    // The poll filled the meeting cache with a mid-pipeline snapshot, and Home
-    // lists from that same cache — so without this the finished meeting sits in
-    // the list marked "Transcribing" until something else happens to refetch.
-    trackProcessing("mtg_9");
-    render(<ProcessingDock />);
-
-    await stage("READY", 100);
-
-    expect(invalidateTags).toHaveBeenCalledWith([{ type: "Meeting", id: "mtg_9" }, "Meetings"]);
-    expect(dispatch).toHaveBeenCalled();
-  });
-
-  it("reports a failure with the reason the server gave", async () => {
+  it("says so when a meeting fails, with the reason the server gave", async () => {
     meeting.current = {
       id: "mtg_9",
       title: "Standup",
@@ -144,251 +120,61 @@ describe("ProcessingDock", () => {
     await stage("FAILED", 100);
 
     expect(toastError).toHaveBeenCalledWith(
-      expect.stringContaining("Standup"),
-      expect.objectContaining({ description: "The audio could not be decoded." }),
+      'Processing failed for "Standup".',
+      { description: "The audio could not be decoded." },
     );
   });
 
-  it("announces once, not again on the next render", async () => {
+  it("refreshes the list Home renders from", async () => {
+    // The reason this cannot simply be deleted. Without it a finished meeting
+    // goes on reading "Processing" in a list nobody happened to refetch.
     trackProcessing("mtg_9");
     render(<ProcessingDock />);
 
     await stage("READY", 100);
-    await act(async () => {});
+
+    expect(invalidateTags).toHaveBeenCalledWith([{ type: "Meeting", id: "mtg_9" }, "Meetings"]);
+  });
+
+  it("lets go of a job once it has settled", async () => {
+    trackProcessing("mtg_9");
+    render(<ProcessingDock />);
+
+    await stage("READY", 100);
+
+    await waitFor(() => expect(processingJobs()).not.toContain("mtg_9"));
+  });
+
+  it("announces a finished meeting exactly once", async () => {
+    // Settling untracks, which unmounts the watcher; without the guard a
+    // re-render in the same tick fires the toast twice.
+    trackProcessing("mtg_9");
+    render(<ProcessingDock />);
+
+    await stage("READY", 100);
+    await stage("READY", 100);
 
     expect(toastSuccess).toHaveBeenCalledTimes(1);
   });
 
-  it("finishes on the poll when the socket never says anything", async () => {
-    // A browser or proxy that drops the WebSocket leaves the socket silent, and
-    // a dock that trusted it alone would sit at one number over a meeting that
-    // was ready ten minutes ago.
-    trackProcessing("mtg_9");
-    const { rerender } = render(<ProcessingDock />);
-
+  it("settles a meeting that finishes on the poll alone", async () => {
+    // A proxy that drops the WebSocket leaves the socket silent for ever. The
+    // poll is what makes the job finish rather than being watched all day.
     meeting.current = { id: "mtg_9", title: "Standup", status: "READY" };
-    await act(async () => {
-      rerender(<ProcessingDock />);
-    });
+    trackProcessing("mtg_9");
+
+    render(<ProcessingDock />);
 
     await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
     expect(processingJobs()).not.toContain("mtg_9");
   });
 
-  it("can be dismissed without anything being cancelled", async () => {
+  it("closes the socket when it stops watching", async () => {
     trackProcessing("mtg_9");
-    render(<ProcessingDock />);
-
-    await userEvent.click(screen.getByRole("button", { name: /Stop showing this/i }));
-
-    // Stops watching. It cannot stop the worker — that is what deleting the
-    // meeting does, and it is offered on the meeting's own page where the
-    // consequence can be spelled out.
-    expect(processingJobs()).not.toContain("mtg_9");
-    expect(toastSuccess).not.toHaveBeenCalled();
-  });
-
-  it("watches several meetings at once", () => {
-    trackProcessing("mtg_9");
-    trackProcessing("mtg_8");
-
-    render(<ProcessingDock />);
-
-    // Two cards, not one showing the most recent. Importing three files in a
-    // row is three jobs and the user is owed all three.
-    expect(screen.getAllByRole("link")).toHaveLength(2);
-  });
-});
-
-/**
- * The rule that stops one job drawing two bars.
- *
- * <p>The complaint was seeing "a large processing indicator in the meeting page
- * AND a floating bottom-right processing card" for the same meeting. The dock
- * is the one that yields, because the inline banner is attached to the thing it
- * is about; and on Home it yields entirely, because every processing meeting is
- * already saying so inside its own row.
- */
-describe("where the dock is allowed to draw", () => {
-  it("drops the meeting whose page is on screen", () => {
-    expect(visibleJobs(["mtg_9", "mtg_8"], "/meetings/mtg_9")).toEqual(["mtg_8"]);
-  });
-
-  it("still shows other meetings while one is being viewed", () => {
-    // They are not on screen anywhere else, so hiding them would lose them.
-    expect(visibleJobs(["mtg_8"], "/meetings/mtg_9")).toEqual(["mtg_8"]);
-  });
-
-  it("draws nothing at all on Home", () => {
-    // Home communicates processing through the meeting row itself.
-    expect(visibleJobs(["mtg_9", "mtg_8"], "/home")).toEqual([]);
-  });
-
-  it("still draws everywhere else", () => {
-    expect(visibleJobs(["mtg_9"], "/ask")).toEqual(["mtg_9"]);
-    expect(visibleJobs(["mtg_9"], "/folder/prj_1")).toEqual(["mtg_9"]);
-  });
-
-  it("is not confused by a sub-route of the meeting page", () => {
-    expect(visibleJobs(["mtg_9"], "/meetings/mtg_9/anything")).toEqual([]);
-  });
-
-  it("does not match a different meeting whose id starts the same", () => {
-    // A prefix compare would hide mtg_9 while viewing mtg_99.
-    expect(visibleJobs(["mtg_9"], "/meetings/mtg_99")).toEqual(["mtg_9"]);
-  });
-
-  it("draws everything when the pathname is not known yet", () => {
-    // `usePathname` is null on the server pass; the safe answer is the dock the
-    // user already expects rather than a blank corner.
-    expect(visibleJobs(["mtg_9"], "")).toEqual(["mtg_9"]);
-  });
-});
-
-it("renders nothing for the meeting currently being viewed", () => {
-  usePathnameMock.mockReturnValue("/meetings/mtg_9");
-  trackProcessing("mtg_9");
-
-  const { container } = render(<ProcessingDock />);
-
-  // Exactly one processing UI in this view, and it is the page's own banner.
-  //
-  // Asserted on what is drawn rather than on an empty container: the job is
-  // still mounted and still being watched -- that is the point, and hiding it
-  // by unmounting is the bug this replaced. The wrapper collapses via
-  // `empty:hidden`.
-  expect(container.textContent).toBe("");
-  expect(screen.queryByRole("link")).not.toBeInTheDocument();
-  expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
-});
-
-/**
- * Hidden is not the same as unwatched.
- *
- * <p>The bug: the dock returned null when there was nothing to draw, which also
- * unmounted the watcher — no poll, no toast, no cache invalidation. A meeting
- * that finished while the user sat on Home was never noticed, so its row went on
- * saying "Processing" over a meeting that was ready.
- */
-describe("watching where it does not draw", () => {
-  it("still settles a meeting that finishes while the user is on Home", async () => {
-    usePathnameMock.mockReturnValue("/home");
-    trackProcessing("mtg_9");
-    const { container } = render(<ProcessingDock />);
-
-    // Nothing on screen — Home says it in the row.
-    expect(container.textContent).toBe("");
-
-    await stage("READY", 100);
-
-    // But the job was watched all along: the list Home renders from is
-    // refetched, which is what stops the row claiming to still be processing.
-    expect(invalidateTags).toHaveBeenCalledWith([{ type: "Meeting", id: "mtg_9" }, "Meetings"]);
-    await waitFor(() => expect(processingJobs()).not.toContain("mtg_9"));
-  });
-
-  it("still settles the meeting whose own page is open", async () => {
-    // The page has its own banner and its own poll, but the tracker must still
-    // let go of the job — otherwise it is watched for the life of the tab.
-    usePathnameMock.mockReturnValue("/meetings/mtg_9");
-    trackProcessing("mtg_9");
-    const { container } = render(<ProcessingDock />);
-
-    expect(container.textContent).toBe("");
-
-    await stage("READY", 100);
-
-    await waitFor(() => expect(processingJobs()).not.toContain("mtg_9"));
-  });
-
-  it("draws the visible one and only watches the rest", async () => {
-    usePathnameMock.mockReturnValue("/meetings/mtg_9");
-    trackProcessing("mtg_9");
-    trackProcessing("mtg_8");
-
-    render(<ProcessingDock />);
-
-    // One card: the meeting being viewed says it on its own page.
-    expect(screen.getAllByRole("link")).toHaveLength(1);
-  });
-});
-
-/**
- * The bar that flashed.
- *
- * <p>Saving a recording tracks the meeting and pushes to its page at once. For
- * the length of that route change `usePathname` still answers with the page
- * being left, so the rule above could not tell that this was the meeting about
- * to fill the screen: the dock drew a bar, the navigation landed, and the bar
- * vanished. Under a second, in the corner, at the moment of a successful save
- * — which reads as something having gone wrong.
- *
- * <p>The distinction is the same one the block above is about. Watching starts
- * immediately and must; only the drawing waits.
- */
-describe("a job the user is being taken to", () => {
-  it("draws no bar while the navigation to its own page is still in flight", () => {
-    usePathnameMock.mockReturnValue("/record");
-    trackProcessing("mtg_9", "/record");
-
-    const { container } = render(<ProcessingDock />);
-
-    expect(container.textContent).toBe("");
-    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
-  });
-
-  it("watches it all the same, and settles it if it finishes first", async () => {
-    // A very short recording can be READY before the meeting page has mounted.
-    // Held back is not unwatched.
-    usePathnameMock.mockReturnValue("/record");
-    trackProcessing("mtg_9", "/record");
     render(<ProcessingDock />);
 
     await stage("READY", 100);
 
-    expect(invalidateTags).toHaveBeenCalledWith([{ type: "Meeting", id: "mtg_9" }, "Meetings"]);
-    await waitFor(() => expect(processingJobs()).not.toContain("mtg_9"));
-  });
-
-  it("draws it once the route lands somewhere that is not its page", async () => {
-    // The release valve, and the reason this needs no timer: a job held back
-    // for a navigation that went elsewhere must not stay hidden for ever.
-    usePathnameMock.mockReturnValue("/record");
-    trackProcessing("mtg_9", "/record");
-    const view = render(<ProcessingDock />);
-    expect(view.container.textContent).toBe("");
-
-    usePathnameMock.mockReturnValue("/ask");
-    await act(async () => {
-      view.rerender(<ProcessingDock />);
-    });
-
-    expect(screen.getByRole("progressbar")).toBeInTheDocument();
-  });
-
-  it("goes on hiding it after it arrives, because the page says it instead", async () => {
-    usePathnameMock.mockReturnValue("/record");
-    trackProcessing("mtg_9", "/record");
-    const view = render(<ProcessingDock />);
-
-    usePathnameMock.mockReturnValue("/meetings/mtg_9");
-    await act(async () => {
-      view.rerender(<ProcessingDock />);
-    });
-
-    // Hidden by the ordinary rule now, not by the hand-over.
-    expect(view.container.textContent).toBe("");
-  });
-
-  it("still draws every other job in the meantime", () => {
-    // Only the one being opened is held back. An import running alongside it is
-    // on screen nowhere else.
-    usePathnameMock.mockReturnValue("/record");
-    trackProcessing("mtg_9", "/record");
-    trackProcessing("mtg_8");
-
-    render(<ProcessingDock />);
-
-    expect(screen.getAllByRole("link")).toHaveLength(1);
+    await waitFor(() => expect(deactivate).toHaveBeenCalled());
   });
 });

@@ -17,21 +17,26 @@
  * closing the tab has never stopped a meeting being transcribed. The interface
  * was the only thing implying otherwise.
  *
- * So the wait moves here — one small docked bar that follows you around — and
- * the meeting page keeps its own progress as a slim banner rather than as the
- * whole page. See components/processing-dock.tsx.
+ * So the wait moves into the list. Saving lands on Home, where the meeting has
+ * a row of its own carrying its stage and its bar, and the meeting page keeps
+ * its own progress as a slim banner rather than as the whole page. See
+ * components/processing-row.tsx and components/processing-card.tsx.
+ *
+ * A third copy floated in the bottom-right corner of every page for a while and
+ * has been removed; what tracks a job now draws nothing at all. See
+ * components/processing-dock.tsx for what is left and why it still exists.
  *
  * ## Why a module store and not Redux
  *
- * The same reasoning as lib/active-chat: a set of ids shared between the dock,
- * the meeting page and three upload paths, with no reducer logic worth the name.
+ * The same reasoning as lib/active-chat: a set of ids shared between the
+ * watcher, the meeting page and three upload paths, with no reducer logic worth
+ * the name.
  * `useSyncExternalStore` is what that is for.
  *
  * ## Why it is written to sessionStorage
  *
- * A reload used to lose the job. That was defensible when the wait lived on the
- * meeting's own page — the page could read the status back from the server — and
- * it is not defensible for a dock that is the only thing on screen tracking it.
+ * A reload used to lose the job, and with it the completion toast and the cache
+ * invalidation that stops Home listing a finished meeting as still processing.
  * `sessionStorage` and not `localStorage`: this is "what this tab is watching",
  * and a job tracked in a tab you closed last Tuesday is noise.
  *
@@ -110,96 +115,18 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
-/**
- * Jobs whose own page the user is on their way to, and where they set off from.
- *
- * ## Why watching has to start before the navigation ends
- *
- * Saving a recording tracks the meeting and pushes to its page in the same
- * breath. Both are right: the job has to be watched from the moment it exists,
- * or a save followed by a wander somewhere else loses the completion entirely.
- *
- * But a route change is not instant. For the length of it `usePathname` still
- * answers `/record`, so the dock — whose one rule is "not the meeting you are
- * looking at" — could not yet tell that this was the meeting being opened. It
- * drew a bar for a job it was about to be told not to draw, and the whole of
- * that bar's life on screen was a flash in the corner between pressing Save and
- * arriving.
- *
- * ## What is remembered, and how it is let go
- *
- * The pathname the job set off from. The dock holds the job back while the user
- * is still standing on it, and releases it the moment the pathname is anything
- * else — see `releaseOpening`, called from the dock, which is the one place
- * that observes a navigation happening.
- *
- * Releasing on *any* change rather than on arrival at the meeting is what keeps
- * this from being a way to hide a job for ever. A navigation that never happens
- * is one where nothing moved on screen either, so there is nothing to be stuck
- * behind; no timer is needed and none is used.
- *
- * Deliberately not written to `sessionStorage`, unlike the ids themselves. This
- * describes one navigation in flight, and a reload is the end of that
- * navigation whatever became of it.
- */
-const opening = new Map<string, string>();
-
-/**
- * Start watching a meeting. Idempotent — the same id twice is one job.
- *
- * <p>`openingFrom` is for the one caller that tracks a meeting and immediately
- * sends the user to its page: the pathname it is leaving. Everyone else tracks
- * a meeting that is already somewhere else and passes nothing.
- */
-export function trackProcessing(meetingId: string, openingFrom?: string): void {
+/** Start watching a meeting. Idempotent — the same id twice is one job. */
+export function trackProcessing(meetingId: string): void {
   if (!meetingId) return;
   load();
-  // Before the bail-out below, not after. The meeting page tracks the same id
-  // again on arrival, and whether that call happens to be the first must not
-  // decide whether the dock held the job back on the way there.
-  if (openingFrom !== undefined) opening.set(meetingId, openingFrom);
   if (ids.includes(meetingId)) return;
   ids = [...ids, meetingId];
   emit();
 }
 
-/**
- * Whether this job is one the user is in the middle of being taken to.
- *
- * <p>Pure: it compares and does not clean up. `releaseOpening` does that, from
- * the one place that knows a navigation has happened.
- */
-export function isOpening(meetingId: string, pathname: string): boolean {
-  return opening.get(meetingId) === pathname;
-}
-
-/**
- * Let go of every job whose navigation is over.
- *
- * <p>"Over" means only that the pathname is no longer the one it set off from,
- * not that it arrived where it was going. Landing anywhere at all is enough: on
- * the meeting's own page the dock hides the job for its own reason, and
- * anywhere else it should be drawn like any other.
- */
-export function releaseOpening(pathname: string): void {
-  let changed = false;
-  for (const [id, from] of opening) {
-    if (from === pathname) continue;
-    opening.delete(id);
-    changed = true;
-  }
-  // Only when something actually moved. `emit` hands out a fresh snapshot, and
-  // one on every navigation would re-render the dock for nothing.
-  if (changed) emit();
-}
-
-/**
- * Stop watching. Called when the meeting reaches a terminal state, and by the
- * dismiss control on the dock.
- */
+/** Stop watching. Called when the meeting reaches a terminal state. */
 export function untrackProcessing(meetingId: string): void {
   load();
-  opening.delete(meetingId);
   if (!ids.includes(meetingId)) return;
   ids = ids.filter((id) => id !== meetingId);
   emit();
@@ -224,7 +151,6 @@ export function processingJobs(): readonly string[] {
  */
 export function resetProcessingJobs(): void {
   loaded = true;
-  opening.clear();
   try {
     window.sessionStorage.removeItem(KEY);
   } catch {

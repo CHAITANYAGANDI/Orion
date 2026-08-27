@@ -4,18 +4,23 @@
  * Getting a finished recording onto the server, and watching what happens next.
  *
  * <p>Lives on the provider rather than in the control bar, because the thing
- * that reads it is not the bar: saving lands on the meeting's own page, and
- * that page draws the pipeline and offers the one control that calls it off.
+ * that reads it is not the bar: the meeting's own page draws the pipeline and
+ * offers the one control that calls it off, and it is reached long after the
+ * bar has gone.
  *
  * <p><b>Nothing here reports the upload any more.</b> There was a percentage,
  * drawn first in a docked bar and then in a modal that asked for the browser to
  * be kept open; both were removed on request. Against local storage the upload
  * is over in milliseconds, so what either of them actually produced was a flash
- * between pressing Save and arriving at the meeting. Save goes straight there
- * now, and the wait somebody actually sits through is the pipeline — drawn as a
- * banner on the page they land on and as a docked bar everywhere else, so
- * leaving is free. See components/processing-card.tsx and
- * components/processing-dock.tsx.
+ * between pressing Save and the page changing. Save navigates straight away
+ * now, and the wait somebody actually sits through is the pipeline — drawn in
+ * the meeting's row on Home and as a banner on its own page. See
+ * components/processing-row.tsx and components/processing-card.tsx.
+ *
+ * <p><b>Where it lands: Home.</b> It used to be `/meetings/<id>`, on the
+ * reasoning that the wait belongs where the result will appear. The row on Home
+ * says the same thing in a line, beside everything else there is to do
+ * meanwhile, and does not make a screen out of waiting.
  *
  * <p><b>The phases past `creating` are still tracked</b>, and `processing` is
  * the one that earns its keep: it is what tells the meeting page that this is
@@ -27,8 +32,8 @@
  * "Transcribing" moved to `ProcessingDock`, which watches every processing
  * meeting rather than only the one this hook is holding — so a file somebody
  * imported got neither, and a recording got them only for as long as the tab
- * stayed on this hook's phase. What this hook still owes the dock is one call
- * to `trackProcessing` the moment the meeting exists.
+ * stayed on this hook's phase. What this hook still owes it is one call to
+ * `trackProcessing` the moment the meeting exists.
  */
 
 import * as React from "react";
@@ -42,6 +47,7 @@ import {
 } from "@/lib/api";
 import { subscribeMeetingStatus } from "@/lib/ws";
 import { putWithProgress, uploadError } from "@/lib/uploads";
+import { HOME } from "@/lib/routes";
 import { statusProgress } from "@/lib/format";
 import { clampToStage } from "@/lib/progress";
 import { trackProcessing, untrackProcessing } from "@/lib/processing-jobs";
@@ -231,30 +237,31 @@ export function useSaveJob(recorder: UseRecorder): UseSaveJob {
         message: "Queued for processing…",
       });
       setPhase("processing");
-      // Handed to the app-wide tracker, which is what draws the docked bar and
-      // what settles the job when it finishes. This hook still follows the
+      // Handed to the app-wide tracker, which is what settles the job when it
+      // finishes -- the toast, and the refresh that stops Home listing a
+      // finished meeting as still processing. This hook still follows the
       // pipeline -- the Stop control on the meeting page needs `job` -- but it
       // is no longer the only thing that does, so leaving this page no longer
       // means the completion goes unnoticed. See lib/processing-jobs.
       //
-      // The pathname goes with it because of what happens on the next line but
-      // one. Watching has to start now -- a save followed by a wander elsewhere
-      // would otherwise lose the completion -- while the bar must not be drawn,
-      // because the user is already on their way to the page that draws this
-      // same job full width. Until that navigation lands, `usePathname` still
-      // answers with the page being left, so the dock cannot work it out on its
-      // own; without this it drew a bar for the length of the route change and
-      // dropped it on arrival, which on screen is a flash in the corner.
-      trackProcessing(meeting.id, window.location.pathname);
+      trackProcessing(meeting.id);
       // The audio is on the server now. A second copy in the tab is one nothing
       // reads, and one the bar would go on offering to save.
       recorder.reset();
-      // Onto the meeting that was just made. It exists from this moment, it has
-      // a page, and that page already draws the pipeline full width with the
-      // stage it is on — so the wait is watched in the place the result will
-      // appear rather than in a bar over a list the meeting is not in yet.
-      // Leaving is still free: the bar picks the wait up on any other page.
-      router.push(`/meetings/${meeting.id}`);
+      // Back to the list, not onto the meeting.
+      //
+      // Saving used to land on `/meetings/<id>`, on the reasoning that the wait
+      // should be watched where the result will appear. Home is the better
+      // answer to the same question: the meeting is in the list from this
+      // moment with its own row, its own stage and its own bar, and it is
+      // beside everything else there is to do meanwhile. Opening a page that is
+      // mostly placeholders makes the wait the subject again, which is the
+      // thing this whole area has been moving away from.
+      //
+      // Nothing is lost by not going there. The row is a link, the completion
+      // toast carries its own way in, and the pipeline never depended on a
+      // browser being pointed at it.
+      router.push(HOME);
     } catch (err) {
       // The recorder was not reset, so the audio is still in the tab and the
       // bar comes back offering Save. The toast is the whole of the telling.

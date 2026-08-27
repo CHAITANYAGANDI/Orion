@@ -174,7 +174,7 @@ describe("saving", () => {
     expect(createMeeting.mock.calls[0][0]).toMatchObject({ projectId: undefined });
   });
 
-  it("lands on the meeting it just made", async () => {
+  it("lands on Home, not on the meeting it just made", async () => {
     const { result } = setup();
 
     await act(async () => {
@@ -182,11 +182,29 @@ describe("saving", () => {
     });
 
     // The audio has gone to the server and the microphone is closed, so the
-    // recording page is about something that is over. The meeting exists from
-    // this moment and its page draws the pipeline full width — the wait is
-    // watched where the result will appear. Leaving is still free: the docked
-    // bar picks it up on every other page.
-    expect(push).toHaveBeenCalledWith("/meetings/mtg_9");
+    // recording page is about something that is over. Home is where the meeting
+    // now is: a row of its own carrying the same stage and the same bar, beside
+    // everything else there is to do while it runs.
+    //
+    // It used to push to `/meetings/<id>`, on the reasoning that the wait
+    // belongs where the result will appear. What that actually opened was a
+    // page of placeholders — which makes the wait the subject again, and is the
+    // thing this whole area has been moving away from.
+    expect(push).toHaveBeenCalledWith("/home");
+    expect(push).not.toHaveBeenCalledWith("/meetings/mtg_9");
+  });
+
+  it("still watches the meeting it just made", async () => {
+    // Not going to its page is not losing sight of it. The tracker is what
+    // carries the completion toast and the cache invalidation, wherever the
+    // user happens to be by then.
+    const { result } = setup();
+
+    await act(async () => {
+      await result.current.save(aResult(), "x");
+    });
+
+    expect(processingJobs()).toContain("mtg_9");
   });
 
   it("lets go of the audio once the server has it", async () => {
