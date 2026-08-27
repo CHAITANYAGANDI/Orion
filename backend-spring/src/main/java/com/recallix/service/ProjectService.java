@@ -75,7 +75,7 @@ public class ProjectService {
      */
     @Transactional(readOnly = true)
     public List<MeetingResponse> unfiled(String userId) {
-        return meetings.findByUserIdAndProjectIdIsNullOrderByCreatedAtDesc(userId).stream()
+        return meetings.findUnfiled(userId).stream()
                 .map(MeetingResponse::from)
                 .toList();
     }

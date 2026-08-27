@@ -107,8 +107,20 @@ public interface MeetingRepository extends JpaRepository<Meeting, String> {
     /** One project's meetings, newest first — the project page's list. */
     List<Meeting> findByUserIdAndProjectIdOrderByCreatedAtDesc(String userId, String projectId);
 
-    /** Everything not filed anywhere, which the tree shows last. */
-    List<Meeting> findByUserIdAndProjectIdIsNullOrderByCreatedAtDesc(String userId);
+    /**
+     * Everything not filed anywhere, which the tree shows last.
+     *
+     * <p>Confirmed meetings only — see {@link #search} for what {@code CREATED}
+     * means and why it is never listed.
+     */
+    @Query("""
+            SELECT m FROM Meeting m
+             WHERE m.userId = :userId
+               AND m.projectId IS NULL
+               AND m.status <> com.recallix.domain.MeetingStatus.CREATED
+             ORDER BY m.createdAt DESC
+            """)
+    List<Meeting> findUnfiled(@Param("userId") String userId);
 
     /**
      * What a project-scoped question is allowed to read.
@@ -157,10 +169,27 @@ public interface MeetingRepository extends JpaRepository<Meeting, String> {
      * because the thing being matched is an absence: a meeting with no folder.
      * A nullable {@code projectId} could not express it — null already means
      * "do not filter by folder" — so the two questions are kept apart.
+     *
+     * <p><b>{@code CREATED} rows are never returned, and are not meetings.</b>
+     * {@code createUploadUrl} writes one at presign so the object key can carry
+     * the meeting id, and {@code createMeeting} is what turns it into a meeting:
+     * it charges the allowance, applies the title, the folder and the tags, and
+     * moves the row to {@code QUEUED}. Everything between those two calls is a
+     * reservation — an upload that may never arrive, a confirmation that may be
+     * refused for having no minutes left, a tab that was closed.
+     *
+     * <p>Nothing cleans those up, deliberately: the comment on
+     * {@code createMeeting} notes that charging at confirmation is what makes an
+     * abandoned upload free. Being free was handled and being invisible was not,
+     * so every abandoned presign appeared in the list as a meeting stuck at
+     * "Uploading recording… 1%" for ever, with no way to remove it. Excluded
+     * here rather than swept, because a sweep still leaves them on screen until
+     * it runs.
      */
     @Query(value = """
             SELECT * FROM meetings m
             WHERE m.user_id = :userId
+              AND m.status <> 'CREATED'
               AND (:search IS NULL OR m.title ILIKE '%' || :search || '%')
               AND (:status IS NULL OR m.status = :status)
               AND (:tag IS NULL OR m.tags @> CAST(('["' || :tag || '"]') AS jsonb))
@@ -172,6 +201,7 @@ public interface MeetingRepository extends JpaRepository<Meeting, String> {
             countQuery = """
             SELECT COUNT(*) FROM meetings m
             WHERE m.user_id = :userId
+              AND m.status <> 'CREATED'
               AND (:search IS NULL OR m.title ILIKE '%' || :search || '%')
               AND (:status IS NULL OR m.status = :status)
               AND (:tag IS NULL OR m.tags @> CAST(('["' || :tag || '"]') AS jsonb))
