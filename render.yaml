@@ -29,6 +29,14 @@ services:
     dockerContext: ./backend-spring
     healthCheckPath: /actuator/health
     envVars:
+      # --- Which mode this is ----------------------------------------------
+      # Switches on DeploymentCheck, which refuses to start this service if any
+      # of the settings below is still the development one. Set here and
+      # nowhere else -- docker-compose deliberately does not, because the local
+      # stack IS the development configuration and stopping it would be absurd.
+      - key: SPRING_PROFILES_ACTIVE
+        value: production
+
       # --- JVM -------------------------------------------------------------
       # Container-aware sizing. Without this the JVM sees the host's memory,
       # sizes a heap it cannot have, and is OOM-killed under load.
@@ -100,16 +108,41 @@ services:
         value: auto
 
       # --- Wiring -----------------------------------------------------------
+      # Left auto-wired, unlike the two public URLs. `hostport` yields
+      # `recallix-ai:10000` -- the right host and the right port, no scheme --
+      # and AiClient prefixes `http://` because a private service on Render's
+      # internal network can only mean that. Worth repairing rather than
+      # refusing: the alternative is writing the private port out by hand and
+      # keeping it in step forever.
       - key: AI_SERVICE_URL
         fromService:
           type: pserv
           name: recallix-ai
           property: hostport
+      # The single allowed CORS origin AND the STOMP allowed origin, so a
+      # wrong value here blocks every browser request and every socket while
+      # the service itself stays perfectly healthy -- it reads as "the API is
+      # down".
+      #
+      # NOT `fromService`, which is what this used to be. `property: host`
+      # yields a bare `recallix-frontend.onrender.com` with no scheme, and a
+      # bare host is not an origin: CORS compares it against the browser's
+      # `https://recallix-frontend.onrender.com` and never matches. The
+      # blueprint has no property that produces a URL, so this is filled in by
+      # hand and DeploymentCheck refuses to start if it is missing a scheme.
       - key: APP_FRONTEND_URL
-        fromService:
-          type: web
-          name: recallix-frontend
-          property: host
+        sync: false        # https://recallix-frontend.onrender.com
+
+      # Where this API is reachable from the public internet. Only used for the
+      # calendar feed -- which is fetched by Google's and Apple's servers, not
+      # by the user's browser, so this is the one URL where a private address
+      # fails for somebody who is not you and cannot be noticed locally.
+      #
+      # Was absent from this file entirely, which meant it fell back to
+      # http://localhost:8080 and every subscribed calendar silently stopped
+      # updating.
+      - key: APP_PUBLIC_URL
+        sync: false        # https://recallix-backend.onrender.com
 
   # ---------------------------------------------------------------------------
   # AI service — private. It is reached only by the backend and by Kafka, and
@@ -122,11 +155,12 @@ services:
     dockerfilePath: ./ai-service/Dockerfile
     dockerContext: ./ai-service
     envVars:
+      # Same missing-scheme problem as APP_FRONTEND_URL above: `property: host`
+      # gives `recallix-backend.onrender.com`, and httpx rejects a request URL
+      # with no scheme -- so every transcript callback would fail after the work
+      # was already done and paid for.
       - key: SPRING_CALLBACK_URL
-        fromService:
-          type: web
-          name: recallix-backend
-          property: host
+        sync: false        # https://recallix-backend.onrender.com
       - key: RECALLIX_INTERNAL_TOKEN
         fromService:
           type: web
@@ -209,11 +243,13 @@ services:
     dockerfilePath: ./frontend/Dockerfile
     dockerContext: ./frontend
     envVars:
+      # By hand, for the third time and the same reason: `property: host` has
+      # no scheme, and this one is INLINED INTO THE BROWSER BUNDLE at build
+      # time. A scheme-less value there becomes a relative path -- the app
+      # would call itself instead of the API, and no amount of restarting
+      # fixes it without a rebuild.
       - key: NEXT_PUBLIC_API_URL
-        fromService:
-          type: web
-          name: recallix-backend
-          property: host
+        sync: false        # https://recallix-backend.onrender.com
       - key: NEXT_PUBLIC_WS_URL
         sync: false        # wss://<backend-host>/ws
       - key: NEXT_PUBLIC_AUTH_MODE

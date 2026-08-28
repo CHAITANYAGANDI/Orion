@@ -9,13 +9,55 @@ deployment that works and one that comes up healthy while being silently wrong.
 
 ---
 
-## 0. Before anything: the two failure modes that do not announce themselves
+## 0. Before anything: the failure modes that do not announce themselves
 
-**Auth mode.** `RECALLIX_AUTH_MODE` defaults to `dev` everywhere. In dev mode
-`AuthenticationFilter` trusts an `X-Dev-User` header, so *any* request can
-impersonate *any* user. A deployment that misses this variable is completely
-open **and behaves perfectly** — nothing in the logs or the UI reveals it. The
-blueprint hardcodes `clerk`; do not override it.
+Every item in this section fails by *working*. The service starts, the health
+check passes, pages render — and something is wrong that no log line mentions.
+That is what makes them worth a section of their own.
+
+**The production profile catches most of them now.** `render.yaml` sets
+`SPRING_PROFILES_ACTIVE=production`, which switches on `DeploymentCheck`: the
+backend refuses to start if any setting below is still the development one, and
+names all of them at once rather than one per restart. Nothing else sets that
+profile — `docker-compose` deliberately does not, because the local stack *is*
+the development configuration.
+
+**Auth mode.** `RECALLIX_AUTH_MODE` defaults to `clerk`, in `application.yml`
+and on every `@Value` that reads it. In dev mode `AuthenticationFilter` and
+`StompAuthInterceptor` trust an `X-Dev-User` header, so *any* request — and any
+websocket — can impersonate *any* user. The blueprint hardcodes `clerk`; do not
+override it.
+
+> It defaulted to `dev` until recently, and the fail-closed default written on
+> the `@Value` was cancelled by `application.yml` supplying `dev` explicitly — a
+> `@Value` default applies only when a property is *absent*. Two defaults for
+> one decision, and the weaker one won silently. `ApplicationDefaultsTest` now
+> resolves the real YAML with an empty environment and pins the answer.
+
+**The internal callback token.** `RECALLIX_INTERNAL_TOKEN` has **no default**.
+It used to fall back to `dev-internal-token`, which is committed to this
+repository and printed further down this page, so a deployment that never set it
+looked exactly like one that did — while accepting result callbacks from anybody
+who had read the source. Those callbacks write transcripts and mark meetings
+READY. Unset now means `InternalTokenFilter` refuses every `/internal/**`
+request: meetings pile up in PROCESSING and the ai-service logs 401s, which is
+loud and traceable in a way that silent acceptance is not.
+
+**URLs that have no scheme.** Render's blueprint cannot produce a URL.
+`fromService` with `property: host` yields a bare `recallix-backend.onrender.com`,
+and a bare host is not an origin — CORS compares it against the browser's
+`https://…` and never matches, so every request fails and it reads as "the API
+is down". `APP_FRONTEND_URL`, `APP_PUBLIC_URL`, `SPRING_CALLBACK_URL` and
+`NEXT_PUBLIC_API_URL` are therefore `sync: false` and filled in by hand, with
+the scheme. `AI_SERVICE_URL` is the one exception: it names a private service,
+where `http` is the only possibility, so `AiClient` supplies it.
+
+**`APP_PUBLIC_URL` is not the frontend URL.** It is where *this API* is
+reachable from the public internet, and only the calendar feed uses it — fetched
+by Google's and Apple's servers rather than by the user's browser. It was
+missing from the blueprint entirely, so it fell back to `http://localhost:8080`
+and every subscribed calendar quietly stopped updating. Nothing in the app shows
+this; the feed simply never refreshes.
 
 **Frontend build-time values.** `NEXT_PUBLIC_*` are inlined into the client
 bundle by `next build`, not read at runtime. Change one and you must *rebuild*,
@@ -227,9 +269,23 @@ every server-side check still passes:
 
 ## 4. Clerk
 
+**Create a production instance.** A Clerk *development* instance — the one whose
+keys begin `pk_test_` / `sk_test_` and whose issuer ends `.accounts.dev` — is
+not a production instance with a different name. It has its own user list, so
+accounts created there do not exist in production; it has relaxed session
+handling and no custom domain; and its sign-in flow depends on a dev-browser
+cookie that behaves differently across sites.
+
+The backend logs a WARNING when it sees `.accounts.dev`, and does not refuse to
+start — a staging environment on a development instance is a reasonable thing to
+run, and nothing here can tell staging from production.
+
 Set the instance to production, add the frontend domain, and take:
 
-- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` (frontend, **build-time**)
+- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` (frontend, **build-time** — `pk_live_…`)
+- `CLERK_SECRET_KEY` (frontend service, **runtime only** — `middleware.ts` runs
+  in Node and verifies the session before a page is sent. It must never be a
+  `NEXT_PUBLIC_` name, which would inline it into the browser bundle.)
 - `CLERK_ISSUER` and `CLERK_JWKS_URL` (backend)
 
 Add an `email` claim to the JWT template. Clerk's default session token
@@ -283,6 +339,11 @@ Fill every `sync: false` value in the dashboard before the first build.
 `RECALLIX_INTERNAL_TOKEN` is generated on the backend and referenced by the
 ai-service, so the two always match — do not set it by hand on one side only,
 or every worker callback returns 401.
+
+If any of them is missed, the backend will not start: `DeploymentCheck` lists
+every development setting it found and refuses. That is the intended outcome —
+it is a bad ten minutes rather than a deployment that is open, or broken, and
+looks fine. The message names each variable and what it costs.
 
 ### Order matters on first boot
 

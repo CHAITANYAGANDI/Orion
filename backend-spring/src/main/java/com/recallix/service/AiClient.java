@@ -31,6 +31,7 @@ public class AiClient {
     private final RestClient client;
 
     public AiClient(@Value("${app.ai-service-url:http://localhost:8000}") String aiServiceUrl) {
+        String baseUrl = withScheme(aiServiceUrl);
         // Pin HTTP/1.1. RestClient's default JDK HttpClient negotiates HTTP/2 over
         // cleartext with an h2c upgrade handshake, which uvicorn rejects
         // ("Unsupported upgrade request") — the request then arrives with no body,
@@ -41,8 +42,37 @@ public class AiClient {
                 .build();
         this.client = RestClient.builder()
                 .requestFactory(new JdkClientHttpRequestFactory(jdkClient))
-                .baseUrl(aiServiceUrl)
+                .baseUrl(baseUrl)
                 .build();
+    }
+
+    /**
+     * Puts {@code http://} in front of a bare {@code host:port}.
+     *
+     * <p>Render's blueprint cannot produce a URL. {@code fromService} with
+     * {@code property: hostport} yields {@code recallix-ai:10000} — the right
+     * host and the right port, with no scheme — and that is not a base URL:
+     * {@code URI} reads {@code recallix-ai} as the scheme and the rest as an
+     * opaque body, so every call fails with a parse error naming a host nobody
+     * configured. Losing the auto-wiring to avoid that would mean writing the
+     * private service's port out by hand and keeping it in step forever.
+     *
+     * <p>{@code http}, not {@code https}: this address exists only on Render's
+     * internal network, where private services are plain HTTP and are not
+     * reachable from outside at all.
+     *
+     * <p>Only this URL gets repaired. The frontend and public URLs are refused
+     * by {@link com.recallix.config.DeploymentCheck} instead, because for those
+     * both schemes are plausible and a wrong guess is a working deployment
+     * pointing somewhere unintended.
+     */
+    private static String withScheme(String url) {
+        String trimmed = url == null ? "" : url.trim();
+        if (trimmed.isEmpty() || trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+            return trimmed;
+        }
+        log.info("AI_SERVICE_URL has no scheme; reading '{}' as http://{}", trimmed, trimmed);
+        return "http://" + trimmed;
     }
 
     public record Citation(int chunkIndex, Double start, Double end, String text,

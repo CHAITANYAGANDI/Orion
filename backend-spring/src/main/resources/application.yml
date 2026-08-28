@@ -113,8 +113,29 @@ spring:
 # JwtDecoder itself, lazily, from recallix.clerk.jwks-url below.
 
 recallix:
-  auth-mode: ${RECALLIX_AUTH_MODE:dev}
-  internal-token: ${RECALLIX_INTERNAL_TOKEN:dev-internal-token}
+  # Defaults to clerk, and that single word is the whole of the access control
+  # story for a deployment whose environment did not arrive intact.
+  #
+  # This used to read `:dev`, which quietly cancelled the fail-closed default
+  # written on the @Value in AuthenticationFilter and ClerkTokens. A @Value
+  # default only applies when the property is ABSENT, and this file made it
+  # present in every profile -- so an unset RECALLIX_AUTH_MODE resolved here, to
+  # dev, and the guard three layers down never got a say. Two defaults for one
+  # decision, and the weaker one won.
+  #
+  # In dev mode AuthenticationFilter and StompAuthInterceptor take an
+  # `X-Dev-User` header at its word and become whoever it names. A deployment
+  # that missed this variable was completely open and behaved perfectly.
+  #
+  # The opposite mistake costs a wall of 401s: obvious in seconds, and nobody's
+  # data is exposed while it lasts. See AuthModeDefaultTest.
+  auth-mode: ${RECALLIX_AUTH_MODE:clerk}
+  # No default, deliberately. This is the shared secret on /internal/**, which
+  # is where the ai-service writes transcripts and marks meetings READY -- so a
+  # well-known default value is an unauthenticated write endpoint dressed as a
+  # configured one. Blank means InternalTokenFilter refuses every internal
+  # request rather than accepting a token published in this repository.
+  internal-token: ${RECALLIX_INTERNAL_TOKEN:}
   clerk:
     issuer: ${CLERK_ISSUER:}
     jwks-url: ${CLERK_JWKS_URL:}

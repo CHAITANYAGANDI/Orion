@@ -37,6 +37,14 @@ services:
       KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-PLAIN}
       KAFKA_SASL_JAAS_CONFIG: ${KAFKA_SASL_JAAS_CONFIG:-}
       RECALLIX_AUTH_MODE: ${RECALLIX_AUTH_MODE:-clerk}
+      # The development value now lives HERE and only here. application.yml has
+      # no default for it any more: an unset RECALLIX_INTERNAL_TOKEN used to
+      # resolve to this same published string, which made a deployment that
+      # never configured it indistinguishable from one that did. Blank means
+      # InternalTokenFilter refuses every /internal/** callback.
+      #
+      # Which is why compose still passes it explicitly -- the local stack is
+      # meant to work out of the box, and this token is public anyway.
       RECALLIX_INTERNAL_TOKEN: ${RECALLIX_INTERNAL_TOKEN:-dev-internal-token}
       # The nightly retention pass (V35). Exposed for the same reason and one
       # more: it is the only scheduled job that deletes data, so an environment
@@ -61,7 +69,14 @@ services:
       # R2 signs with this and wants `auto`. MinIO ignored it, which is why it
       # was never in this file before.
       S3_REGION: ${S3_REGION:-auto}
-      APP_FRONTEND_URL: http://localhost:3000
+      # The only allowed CORS origin and the only allowed STOMP origin. Was
+      # hardcoded, so a stack served from anywhere but localhost:3000 could not
+      # be fixed without editing this file.
+      APP_FRONTEND_URL: ${APP_FRONTEND_URL:-http://localhost:3000}
+      # Where this API is reachable from OUTSIDE the docker network. Only the
+      # calendar feed uses it, and that is fetched by Google's and Apple's
+      # servers -- so localhost is right here and wrong anywhere real.
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:8080}
 
   ai-service:
     build: ./ai-service
