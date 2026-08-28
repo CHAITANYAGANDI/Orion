@@ -6,7 +6,7 @@
  * One plan, free, and the page says so in the first sentence rather than
  * leaving somebody to scroll for the catch. What used to be here was three
  * cards — Free, Pro at $19, Premium at $49 — with a Stripe checkout behind two
- * of them and feature lists nothing in the codebase backed. Recallix does not
+ * of them and feature lists nothing in the codebase backed. Orion does not
  * have two more products; it has one, and a pricing table that implies
  * otherwise is a promise made on behalf of work that does not exist.
  *
@@ -54,7 +54,7 @@ function PlanCard() {
           Plans
         </h2>
         <p className="text-sm text-muted-foreground">
-          Recallix has one plan. Everything the product does is in it.
+          Orion has one plan. Everything the product does is in it.
         </p>
       </div>
 

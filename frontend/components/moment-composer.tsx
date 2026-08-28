@@ -92,7 +92,7 @@ export function NoteDialog({
         <DialogHeader>
           <DialogTitle>Add a note</DialogTitle>
           <DialogDescription>
-            Private to you — Recallix has one account per workspace, so there is
+            Private to you — Orion has one account per workspace, so there is
             nobody else on this transcript to notify.
           </DialogDescription>
         </DialogHeader>
@@ -197,7 +197,7 @@ export function ActionItemDialog({
           <DialogTitle>Create an action item</DialogTitle>
           <DialogDescription>
             Goes into this meeting&apos;s action items and the workspace list,
-            alongside the ones Recallix extracted.
+            alongside the ones Orion extracted.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">

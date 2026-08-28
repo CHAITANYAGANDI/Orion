@@ -163,12 +163,12 @@ docker run --rm \
   -v "$PWD/ai-service/benchmarks:/app/benchmarks:ro" \
   -v "$PWD/benchmark-audio/speakers:/audio:ro" \
   -v "$PWD/benchmark-audio/results:/out" \
-  recallix-ai-service:latest \
+  orion-ai-service:latest \
   python -m benchmarks.speaker_id.run --audio /audio --out /out --truncate
 ```
 
 On Windows under Git Bash, prefix with `MSYS_NO_PATHCONV=1` and use an absolute
-path (`-v "d:/FullStackDevelopment/Recallix/ai-service/benchmarks:/app/benchmarks:ro"`).
+path (`-v "d:/FullStackDevelopment/Orion/ai-service/benchmarks:/app/benchmarks:ro"`).
 
 Build the image first if you have not: `docker compose build ai-service`.
 
@@ -178,7 +178,7 @@ Check the filenames without loading anything:
 docker run --rm \
   -v "$PWD/ai-service/benchmarks:/app/benchmarks:ro" \
   -v "$PWD/benchmark-audio/speakers:/audio:ro" \
-  recallix-ai-service:latest \
+  orion-ai-service:latest \
   python -m benchmarks.speaker_id.run --audio /audio --out /tmp --check
 ```
 

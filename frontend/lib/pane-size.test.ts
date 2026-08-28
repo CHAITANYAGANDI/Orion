@@ -64,14 +64,14 @@ describe("usePaneWidth", () => {
     // Not hypothetical the moment the bounds change: a rail dragged to 400 and
     // then capped at 320 in a later release would otherwise come back too wide
     // for its own limit and never be correctable except by dragging.
-    window.localStorage.setItem("recallix.pane.rail", "5000");
+    window.localStorage.setItem("orion.pane.rail", "5000");
 
     const { result } = renderHook(() => usePaneWidth("rail", BOUNDS));
     expect(result.current[0]).toBe(400);
   });
 
   it("ignores a stored value that is not a width", () => {
-    window.localStorage.setItem("recallix.pane.rail", "wide");
+    window.localStorage.setItem("orion.pane.rail", "wide");
 
     const { result } = renderHook(() => usePaneWidth("rail", BOUNDS));
     expect(result.current[0]).toBe(256);

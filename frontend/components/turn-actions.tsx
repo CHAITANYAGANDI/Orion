@@ -196,7 +196,7 @@ export function TurnActions({
               </button>
             ))}
           </div>
-          {/* Said once, here, rather than on every chip. Recallix has one
+          {/* Said once, here, rather than on every chip. Orion has one
               account per workspace, so there is nobody for a reaction to
               notify and nobody it could be aimed at — it is a one-click tag on
               a passage, and somebody who thinks otherwise is entitled to know

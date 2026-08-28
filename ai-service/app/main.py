@@ -85,7 +85,7 @@ async def lifespan(app: FastAPI):
         logger.info("ai-service stopped.")
 
 
-app = FastAPI(title="Recallix AI Service", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Orion AI Service", version="0.1.0", lifespan=lifespan)
 app.include_router(ai_router.router)
 
 

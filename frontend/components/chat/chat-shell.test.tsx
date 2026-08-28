@@ -5,7 +5,7 @@ import { ChatDock, ChatRail } from "@/components/chat/chat-shell";
 import type { ChatPrompt } from "@/lib/chat-prompts";
 
 /**
- * The layout every Recallix chat shares.
+ * The layout every Orion chat shares.
  *
  * Three surfaces draw a conversation — the home rail, the meeting rail and the
  * full AI Chat page — and they had drifted into three different shapes. What is

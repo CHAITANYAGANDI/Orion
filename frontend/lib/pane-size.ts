@@ -42,7 +42,7 @@ export interface PaneBounds {
   max: number;
 }
 
-const PREFIX = "recallix.pane.";
+const PREFIX = "orion.pane.";
 
 /** Hold a width inside its bounds, rounded to whole pixels. */
 export function clampWidth(px: number, bounds: { min: number; max: number }): number {

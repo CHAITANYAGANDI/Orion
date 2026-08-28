@@ -127,7 +127,7 @@ describe("safety", () => {
     const link = screen.getByRole("link", { name: "the site" });
     expect(link).toHaveAttribute("target", "_blank");
     // noopener/noreferrer for the tab it opens; nofollow because this
-    // destination came out of a language model, not out of Recallix.
+    // destination came out of a language model, not out of Orion.
     expect(link.getAttribute("rel")).toContain("noopener");
     expect(link.getAttribute("rel")).toContain("noreferrer");
     expect(link.getAttribute("rel")).toContain("nofollow");

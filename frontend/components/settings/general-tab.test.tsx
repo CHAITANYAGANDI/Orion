@@ -14,14 +14,14 @@ import type { PreferencesResponse, PrivacyOverview, SpeakerSettings } from "@/li
  * so the test that matters is that saving one does not quietly clear another,
  * which is what a form that sends its whole state on every keystroke would do.
  *
- * <i>Email and password are shown and not editable.</i> Neither is Recallix's to
+ * <i>Email and password are shown and not editable.</i> Neither is Orion's to
  * change; a development session has no sign-in provider and therefore no
  * password at all, and an Edit control over them would be a promise the product
  * cannot keep.
  *
  * <i>Nothing in the footer is invented.</i> No commit means "dev build" rather
  * than a hash that resolves to nothing, and the legal line does not appear at
- * all unless somebody has supplied real URLs — Recallix ships no terms of
+ * all unless somebody has supplied real URLs — Orion ships no terms of
  * service of its own.
  */
 const {
@@ -222,17 +222,17 @@ describe("editing", () => {
     expect(screen.queryByLabelText("Pronouns")).not.toBeInTheDocument();
   });
 
-  it("lets the address be edited in a session Recallix owns", async () => {
+  it("lets the address be edited in a session Orion owns", async () => {
     await openEditor();
 
-    // Dev has no provider, so the column is Recallix's own and an edit sticks.
+    // Dev has no provider, so the column is Orion's own and an edit sticks.
     expect(screen.getByLabelText("Email")).toBeEnabled();
   });
 
   it("never puts a real password in the DOM", async () => {
     await openEditor();
 
-    // Dots are a drawing of a password, not one. Recallix has never held it,
+    // Dots are a drawing of a password, not one. Orion has never held it,
     // and rendering anything else here would mean it had started to.
     expect(screen.getByLabelText("Password")).toBeDisabled();
     expect(screen.getByLabelText("Password")).toHaveValue("••••••••••");
@@ -341,7 +341,7 @@ describe("the rest of the page", () => {
   it("shows no legal line when there are no documents to link to", () => {
     render(<GeneralTab />);
 
-    // Recallix ships no terms of service of its own, and a link to a page that
+    // Orion ships no terms of service of its own, and a link to a page that
     // does not exist is worse than no link.
     expect(screen.queryByText(/Terms of Service/)).not.toBeInTheDocument();
   });
@@ -483,7 +483,7 @@ describe("closing the account", () => {
  * Voice recognition ~ the only consent on this page, and the only data on it
  * that is derived from somebody's body.
  *
- * <p>Matching a voice across meetings cannot be done from names. Recallix held a
+ * <p>Matching a voice across meetings cannot be done from names. Orion held a
  * list of names for a year and it could never have identified anybody: it needs
  * a numerical description of how a person sounds, which is a stable identifier
  * and, under GDPR Article 9, biometric data when used to identify someone.

@@ -10,7 +10,7 @@ import userEvent from "@testing-library/user-event";
  * failure says so instead of silently keeping the old one, and that removing it
  * really removes it.
  *
- * The rest is about restraint. Neither credential belongs to Recallix, and the
+ * The rest is about restraint. Neither credential belongs to Orion, and the
  * dialog has to be clear about which of them this deployment can change at all.
  */
 const { avatarFromFile } = vi.hoisted(() => ({ avatarFromFile: vi.fn() }));
@@ -167,7 +167,7 @@ describe("the photo", () => {
 });
 
 describe("the email", () => {
-  it("can be edited where Recallix owns it", async () => {
+  it("can be edited where Orion owns it", async () => {
     show(EMPTY, "dev");
     expect(screen.getByLabelText("Email")).toBeEnabled();
   });

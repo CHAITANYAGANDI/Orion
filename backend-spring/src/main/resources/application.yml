@@ -3,15 +3,15 @@ server:
 
 spring:
   application:
-    name: recallix-backend-spring
+    name: orion-backend-spring
 
   # Runtime connections use the UNPRIVILEGED role. Row-level security is
   # ignored by superusers and by anything holding BYPASSRLS, so connecting as
   # the schema owner would leave every V9 policy enabled and enforcing nothing.
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/recallix}
-    username: ${SPRING_DATASOURCE_USERNAME:recallix_app}
-    password: ${SPRING_DATASOURCE_PASSWORD:recallix_app}
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/orion}
+    username: ${SPRING_DATASOURCE_USERNAME:orion_app}
+    password: ${SPRING_DATASOURCE_PASSWORD:orion_app}
     driver-class-name: org.postgresql.Driver
 
   # How much scheduled work can happen at once.
@@ -35,7 +35,7 @@ spring:
   task:
     scheduling:
       pool:
-        size: ${RECALLIX_SCHEDULER_THREADS:3}
+        size: ${ORION_SCHEDULER_THREADS:3}
 
   jpa:
     hibernate:
@@ -59,9 +59,9 @@ spring:
     # holds an advisory lock across several transactions, and a transaction-mode
     # connection pooler does not keep it — so FLYWAY_URL should name the direct
     # endpoint while the runtime pool uses the pooled one.
-    url: ${FLYWAY_URL:${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/recallix}}
-    user: ${FLYWAY_USER:recallix}
-    password: ${FLYWAY_PASSWORD:recallix}
+    url: ${FLYWAY_URL:${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/orion}}
+    user: ${FLYWAY_USER:orion}
+    password: ${FLYWAY_PASSWORD:orion}
 
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
@@ -75,7 +75,7 @@ spring:
       sasl.mechanism: ${KAFKA_SASL_MECHANISM:PLAIN}
       sasl.jaas.config: ${KAFKA_SASL_JAAS_CONFIG:}
     consumer:
-      group-id: recallix-backend
+      group-id: orion-backend
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
@@ -110,16 +110,16 @@ spring:
 # Boot's OAuth2 resource-server autoconfiguration activates as soon as
 # jwk-set-uri is *present* — an empty value (dev mode) makes it fail startup
 # with "jwkSetUri cannot be empty". AuthenticationFilter builds the Clerk
-# JwtDecoder itself, lazily, from recallix.clerk.jwks-url below.
+# JwtDecoder itself, lazily, from orion.clerk.jwks-url below.
 
-recallix:
+orion:
   # Defaults to clerk, and that single word is the whole of the access control
   # story for a deployment whose environment did not arrive intact.
   #
   # This used to read `:dev`, which quietly cancelled the fail-closed default
   # written on the @Value in AuthenticationFilter and ClerkTokens. A @Value
   # default only applies when the property is ABSENT, and this file made it
-  # present in every profile -- so an unset RECALLIX_AUTH_MODE resolved here, to
+  # present in every profile -- so an unset ORION_AUTH_MODE resolved here, to
   # dev, and the guard three layers down never got a say. Two defaults for one
   # decision, and the weaker one won.
   #
@@ -129,13 +129,13 @@ recallix:
   #
   # The opposite mistake costs a wall of 401s: obvious in seconds, and nobody's
   # data is exposed while it lasts. See AuthModeDefaultTest.
-  auth-mode: ${RECALLIX_AUTH_MODE:clerk}
+  auth-mode: ${ORION_AUTH_MODE:clerk}
   # No default, deliberately. This is the shared secret on /internal/**, which
   # is where the ai-service writes transcripts and marks meetings READY -- so a
   # well-known default value is an unauthenticated write endpoint dressed as a
   # configured one. Blank means InternalTokenFilter refuses every internal
   # request rather than accepting a token published in this repository.
-  internal-token: ${RECALLIX_INTERNAL_TOKEN:}
+  internal-token: ${ORION_INTERNAL_TOKEN:}
   clerk:
     issuer: ${CLERK_ISSUER:}
     jwks-url: ${CLERK_JWKS_URL:}
@@ -144,8 +144,8 @@ recallix:
   # job that deletes data: an environment restored from a backup should be able
   # to find the switch before it wakes up and re-runs last month's deletions.
   retention:
-    enabled: ${RECALLIX_RETENTION_ENABLED:true}
-    cron: ${RECALLIX_RETENTION_CRON:0 0 3 * * *}
+    enabled: ${ORION_RETENTION_ENABLED:true}
+    cron: ${ORION_RETENTION_CRON:0 0 3 * * *}
 
 app:
   frontend-url: ${APP_FRONTEND_URL:http://localhost:3000}
@@ -162,7 +162,7 @@ s3:
   public-endpoint: ${S3_PUBLIC_ENDPOINT:http://localhost:9000}
   access-key: ${S3_ACCESS_KEY:minioadmin}
   secret-key: ${S3_SECRET_KEY:minioadmin}
-  bucket: ${S3_BUCKET:recallix}
+  bucket: ${S3_BUCKET:orion}
   region: ${S3_REGION:us-east-1}
   presign-expiry-seconds: 900
   # Applied to the bucket at startup when set (AES256 or aws:kms), and left
@@ -203,4 +203,4 @@ resilience4j:
 
 logging:
   level:
-    com.recallix: INFO
+    com.orion: INFO

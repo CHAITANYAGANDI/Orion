@@ -38,7 +38,7 @@ describe("SelectionMenu", () => {
       "Highlight",
       "Copy",
       "Add note",
-      "Ask Recallix",
+      "Ask Orion",
       "Summarize",
       "Create action item",
       "Copy link to moment",

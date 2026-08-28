@@ -273,7 +273,7 @@ def match_speakers(
 #: An exact shape rather than a prefix, and the difference is a bug that was
 #: caught by a test rather than by a user: "speaker " as a prefix also matches
 #: **"Speaker of the House"**, so a rematch would have overwritten a name
-#: somebody deliberately typed. Only the three forms Recallix itself generates
+#: somebody deliberately typed. Only the three forms Orion itself generates
 #: are up for grabs, and each must match end to end.
 _UNRESOLVED = re.compile(r"^(speaker\s+\d+|spk_\d+|unknown speaker)$", re.IGNORECASE)
 
@@ -281,7 +281,7 @@ _UNRESOLVED = re.compile(r"^(speaker\s+\d+|spk_\d+|unknown speaker)$", re.IGNORE
 def is_unresolved(display_name: str | None) -> bool:
     """Whether this label is still a placeholder rather than a person.
 
-    Matches the labels Recallix itself generates — "Speaker 1", "spk_2",
+    Matches the labels Orion itself generates — "Speaker 1", "spk_2",
     "Unknown speaker" — and nothing else. It is deliberately not "does this look
     like a name": somebody who renames a speaker to "Facilitator",
     "Interviewer 2" or "Speaker of the House" has made a decision about their own

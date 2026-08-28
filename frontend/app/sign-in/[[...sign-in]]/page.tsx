@@ -8,7 +8,7 @@ import { AuthScreen } from "@/components/auth-screen";
  * path — a second factor, an emailed code, a password reset — and each of those
  * is a URL. A plain `/sign-in` route would 404 on every one of them.
  *
- * <p>Clerk's own component rather than a form of ours. Recallix does not
+ * <p>Clerk's own component rather than a form of ours. Orion does not
  * authenticate anybody and deliberately holds no password: what is signed in
  * here is verified against Clerk's JWKS by
  * `AuthenticationFilter`, and everything a credential needs around it —
@@ -18,7 +18,7 @@ import { AuthScreen } from "@/components/auth-screen";
 export default function SignInPage() {
   return (
     <AuthScreen
-      title="Sign in to Recallix"
+      title="Sign in to Orion"
       subtitle="Your meetings, transcripts and notes are scoped to your account."
     >
       {/* `fallbackRedirectUrl`, not `forceRedirectUrl`: the middleware puts the

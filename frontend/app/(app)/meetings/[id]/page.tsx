@@ -206,7 +206,7 @@ export default function MeetingDetailPage() {
 
   /**
    * Controlled so the transcript can hand a selection to the chat.
-   * "Ask Recallix" about a highlighted sentence has to leave the tab it was
+   * "Ask Orion" about a highlighted sentence has to leave the tab it was
    * invoked from, which an uncontrolled Tabs cannot do.
    */
   const [tab, setTab] = React.useState("summary");
@@ -512,7 +512,7 @@ export default function MeetingDetailPage() {
    *
    * The summary is prose you paste into a reply; the minutes are a document you
    * paste into a doc or an email. Speakers come from the transcript because
-   * "Present:" is the line every set of minutes opens with, and Recallix knows
+   * "Present:" is the line every set of minutes opens with, and Orion knows
    * who spoke without anyone having typed an attendee list.
    */
   function minutesInput() {

@@ -8,7 +8,7 @@
  * every field is an input invites somebody to change one by accident while
  * scanning it. Editing is a thing you decide to start.
  *
- * <p>The password is not typed into this form. It is not Recallix's to hold —
+ * <p>The password is not typed into this form. It is not Orion's to hold —
  * there is no password column and no login form; the identity provider owns
  * sign-in — so the row shows dots and opens a dialog that hands the change to
  * the provider. Putting an editable box here instead would mean either storing

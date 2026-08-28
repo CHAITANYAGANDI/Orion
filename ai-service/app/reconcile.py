@@ -54,7 +54,7 @@ Two cases still produce no speaker at all:
 * the best cluster's share of the word does not beat the runner-up by
   ``MARGIN`` — the boundary is genuinely ambiguous.
 
-Unresolved is a real answer and renders as one. Recallix already has
+Unresolved is a real answer and renders as one. Orion already has
 ``speaker_status="unknown"`` for precisely this, and filing an ambiguous word
 under whoever was nearest is how a transcript comes to quote somebody who did
 not speak.

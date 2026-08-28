@@ -12,7 +12,7 @@
  * highlight starting mid-word looks like a rendering bug, and a partial word is
  * a much worse anchor than a whole one.
  *
- * RECOVERY. Recallix lets people correct transcript lines. Fixing a typo near
+ * RECOVERY. Orion lets people correct transcript lines. Fixing a typo near
  * the start of a sentence shifts every character offset after it — so an
  * annotation stored as offsets alone does not break loudly, it silently slides
  * onto different words. `resolveRange` therefore trusts the offsets only when

@@ -161,7 +161,7 @@ describe("NotificationBell badge", () => {
  * It sits beside the wordmark, at the top of the left rail.
  *
  * <p>Which pins down two things. There is no room for a written label next to
- * "Recallix", so everything that names this control has to come from the
+ * "Orion", so everything that names this control has to come from the
  * accessible name — an icon with no text and no label is the one item on screen
  * nobody can ask for. And the rail is a slide-over on a narrow window, so
  * following a notification has to close it; otherwise the panel and the rail
@@ -382,7 +382,7 @@ describe("NotificationBell end of the list", () => {
   });
 
   it("says how much is shown when there is more", async () => {
-    // Recallix keeps notifications until they are cleared, so the panel says
+    // Orion keeps notifications until they are cleared, so the panel says
     // what it is showing rather than claiming a retention window it has not got.
     total = 64;
     await openBell();

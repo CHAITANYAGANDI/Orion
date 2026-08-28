@@ -10,7 +10,7 @@ Speaker 2 (00:22)  "Okay, you have a good day anyway. I'm going home.
 ```
 
 Two people, one label. The audio was re-submitted to AssemblyAI four ways — as
-Recallix sends it, with `speakers_expected: 2`, with `speaker_options{2,2}`, and
+Orion sends it, with `speakers_expected: 2`, with `speaker_options{2,2}`, and
 on `universal-2` — and every run returned the same merged utterance with **every
 word labelled `B`**, in both the `utterances` array and the top-level `words`
 array. There was nothing in the response to recover, and no request-level flag

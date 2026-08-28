@@ -21,9 +21,9 @@
  *
  * That the browser still asks its own permission question is the point at which
  * this is not silent — it is the browser's prompt, it names the site, and it is
- * the only consent gate Recallix relies on.
+ * the only consent gate Orion relies on.
  *
- * The consent tick going means Recallix no longer has anything to say about
+ * The consent tick going means Orion no longer has anything to say about
  * consent for a recording, and says nothing rather than something convenient.
  * See where the meeting is created in components/recording-bar.tsx.
  *
@@ -237,7 +237,7 @@ export default function RecordPage() {
 /**
  * The body of a meeting that is being recorded.
  *
- * It says the transcript is not coming yet, because it is not. Recallix
+ * It says the transcript is not coming yet, because it is not. Orion
  * transcribes after Stop — the audio is captured in the browser, uploaded, and
  * sent through the pipeline as one file. An empty pane that looked like it was
  * waiting for words would be a promise of live captions the product does not

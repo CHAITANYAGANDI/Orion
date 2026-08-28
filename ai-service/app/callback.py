@@ -98,7 +98,7 @@ class SpringCallbackClient:
 
     def __init__(self, settings: Settings) -> None:
         self._base = settings.spring_callback_url.rstrip("/")
-        self._headers = {"X-Internal-Token": settings.recallix_internal_token}
+        self._headers = {"X-Internal-Token": settings.orion_internal_token}
         self._timeout = 15.0
 
     async def job_state(self, meeting_id: str) -> "JobState | None":

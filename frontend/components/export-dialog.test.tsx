@@ -294,7 +294,7 @@ describe("ExportDialog the recording", () => {
 
     await userEvent.click(screen.getByRole("switch", { name: "Audio" }));
 
-    // Recallix does not transcode. Printing "mp3" would name a file the user
+    // Orion does not transcode. Printing "mp3" would name a file the user
     // cannot open with whatever they downloaded it for.
     expect(screen.getByText("m4a")).toBeInTheDocument();
   });

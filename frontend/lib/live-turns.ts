@@ -139,7 +139,7 @@ export interface SpeakerRevision {
  * When this turn began, in seconds into the recording.
  *
  * From the provider, never from a timer in this tab. The old browser preview
- * stamped each phrase with Recallix's own elapsed counter at the moment
+ * stamped each phrase with Orion's own elapsed counter at the moment
  * recognition happened to return, which is a description of how long
  * recognition took — that is how a line spoken at 0:04 came to be labelled
  * 0:10. The provider knows when the audio it transcribed arrived.

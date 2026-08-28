@@ -9,7 +9,7 @@ import { Toaster } from "@/components/ui/sonner";
 /**
  * App-wide client providers: Redux store, auth and toasts.
  *
- * No theme provider. Recallix has one palette, set on `:root` in globals.css,
+ * No theme provider. Orion has one palette, set on `:root` in globals.css,
  * so there is nothing to switch and nothing to restore from storage — which
  * also removes the flash of the wrong theme that any of this would reintroduce.
  */

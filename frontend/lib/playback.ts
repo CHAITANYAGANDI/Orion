@@ -2,7 +2,7 @@
  * Playback moves that are driven by the transcript rather than by the audio.
  *
  * Skip-silence, jump-to-speaker and play-highlights-only all look like audio
- * features and none of them are. Recallix already knows, to the word, when
+ * features and none of them are. Orion already knows, to the word, when
  * somebody was speaking and who — so a gap between utterances *is* the silence,
  * and a change of `speaker` *is* the boundary. Deriving them from the
  * transcript is both free and exact, where an amplitude-based implementation
@@ -164,7 +164,7 @@ export function nextSpanStart(spans: Span[], at: number): number | null {
  * How long the recording is: what the element knows, or what the server
  * measured when it could not.
  *
- * Every recording Recallix makes itself is WebM from the browser's
+ * Every recording Orion makes itself is WebM from the browser's
  * `MediaRecorder`, and a `MediaRecorder` cannot write a duration. It is muxing
  * a stream of unknown length, so it emits a Segment header of unknown size and
  * no Duration element and no Cues — verified on a stored recording, whose

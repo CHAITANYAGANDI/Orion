@@ -387,7 +387,7 @@ function SourceLink({
  * The task's working log.
  *
  * Called notes rather than comments in the copy, because "comment" promises a
- * reply and there is nobody to reply — Recallix has one account per workspace.
+ * reply and there is nobody to reply — Orion has one account per workspace.
  * What it is for is the thing a status of OPEN cannot say: waiting on legal,
  * half shipped, blocked until Thursday.
  */

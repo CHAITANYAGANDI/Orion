@@ -5,7 +5,7 @@ the morning without writing a parser first. So this reads the format Otter
 exports, the format Rev exports, and plain speaker-prefixed text — because
 those are what a ground-truth transcript arrives as.
 
-Nothing here is Recallix-specific and nothing here is committed with content:
+Nothing here is Orion-specific and nothing here is committed with content:
 the transcripts these parse are derived from copyrighted recordings, and
 benchmark-audio/ is gitignored for that reason.
 """
@@ -23,7 +23,7 @@ _OTTER_HEADER = re.compile(
     r"^\s*(?P<speaker>[^\t\n]{1,60}?)\s{2,}(?P<time>\d{1,2}:\d{2}(?::\d{2})?)\s*$"
 )
 
-#: "Speaker 1: the words", all on one line. What Recallix itself produces.
+#: "Speaker 1: the words", all on one line. What Orion itself produces.
 _PREFIXED = re.compile(r"^\s*(?P<speaker>[^:\n]{1,60}?)\s*:\s*(?P<text>.+)$")
 
 #: Otter stamps its own exports. Not part of the meeting.

@@ -12,7 +12,7 @@
  * Every action item belongs to a meeting, and this does not change that. From
  * the tracker the meeting is a choice; from a meeting page it is already
  * settled. That constraint is deliberate — an item with no meeting behind it is
- * a task in a to-do app, and Recallix has nothing to say about it: no source
+ * a task in a to-do app, and Orion has nothing to say about it: no source
  * sentence, no recording to seek to, nothing for the chat to read.
  */
 
@@ -89,7 +89,7 @@ export function NewActionItemDialog({
           <DialogHeader>
             <DialogTitle>Add an action item</DialogTitle>
             <DialogDescription>
-              Goes in alongside the ones Recallix extracted, and is kept when the
+              Goes in alongside the ones Orion extracted, and is kept when the
               meeting is reprocessed.
             </DialogDescription>
           </DialogHeader>

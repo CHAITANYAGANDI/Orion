@@ -11,7 +11,7 @@ faked instead.
 
 ## 1. Why the old feature could not have worked
 
-Recallix shipped a `known_speakers` table in V20. It stored:
+Orion shipped a `known_speakers` table in V20. It stored:
 
 ```
 display_name    times_used    last_used_at
@@ -64,7 +64,7 @@ Checked against current documentation rather than assumed.
 | | Diarization | Cross-file identity |
 |---|---|---|
 | **AssemblyAI** | Yes, word-level | **No.** Its "Speaker Identification" is per-file: it maps that file's diarized labels onto a list of names you supply, using in-file context. There is no enrolment and no voiceprint. |
-| **Deepgram** *(evaluated, no longer used)* | Yes | **No.** Labels do not persist across requests. Kept in this table because it is evidence for the conclusion below: no transcription provider offers cross-file identity, which is why Recallix owns this piece. |
+| **Deepgram** *(evaluated, no longer used)* | Yes | **No.** Labels do not persist across requests. Kept in this table because it is evidence for the conclusion below: no transcription provider offers cross-file identity, which is why Orion owns this piece. |
 | **OpenAI Whisper** | No | No |
 
 AssemblyAI's own FAQ on the subject recommends the approach taken here: get
@@ -72,7 +72,7 @@ diarization from them, *"use a model like Nvidia Titanet to generate speaker
 embeddings from the audio, then match these embeddings against a vector database
 of known speakers."*
 
-So this is a capability Recallix has to own. It cannot be bought from the
+So this is a capability Orion has to own. It cannot be bought from the
 transcription provider, and no configuration flag turns it on.
 
 ## 4. The model
@@ -175,7 +175,7 @@ that makes a match *more* likely.
    A candidate that loses it to a better match is **not** given its second
    choice — that would be answering "who else could this be?".
 
-Plus, on both sides of the wire: a speaker whose label is not one Recallix
+Plus, on both sides of the wire: a speaker whose label is not one Orion
 generated is never touched.
 
 ### The asymmetry all of this serves

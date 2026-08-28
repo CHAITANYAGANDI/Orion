@@ -1,7 +1,7 @@
 /**
  * Provider cluster ids in, meeting-local speaker numbers out.
  *
- * AssemblyAI names voices "A", "B", "C"… Recallix used to render those by
+ * AssemblyAI names voices "A", "B", "C"… Orion used to render those by
  * alphabet position — `charCodeAt(0) - 64` — so a meeting whose two voices
  * clustered as A and D displayed **Speaker 1 and Speaker 4**, with no Speaker 2
  * or 3 anywhere. That reads as two people missing from the room, and it is
@@ -90,7 +90,7 @@ export function rawToken(value: unknown): string | null {
  *
  * A cluster id ("A", "0") carries no meaning and is replaced by a meeting-local
  * number; anything longer came from speaker identification and is a name, which
- * beats any number Recallix could invent.
+ * beats any number Orion could invent.
  */
 export function isGenericCluster(token: string): boolean {
   return token.length === 1 || /^\d+$/.test(token);

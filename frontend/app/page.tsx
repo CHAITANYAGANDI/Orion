@@ -55,7 +55,7 @@ export default function LandingPage() {
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
               <Mic className="h-4 w-4" />
             </div>
-            <span className="font-semibold">Recallix AI</span>
+            <span className="font-semibold">Orion AI</span>
           </div>
           <nav className="flex items-center gap-2">
             <Button variant="ghost" asChild>
@@ -79,7 +79,7 @@ export default function LandingPage() {
             Turn meeting audio into tasks and clean summaries
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-balance text-lg text-muted-foreground">
-            Recallix AI transcribes your meetings, summarizes the discussion, and extracts every
+            Orion AI transcribes your meetings, summarizes the discussion, and extracts every
             decision, action item and risk — so nothing gets missed.
           </p>
           <div className="mt-8 flex items-center justify-center gap-3">
@@ -171,7 +171,7 @@ export default function LandingPage() {
             {/* The absence a reader would otherwise discover after the meeting
                 they expected to be recorded. */}
             <p className="mt-6 border-t pt-4 text-sm text-muted-foreground">
-              Recallix records in your own browser tab. It never joins a Zoom,
+              Orion records in your own browser tab. It never joins a Zoom,
               Teams or Meet call, and there is no phone app — the full list of
               what it does not do is on the Plans tab.
             </p>
@@ -185,7 +185,7 @@ export default function LandingPage() {
 
       <footer className="border-t">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-2 px-4 py-8 text-sm text-muted-foreground sm:flex-row">
-          <span>© {new Date().getFullYear()} Recallix AI</span>
+          <span>© {new Date().getFullYear()} Orion AI</span>
           <span>Built with Next.js · Spring Boot · FastAPI · Kafka</span>
         </div>
       </footer>

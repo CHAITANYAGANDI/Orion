@@ -123,7 +123,7 @@ describe("starting", () => {
     expect(FakeSocket.open).toHaveLength(0);
   });
 
-  it("mints a token from Recallix and never carries a provider key", async () => {
+  it("mints a token from Orion and never carries a provider key", async () => {
     render();
 
     await waitFor(() => expect(FakeSocket.open).toHaveLength(1));

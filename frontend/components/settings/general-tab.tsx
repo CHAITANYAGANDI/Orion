@@ -4,7 +4,7 @@
  * General — who you are, what is done with it, and the way out.
  *
  * Five things, in the order somebody needs them: the identity block, the
- * language your meetings are held in, what Recallix does and does not do with a
+ * language your meetings are held in, what Orion does and does not do with a
  * recording, how long it keeps one, and the button that ends the account.
  *
  * Every field here is read by something. Your name is matched against the owner
@@ -15,11 +15,11 @@
  * too and were read by nothing at all — a form that asks for facts it never uses
  * is one people fill in for nothing, so they are gone.
  *
- * Email and password are the two Recallix may not own. The address is editable
+ * Email and password are the two Orion may not own. The address is editable
  * only where there is no identity provider, because `provision` rewrites that
  * column from the sign-in token on the very next request and an edit under Clerk
  * would appear to save and revert a second later. The password is never
- * Recallix's: there is no password column, so the change is handed to the
+ * Orion's: there is no password column, so the change is handed to the
  * provider, and a development session has no provider and therefore nothing to
  * rotate.
  *
@@ -142,7 +142,7 @@ function IdentityBlock() {
               <span className="text-muted-foreground">No email address yet</span>
             )}
           </p>
-          {/* Dots, and a sentence saying whose password they are. Recallix
+          {/* Dots, and a sentence saying whose password they are. Orion
               never sees it: Clerk holds it, and a development session is
               identified by a header and has none at all. */}
           <p className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
@@ -254,7 +254,7 @@ function LanguageRow() {
  * The section with nothing to switch.
  *
  * <p>Every competitor puts a toggle here, because they have something to ask
- * permission for. Recallix does not train models, so the honest version of this
+ * permission for. Orion does not train models, so the honest version of this
  * section is a statement of who sees the data on the way to producing your
  * notes — and no switch, because a switch would imply there is a use to opt out
  * of.
@@ -272,7 +272,7 @@ function TrainingSection() {
       <div className="space-y-2 border-b py-4 text-sm text-muted-foreground">
         <p>
           <strong className="text-foreground">
-            Recallix does not train on your meetings.
+            Orion does not train on your meetings.
           </strong>{" "}
           Your recordings, transcripts and notes are not used to improve any
           model, are not reviewed by people here, and are not pooled with anybody
@@ -313,7 +313,7 @@ function TrainingSection() {
  *
  * <p>This is the only section on this page that asks for consent rather than
  * stating a fact, and the reason is worth being blunt about on screen as well as
- * here. Matching a voice across meetings cannot be done with names — Recallix
+ * here. Matching a voice across meetings cannot be done with names — Orion
  * held a list of names for a year and it could never have identified anybody.
  * It needs a numerical description of how each person sounds, and that is a
  * stable identifier derived from someone's body. Under GDPR Article 9 a template
@@ -347,7 +347,7 @@ function VoiceRecognitionSection() {
       const ok = window.confirm(
         `Turning this off deletes ${profiles.length} saved ${
           profiles.length === 1 ? "voice" : "voices"
-        }. Recallix will stop recognising them in new meetings. Continue?`,
+        }. Orion will stop recognising them in new meetings. Continue?`,
       );
       if (!ok) return;
     }
@@ -382,7 +382,7 @@ function VoiceRecognitionSection() {
               Recognise people you have named before
             </p>
             <p>
-              When you put a name to a speaker, Recallix can save a numerical
+              When you put a name to a speaker, Orion can save a numerical
               description of how that voice sounds. In a later meeting,
               <strong className="text-foreground"> Rematch speakers</strong> uses
               it to work out who an unidentified speaker is.
@@ -542,7 +542,7 @@ function RetentionSection() {
               Age is counted from when a meeting was created, not from when you
               last opened it — otherwise the recording of a sensitive
               conversation survives longest precisely because people keep going
-              back to it. Recallix checks once a day and tells you what it took.
+              back to it. Orion checks once a day and tells you what it took.
               Deletion is immediate and cannot be undone.
             </p>
           </>
@@ -755,7 +755,7 @@ function Row({
  * <p>The build line is real or it is not there: the version comes from
  * package.json and the commit from a build argument, so a container built
  * without one says "dev" rather than inventing a hash. The legal links appear
- * only when somebody has supplied the URLs — Recallix ships no terms of service
+ * only when somebody has supplied the URLs — Orion ships no terms of service
  * or privacy policy of its own, and a link to a page that does not exist is
  * worse than no link.
  */
@@ -765,7 +765,7 @@ function Footer() {
       <p>{BUILD_LINE}</p>
       {LEGAL_LINKS.length > 0 && (
         <p>
-          By using Recallix you agree to the{" "}
+          By using Orion you agree to the{" "}
           {LEGAL_LINKS.map((link, i) => (
             <React.Fragment key={link.href}>
               {i > 0 && " and "}
@@ -784,7 +784,7 @@ function Footer() {
       )}
       <p>
         <a href="#data" className="underline-offset-2 hover:underline">
-          How long Recallix keeps what is yours
+          How long Orion keeps what is yours
         </a>
       </p>
     </div>

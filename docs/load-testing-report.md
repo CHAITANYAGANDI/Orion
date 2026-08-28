@@ -1,4 +1,4 @@
-# Recallix AI — Load Testing
+# Orion AI — Load Testing
 
 > **Status: planned, not yet implemented.** This document is the test plan. The
 > k6 scripts described below have **not been written** and no load run has been

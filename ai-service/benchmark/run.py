@@ -1,4 +1,4 @@
-"""Run one audio file through Recallix transcription and score the result.
+"""Run one audio file through Orion transcription and score the result.
 
     python -m benchmark.run ../benchmark-audio/transcription-test.mp3 \
         --reference ../benchmark-audio/otter-reference.txt
@@ -11,11 +11,11 @@ is third-party material and the reference transcripts derive from it.
 
 Do **not** compare a room played through speakers into a laptop microphone
 against a file uploaded directly to another product. That was the shape of the
-original complaint about Recallix's transcription quality and it measures
+original complaint about Orion's transcription quality and it measures
 mostly the microphone: two different signals, two different processing modes,
 and the gap between them is not the thing anybody wanted to know about.
 
-The comparison this runs is the fair one — the *same file*, through Recallix's
+The comparison this runs is the fair one — the *same file*, through Orion's
 final asynchronous path, against a human or reference transcript of that file.
 
 ## Latency is measured, not assumed

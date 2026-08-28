@@ -328,7 +328,7 @@ export function useRecorder(): UseRecorder {
         setError("That microphone is no longer available. Choose another and start again.");
         return;
       }
-      setError("Microphone access was denied. Recallix needs it to record you.");
+      setError("Microphone access was denied. Orion needs it to record you.");
       return;
     }
 

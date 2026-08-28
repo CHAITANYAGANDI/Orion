@@ -1,4 +1,4 @@
-# Runtime + test dependencies for the Recallix ai-service.
+# Runtime + test dependencies for the Orion ai-service.
 # (pyproject.toml is the canonical source; this mirror is provided for
 #  `pip install -r requirements.txt` convenience / Docker builds.)
 fastapi>=0.111

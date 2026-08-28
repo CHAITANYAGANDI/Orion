@@ -3,7 +3,7 @@
 /**
  * The bell.
  *
- * <p>Everything Recallix does happens somewhere the user is not: an hour of
+ * <p>Everything Orion does happens somewhere the user is not: an hour of
  * audio is transcribed while they are at lunch, a recap goes out overnight, a
  * link they shared is opened on Tuesday. Before this, the only feedback surface
  * was the live status socket on one meeting page — close the tab and the product
@@ -155,7 +155,7 @@ export function NotificationBell({ onNavigate }: { onNavigate?: () => void } = {
       }}
     >
       {/* An icon in the wordmark row, not a row of its own.
-          There is no width for a written label beside "Recallix", so the name
+          There is no width for a written label beside "Orion", so the name
           lives in aria-label and in the tooltip and the count goes back to the
           corner of the icon. That is the cost of the move, and it is paid
           knowingly: the row it left was below the fold on a short window with a
@@ -253,7 +253,7 @@ export function NotificationBell({ onNavigate }: { onNavigate?: () => void } = {
                 <>
                   <p className="text-sm font-medium">Nothing yet</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Recallix will tell you here when a meeting is ready, when work falls
+                    Orion will tell you here when a meeting is ready, when work falls
                     due, and when a link you shared is opened.
                   </p>
                 </>
@@ -291,7 +291,7 @@ export function NotificationBell({ onNavigate }: { onNavigate?: () => void } = {
 
         {items.length > 0 && (
           <div className="flex items-center justify-between gap-2 border-t border-border px-3 py-2">
-            {/* What the end of the list means. Recallix keeps notifications
+            {/* What the end of the list means. Orion keeps notifications
                 until they are cleared, so this says how much is shown rather
                 than inventing a retention window it does not have. */}
             <span className="text-xs text-muted-foreground">

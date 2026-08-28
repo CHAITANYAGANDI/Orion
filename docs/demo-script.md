@@ -1,4 +1,4 @@
-# Recallix AI — Demo Script (for the portfolio video)
+# Orion AI — Demo Script (for the portfolio video)
 
 Target length: 2–3 minutes.
 
@@ -16,7 +16,7 @@ Target length: 2–3 minutes.
    Rename the meeting inline to show where metadata actually lives.
 7. **Marking the transcript** (1:40) — select a sentence and use the menu that
    appears: highlight it, then select another and turn it into an action item.
-   The strongest beat is "Ask Recallix" — it carries the passage into the chat,
+   The strongest beat is "Ask Orion" — it carries the passage into the chat,
    which is the one thing a highlight in a document cannot do.
 8. **Action items** (1:55) — the item created from the transcript is in the list
    with the spoken line as its evidence; edit owner/due, mark one done,

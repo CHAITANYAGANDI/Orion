@@ -3,7 +3,7 @@
 Speech models guess. Given "sprint review" and the name of the project
 beforehand, they guess differently — and the words a meeting app gets wrong
 are exactly the ones a generic language model has never seen: product names,
-acronyms, the client. Recallix already knows some of them at the moment it
+acronyms, the client. Orion already knows some of them at the moment it
 queues a job and, before this module existed, sent none of them.
 
 This module once had two more sources: the account's custom vocabulary and its
@@ -60,7 +60,7 @@ PROMPT_MAX_WORDS = 50
 
 @dataclass(frozen=True)
 class MeetingContext:
-    """What Recallix knows about a recording before it has heard it.
+    """What Orion knows about a recording before it has heard it.
 
     Every field is optional and every one is routinely absent — an imported
     file has no project, a quick recording has no title. The builder is written
@@ -107,7 +107,7 @@ def _clean(value: str | None) -> str:
 def meaningful_title(title: str | None) -> str | None:
     """A title worth telling the transcriber, or None.
 
-    "Recording — 19/08/2026, 21:15" is the name Recallix gives a recording
+    "Recording — 19/08/2026, 21:15" is the name Orion gives a recording
     nobody named. Putting it in a prompt teaches the model that this meeting is
     about recordings and dates, which is worse than saying nothing: an empty
     prompt is ignored, a misleading one is obeyed.

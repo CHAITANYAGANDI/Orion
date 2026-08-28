@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Taking a meeting out of Recallix.
+ * Taking a meeting out of Orion.
  *
  * <p>Two panes: what to take on the left, what it will look like on the right.
  * The preview is the reason the rest of it is worth building. Export used to be
@@ -607,7 +607,7 @@ function Bullets({ items }: { items: string[] }) {
 /**
  * What the recording actually is.
  *
- * <p>Read from the stored content type rather than printed as "mp3". Recallix
+ * <p>Read from the stored content type rather than printed as "mp3". Orion
  * does not transcode: a browser recording is webm, an iPhone upload is m4a, and
  * promising mp3 would name a file the user cannot play with the app they chose
  * it for.

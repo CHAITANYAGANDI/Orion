@@ -158,7 +158,7 @@ export interface PreferencesResponse {
   /**
    * The account address.
    *
-   * Editable only where Recallix owns it. Under an identity provider the
+   * Editable only where Orion owns it. Under an identity provider the
    * server refuses a change, because the column is rewritten from the sign-in
    * token on the next request and the edit would undo itself.
    */
@@ -182,7 +182,7 @@ export interface PreferencesResponse {
   /**
    * Bell kinds switched off. Everything absent from this is on.
    *
-   * The bell is the only channel there is — Recallix sends no email (V56).
+   * The bell is the only channel there is — Orion sends no email (V56).
    */
   mutedNotifications: string[];
 }
@@ -195,7 +195,7 @@ export interface PreferencesUpdateRequest {
   /** Blank clears it. */
   pronouns?: string;
   /**
-   * Accepted only where Recallix owns it; under an identity provider the
+   * Accepted only where Orion owns it; under an identity provider the
    * server refuses it, because the column is rewritten from the sign-in token
    * on the next request.
    */
@@ -304,7 +304,7 @@ export interface SpeakerRematchResult {
   unavailable: string | null;
 }
 
-/** One voice Recallix has learned, as Settings lists it. */
+/** One voice Orion has learned, as Settings lists it. */
 export interface SpeakerProfile {
   id: string;
   name: string;
@@ -533,7 +533,7 @@ export interface ChatConversation {
  * A body of work meetings are filed into.
  *
  * Not a folder, and the difference is the feature: a project is a thing that is
- * happening, which is what makes "ask Recallix about this project" a sensible
+ * happening, which is what makes "ask Orion about this project" a sensible
  * sentence. Exactly one per meeting, or none — tags remain the many-to-many.
  */
 export interface Project {
@@ -638,7 +638,7 @@ export interface SearchMeetingHit {
 }
 
 /**
- * Someone in the archive. Not an account: Recallix has one of those per
+ * Someone in the archive. Not an account: Orion has one of those per
  * workspace. Anyone who spoke, owns a commitment, or has been named as a
  * speaker before — `segments` counts what they said, `mentions` counts other
  * people saying their name, `commitments` counts what they owe. A person can
@@ -661,7 +661,7 @@ export interface SearchInsightHit {
   text: string;
 }
 
-/** A commitment — which in Recallix is an action item. There is no second store. */
+/** A commitment — which in Orion is an action item. There is no second store. */
 export interface SearchCommitmentHit {
   id: string;
   meetingId: string;
@@ -706,7 +706,7 @@ export interface SearchFilterState {
   from?: string;
   to?: string;
   status?: MeetingStatus | "";
-  /** Summary-template slug — what a "meeting type" is in Recallix. */
+  /** Summary-template slug — what a "meeting type" is in Orion. */
   type?: string;
   tag?: string;
   /** A project id, or `none` for meetings filed nowhere (V30). */
@@ -736,7 +736,7 @@ export interface SearchFacets {
 // ---- Translation ----
 
 /**
- * One language Recallix works in.
+ * One language Orion works in.
  *
  * The same list bounds what audio can be transcribed and what a brief can be
  * translated into — see the backend's `domain/Language` for why those are
@@ -796,7 +796,7 @@ export interface MeetingTranslation {
 }
 
 /**
- * Something Recallix did while you were not looking.
+ * Something Orion did while you were not looking.
  *
  * <p>Named `AppNotification` rather than `Notification` because the DOM already
  * owns that name globally, and shadowing it makes every `new Notification(...)`
@@ -948,7 +948,7 @@ export interface Insight {
 /**
  * `REACTION` is a one-click tag on a turn — the emoji lives in `body`, and the
  * mark anchors to a time rather than to a passage, exactly as a bookmark does.
- * It is nobody's notification: Recallix has one account per workspace, so there
+ * It is nobody's notification: Orion has one account per workspace, so there
  * is no second person for it to reach. See V41.
  */
 export type MomentKind = "HIGHLIGHT" | "BOOKMARK" | "NOTE" | "REACTION";
@@ -1040,7 +1040,7 @@ export interface SharedMeeting {
 // ---- Privacy & data (V35) ----
 
 /**
- * What Recallix holds, counted.
+ * What Orion holds, counted.
  *
  * No byte totals: getting them means a HEAD request per stored object, and the
  * number people actually want here is how many recordings of them exist, not
@@ -1110,7 +1110,7 @@ export interface RetentionUpdateRequest {
   meetingDays: number | null;
 }
 
-/** The receipt for closing an account — the last thing Recallix can tell you. */
+/** The receipt for closing an account — the last thing Orion can tell you. */
 export interface AccountClosed {
   meetings: number;
   storedObjects: number;

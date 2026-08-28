@@ -1,4 +1,4 @@
-# Recallix on Render — three Docker services against managed backing stores.
+# Orion on Render — three Docker services against managed backing stores.
 #
 #   Postgres  Neon          (already provisioned)
 #   Kafka     Confluent Cloud
@@ -22,7 +22,7 @@ services:
   # one that runs migrations.
   # ---------------------------------------------------------------------------
   - type: web
-    name: recallix-backend
+    name: orion-backend
     runtime: docker
     plan: starter          # 512 MB is not enough; the JVM heap below assumes 2 GB
     dockerfilePath: ./backend-spring/Dockerfile
@@ -54,12 +54,12 @@ services:
       - key: SPRING_DATASOURCE_URL
         sync: false        # jdbc:postgresql://<pooled-host>/neondb?sslmode=require
       - key: SPRING_DATASOURCE_USERNAME
-        value: recallix_app
+        value: orion_app
       - key: SPRING_DATASOURCE_PASSWORD
         sync: false
-      - key: RECALLIX_DATASOURCE_SYSTEM_USERNAME
-        value: recallix_sys
-      - key: RECALLIX_DATASOURCE_SYSTEM_PASSWORD
+      - key: ORION_DATASOURCE_SYSTEM_USERNAME
+        value: orion_sys
+      - key: ORION_DATASOURCE_SYSTEM_PASSWORD
         sync: false
       - key: FLYWAY_URL
         sync: false        # jdbc:postgresql://<DIRECT-host>/neondb?sslmode=require
@@ -81,13 +81,13 @@ services:
       # --- Auth -------------------------------------------------------------
       # clerk, never dev. In dev mode an `X-Dev-User` header impersonates any
       # user, and nothing about a running deployment reveals the mistake.
-      - key: RECALLIX_AUTH_MODE
+      - key: ORION_AUTH_MODE
         value: clerk
       - key: CLERK_ISSUER
         sync: false
       - key: CLERK_JWKS_URL
         sync: false
-      - key: RECALLIX_INTERNAL_TOKEN
+      - key: ORION_INTERNAL_TOKEN
         generateValue: true   # must match the ai-service value; see docs/deploy.md
 
       # --- Storage (Cloudflare R2) ------------------------------------------
@@ -103,13 +103,13 @@ services:
       - key: S3_SECRET_KEY
         sync: false
       - key: S3_BUCKET
-        value: recallix
+        value: orion
       - key: S3_REGION
         value: auto
 
       # --- Wiring -----------------------------------------------------------
       # Left auto-wired, unlike the two public URLs. `hostport` yields
-      # `recallix-ai:10000` -- the right host and the right port, no scheme --
+      # `orion-ai:10000` -- the right host and the right port, no scheme --
       # and AiClient prefixes `http://` because a private service on Render's
       # internal network can only mean that. Worth repairing rather than
       # refusing: the alternative is writing the private port out by hand and
@@ -117,7 +117,7 @@ services:
       - key: AI_SERVICE_URL
         fromService:
           type: pserv
-          name: recallix-ai
+          name: orion-ai
           property: hostport
       # The single allowed CORS origin AND the STOMP allowed origin, so a
       # wrong value here blocks every browser request and every socket while
@@ -125,13 +125,13 @@ services:
       # down".
       #
       # NOT `fromService`, which is what this used to be. `property: host`
-      # yields a bare `recallix-frontend.onrender.com` with no scheme, and a
+      # yields a bare `orion-frontend.onrender.com` with no scheme, and a
       # bare host is not an origin: CORS compares it against the browser's
-      # `https://recallix-frontend.onrender.com` and never matches. The
+      # `https://orion-frontend.onrender.com` and never matches. The
       # blueprint has no property that produces a URL, so this is filled in by
       # hand and DeploymentCheck refuses to start if it is missing a scheme.
       - key: APP_FRONTEND_URL
-        sync: false        # https://recallix-frontend.onrender.com
+        sync: false        # https://orion-frontend.onrender.com
 
       # Where this API is reachable from the public internet. Only used for the
       # calendar feed -- which is fetched by Google's and Apple's servers, not
@@ -142,30 +142,30 @@ services:
       # http://localhost:8080 and every subscribed calendar silently stopped
       # updating.
       - key: APP_PUBLIC_URL
-        sync: false        # https://recallix-backend.onrender.com
+        sync: false        # https://orion-backend.onrender.com
 
   # ---------------------------------------------------------------------------
   # AI service — private. It is reached only by the backend and by Kafka, and
   # exposing it publicly would expose /internal-shaped surface for no reason.
   # ---------------------------------------------------------------------------
   - type: pserv
-    name: recallix-ai
+    name: orion-ai
     runtime: docker
     plan: starter
     dockerfilePath: ./ai-service/Dockerfile
     dockerContext: ./ai-service
     envVars:
       # Same missing-scheme problem as APP_FRONTEND_URL above: `property: host`
-      # gives `recallix-backend.onrender.com`, and httpx rejects a request URL
+      # gives `orion-backend.onrender.com`, and httpx rejects a request URL
       # with no scheme -- so every transcript callback would fail after the work
       # was already done and paid for.
       - key: SPRING_CALLBACK_URL
-        sync: false        # https://recallix-backend.onrender.com
-      - key: RECALLIX_INTERNAL_TOKEN
+        sync: false        # https://orion-backend.onrender.com
+      - key: ORION_INTERNAL_TOKEN
         fromService:
           type: web
-          name: recallix-backend
-          envVarKey: RECALLIX_INTERNAL_TOKEN
+          name: orion-backend
+          envVarKey: ORION_INTERNAL_TOKEN
 
       # --- Kafka ------------------------------------------------------------
       - key: KAFKA_BOOTSTRAP_SERVERS
@@ -209,7 +209,7 @@ services:
       - key: S3_SECRET_KEY
         sync: false
       - key: S3_BUCKET
-        value: recallix
+        value: orion
       - key: S3_REGION
         value: auto
 
@@ -224,7 +224,7 @@ services:
       - key: PG_DATABASE
         value: neondb
       - key: PG_USER
-        value: recallix_app
+        value: orion_app
       - key: PG_PASSWORD
         sync: false
       - key: PG_SSLMODE
@@ -237,7 +237,7 @@ services:
   # just a restart: a redeploy that only restarts keeps the old bundle.
   # ---------------------------------------------------------------------------
   - type: web
-    name: recallix-frontend
+    name: orion-frontend
     runtime: docker
     plan: starter
     dockerfilePath: ./frontend/Dockerfile
@@ -249,7 +249,7 @@ services:
       # would call itself instead of the API, and no amount of restarting
       # fixes it without a rebuild.
       - key: NEXT_PUBLIC_API_URL
-        sync: false        # https://recallix-backend.onrender.com
+        sync: false        # https://orion-backend.onrender.com
       - key: NEXT_PUBLIC_WS_URL
         sync: false        # wss://<backend-host>/ws
       - key: NEXT_PUBLIC_AUTH_MODE

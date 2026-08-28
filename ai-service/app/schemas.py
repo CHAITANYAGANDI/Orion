@@ -115,7 +115,7 @@ class Segment(CamelModel):
     # The provider's cluster id ("A", "D") this turn came from. Not shown. Its
     # value is that a renumbering bug is otherwise undiagnosable after the
     # fact — the display label alone cannot tell you whether the provider
-    # merged two people or Recallix mislabelled one.
+    # merged two people or Orion mislabelled one.
     speaker_raw: str | None = None
 
 
@@ -570,7 +570,7 @@ class SpeakerExpectation(CamelModel):
 
 
 class MeetingContext(CamelModel):
-    """What Recallix knows about a recording before transcribing it.
+    """What Orion knows about a recording before transcribing it.
 
     Carried on the event rather than looked up by the worker: the worker has
     no user context, and pinning the values at enqueue keeps a rename mid-run

@@ -1,4 +1,4 @@
-# Recallix AI — Shared Contracts
+# Orion AI — Shared Contracts
 
 This document is the **single source of truth** shared by the three services
 (`frontend/`, `backend-spring/`, `ai-service/`). All services MUST conform to
@@ -33,8 +33,8 @@ events for observability).
 - Spring validates the JWT (issuer = Clerk frontend API, JWKS endpoint) and
   extracts `sub` as `clerk_user_id`. A local `users` row is upserted on first request.
 - Internal callbacks from FastAPI -> Spring use a shared secret header
-  `X-Internal-Token: <RECALLIX_INTERNAL_TOKEN>` (NOT a Clerk JWT).
-- **Dev mode**: when `RECALLIX_AUTH_MODE=dev`, Spring accepts a header
+  `X-Internal-Token: <ORION_INTERNAL_TOKEN>` (NOT a Clerk JWT).
+- **Dev mode**: when `ORION_AUTH_MODE=dev`, Spring accepts a header
   `X-Dev-User: <clerk_user_id>` instead of a real JWT, so the whole system runs
   without a Clerk account. Frontend sends this automatically when
   `NEXT_PUBLIC_AUTH_MODE=dev`.
@@ -92,9 +92,9 @@ again in the worker.
 | DELETE | `/api/v1/meetings/{id}` | — | `204` |
 
 **The account profile (V38).** `department` and `jobRole` are descriptive and
-read by nothing — Recallix has no teams for a department to route to. They exist
+read by nothing — Orion has no teams for a department to route to. They exist
 because the account page asks for them and because they go into the account
-export: what somebody typed about themselves is data Recallix holds of theirs.
+export: what somebody typed about themselves is data Orion holds of theirs.
 `email` is returned and not writable; it is the sign-in provider's fact, and a
 development session has no provider and therefore no address at all. The
 editable one is `recapEmail`, which is where mail should go rather than who you
@@ -146,7 +146,7 @@ both are things you know after listening rather than before. On that endpoint a
 `null`/absent field means *leave alone* and an empty `tags` array means *clear*
 — without the distinction, removing the last tag would be inexpressible.
 
-There is no `participants` field anywhere. Recallix never joins a meeting, so it
+There is no `participants` field anywhere. Orion never joins a meeting, so it
 never learns who attended; the column only ever held what an uploader typed, and
 was dropped in V23. Speaker labels on the transcript are the answer to "who was
 here", and they come from the recording itself.
@@ -429,7 +429,7 @@ two pages rather than the forty.
 pointing at `POST /translations`. In the app the reader has already switched the
 page into that language, which is what created it — and the export follows what
 is on screen rather than offering a second language choice that could silently
-disagree with it. Recallix's own headings ("Action items", "Transcript", "Not
+disagree with it. Orion's own headings ("Action items", "Transcript", "Not
 discussed.") are translated from a table in `ExportLabels`; the section titles
 come from the template and were translated with the brief.
 
@@ -462,7 +462,7 @@ carries both spellings: `filename*=UTF-8''…` per RFC 5987 and a stripped plain
 lands under a fallback name.
 
 **Audio is a presigned link, not bytes through the API.** The recording is the
-largest thing Recallix stores, and proxying it to add nothing would tie up a
+largest thing Orion stores, and proxying it to add nothing would tie up a
 request thread for the length of a download. The disposition is signed into the
 URL — the HTML `download` attribute is ignored cross-origin, so this is the only
 thing that makes the browser save `sprint-planning.mp3` instead of opening an
@@ -503,7 +503,7 @@ CASCADE`). The panel therefore reports what it is showing ("Showing the 20 most
 recent of 64") rather than claiming a rolling window the product does not
 enforce.
 
-**What a one-account product cannot notify about.** Recallix has no teams,
+**What a one-account product cannot notify about.** Orion has no teams,
 members or invitations, so there is no "someone" to comment, to mention you or to
 share a meeting with you. Two of those three have real counterparts and are here
 under honest names: `MENTIONED_IN_MEETING` is a meeting assigning work to you
@@ -605,7 +605,7 @@ later.
 **There are no integrations, and the removal is V48.** V36 added an outbound
 ICS feed of action item deadlines: `users.calendar_token`, 192 bits from
 `SecureRandom`, served at `/public/calendar/{token}.ics` under the tenant
-exemption. It was the one integration Recallix had, and it is gone — the
+exemption. It was the one integration Orion had, and it is gone — the
 controller, the service and the column. The column matters most: the URL **was**
 the credential, because Google's servers fetch it with no session and no header
 we could add, so a token left in the table after the route stopped existing would
@@ -650,7 +650,7 @@ about Priya with Priyanka's lines and nothing on screen would reveal it.
 | DELETE | `/api/v1/meetings/{id}/audio` | — | `{ audioDeletedAt }` |
 | DELETE | `/api/v1/meetings/{id}/transcript` | — | `{ transcriptDeletedAt }` |
 
-**Recallix had the architecture and none of the controls.** Row-level security
+**Orion had the architecture and none of the controls.** Row-level security
 means one account cannot read another's rows; the audio is in a private bucket
 reachable only through a URL we sign for fifteen minutes;
 per meeting, and revocable. All true, all invisible, and the settings page's
@@ -697,8 +697,8 @@ that one dial cannot express. A meeting window shorter than the audio window is
 that silently does not do its job is worse than one that will not save. Age is
 measured from `created_at`, not last access — last-touched retention means the
 recording of a sensitive conversation survives precisely because people keep going
-back to it. `RetentionJob` runs at 03:00 UTC (`recallix.retention.cron`,
-`recallix.retention.enabled`) and shares `ErasureService` with the buttons, so the
+back to it. `RetentionJob` runs at 03:00 UTC (`orion.retention.cron`,
+`orion.retention.enabled`) and shares `ErasureService` with the buttons, so the
 nightly pass and the menu item cannot come to disagree about what deleted means.
 
 **The interface offers three windows; the API still accepts 1..3650.** Never, a
@@ -759,10 +759,10 @@ that stops being complete the first time somebody adds a table.
 the browser recorder sends `consentConfirmed`. Until now the tick on the record page
 enabled a button and was then forgotten, which makes it theatre; stamped on the
 meeting it becomes a record that the person asked. Only the recorder sends it — an
-uploaded file was captured somewhere Recallix was not present to ask — and the page
-also hands over the sentence to say out loud, because **Recallix has no bot**. It
+uploaded file was captured somewhere Orion was not present to ask — and the page
+also hands over the sentence to say out loud, because **Orion has no bot**. It
 never joins a call and never appears in a participant list, so "the bot is visibly
-identified as Recallix" has no counterpart here; the announcement has to come from
+identified as Orion" has no counterpart here; the announcement has to come from
 the person recording, and giving them the words is the difference between a policy
 and a thing that gets said.
 
@@ -780,7 +780,7 @@ and a thing that gets said.
 | PUT | `/api/v1/projects/meetings/{meetingId}` | `{ "projectId": id \| null }` | `MeetingResponse` |
 
 **A project is not a folder**, and the difference is the feature: it is a thing
-that is happening, which is what makes "ask Recallix about this project" a
+that is happening, which is what makes "ask Orion about this project" a
 sensible sentence. The chat below is the point of the table; the grouping is how
 it knows what to read.
 
@@ -879,7 +879,7 @@ no second store, and deliberately: the ai-service excludes a template's
 Commitments section from the insight pass precisely so a promise is not recorded
 twice, once where its state is tracked and once where it is not.
 
-And **a person is not an account**: Recallix has one user per workspace, so
+And **a person is not an account**: Orion has one user per workspace, so
 `people` is names, from three places. Diarized speakers alone would list
 everyone who talked and nobody who was talked about — search a name that owns
 three commitments and is said in nine sentences, and a speakers-only query
@@ -913,7 +913,7 @@ features are read out of the transcript rather than out of the audio.
 | play highlights only | `transcript_moments` spans, merged |
 | coloured seek bar | speaker turns over the meeting's duration |
 
-Recallix already knows to the word who spoke and when, so a gap between
+Orion already knows to the word who spoke and when, so a gap between
 utterances **is** the silence and a change of speaker **is** the boundary.
 Deriving them is exact and free; an amplitude implementation would need the
 samples decoded in the browser and would still guess at the quiet parts of
@@ -1122,7 +1122,7 @@ note at a different passage is a new note, and doing it in place would leave a
 comment attached to words nobody wrote it about.
 
 **The anchor is stored three ways, and this is the point of the design.**
-Recallix lets people correct transcript lines. Fixing a typo near the start of a
+Orion lets people correct transcript lines. Fixing a typo near the start of a
 line shifts every character offset after it, so an annotation pinned to offsets
 alone does not break loudly — it slides silently onto different words.
 
@@ -1155,7 +1155,7 @@ repaired offsets would make a `GET` a write, and reverting an edit brings the
 original offsets back into agreement on its own.
 
 **What is not here.** No threads, no `@mentions`, no reactions. Those are one
-person addressing another, and Recallix has one account per workspace — there is
+person addressing another, and Orion has one account per workspace — there is
 no second user to reply to, mention or react at. A note here is a private
 annotation.
 
@@ -1261,7 +1261,7 @@ recording the server cannot accept.
 Chat spends no transcription minutes, so this is a product decision rather than
 an accounting one: 100 minutes is the whole of what an account gets, and an AI
 feature still answering afterwards would make the limit a limit on recording
-rather than on Recallix. Reads are untouched — existing conversations stay
+rather than on Orion. Reads are untouched — existing conversations stay
 readable.
 
 ### Internal callback (FastAPI -> Spring, `X-Internal-Token`)

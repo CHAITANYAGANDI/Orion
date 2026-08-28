@@ -102,7 +102,7 @@ async function decode(file: Blob): Promise<ImageBitmap | HTMLImageElement> {
     return await new Promise<HTMLImageElement>((resolve, reject) => {
       const img = new Image();
       img.onload = () => resolve(img);
-      img.onerror = () => reject(new AvatarError("That file is not an image Recallix can read."));
+      img.onerror = () => reject(new AvatarError("That file is not an image Orion can read."));
       img.src = url;
     });
   } finally {

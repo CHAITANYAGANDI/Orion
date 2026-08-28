@@ -100,7 +100,7 @@ class Settings(BaseSettings):
 
     # --- Spring internal callback ---
     spring_callback_url: str = "http://localhost:8080"
-    recallix_internal_token: str = "dev-internal-token"
+    orion_internal_token: str = "dev-internal-token"
 
     # --- AI provider selection ---
     ai_provider: AiProvider = "mock"
@@ -243,9 +243,9 @@ class Settings(BaseSettings):
     memory_evidence_k: int = 4
     pg_host: str | None = None
     pg_port: int = 5432
-    pg_database: str = "recallix"
-    pg_user: str = "recallix"
-    pg_password: str = "recallix"
+    pg_database: str = "orion"
+    pg_user: str = "orion"
+    pg_password: str = "orion"
     # "prefer" encrypts when the server offers it and falls back when it does
     # not, which is what the local container needs. A managed Postgres (Neon)
     # refuses unencrypted connections outright and wants "require".
@@ -255,7 +255,7 @@ class Settings(BaseSettings):
     s3_endpoint: str | None = None
     s3_access_key: str | None = None
     s3_secret_key: str | None = None
-    s3_bucket: str = "recallix"
+    s3_bucket: str = "orion"
     # Where AssemblyAI should fetch a recording from, when it fetches one
     # itself. Distinct from `s3_endpoint`, which is reachable from inside the
     # compose network and from nowhere else: a presigned URL signed against

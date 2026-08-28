@@ -137,4 +137,4 @@ describe("processing jobs", () => {
   });
 });
 
-const KEY = "recallix:processing";
+const KEY = "orion:processing";

@@ -39,7 +39,7 @@ import type { MeetingResponse } from "@/lib/types";
  *
  * <p>The list is the whole page now. It is what anybody arriving here came for —
  * which conversations belong to this work — and it used to sit above a chat
- * scoped to the folder, headed "Ask Recallix about this folder".
+ * scoped to the folder, headed "Ask Orion about this folder".
  *
  * <p><strong>That chat was removed on request, and only from here.</strong> The
  * workspace chat at /ask is untouched, and so is the server: POST

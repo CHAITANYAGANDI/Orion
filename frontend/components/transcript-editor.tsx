@@ -3,7 +3,7 @@
 /**
  * Correcting a whole transcript in one pass.
  *
- * <p>Recallix could already fix a line: hover, click the pencil, retype, save.
+ * <p>Orion could already fix a line: hover, click the pencil, retype, save.
  * That is the right shape for spotting one wrong name while listening, and the
  * wrong shape for the thing people actually do after a bad recording, which is
  * read the transcript from the top and fix everything that is wrong. Doing that

@@ -21,7 +21,7 @@ const mono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Recallix AI — Meeting summaries & action items",
+  title: "Orion AI — Meeting summaries & action items",
   description:
     "Turn meeting audio into accurate transcripts, concise summaries, and trackable action items.",
 };

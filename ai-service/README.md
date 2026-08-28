@@ -1,6 +1,6 @@
-# Recallix AI — `ai-service`
+# Orion AI — `ai-service`
 
-FastAPI **AI worker** for Recallix AI. It is stateless compute: it transcribes
+FastAPI **AI worker** for Orion AI. It is stateless compute: it transcribes
 meeting audio (Whisper), summarizes it, and extracts action items, decisions,
 and risks (GPT) — exposing every step as an HTTP endpoint and also running the
 full pipeline off a Kafka queue.
@@ -53,7 +53,7 @@ tests/               pytest (mock, offline)
 |---|---|---|
 | `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | Kafka brokers |
 | `SPRING_CALLBACK_URL` | `http://localhost:8080` | Spring base URL for callbacks |
-| `RECALLIX_INTERNAL_TOKEN` | `dev-internal-token` | `X-Internal-Token` shared secret |
+| `ORION_INTERNAL_TOKEN` | `dev-internal-token` | `X-Internal-Token` shared secret |
 | `AI_PROVIDER` | `mock` | `mock` or `openai` |
 | `OPENAI_API_KEY` | — | required when `AI_PROVIDER=openai` |
 | `OPENAI_TRANSCRIBE_MODEL` | `whisper-1` | Whisper model |
@@ -61,7 +61,7 @@ tests/               pytest (mock, offline)
 | `OPENAI_EXTRACTION_MODEL` | `gpt-5.6-luna` | model for action items, decisions and risks |
 | `S3_ENDPOINT` | — | MinIO/S3 endpoint (for `objectKey` downloads) |
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | — | S3 credentials |
-| `S3_BUCKET` | `recallix` | audio bucket |
+| `S3_BUCKET` | `orion` | audio bucket |
 
 The service boots in **mock mode with no external dependencies** — Kafka and
 OpenAI are both optional to start it.
@@ -101,8 +101,8 @@ curl -X POST http://localhost:8000/ai/process-meeting \
 ## Run with Docker
 
 ```bash
-docker build -t recallix-ai-service .
-docker run --rm -p 8000:8000 -e AI_PROVIDER=mock recallix-ai-service
+docker build -t orion-ai-service .
+docker run --rm -p 8000:8000 -e AI_PROVIDER=mock orion-ai-service
 ```
 
 Or via the repo's `docker-compose.yml` (`ai-service` service).

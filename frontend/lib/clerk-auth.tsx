@@ -61,7 +61,7 @@ export function ClerkAuthProvider({
   return (
     /*
      * The four URLs are given rather than left to Clerk's defaults, which point
-     * at its own hosted pages. Recallix hosts the two screens itself — see
+     * at its own hosted pages. Orion hosts the two screens itself — see
      * app/sign-in and app/sign-up — so a default that sent people to
      * accounts.clerk.dev would take them out of the product to come back into
      * it, and `afterSignOutUrl` is what stops signing out landing on a

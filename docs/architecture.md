@@ -1,4 +1,4 @@
-# Recallix AI — Architecture
+# Orion AI — Architecture
 
 ## Services & responsibilities
 

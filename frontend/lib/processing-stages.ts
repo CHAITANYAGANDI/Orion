@@ -3,7 +3,7 @@
  *
  * ## The rule
  *
- * A stage is only marked complete when Recallix has actually reported that
+ * A stage is only marked complete when Orion has actually reported that
  * result. Nothing here is derived from where a percentage happens to have got
  * to: the bar is an *estimate* that eases forward on a timer (see lib/progress),
  * and reading stage completion off it would tick "Transcript ✓" on a meeting
@@ -100,7 +100,7 @@ function reachedStatus(status: MeetingStatus, mark: MeetingStatus): boolean {
  * Whether the transcript — and with it the speaker pass — is finished.
  *
  * Three ways to know, any one of which is enough, and all three are things
- * Recallix said rather than things inferred from a clock.
+ * Orion said rather than things inferred from a clock.
  */
 function transcriptDone(facts: ProcessingFacts): boolean {
   if (facts.hasTranscript) return true;
@@ -113,13 +113,13 @@ function transcriptDone(facts: ProcessingFacts): boolean {
 }
 
 /**
- * Whether the brief is actually in Recallix.
+ * Whether the brief is actually in Orion.
  *
  * <p>Stricter than the transcript rule above, and deliberately. `EXTRACTING` is
  * the worker saying *it* has written a summary and moved on to action items —
  * but that summary is still inside the worker. `CallbackService.applyResult`
  * persists the summary, the action items and READY in one transaction, so until
- * then Recallix does not have it and there is nothing to read.
+ * then Orion does not have it and there is nothing to read.
  *
  * <p>Ticking on EXTRACTING would also leave the strip fully ticked while the
  * meeting was still processing, which reads as finished. The transcript can tick

@@ -59,7 +59,7 @@ drawn by `app/(app)/record/page.tsx`.
 * Restarted on `onend` because Chrome ends the session on silence.
 * Produces `LivePhrase { id, at, text }` — **no speaker**, no word timings, no
   confidence.
-* `at` is `elapsed` — Recallix's own `setInterval` second-counter — sampled at
+* `at` is `elapsed` — Orion's own `setInterval` second-counter — sampled at
   the moment the **first interim result arrived**, not when the words were
   spoken.
 
@@ -99,7 +99,7 @@ an unknown speaker is silently merged into the first one.
 
 ## 5. Transcription context available but unused
 
-Recallix already knows all of this at enqueue time and sends none of it:
+Orion already knows all of this at enqueue time and sends none of it:
 
 | Known | Where it lives | Sent today |
 |---|---|---|
@@ -143,7 +143,7 @@ parameter rejection look identical at the socket.
    laptop mic and recognised by the browser, the other is the source file
    transcribed by a server model.
 2. **Live timestamps are invented.** `elapsed` at the moment recognition
-   returned, so the 0:04 line is stamped 0:10 in the Recallix screenshot.
+   returned, so the 0:04 line is stamped 0:10 in the Orion screenshot.
 3. **Unknown speakers become `Speaker 1`.** False attribution, silently.
 4. **No transcription context.** `prompt` and `keyterms_prompt` unused; the
    title, project, template and known speaker names all thrown away.

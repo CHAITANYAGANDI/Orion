@@ -279,7 +279,7 @@ def test_the_reader_is_never_shown_the_vocabulary_of_the_pipeline():
             assert word in brief
 
 
-def test_no_answer_may_claim_a_capability_recallix_does_not_have():
+def test_no_answer_may_claim_a_capability_orion_does_not_have():
     """The reference product offers to search the web. We cannot.
 
     An answer that has just admitted the transcript lacks a link is one sentence
@@ -363,7 +363,7 @@ def test_background_describes_the_category_and_never_this_instance():
 
     "Tech in Asia Conference 2025 includes VIP passes and pitch stages" is a
     sentence about a real event somebody may be about to buy a ticket to. It is
-    not supported by forty-seven seconds of promotional speech and Recallix has
+    not supported by forty-seven seconds of promotional speech and Orion has
     no other source for it.
     """
     brief = answering.system_prompt(
@@ -831,7 +831,7 @@ def test_a_previous_answer_is_never_handed_back_as_evidence():
     "Did the speaker mention a price?" asked after a procedural answer must be
     answered from the transcript. If the previous answer travelled with it, the
     general registration steps would be sitting in the prompt as material — and
-    the follow-up would be grounded in Recallix's own advice.
+    the follow-up would be grounded in Orion's own advice.
     """
     prompt = answering.user_prompt(
         "Did the speaker mention a price?",

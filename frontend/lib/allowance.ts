@@ -106,7 +106,7 @@ export function useAllowance(): Allowance {
  */
 export function recordRefusal(a: Allowance): string | null {
   if (a.loading) return "Checking what is left of your allowance…";
-  if (a.unknown) return "Recallix could not check your remaining minutes, so it will not start a recording it might not be able to save. Try again in a moment.";
+  if (a.unknown) return "Orion could not check your remaining minutes, so it will not start a recording it might not be able to save. Try again in a moment.";
   if (a.minutesLeft <= 0) {
     return "You have used all 100 transcription minutes on this account. Everything already transcribed is still here, but there are no minutes left to record with.";
   }

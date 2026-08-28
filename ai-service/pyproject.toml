@@ -1,7 +1,7 @@
 [project]
-name = "recallix-ai-service"
+name = "orion-ai-service"
 version = "0.1.0"
-description = "Recallix AI — FastAPI AI worker (transcription, summarization, extraction)."
+description = "Orion AI — FastAPI AI worker (transcription, summarization, extraction)."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

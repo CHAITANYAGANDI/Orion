@@ -7,7 +7,7 @@
  * commit says `dev` — which is true — rather than showing a hash that resolves
  * to nothing.
  *
- * The legal links are the same principle with more at stake. Recallix ships no
+ * The legal links are the same principle with more at stake. Orion ships no
  * terms of service and no privacy policy of its own; they are documents somebody
  * has to write and be bound by, not strings a UI can supply. Set
  * `NEXT_PUBLIC_TERMS_URL` and `NEXT_PUBLIC_PRIVACY_URL` and the footer links to

@@ -34,7 +34,7 @@
  * falls back to the default.
  */
 
-const KEY = "recallix.prefs";
+const KEY = "orion.prefs";
 
 interface Stored {
   /** Identifies the sign-in these were chosen under. */

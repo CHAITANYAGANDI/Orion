@@ -1,8 +1,8 @@
-# Recallix AI
+# Orion AI
 
 > Turn meeting audio into accurate transcripts, concise summaries, decisions, risks, and trackable action items.
 
-Recallix AI is a production-style, multi-service SaaS. Bring a meeting in —
+Orion AI is a production-style, multi-service SaaS. Bring a meeting in —
 import audio or video, paste a YouTube link, upload typed-up minutes, or record
 one from your microphone — and it transcribes, summarizes, and extracts
 decisions / action items / risks, streams live progress over WebSockets, and
@@ -48,7 +48,7 @@ docker compose up --build
 The stack runs end-to-end out of the box: **dev auth** (no Clerk account needed)
 and **mock AI** (deterministic transcript/summary, no OpenAI key). To enable the
 real pipeline set `AI_PROVIDER=openai` + `OPENAI_API_KEY`, and/or
-`RECALLIX_AUTH_MODE=clerk` with Clerk env vars. See [.env.example](.env.example).
+`ORION_AUTH_MODE=clerk` with Clerk env vars. See [.env.example](.env.example).
 
 > A dev session has no identity provider and therefore **no email address**, so
 > every automatic email is correctly refused rather than sent nowhere. Set a
@@ -80,7 +80,7 @@ so it takes a fourth upload to see.
 - [Demo script](docs/demo-script.md)
 - [Speaker identification](docs/speaker-identification.md) — how a voice named in
   one meeting is recognised in another, and the biometric-adjacent data that needs
-- [Speaker diarization](docs/diarization.md) — provider clusters vs. Recallix speakers
+- [Speaker diarization](docs/diarization.md) — provider clusters vs. Orion speakers
 - [Load testing](docs/load-testing-report.md) — test plan; not yet run
 
 ## Feature status
@@ -179,7 +179,7 @@ and did not.
   AI calls).
 - **Security**: Clerk JWT validation, Postgres row-level security, private S3
   buckets + short-lived presigned URLs, audit logs, plan-based file/usage limits.
-- **No email at all**: Recallix contacts nobody. The recap, the morning
+- **No email at all**: Orion contacts nobody. The recap, the morning
   deadline reminder, the Monday review and the comment/highlight notices were
   removed in V56 — the settings tab that switched them on had already gone, which
   left senders nobody could reach. The notification bell is the only channel, and
@@ -191,7 +191,7 @@ and did not.
 ## What is not here, stated honestly
 
 - **Integration tests exist but are opt-in.** Three suites run against a real
-  PostgreSQL and are skipped unless `RECALLIX_IT_DB_URL` is set:
+  PostgreSQL and are skipped unless `ORION_IT_DB_URL` is set:
   `OutboxClaimConcurrencyTest` (row claiming, retry, poison events, purge
   safety, RLS), `MeetingAttemptAllocationTest` (concurrent reprocess) and
   `ApplicationContextSmokeTest` (the Spring context against a migrated schema).

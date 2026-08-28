@@ -2,21 +2,21 @@
 --
 -- Row-level security is ignored entirely by superusers and by any role holding
 -- BYPASSRLS — FORCE ROW LEVEL SECURITY does not change that. The bootstrap user
--- created by the Postgres image (`recallix`) is a superuser, so connecting as it
+-- created by the Postgres image (`orion`) is a superuser, so connecting as it
 -- leaves every policy in V9 enabled and enforcing nothing: the most dangerous
 -- possible state, because it looks secure.
 --
 -- So there are two roles, with different jobs:
 --
---   recallix      owns the schema and runs Flyway. Superuser, needed for
+--   orion      owns the schema and runs Flyway. Superuser, needed for
 --                 CREATE EXTENSION vector. Never serves a request.
---   recallix_app  what Spring and the ai-service connect as at runtime.
+--   orion_app  what Spring and the ai-service connect as at runtime.
 --                 NOSUPERUSER and NOBYPASSRLS, so the policies actually bind.
 --
 -- Runs automatically on a fresh volume (docker-entrypoint-initdb.d). On a
 -- managed database — Neon, RDS — run it once by hand as the owner.
 
---   recallix_sys  the handful of paths with no user behind them: worker
+--   orion_sys  the handful of paths with no user behind them: worker
 --                 callbacks, the outbox relay, Stripe webhooks, public share
 --                 links, and provisioning during authentication. Holds
 --                 BYPASSRLS, so its exemption is a property of the connection.
@@ -29,33 +29,33 @@
 
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'recallix_app') THEN
-        CREATE ROLE recallix_app LOGIN PASSWORD 'recallix_app'
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'orion_app') THEN
+        CREATE ROLE orion_app LOGIN PASSWORD 'orion_app'
             NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT;
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'recallix_sys') THEN
-        CREATE ROLE recallix_sys LOGIN PASSWORD 'recallix_sys'
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'orion_sys') THEN
+        CREATE ROLE orion_sys LOGIN PASSWORD 'orion_sys'
             NOSUPERUSER BYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT;
     END IF;
 END $$;
 
 -- Explicitly, in case the roles predate this script or were created by hand.
-ALTER ROLE recallix_app NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
-ALTER ROLE recallix_sys NOSUPERUSER BYPASSRLS   NOCREATEDB NOCREATEROLE;
+ALTER ROLE orion_app NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+ALTER ROLE orion_sys NOSUPERUSER BYPASSRLS   NOCREATEDB NOCREATEROLE;
 
-GRANT USAGE ON SCHEMA public TO recallix_app, recallix_sys;
+GRANT USAGE ON SCHEMA public TO orion_app, orion_sys;
 
 -- DML only, for both. Schema changes belong to Flyway, running as the owner,
--- so neither role can drop a policy to escape its tenant — and recallix_sys,
+-- so neither role can drop a policy to escape its tenant — and orion_sys,
 -- despite bypassing RLS, still cannot alter the schema.
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public
-    TO recallix_app, recallix_sys;
+    TO orion_app, orion_sys;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public
-    TO recallix_app, recallix_sys;
+    TO orion_app, orion_sys;
 
 -- Tables created by future migrations, so a new table is not accidentally
 -- unreachable until someone remembers to grant on it.
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO recallix_app, recallix_sys;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO orion_app, orion_sys;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT USAGE, SELECT ON SEQUENCES TO recallix_app, recallix_sys;
+    GRANT USAGE, SELECT ON SEQUENCES TO orion_app, orion_sys;

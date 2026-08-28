@@ -3,7 +3,7 @@
 <h2>Why word-level and not DER</h2>
 
 Diarization Error Rate is the standard, and it is the wrong headline for this
-product. DER measures seconds of misattributed *audio*; Recallix renders
+product. DER measures seconds of misattributed *audio*; Orion renders
 *words*. A model can win on DER by getting long stretches right while losing
 every one-word interjection, and the interjections are the complaint. So the
 headline here is **word attribution accuracy** — of the words a human labelled,
@@ -13,7 +13,7 @@ one number cannot distinguish "merged two people" from "split one".
 <h2>Mapping anonymous labels to truth</h2>
 
 Every system involved invents its own names: AssemblyAI says ``A``/``B``,
-a diarizer says ``D0``/``D1``, Recallix says ``spk_1``/``spk_2``, and the human
+a diarizer says ``D0``/``D1``, Orion says ``spk_1``/``spk_2``, and the human
 label says ``alice``/``bob``. None of them can be compared directly.
 
 The standard fix is an optimal one-to-one assignment between hypothesis and

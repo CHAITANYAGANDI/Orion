@@ -1,4 +1,4 @@
-# Deploying Recallix
+# Deploying Orion
 
 Target: **Render** for the three services, with **Neon** (Postgres), **Confluent
 Cloud** (Kafka) and **Cloudflare R2** (object storage).
@@ -22,7 +22,7 @@ names all of them at once rather than one per restart. Nothing else sets that
 profile — `docker-compose` deliberately does not, because the local stack *is*
 the development configuration.
 
-**Auth mode.** `RECALLIX_AUTH_MODE` defaults to `clerk`, in `application.yml`
+**Auth mode.** `ORION_AUTH_MODE` defaults to `clerk`, in `application.yml`
 and on every `@Value` that reads it. In dev mode `AuthenticationFilter` and
 `StompAuthInterceptor` trust an `X-Dev-User` header, so *any* request — and any
 websocket — can impersonate *any* user. The blueprint hardcodes `clerk`; do not
@@ -34,7 +34,7 @@ override it.
 > one decision, and the weaker one won silently. `ApplicationDefaultsTest` now
 > resolves the real YAML with an empty environment and pins the answer.
 
-**The internal callback token.** `RECALLIX_INTERNAL_TOKEN` has **no default**.
+**The internal callback token.** `ORION_INTERNAL_TOKEN` has **no default**.
 It used to fall back to `dev-internal-token`, which is committed to this
 repository and printed further down this page, so a deployment that never set it
 looked exactly like one that did — while accepting result callbacks from anybody
@@ -44,7 +44,7 @@ request: meetings pile up in PROCESSING and the ai-service logs 401s, which is
 loud and traceable in a way that silent acceptance is not.
 
 **URLs that have no scheme.** Render's blueprint cannot produce a URL.
-`fromService` with `property: host` yields a bare `recallix-backend.onrender.com`,
+`fromService` with `property: host` yields a bare `orion-backend.onrender.com`,
 and a bare host is not an origin — CORS compares it against the browser's
 `https://…` and never matches, so every request fails and it reads as "the API
 is down". `APP_FRONTEND_URL`, `APP_PUBLIC_URL`, `SPRING_CALLBACK_URL` and
@@ -111,12 +111,12 @@ FLYWAY_URL=jdbc:postgresql://ep-xxx.region.aws.neon.tech/neondb?sslmode=require
 
 `infra/postgres-init/01-app-role.sql` runs automatically only on a fresh Docker
 volume. On Neon, run it **once by hand as `neondb_owner`**, against the direct
-endpoint. It creates `recallix_app` (no bypass — every user request) and
-`recallix_sys` (`BYPASSRLS` — outbox relay, worker callbacks,
+endpoint. It creates `orion_app` (no bypass — every user request) and
+`orion_sys` (`BYPASSRLS` — outbox relay, worker callbacks,
 share links, provisioning).
 
 Change the two passwords from the development defaults first; they are what
-`SPRING_DATASOURCE_PASSWORD` and `RECALLIX_DATASOURCE_SYSTEM_PASSWORD` must be
+`SPRING_DATASOURCE_PASSWORD` and `ORION_DATASOURCE_SYSTEM_PASSWORD` must be
 set to.
 
 ### 1.4 Migrate
@@ -131,7 +131,7 @@ place to look if one behaves differently than it did locally.
 
 ### 1.5 Verify isolation actually survived the move
 
-Do not skip this. Connect as `recallix_app` and confirm the tenant boundary
+Do not skip this. Connect as `orion_app` and confirm the tenant boundary
 holds on the real database:
 
 ```sql
@@ -140,7 +140,7 @@ SELECT count(*) FROM meetings;          -- only that user's rows
 SELECT set_config('app.bypass','on',false);
 SELECT count(*) FROM meetings;          -- MUST be unchanged
 SELECT count(*) FROM outbox_events;     -- MUST be 0
-ALTER ROLE recallix_app BYPASSRLS;      -- MUST be denied
+ALTER ROLE orion_app BYPASSRLS;      -- MUST be denied
 ```
 
 ---
@@ -185,7 +185,7 @@ never reach the worker.
 
 One key scoped to the cluster (**Global access** is fine for a single-tenant
 deployment; granular access needs ACLs for both service accounts on all eight
-topics plus the `recallix-backend` and `ai-service` consumer groups). **The
+topics plus the `orion-backend` and `ai-service` consumer groups). **The
 secret is shown once** — copy both halves before closing the dialog.
 
 Confluent's own docs note it can take ~90 seconds for a new key to propagate; an
@@ -242,7 +242,7 @@ credentials are right.
 
 ## 3. Cloudflare R2
 
-Create a bucket named `recallix` and an API token with object read/write.
+Create a bucket named `orion` and an API token with object read/write.
 
 - `S3_ENDPOINT` — `https://<account-id>.r2.cloudflarestorage.com`
 - `S3_REGION` — `auto` (R2 accepts nothing else)
@@ -291,7 +291,7 @@ Set the instance to production, add the frontend domain, and take:
 Add an `email` claim to the JWT template. Clerk's default session token
 carries no email, and without it every Clerk-authenticated user lands with a
 null address — which is the address shown on their own profile page. Nothing is
-mailed to it either way; Recallix sends no email (V56).
+mailed to it either way; Orion sends no email (V56).
 
 ---
 
@@ -336,7 +336,7 @@ render blueprint launch     # or point the dashboard at render.yaml
 ```
 
 Fill every `sync: false` value in the dashboard before the first build.
-`RECALLIX_INTERNAL_TOKEN` is generated on the backend and referenced by the
+`ORION_INTERNAL_TOKEN` is generated on the backend and referenced by the
 ai-service, so the two always match — do not set it by hand on one side only,
 or every worker callback returns 401.
 

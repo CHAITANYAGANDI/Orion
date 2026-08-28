@@ -712,7 +712,7 @@ export const api = createApi({
 
     // ---- Translation ----
     /**
-     * The languages Recallix works in.
+     * The languages Orion works in.
      *
      * A property of the product rather than of the caller, so it is fetched
      * once and kept: `keepUnusedDataFor` is deliberately long here because this

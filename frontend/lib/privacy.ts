@@ -66,13 +66,13 @@ export function confirmsDeletion(typed: string): boolean {
 /**
  * The sentence to say before recording.
  *
- * Recallix has no bot to announce itself in a participant list — recording
+ * Orion has no bot to announce itself in a participant list — recording
  * happens in the account holder's own browser — so the announcement has to come
  * from them. Handing them the words is the difference between a policy and a
  * thing that actually gets said.
  */
 export const RECORDING_ANNOUNCEMENT =
-  "Just so everyone knows — I'm recording this meeting with Recallix, " +
+  "Just so everyone knows — I'm recording this meeting with Orion, " +
   "which will transcribe it and write up the notes and action items. " +
   "Say if you'd rather I didn't.";
 

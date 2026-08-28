@@ -36,7 +36,7 @@ import * as React from "react";
 import { createPortal } from "react-dom";
 
 /** The id of the element in the shell header that receives page actions. */
-export const HEADER_SLOT_ID = "recallix-header-actions";
+export const HEADER_SLOT_ID = "orion-header-actions";
 
 export function HeaderSlot({ children }: { children: React.ReactNode }) {
   const [target, setTarget] = React.useState<HTMLElement | null>(null);

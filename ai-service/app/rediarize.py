@@ -14,7 +14,7 @@ Two people. The first sentence is one of them saying goodbye; everything after
 it is the other one, starting a new thought. The transcript put all of it on one
 speaker.
 
-**This is not Recallix losing information.** The audio was re-submitted to
+**This is not Orion losing information.** The audio was re-submitted to
 AssemblyAI four ways — as sent today, with `speakers_expected: 2`, with
 `speaker_options{min: 2, max: 2}`, and on `universal-2` — and every run returned
 the same merged utterance with **every word labelled `B`**, in both the
@@ -23,7 +23,7 @@ response to recover. Speaker constraints did not help because the provider had
 already found exactly two speakers; it simply put the boundary in the wrong
 place.
 
-So the only remaining evidence is the sound, and since `V53` Recallix has a
+So the only remaining evidence is the sound, and since `V53` Orion has a
 speaker embedding model of its own. This module uses it to ask one question
 about each suspiciously long turn: **does the audio actually stay with one
 person the whole way through?**

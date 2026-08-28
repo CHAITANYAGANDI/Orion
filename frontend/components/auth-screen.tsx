@@ -6,7 +6,7 @@ import { Mic } from "lucide-react";
  *
  * <p>Deliberately thin. Everything inside the card — the fields, the error
  * states, the second factor, the emailed code — is Clerk's, because it is
- * Clerk's credential; wrapping it in a Recallix-shaped form would mean owning
+ * Clerk's credential; wrapping it in a Orion-shaped form would mean owning
  * the parts of a sign-in that go wrong. What this adds is the two things the
  * component cannot know: whose product this is, and the way back out.
  *
@@ -30,7 +30,7 @@ export function AuthScreen({
         <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
           <Mic className="h-4 w-4" />
         </span>
-        <span className="font-semibold">Recallix AI</span>
+        <span className="font-semibold">Orion AI</span>
       </Link>
 
       <div className="space-y-1 text-center">

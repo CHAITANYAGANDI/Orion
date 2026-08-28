@@ -54,7 +54,7 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 
-const KEY = "recallix:processing";
+const KEY = "orion:processing";
 
 let ids: string[] = [];
 const listeners = new Set<() => void>();

@@ -19,7 +19,7 @@ import userEvent from "@testing-library/user-event";
  * are not stale copy, they are copy that reports the product as broken.
  *
  * <p>The other thing held here is the sentence saying the transcript comes
- * after you stop. Recallix has no live transcription: the audio is captured in
+ * after you stop. Orion has no live transcription: the audio is captured in
  * the browser and only reaches the pipeline on Stop. A blank pane that looked
  * like it was waiting for words would promise captions the product does not
  * have, and the obvious conclusion to draw from it is that the microphone is
@@ -381,7 +381,7 @@ describe("RecordPage on arrival", () => {
   });
 
   it("offers a way back when the microphone is refused", async () => {
-    renderPage({ error: "Microphone access was denied. Recallix needs it to record you." });
+    renderPage({ error: "Microphone access was denied. Orion needs it to record you." });
     await waitFor(() => expect(start).toHaveBeenCalledTimes(1));
 
     // The recording never began, so without this the route is a dead end with a

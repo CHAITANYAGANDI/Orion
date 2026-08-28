@@ -11,11 +11,11 @@
         <relativePath/>
     </parent>
 
-    <groupId>com.recallix</groupId>
+    <groupId>com.orion</groupId>
     <artifactId>backend-spring</artifactId>
     <version>0.1.0</version>
-    <name>recallix-backend-spring</name>
-    <description>Recallix AI — business API + orchestrator</description>
+    <name>orion-backend-spring</name>
+    <description>Orion AI — business API + orchestrator</description>
 
     <properties>
         <java.version>21</java.version>

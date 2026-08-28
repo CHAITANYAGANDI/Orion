@@ -301,7 +301,7 @@ describe("RecordingBar", () => {
   it("keeps the reminder next to the controls", () => {
     renderBar({ state: "recording" });
 
-    // Recallix has no bot that announces itself in a participant list. The only
+    // Orion has no bot that announces itself in a participant list. The only
     // thing that tells the room is the person holding these controls.
     expect(screen.getByText("Always ask permission before recording")).toBeInTheDocument();
   });

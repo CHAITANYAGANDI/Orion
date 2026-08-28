@@ -173,7 +173,7 @@ def test_no_presigned_url_without_an_explicitly_public_endpoint():
     internal_only = Settings(
         s3_endpoint="http://minio:9000",
         s3_public_endpoint="",
-        s3_bucket="recallix",
+        s3_bucket="orion",
         s3_access_key="k",
         s3_secret_key="s",
     )
@@ -187,7 +187,7 @@ def test_a_url_is_offered_once_a_reachable_endpoint_is_configured():
     configured = Settings(
         s3_endpoint="http://minio:9000",
         s3_public_endpoint="https://storage.example.com",
-        s3_bucket="recallix",
+        s3_bucket="orion",
         s3_access_key="k",
         s3_secret_key="s",
     )
