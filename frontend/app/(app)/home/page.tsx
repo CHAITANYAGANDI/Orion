@@ -84,8 +84,8 @@ import { recordHref } from "@/lib/routes";
  * be a filter that is permanently empty and reads as a fault.
  */
 const SCOPES = [
-  { value: "recent", label: "Recent Conversations", hint: "everything outside your folders" },
   { value: "all", label: "All Conversations", hint: "everything in this workspace" },
+  { value: "recent", label: "Recent Conversations", hint: "everything outside your folders" },
 ] as const;
 
 type Scope = (typeof SCOPES)[number]["value"];
@@ -104,6 +104,58 @@ const SCOPE_CODEC: PreferenceCodec<Scope> = {
   load: (raw) => (raw === "recent" || raw === "all" ? raw : null),
 };
 
+/**
+ * Home shows the whole workspace unless somebody says otherwise.
+ *
+ * <h2>The bug</h2>
+ *
+ * <p>This defaulted to `recent`, and `recent` means `unfiled=true` on the wire
+ * -- conversations that were never put in a folder. So the default Home was not
+ * "your meetings", it was "your meetings, minus the ones you organised". An
+ * account that had tidied everything away opened Home to "Everything is in a
+ * folder" and a button, with no meetings visible anywhere.
+ *
+ * <p>Being remembered made it stick. The scope is persisted, so once `recent`
+ * was written down -- which happened the first time anybody touched the picker,
+ * and the default was already `recent` besides -- every later visit restored it.
+ * Opening a meeting and coming back landed on the empty state again.
+ *
+ * <h2>Why a new key rather than a new default</h2>
+ *
+ * <p>Changing the default alone would fix nothing for anyone already using the
+ * app: their browser has `home.scope: "recent"` in localStorage, and a restored
+ * value beats a default every time. The bug would survive the deployment in
+ * exactly the browsers that hit it.
+ *
+ * <p>And the stored value cannot be repaired in place, because it is ambiguous.
+ * Under v1 the default *was* `recent`, so a stored `"recent"` means either "I
+ * chose this" or "I touched the picker once and it wrote down where I already
+ * was" -- and nothing distinguishes them. Honouring it keeps the bug; dropping
+ * it silently discards a real preference for the few who meant it.
+ *
+ * <p>A version bump resolves that by not pretending to know: v1 is abandoned
+ * wholesale, everyone starts on `all`, and the first explicit choice under v2 is
+ * unambiguous because the default it differs from is now the safe one. One
+ * preference lost once, for the minority who had set it deliberately, against a
+ * broken first screen for everybody who had not.
+ *
+ * <p>The old `home.scope` entry is left where it is rather than deleted. It is
+ * inert -- nothing reads that name any more -- and clearing it would mean a
+ * write on load, from a page whose whole problem was doing something surprising
+ * on load.
+ */
+const SCOPE_PREF_KEY = "home.scope.v2";
+
+/**
+ * All Conversations, and only an explicit choice moves off it.
+ *
+ * <p>Recent stays in the picker: filing is real, and "what I have not filed
+ * yet" is a genuine question. It is just not the question Home should answer
+ * before being asked -- a list that hides rows by default has to be chosen, not
+ * arrived at.
+ */
+const DEFAULT_SCOPE: Scope = "all";
+
 const WHEN_CODEC: PreferenceCodec<DateWindow> = {
   // The choice, not the window. Storing the instants would pin "Last 7 days" to
   // the week it was picked and leave "Today" labelling a day that has passed.
@@ -115,13 +167,16 @@ export default function HomePage() {
   // Home opens on Recent: what has not been filed anywhere else. A meeting
   // recorded inside a folder is therefore not on this list until you switch to
   // All — deliberately, because the folder is where it was put and the rail on
-  // the left is how you get back to it. The consequence is worth knowing before
-  // anybody reports it: the count on Home is not the count in the workspace.
+  // the left is how you get back to it.
+  //
+  // Home counts the whole workspace now. It used to open on Recent, where the
+  // count excluded anything filed -- see SCOPE_PREF_KEY for why that default
+  // was wrong and why the key is versioned.
   // Both of these are remembered until sign-out. Home is a page people leave
   // and come back to constantly — open a meeting, come back, open another — and
   // a filter that reset on every return meant narrowing the list was work you
   // did once per visit rather than once.
-  const scopePref = useStickyPreference<Scope>("home.scope", "recent", SCOPE_CODEC);
+  const scopePref = useStickyPreference<Scope>(SCOPE_PREF_KEY, DEFAULT_SCOPE, SCOPE_CODEC);
   const whenPref = useStickyPreference<DateWindow>("home.when", ANY_TIME, WHEN_CODEC);
   const { value: scope, set: setScope } = scopePref;
   const { value: when, set: setWhen } = whenPref;
@@ -443,10 +498,16 @@ function ConversationRow({ meeting }: { meeting: MeetingResponse }) {
  * <p>Which makes one question worth a request of its own: an empty Recent means
  * either that everything is filed or that there is nothing at all, and those
  * two want opposite screens — the way to the folders, or the way to a first
- * recording. Home opens on Recent, so the second is what a new account sees
- * first, and getting it wrong would answer "you have no meetings" with a button
- * that leads to another empty list. One row is enough to tell them apart, and
- * it is only ever asked for when there is nothing to show.
+ * recording. One row is enough to tell them apart, and it is only ever asked
+ * for when there is nothing to show.
+ *
+ * <p><b>Only when Recent was chosen.</b> "Everything is in a folder" describes
+ * a list that is hiding rows, which is only true of Recent — and Home no longer
+ * opens there. On All Conversations an empty list means the workspace is empty,
+ * full stop, so the probe below is skipped and the first-recording screen is
+ * what shows. That skip is the whole guard: get it wrong and a new account is
+ * told its meetings are filed somewhere, and handed a button to another empty
+ * list.
  */
 function EmptyState({
   scope,
@@ -495,7 +556,15 @@ function EmptyState({
   // is worse than a blank half-second.
   if (scope === "recent" && workspace.isLoading) return null;
 
-  if (filedElsewhere) {
+  /*
+   * `scope === "recent"` as well as the count, though the probe above is
+   * already skipped on any other scope so `filedElsewhere` cannot be true here.
+   * Stated anyway: this screen must appear only when the user has explicitly
+   * narrowed to the unfiled list, and tying that to one `skip` expression makes
+   * it true by accident. Two lines apart, either could be relaxed without the
+   * other being noticed.
+   */
+  if (scope === "recent" && filedElsewhere) {
     return (
       <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center">
         <FolderOpen className="h-8 w-8 text-muted-foreground" />

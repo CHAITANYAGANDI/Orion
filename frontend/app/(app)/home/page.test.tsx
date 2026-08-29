@@ -101,18 +101,20 @@ beforeEach(() => {
 });
 
 describe("the scope picker", () => {
-  it("offers what is outside a folder and the whole workspace, in that order", async () => {
+  it("offers the whole workspace and what is outside a folder, in that order", async () => {
     render(<HomePage />);
 
-    await userEvent.click(screen.getByRole("button", { name: /Recent Conversations/ }));
+    await userEvent.click(screen.getByRole("button", { name: /All Conversations/ }));
     const menu = screen.getByRole("menu");
     const options = within(menu).getAllByRole("menuitemradio");
 
-    // Recent first: it is where Home opens, and an option list that does not
-    // start with the one you are on reads as a list of somewhere else.
+    // All first: it is where Home opens, and an option list that does not
+    // start with the one you are on reads as a list of somewhere else. The
+    // order followed the default when the default was Recent, and follows it
+    // still.
     expect(options).toHaveLength(2);
-    expect(options[0]).toHaveTextContent("Recent Conversations");
-    expect(options[1]).toHaveTextContent("All Conversations");
+    expect(options[0]).toHaveTextContent("All Conversations");
+    expect(options[1]).toHaveTextContent("Recent Conversations");
     // The label is about folders, not about time, and only the hint says so.
     expect(within(menu).getByText("everything outside your folders")).toBeInTheDocument();
     // It counted twenty rows and called them unread. Nothing tracks whether a
@@ -120,40 +122,40 @@ describe("the scope picker", () => {
     expect(within(menu).queryByText(/For you/)).not.toBeInTheDocument();
   });
 
-  it("starts on what has not been filed", () => {
+  it("starts on the whole workspace", () => {
     render(<HomePage />);
 
-    // Home is the list of what was not put somewhere else. The count on it is
-    // therefore not the count in the workspace, which is the one thing about
-    // this default anybody is likely to report.
-    expect(screen.getByRole("button", { name: /Recent Conversations/ })).toBeInTheDocument();
-    expect(query.last?.unfiled).toBe(true);
-  });
-
-  it("asks the server for the whole workspace", async () => {
-    render(<HomePage />);
-
-    await choose("All Conversations");
-
-    // The whole of the fix. This used to narrow the page in the browser, and
-    // narrow it by nothing: both options ran through a function that returned
-    // its argument.
+    // The regression. Home used to open on Recent, which is `unfiled=true` --
+    // so the default list hid every meeting that had been filed, and an account
+    // that had tidied up opened Home to an empty state.
+    expect(screen.getByRole("button", { name: /All Conversations/ })).toBeInTheDocument();
     expect(query.last?.unfiled).toBe(false);
   });
 
-  it("asks for the ones outside a folder again on the way back", async () => {
+  it("asks the server for what is outside a folder only when asked to", async () => {
     render(<HomePage />);
-    await choose("All Conversations");
 
     await choose("Recent Conversations");
 
+    // Recent still works and still reaches the server. It used to narrow the
+    // page in the browser, and narrow it by nothing: both options ran through a
+    // function that returned its argument.
     expect(query.last?.unfiled).toBe(true);
+  });
+
+  it("asks for the whole workspace again on the way back", async () => {
+    render(<HomePage />);
+    await choose("Recent Conversations");
+
+    await choose("All Conversations");
+
+    expect(query.last?.unfiled).toBe(false);
   });
 
   it("keeps the date window while the scope changes", async () => {
     render(<HomePage />);
 
-    await choose("All Conversations");
+    await choose("Recent Conversations");
 
     // Two filters over one list. Losing one when the other moves is the bug
     // that follows from rebuilding the query object per control.
@@ -175,11 +177,14 @@ describe("the list", () => {
 });
 
 describe("when there is nothing to show", () => {
-  it("says the rest is filed, and offers the way back", async () => {
+  it("says the rest is filed once Recent was chosen, and offers the way back", async () => {
     rows = [];
     workspaceTotal = 11;
 
     render(<HomePage />);
+    // Explicitly, because Home no longer starts here. This screen describes a
+    // list that is hiding rows, which is only true of Recent.
+    await choose("Recent Conversations");
 
     // Without this the page offers Record and Import to somebody with a
     // hundred meetings, which reads as an archive that lost them.
@@ -272,17 +277,18 @@ describe("filters that stay where you left them", () => {
 
   it("remembers going back to the default just as firmly", async () => {
     const first = render(<HomePage />);
-    await choose("All Conversations");
+    await choose("Recent Conversations");
     first.unmount();
 
     const second = render(<HomePage />);
-    await choose("Recent Conversations");
+    await choose("All Conversations");
     second.unmount();
 
     // Choosing the default is a choice. Were it treated as "no opinion", the
-    // next visit would reinstate All and this would be the same bug reversed.
+    // next visit would reinstate Recent and this would be the same bug
+    // reversed -- which is exactly the shape of the bug being fixed.
     render(<HomePage />);
-    expect(query.last?.unfiled).toBe(true);
+    expect(query.last?.unfiled).toBe(false);
   });
 
   it("goes back to the defaults after a sign-out and sign-in", async () => {
@@ -296,14 +302,14 @@ describe("filters that stay where you left them", () => {
     auth.sessionKey = "sess_2";
     render(<HomePage />);
 
-    expect(screen.getByRole("button", { name: /Recent Conversations/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /All Conversations/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Any time/ })).toBeInTheDocument();
-    expect(query.last?.unfiled).toBe(true);
+    expect(query.last?.unfiled).toBe(false);
   });
 
   it("asks the server once, with the filters it restored", async () => {
     const visit = render(<HomePage />);
-    await choose("All Conversations");
+    await choose("Recent Conversations");
     visit.unmount();
 
     query.last = null;
@@ -312,8 +318,169 @@ describe("filters that stay where you left them", () => {
     // Storage cannot be read while rendering, so the first render necessarily
     // holds the defaults. Asking then would fetch the whole workspace and fetch
     // it again narrowed -- two requests and a list that changes under the
-    // reader. The query waits instead.
+    // reader. The query waits instead, and the one request it makes carries the
+    // restored scope rather than the default.
+    expect(lastQuery()?.unfiled).toBe(true);
+  });
+});
+
+/**
+ * The default that hid your meetings.
+ *
+ * <h2>The bug</h2>
+ *
+ * <p>Home defaulted to Recent Conversations, and Recent is `unfiled=true` on the
+ * wire — conversations that were never put in a folder. So the default Home was
+ * not "your meetings", it was "your meetings, minus the ones you organised". An
+ * account that had filed everything opened Home to "Everything is in a folder"
+ * with no meetings visible at all.
+ *
+ * <p>Persistence made it stick: the scope is remembered, so once `recent` was
+ * written down every later visit restored it. Open a meeting, come back, empty
+ * state again.
+ *
+ * <p>Fixing the default alone would not have fixed the deployment. Browsers
+ * already carrying `home.scope: "recent"` would restore it over the new default,
+ * so the bug would survive precisely where it was happening — hence a versioned
+ * key, and hence the legacy test below, which is the one that would have caught
+ * a fix that looked complete and shipped broken.
+ */
+describe("the scope Home opens on", () => {
+  it("defaults a fresh visit to All Conversations", () => {
+    render(<HomePage />);
+
+    expect(screen.getByRole("button", { name: /All Conversations/ })).toBeInTheDocument();
+  });
+
+  it("sends unfiled=false on the very first query", () => {
+    render(<HomePage />);
+
+    // The wire, not the label. A restored label over a query that still says
+    // unfiled=true is the version of this bug that looks fixed.
     expect(lastQuery()?.unfiled).toBe(false);
+  });
+
+  it("shows meetings on a default visit even when they are all in folders", () => {
+    // The user-visible bug, end to end. `workspaceTotal` exceeding the rows is
+    // what "everything is filed" looks like from here.
+    rows = [aMeeting({ id: "mtg_filed", title: "Filed away" })];
+    workspaceTotal = 40;
+
+    render(<HomePage />);
+
+    expect(screen.getByText("Filed away")).toBeInTheDocument();
+    expect(screen.queryByText("Everything is in a folder")).not.toBeInTheDocument();
+  });
+
+  it("ignores a legacy home.scope=recent left by the old build", () => {
+    /*
+     * The migration, and the reason the key is versioned.
+     *
+     * Written the way the old build wrote it, under the same session stamp, so
+     * this is a real upgrade rather than a simulated one. Under v1 the default
+     * was `recent`, so a stored `"recent"` cannot be told apart from never
+     * having chosen at all -- honouring it would carry the bug through the
+     * deployment into exactly the browsers that had it.
+     */
+    window.localStorage.setItem(
+      "orion.prefs",
+      JSON.stringify({ session: "sess_1", values: { "home.scope": "recent" } }),
+    );
+
+    render(<HomePage />);
+
+    expect(screen.getByRole("button", { name: /All Conversations/ })).toBeInTheDocument();
+    expect(lastQuery()?.unfiled).toBe(false);
+  });
+
+  it("does not drift back to Recent when you leave for a meeting and return", async () => {
+    // Home is a page people leave and return to all day. The bug showed up on
+    // the return trip, so the return trip is what is pinned.
+    const visit = render(<HomePage />);
+    expect(lastQuery()?.unfiled).toBe(false);
+    visit.unmount();
+
+    query.last = null;
+    render(<HomePage />);
+
+    expect(screen.getByRole("button", { name: /All Conversations/ })).toBeInTheDocument();
+    expect(lastQuery()?.unfiled).toBe(false);
+  });
+
+  it("still sends unfiled=true when Recent is chosen deliberately", async () => {
+    // Recent is not removed, only demoted. It has to keep working, or the fix
+    // has traded one broken list for a missing feature.
+    render(<HomePage />);
+
+    await choose("Recent Conversations");
+
+    expect(lastQuery()?.unfiled).toBe(true);
+  });
+
+  it("keeps an explicit Recent across a return visit", async () => {
+    // Stickiness survives the version bump for choices made under v2, where a
+    // stored value is unambiguous because it differs from the default.
+    const visit = render(<HomePage />);
+    await choose("Recent Conversations");
+    visit.unmount();
+
+    render(<HomePage />);
+
+    expect(screen.getByRole("button", { name: /Recent Conversations/ })).toBeInTheDocument();
+    expect(lastQuery()?.unfiled).toBe(true);
+  });
+
+  it("keeps an explicit All across a return visit", async () => {
+    const visit = render(<HomePage />);
+    await choose("Recent Conversations");
+    await choose("All Conversations");
+    visit.unmount();
+
+    render(<HomePage />);
+
+    expect(screen.getByRole("button", { name: /All Conversations/ })).toBeInTheDocument();
+    expect(lastQuery()?.unfiled).toBe(false);
+  });
+
+  it("returns to All for a new session, discarding an explicit Recent", async () => {
+    const visit = render(<HomePage />);
+    await choose("Recent Conversations");
+    expect(lastQuery()?.unfiled).toBe(true);
+    visit.unmount();
+
+    // Signing out and back in -- as the same person or somebody else.
+    auth.sessionKey = "sess_2";
+    render(<HomePage />);
+
+    expect(screen.getByRole("button", { name: /All Conversations/ })).toBeInTheDocument();
+    expect(lastQuery()?.unfiled).toBe(false);
+  });
+
+  it("offers a first recording, not a folder hint, to an empty account on the default", () => {
+    // The two empty states mean opposite things and want opposite screens. On
+    // All Conversations an empty list means the workspace is empty, so the
+    // folder screen here would tell a new account its meetings are filed
+    // somewhere and hand it a button to another empty list.
+    rows = [];
+    workspaceTotal = 0;
+
+    render(<HomePage />);
+
+    expect(screen.getByText("No conversations")).toBeInTheDocument();
+    expect(screen.queryByText("Everything is in a folder")).not.toBeInTheDocument();
+  });
+
+  it("never shows the folder empty state on the default scope, even with meetings filed", () => {
+    // The strict form of the requirement: "Everything is in a folder" may
+    // appear only when the unfiled list was explicitly asked for. Here the
+    // workspace has forty meetings and the default list came back empty --
+    // which cannot happen for real, and is exactly why it is worth asserting.
+    rows = [];
+    workspaceTotal = 40;
+
+    render(<HomePage />);
+
+    expect(screen.queryByText("Everything is in a folder")).not.toBeInTheDocument();
   });
 });
 
