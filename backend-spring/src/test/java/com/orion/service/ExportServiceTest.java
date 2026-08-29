@@ -6,6 +6,7 @@ import com.orion.domain.ExportOptions;
 import com.orion.domain.SourceType;
 import com.orion.domain.SummarySection;
 import com.orion.dto.AudioDownloadResponse;
+import com.orion.dto.AudioExportResponse;
 import com.orion.dto.TranslationResponse;
 import com.orion.entity.Meeting;
 import com.orion.entity.MeetingActionItem;
@@ -71,6 +72,7 @@ class ExportServiceTest {
     @Mock private TranscriptSegmentRepository segments;
     @Mock private TranslationService translations;
     @Mock private StorageService storage;
+    @Mock private AiClient ai;
 
     private Capturing renderer;
     private ExportService service;
@@ -95,7 +97,7 @@ class ExportServiceTest {
     void setUp() {
         renderer = new Capturing();
         service = new ExportService(meetings, summaries, actionItems, segments,
-                translations, storage, List.of(renderer));
+                translations, storage, ai, List.of(renderer));
 
         when(meetings.findByIdAndUserId(MEETING, USER)).thenReturn(Optional.of(meeting()));
         when(summaries.findFirstByMeetingIdOrderByCreatedAtDesc(MEETING))
@@ -429,6 +431,197 @@ class ExportServiceTest {
             assertThatThrownBy(() -> service.audio(USER, MEETING))
                     .isInstanceOf(ApiException.class)
                     .hasMessageContaining("no stored recording");
+        }
+    }
+
+    /* --------------------------------- mp3 -------------------------------- */
+
+    /**
+     * Exporting the recording as an MP3.
+     *
+     * <p>The claim being defended is narrow and absolute: a file Orion names
+     * {@code .mp3} contains MP3. Renaming a webm would produce something VLC
+     * plays, iTunes refuses, a car stereo skips and a phone opens as a
+     * zero-second track — a file that looks fine until it is the only copy of a
+     * conversation somebody needs.
+     *
+     * <p>The second theme is that this endpoint must not become a way around
+     * erasure. A recording that has been deleted cannot be converted into a copy
+     * of itself, and the test for that sits beside the ones about codecs because
+     * it is the same feature.
+     */
+    @Nested
+    @DisplayName("the recording as an mp3")
+    class Mp3 {
+
+        @BeforeEach
+        void ready() {
+            when(storage.presignExpirySeconds()).thenReturn(900L);
+            when(storage.presignDownload(anyString(), anyString(), anyString()))
+                    .thenReturn("https://minio/signed-mp3");
+        }
+
+        @Test
+        void doesNotConvertARecordingThatIsAlreadyAnMp3() {
+            // The fixture is audio/mpeg. Re-encoding it would spend a minute of
+            // CPU to produce a second, measurably worse copy -- MP3 is lossy, so
+            // a round trip through the encoder always loses something.
+            AudioExportResponse response = service.audioAsMp3(USER, MEETING);
+
+            assertThat(response.status()).isEqualTo("ready");
+            verify(ai, never()).transcodeToMp3(anyString(), anyString());
+            verify(storage).presignDownload(eq("audio/mtg_1.mp3"), anyString(), anyString());
+        }
+
+        @Test
+        void namesItMp3AndSaysItIsAudioMpeg() {
+            AudioExportResponse response = service.audioAsMp3(USER, MEETING);
+
+            // Both, and both signed into the URL. A correct extension over a
+            // response served as application/octet-stream still gets saved
+            // wrongly by some browsers, and the type alone leaves the file
+            // named after an object key.
+            assertThat(response.filename()).isEqualTo("sprint-planning.mp3");
+            assertThat(response.contentType()).isEqualTo("audio/mpeg");
+            verify(storage).presignDownload(anyString(), eq("sprint-planning.mp3"), eq("audio/mpeg"));
+        }
+
+        @Test
+        void reusesTheConvertedCopyRatherThanConvertingAgain() {
+            webm();
+            when(storage.exists("audio/mtg_1.webm.mp3")).thenReturn(true);
+
+            AudioExportResponse response = service.audioAsMp3(USER, MEETING);
+
+            assertThat(response.status()).isEqualTo("ready");
+            assertThat(response.url()).isEqualTo("https://minio/signed-mp3");
+            // The whole point of a deterministic derivative key: the second
+            // export of a meeting is a HEAD and a signature.
+            verify(ai, never()).transcodeToMp3(anyString(), anyString());
+        }
+
+        @Test
+        void convertsAWebmAndAsksTheCallerToWait() {
+            webm();
+            when(storage.exists(anyString())).thenReturn(false);
+            when(ai.transcodeToMp3(anyString(), anyString()))
+                    .thenReturn(new AiClient.TranscodeState("running", null));
+
+            AudioExportResponse response = service.audioAsMp3(USER, MEETING);
+
+            assertThat(response.status()).isEqualTo("preparing");
+            // No URL while preparing. One that 404s if followed would turn a
+            // clear waiting state into an intermittent broken download.
+            assertThat(response.url()).isNull();
+            verify(ai).transcodeToMp3("audio/mtg_1.webm", "audio/mtg_1.webm.mp3");
+        }
+
+        @Test
+        void startsAtMostOneConversionPerRecording() {
+            // Two clicks, one after the other, before the first has finished.
+            // Both reach the ai-service and the ai-service is what refuses to
+            // start twice -- proven in its own tests. What matters here is that
+            // the key is identical, because a key that varied per request would
+            // defeat that guard from this end.
+            webm();
+            when(storage.exists(anyString())).thenReturn(false);
+            when(ai.transcodeToMp3(anyString(), anyString()))
+                    .thenReturn(new AiClient.TranscodeState("running", null));
+
+            service.audioAsMp3(USER, MEETING);
+            service.audioAsMp3(USER, MEETING);
+
+            verify(ai, org.mockito.Mockito.times(2))
+                    .transcodeToMp3("audio/mtg_1.webm", "audio/mtg_1.webm.mp3");
+        }
+
+        @Test
+        void handsBackTheLinkWhenTheConversionFinishedWhileWeAsked() {
+            // The object appeared between the HEAD and the call. Common, because
+            // a conversion started by an earlier poll finishes during a later
+            // one; making the client ask again would add two seconds to every
+            // successful export.
+            webm();
+            when(storage.exists(anyString())).thenReturn(false);
+            when(ai.transcodeToMp3(anyString(), anyString()))
+                    .thenReturn(new AiClient.TranscodeState("ready", null));
+
+            assertThat(service.audioAsMp3(USER, MEETING).status()).isEqualTo("ready");
+        }
+
+        @Test
+        void passesOnAFailureAsSomethingAPersonCanRead() {
+            webm();
+            when(storage.exists(anyString())).thenReturn(false);
+            when(ai.transcodeToMp3(anyString(), anyString())).thenReturn(
+                    new AiClient.TranscodeState("failed", "This recording has no audio to convert."));
+
+            AudioExportResponse response = service.audioAsMp3(USER, MEETING);
+
+            assertThat(response.status()).isEqualTo("failed");
+            assertThat(response.message()).isEqualTo("This recording has no audio to convert.");
+        }
+
+        @Test
+        void hasSomethingToSayEvenWhenTheAiServiceDidNotWriteAMessage() {
+            webm();
+            when(storage.exists(anyString())).thenReturn(false);
+            when(ai.transcodeToMp3(anyString(), anyString()))
+                    .thenReturn(new AiClient.TranscodeState("failed", null));
+
+            assertThat(service.audioAsMp3(USER, MEETING).message())
+                    .contains("could not be converted");
+        }
+
+        @Test
+        void refusesAMeetingThatWasNeverARecording() {
+            Meeting document = meeting();
+            document.setSourceType(SourceType.DOCUMENT);
+            when(meetings.findByIdAndUserId(MEETING, USER)).thenReturn(Optional.of(document));
+
+            assertThatThrownBy(() -> service.audioAsMp3(USER, MEETING))
+                    .isInstanceOf(ApiException.class)
+                    .hasMessageContaining("no recording");
+            verify(ai, never()).transcodeToMp3(anyString(), anyString());
+        }
+
+        @Test
+        void refusesAMeetingWhoseAudioHasBeenErased() {
+            // The one that would matter most if it broke. Erasure is the
+            // strongest promise Orion makes, and an export path that could
+            // reconstruct a deleted recording would quietly withdraw it.
+            Meeting gone = meeting();
+            gone.setObjectKey(null);
+            gone.setAudioDeletedAt(Instant.parse("2026-08-20T10:00:00Z"));
+            when(meetings.findByIdAndUserId(MEETING, USER)).thenReturn(Optional.of(gone));
+
+            assertThatThrownBy(() -> service.audioAsMp3(USER, MEETING))
+                    .isInstanceOf(ApiException.class)
+                    .hasMessageContaining("no stored recording");
+            verify(ai, never()).transcodeToMp3(anyString(), anyString());
+        }
+
+        @Test
+        void mintsAFreshLinkEveryTimeItIsAsked() {
+            // Presigned URLs expire. A caller that comes back an hour later --
+            // a dialog left open, a retry after a failure -- gets a new
+            // signature rather than the dead one, because nothing here caches.
+            webm();
+            when(storage.exists(anyString())).thenReturn(true);
+
+            service.audioAsMp3(USER, MEETING);
+            service.audioAsMp3(USER, MEETING);
+
+            verify(storage, org.mockito.Mockito.times(2))
+                    .presignDownload(eq("audio/mtg_1.webm.mp3"), anyString(), anyString());
+        }
+
+        /** A meeting recorded in a browser, which is the common case. */
+        private void webm() {
+            Meeting m = meeting();
+            m.setObjectKey("audio/mtg_1.webm");
+            m.setContentType("audio/webm;codecs=opus");
+            when(meetings.findByIdAndUserId(MEETING, USER)).thenReturn(Optional.of(m));
         }
     }
 

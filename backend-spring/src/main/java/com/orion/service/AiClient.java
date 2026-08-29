@@ -729,6 +729,85 @@ public class AiClient {
         }
     }
 
+    /* ------------------------------ transcoding ----------------------------- */
+
+    /**
+     * What the ai-service says about one conversion.
+     *
+     * @param status  {@code ready}, {@code running} or {@code failed}
+     * @param message a sentence for the user; only ever set when failed
+     */
+    public record TranscodeState(String status, String message) {
+
+        public static final String READY = "ready";
+        public static final String RUNNING = "running";
+        public static final String FAILED = "failed";
+
+        public boolean ready() {
+            return READY.equals(status);
+        }
+
+        public boolean failed() {
+            return FAILED.equals(status);
+        }
+    }
+
+    /**
+     * Make sure an MP3 copy of a recording exists, and say how far along it is.
+     *
+     * <p>Asked of the ai-service rather than done here for two reasons, and the
+     * first is not the obvious one.
+     *
+     * <p><strong>The bytes must not come through Spring.</strong> A recording is
+     * tens or hundreds of megabytes; reading one into this heap to feed a codec
+     * would put a request-sized object in tenured space and give any logged-in
+     * account a way to exhaust the API by clicking Export. The ai-service
+     * streams it storage-to-storage and never holds the whole file either.
+     *
+     * <p><strong>ffmpeg is already there.</strong> It is installed in that image
+     * for speaker embedding and is the only thing in the stack that reads
+     * everything Orion accepts — webm/opus from a browser, m4a from a phone, wav
+     * from a desk recorder. Adding a second codec dependency to a second image
+     * to do the same job would be two things to keep patched instead of one.
+     *
+     * <p>Returns immediately. The call starts the work or reports on work
+     * already running; it never waits for a conversion to finish, because the
+     * caller is a web request and the conversion is not.
+     *
+     * <p>A transport failure becomes {@code failed} with a sentence rather than
+     * an exception. The caller is a polling endpoint, and an ai-service that is
+     * restarting should tell the user to try again, not produce a 500 in a loop.
+     */
+    public TranscodeState transcodeToMp3(String objectKey, String targetKey) {
+        Map<String, Object> payload = new java.util.HashMap<>();
+        payload.put("objectKey", objectKey);
+        payload.put("targetKey", targetKey);
+        payload.put("format", "mp3");
+        try {
+            JsonNode body = client.post()
+                    .uri("/ai/transcode")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(payload)
+                    .retrieve()
+                    .body(JsonNode.class);
+            if (body == null || !body.hasNonNull("status")) {
+                return new TranscodeState(TranscodeState.FAILED,
+                        "The audio could not be converted just now. Try again in a moment.");
+            }
+            String status = body.get("status").asText();
+            // The ai-service's own words when it wrote any -- "the recording
+            // could not be decoded" tells somebody with a corrupt upload
+            // something a status code cannot. Never a class name or a codec's
+            // stderr: those are in that service's log, where they belong.
+            String message = body.hasNonNull("message") ? body.get("message").asText() : null;
+            return new TranscodeState(status, message);
+        } catch (RuntimeException e) {
+            log.warn("Transcoding {} to mp3 failed: {}", objectKey, e.getClass().getSimpleName());
+            return new TranscodeState(TranscodeState.FAILED,
+                    "The audio could not be converted just now. Try again in a moment.");
+        }
+    }
+
     private static Map<String, Object> speakerPayload(SpeakerTurns speaker) {
         Map<String, Object> m = new java.util.HashMap<>();
         m.put("speakerKey", speaker.speakerKey());

@@ -36,6 +36,7 @@ import type {
   TranscriptResponse,
   AppNotification,
   AudioDownload,
+  Mp3Export,
   AvailableTranslation,
   LanguageOption,
   MeetingTranslation,
@@ -820,6 +821,24 @@ export const api = createApi({
     }),
 
     /**
+     * The recording as an MP3, converting it once if it is not one already.
+     *
+     * Asked repeatedly while a conversion runs, so nothing is cached: a cached
+     * `preparing` would be answered instantly forever and the dialog would spin
+     * until the tab was closed. `keepUnusedDataFor: 0` also means the link the
+     * *last* export produced is never handed to the next one, which matters
+     * because it is signed and short-lived.
+     *
+     * Not tagged and not invalidating. There is nothing in the cache this
+     * changes — the object it may create is not part of any query's data, and
+     * the meeting itself is unaffected.
+     */
+    getMp3Export: builder.query<Mp3Export, string>({
+      query: (id) => `/meetings/${id}/audio/mp3`,
+      keepUnusedDataFor: 0,
+    }),
+
+    /**
      * Correct what the transcriber heard. Invalidates the transcript and the
      * meeting's chat: saving re-indexes the meeting, so previous answers were
      * grounded in text that no longer exists.
@@ -1169,6 +1188,7 @@ export const {
   useGetTranslationsQuery,
   useTranslateMeetingMutation,
   useLazyGetAudioDownloadQuery,
+  useLazyGetMp3ExportQuery,
   useGetNotificationsQuery,
   useGetUnreadCountQuery,
   useGetNotificationKindsQuery,

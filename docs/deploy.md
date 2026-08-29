@@ -335,6 +335,11 @@ Create a bucket named `orion` and an API token with object read/write.
   Needed on **both** services. Blank on `orion-ai` does not fail; it silently
   disables AssemblyAI fetching the recording from R2 itself, so every file is
   pulled into the container and pushed out again.
+- `S3_ACCESS_KEY` / `S3_SECRET_KEY` — the same token on both, and it must have
+  **write**. `orion-ai` used to only read, so a token scoped to "Object Read
+  only" worked there; MP3 export writes the converted copy back to the bucket,
+  and a read-only token turns that into a conversion that runs, succeeds, and
+  fails on the very last step, every time.
 
 > **Historical only.** The bucket was called `recallix` before the rename and
 > its API token was scoped to that name. It is not the deployment bucket and

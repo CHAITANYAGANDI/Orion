@@ -224,6 +224,11 @@ services:
       # domain fronts the bucket.
       - key: S3_PUBLIC_ENDPOINT
         sync: false        # https://<account-id>.r2.cloudflarestorage.com
+      # These need WRITE as well as read. This service used to only ever read
+      # from the bucket, so a token scoped to "Object Read only" worked; MP3
+      # export writes the converted copy back, and a read-only token turns that
+      # into a conversion that runs, succeeds, and fails on the last step every
+      # single time. Use the same token as orion-backend.
       - key: S3_ACCESS_KEY
         sync: false
       - key: S3_SECRET_KEY

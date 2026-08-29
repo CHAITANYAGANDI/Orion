@@ -1,9 +1,21 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("@/lib/api", () => ({ API_BASE: "http://api.test" }));
 vi.mock("@/lib/auth-store", () => ({ buildAuthHeaders: async () => ({}) }));
 
-import { exportPath, filenameFrom } from "@/lib/exports";
+import {
+  bundleName,
+  buildBundle,
+  describeExportFailure,
+  DownloadFailure,
+  exportPath,
+  ExportError,
+  fetchExportFile,
+  filenameFrom,
+  isTransientFailure,
+  REVOKE_DELAY_MS,
+  save,
+} from "@/lib/exports";
 
 /**
  * Asking for a file, and knowing what it is called when it arrives.
@@ -13,6 +25,12 @@ import { exportPath, filenameFrom } from "@/lib/exports";
  * two pages where forty were wanted, with nothing on screen to say so. The
  * header parsing is the other half: a name that does not survive the trip turns
  * a downloads folder into a list of "meeting (3)".
+ *
+ * <p>The rest of this file is about the export that was reported as
+ * intermittent. Three things were producing that and none of them was a flaky
+ * network: an object URL revoked before the browser had read it, a retry that
+ * did not exist, and failure messages that named neither the part nor anything
+ * a person could act on.
  */
 describe("exportPath", () => {
   it("asks for the format", () => {
@@ -59,21 +77,343 @@ describe("filenameFrom", () => {
     );
   });
 
-  it("falls back when the header is missing", () => {
-    // Cross-origin without the header exposed, which is the state this was in
-    // before Content-Disposition was added to the CORS allow-list.
+  it("falls back when there is no header at all", () => {
     expect(filenameFrom(null, "meeting.txt")).toBe("meeting.txt");
   });
 
-  it("drops to the plain name rather than throwing on a mangled encoding", () => {
-    // Truncated percent-encoding. The lossy name is still a better answer than
-    // a generic one, and far better than a thrown error losing the download.
-    expect(filenameFrom("attachment; filename=\"a.md\"; filename*=UTF-8''%E5%9B%", "b.md")).toBe(
-      "a.md",
+  it("falls back rather than failing on broken percent-encoding", () => {
+    expect(filenameFrom("attachment; filename*=UTF-8''%E5%9B", "meeting.pdf")).toBe("meeting.pdf");
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+
+describe("isTransientFailure", () => {
+  it("is true for a network that dropped", () => {
+    // `fetch` rejects with a TypeError. The wording differs by engine —
+    // "Failed to fetch", "NetworkError when attempting to fetch resource" — so
+    // this must never be decided by reading the message.
+    expect(isTransientFailure(new TypeError("Failed to fetch"))).toBe(true);
+  });
+
+  it.each([502, 503, 504])("is true for a gateway answering %s", (status) => {
+    expect(isTransientFailure(new DownloadFailure(status))).toBe(true);
+    expect(isTransientFailure({ status, data: {} })).toBe(true);
+  });
+
+  it.each([400, 401, 403, 404, 409, 429])("is false for %s", (status) => {
+    // The server has decided. Asking again produces the same answer and
+    // doubles the load; a 429 in particular is a request to stop.
+    expect(isTransientFailure(new DownloadFailure(status))).toBe(false);
+    expect(isTransientFailure({ status, data: {} })).toBe(false);
+  });
+
+  it("is false for a 500", () => {
+    // The request reached the application and broke it. Repeating it repeats
+    // the bug, one second later, with the same outcome.
+    expect(isTransientFailure(new DownloadFailure(500))).toBe(false);
+  });
+
+  it("is true for RTK Query's transport statuses and false for its parse one", () => {
+    expect(isTransientFailure({ status: "FETCH_ERROR", error: "offline" })).toBe(true);
+    expect(isTransientFailure({ status: "TIMEOUT_ERROR", error: "slow" })).toBe(true);
+    // A body that is not what it claimed to be will not become one on a second
+    // attempt.
+    expect(isTransientFailure({ status: "PARSING_ERROR", originalStatus: 200 })).toBe(false);
+  });
+
+  it("is false for things that are not failures it understands", () => {
+    for (const error of [null, undefined, {}, "boom", new Error("boom"), 502]) {
+      expect(isTransientFailure(error), JSON.stringify(error)).toBe(false);
+    }
+  });
+});
+
+describe("describeExportFailure", () => {
+  it("names the part that failed", () => {
+    // "Couldn't export this meeting" after choosing three things leaves
+    // somebody checking their downloads folder to work out which arrived.
+    expect(describeExportFailure("summary", new DownloadFailure(500))).toContain(
+      "Couldn't export the summary",
+    );
+    expect(describeExportFailure("transcript", new DownloadFailure(500))).toContain(
+      "Couldn't export the transcript",
+    );
+    expect(describeExportFailure("audio", new DownloadFailure(500))).toContain(
+      "Couldn't export the audio",
     );
   });
 
-  it("falls back when there is nothing usable at all", () => {
-    expect(filenameFrom("attachment; filename*=UTF-8''%E5%9B%", "b.md")).toBe("b.md");
+  it("repeats a sentence the server wrote for a person", () => {
+    // The whole value of the server's message: "this meeting has not been
+    // translated into German" is the entire answer, and no wording invented
+    // here could match it.
+    const message = "This meeting has not been translated into German.";
+    expect(describeExportFailure("summary", new ExportError(message))).toBe(message);
+    expect(
+      describeExportFailure("audio", { status: 400, data: { message } }),
+    ).toBe(message);
+  });
+
+  it("does not repeat a 5xx body", () => {
+    // Spring's 500 says "An unexpected error occurred", and when a proxy
+    // answers instead it is a page of HTML. Neither belongs on screen, and the
+    // second is how technical detail leaks into a UI.
+    const said = describeExportFailure("summary", {
+      status: 500,
+      data: { message: "An unexpected error occurred" },
+    });
+
+    expect(said).toBe("Couldn't export the summary.");
+  });
+
+  it("never leaks a status code, a stack or the browser's phrasing", () => {
+    for (const error of [
+      new DownloadFailure(502),
+      new DownloadFailure("FETCH_ERROR"),
+      new TypeError("Failed to fetch"),
+      { status: 503, data: "<html><body>502 Bad Gateway</body></html>" },
+      { status: "PARSING_ERROR", originalStatus: 200, data: "not json" },
+      new Error("at Object.<anonymous> (/app/x.js:1:1)"),
+    ]) {
+      const said = describeExportFailure("transcript", error);
+      expect(said).not.toMatch(/\d{3}\b/);
+      expect(said).not.toMatch(/Failed to fetch|html|at Object/i);
+      expect(said).toContain("Couldn't export the transcript");
+    }
+  });
+
+  it("refuses a server 'message' that is really a stack trace", () => {
+    const stack = "NullPointerException\n\tat com.orion.Export.render(Export.java:41)";
+
+    expect(describeExportFailure("summary", { status: 400, data: { message: stack } })).toBe(
+      "Couldn't export the summary.",
+    );
+  });
+
+  it("suggests the connection only when that is plausibly the problem", () => {
+    expect(describeExportFailure("summary", new TypeError("Failed to fetch"))).toContain(
+      "Check your connection",
+    );
+    expect(describeExportFailure("summary", new DownloadFailure(500))).not.toContain(
+      "Check your connection",
+    );
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+
+const disposition = (name: string) => ({
+  "Content-Disposition": `attachment; filename="${name}"`,
+});
+
+function ok(name = "sprint-planning.txt", body = "summary") {
+  return {
+    ok: true,
+    status: 200,
+    headers: { get: (h: string) => disposition(name)[h as "Content-Disposition"] ?? null },
+    blob: async () => new Blob([body], { type: "text/plain" }),
+    json: async () => ({}),
+  };
+}
+
+function failing(status: number, body?: unknown) {
+  return {
+    ok: false,
+    status,
+    headers: { get: () => null },
+    blob: async () => new Blob([]),
+    json: async () => {
+      if (body === undefined) throw new SyntaxError("Unexpected token < in JSON");
+      return body;
+    },
+  };
+}
+
+describe("fetchExportFile", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns the bytes and the name the server chose", async () => {
+    fetchMock.mockResolvedValue(ok("四半期.pdf"));
+
+    const file = await fetchExportFile("mtg_1", "pdf", {}, 0);
+
+    expect(file.filename).toBe("四半期.pdf");
+    expect(new TextDecoder().decode(await file.blob.arrayBuffer())).toBe("summary");
+  });
+
+  it("tries once more when the first attempt fails in transit", async () => {
+    // The requirement, precisely: a transient failure followed by success is a
+    // successful export, not a message.
+    fetchMock
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(ok());
+
+    const file = await fetchExportFile("mtg_1", "txt", {}, 0);
+
+    expect(file.filename).toBe("sprint-planning.txt");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([502, 503, 504])("tries once more after a %s", async (status) => {
+    fetchMock.mockResolvedValueOnce(failing(status)).mockResolvedValueOnce(ok());
+
+    await expect(fetchExportFile("mtg_1", "txt", {}, 0)).resolves.toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("tries once more, and only once", async () => {
+    // Two attempts, not three. Each further one buys less and makes a
+    // genuinely broken export take longer to say so.
+    fetchMock.mockResolvedValue(failing(503));
+
+    await expect(fetchExportFile("mtg_1", "txt", {}, 0)).rejects.toBeInstanceOf(DownloadFailure);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([400, 401, 403, 404, 429, 500])("does not retry a %s", async (status) => {
+    fetchMock.mockResolvedValue(failing(status, { message: "" }));
+
+    await expect(fetchExportFile("mtg_1", "txt", {}, 0)).rejects.toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a 4xx explanation the server wrote", async () => {
+    fetchMock.mockResolvedValue(
+      failing(404, { message: "This meeting has not been translated into German." }),
+    );
+
+    await expect(fetchExportFile("mtg_1", "pdf", {}, 0)).rejects.toBeInstanceOf(ExportError);
+  });
+
+  it("does not quote a 5xx body, even when it parses", async () => {
+    // A proxy's HTML page and Spring's generic "An unexpected error occurred"
+    // both land here, and neither is a sentence for a user.
+    fetchMock.mockResolvedValue(failing(500, { message: "An unexpected error occurred" }));
+
+    await expect(fetchExportFile("mtg_1", "pdf", {}, 0)).rejects.toBeInstanceOf(DownloadFailure);
+  });
+
+  it("survives a 5xx whose body is not JSON at all", async () => {
+    // A 502 from a gateway is an HTML page; a truncated response is nothing.
+    // Both used to reach `response.json()`, and the throw from there must not
+    // become the error the user sees.
+    fetchMock.mockResolvedValue(failing(500));
+
+    await expect(fetchExportFile("mtg_1", "pdf", {}, 0)).rejects.toBeInstanceOf(DownloadFailure);
+  });
+
+  it("never mistakes a transport failure for a finished download", async () => {
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    // The rule the whole feature rests on: no path returns a file when none
+    // arrived.
+    await expect(fetchExportFile("mtg_1", "txt", {}, 0)).rejects.toBeInstanceOf(TypeError);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+
+describe("save", () => {
+  const createObjectURL = vi.fn(() => "blob:orion/1");
+  const revokeObjectURL = vi.fn();
+  let click: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    createObjectURL.mockClear();
+    revokeObjectURL.mockClear();
+    vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL });
+    // Anchors from an earlier test outlive it: switching back to real timers
+    // discards the pending cleanup rather than running it.
+    document.body.innerHTML = "";
+    // jsdom has no navigation, so a real click on a download link raises
+    // "Not implemented: navigation" from inside a timer -- noise that would
+    // bury a genuine failure here one day.
+    click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    click.mockRestore();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("does not revoke the object URL in the same tick as the click", () => {
+    // THE intermittent-download bug. A browser schedules the download and
+    // reads the blob URL afterwards; revoking it immediately is a race against
+    // the download the user asked for, which a fast machine usually wins and a
+    // slow one sometimes does not. Nothing throws when it loses.
+    save(new Blob(["x"]), "summary.txt");
+
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+  });
+
+  it("revokes it once the download has had time to start", () => {
+    save(new Blob(["x"]), "summary.txt");
+
+    vi.advanceTimersByTime(REVOKE_DELAY_MS);
+
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:orion/1");
+  });
+
+  it("gives the browser long enough to be sure", () => {
+    // Not a number picked to make a test pass: it has to exceed the time any
+    // browser takes to begin reading a blob it has been handed.
+    expect(REVOKE_DELAY_MS).toBeGreaterThanOrEqual(10_000);
+  });
+
+  it("clicks a link carrying the filename", () => {
+    save(new Blob(["x"]), "四半期.pdf");
+
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(document.querySelector("a[download]")?.getAttribute("download")).toBe("四半期.pdf");
+  });
+
+  it("leaves nothing in the document afterwards", () => {
+    save(new Blob(["x"]), "summary.txt");
+    vi.advanceTimersByTime(REVOKE_DELAY_MS);
+
+    expect(document.querySelectorAll("a[download]")).toHaveLength(0);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+
+describe("bundling", () => {
+  it("puts every document in one archive", async () => {
+    const blob = await buildBundle([
+      { blob: new Blob(["summary"]), filename: "sprint-planning.txt" },
+      { blob: new Blob(["transcript"]), filename: "sprint-planning-transcript.md" },
+    ]);
+
+    const view = new DataView(await blob.arrayBuffer());
+    // Two entries, counted where an extractor counts them.
+    expect(view.getUint16(view.byteLength - 12, true)).toBe(2);
+    expect(blob.type).toBe("application/zip");
+  });
+
+  it("names the archive after the meeting", async () => {
+    // What somebody will search for in a downloads folder six months later.
+    expect(
+      bundleName([
+        { blob: new Blob([]), filename: "sprint-planning.txt" },
+        { blob: new Blob([]), filename: "sprint-planning.md" },
+      ]),
+    ).toBe("sprint-planning.zip");
+  });
+
+  it("has a name even for a file that had none", () => {
+    expect(bundleName([])).toBe("meeting.zip");
   });
 });

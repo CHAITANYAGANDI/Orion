@@ -7,11 +7,13 @@ import com.orion.domain.Language;
 import com.orion.domain.SourceType;
 import com.orion.domain.SummarySection;
 import com.orion.dto.AudioDownloadResponse;
+import com.orion.dto.AudioExportResponse;
 import com.orion.dto.TranslationResponse;
 import com.orion.entity.Meeting;
 import com.orion.entity.MeetingActionItem;
 import com.orion.entity.MeetingSummary;
 import com.orion.entity.TranscriptSegment;
+import com.orion.export.AudioDerivatives;
 import com.orion.export.DocumentRenderer;
 import com.orion.export.Downloads;
 import com.orion.export.ExportDocument;
@@ -67,6 +69,7 @@ public class ExportService {
     private final TranscriptSegmentRepository segments;
     private final TranslationService translations;
     private final StorageService storage;
+    private final AiClient ai;
     private final Map<ExportFormat, DocumentRenderer> renderers = new EnumMap<>(ExportFormat.class);
 
     public ExportService(MeetingRepository meetings,
@@ -75,6 +78,7 @@ public class ExportService {
                          TranscriptSegmentRepository segments,
                          TranslationService translations,
                          StorageService storage,
+                         AiClient ai,
                          List<DocumentRenderer> renderers) {
         this.meetings = meetings;
         this.summaries = summaries;
@@ -82,6 +86,7 @@ public class ExportService {
         this.segments = segments;
         this.translations = translations;
         this.storage = storage;
+        this.ai = ai;
         renderers.forEach(r -> this.renderers.put(r.format(), r));
     }
 
@@ -152,6 +157,97 @@ public class ExportService {
                 meeting.getContentType(),
                 storage.presignExpirySeconds());
     }
+
+    /**
+     * The recording as an actual MP3, converting it once if it is not one.
+     *
+     * <h2>Why this is a poll and not a download</h2>
+     *
+     * <p>Because converting an hour of audio takes tens of seconds and a request
+     * that waited for it would be cut off by a proxy before it finished — after
+     * doing all the work. So this answers straight away with
+     * {@code preparing}, and the client asks again. Three calls with nothing to
+     * do cost three HEAD requests; one call that waits costs a user their
+     * export.
+     *
+     * <h2>What makes it idempotent</h2>
+     *
+     * <p>The derivative's key is derived from the source key
+     * ({@link AudioDerivatives}), so this method holds no state and needs none.
+     * "Is it converted?" is a HEAD against the bucket. A second click during a
+     * conversion finds the same key already in flight in the ai-service and
+     * starts nothing. A click a month later finds the object and presigns it —
+     * which is also what makes this work for meetings recorded long before the
+     * feature existed: there is no backfill, only a first export that is slower
+     * than the second.
+     *
+     * <h2>What it refuses</h2>
+     *
+     * <p>Exactly what {@link #audio} refuses, and for the same reasons — a
+     * meeting imported as a document never had a recording, and one whose audio
+     * has been erased must not be able to produce a copy of it. That second case
+     * is the important one: a privacy control that can be undone by an export
+     * button is not a privacy control.
+     *
+     * <p>Deliberately not {@code @Transactional}, unlike everything else here.
+     * It makes an HTTP call to the ai-service, and a transaction wrapped around
+     * that holds a database connection for the length of somebody else's
+     * network. The call is short — it starts work rather than waiting for it —
+     * but "short" is a property of the ai-service being healthy, and the
+     * connection pool is shared with every other request in the application.
+     * The repository read below gets its own transaction; nothing after it
+     * needs one, since only mapped columns are touched.
+     */
+    public AudioExportResponse audioAsMp3(String userId, String meetingId) {
+        Meeting meeting = meetings.findByIdAndUserId(meetingId, userId)
+                .orElseThrow(() -> ApiException.notFound("Meeting not found"));
+
+        if (meeting.getSourceType() == SourceType.DOCUMENT) {
+            throw ApiException.badRequest("This meeting was imported from a document, so there is no recording.");
+        }
+        String source = meeting.getObjectKey();
+        if (source == null || source.isBlank()) {
+            throw ApiException.notFound("This meeting has no stored recording.");
+        }
+
+        String filename = Downloads.slug(meeting.getTitle()) + ".mp3";
+
+        // Already an MP3. Converting it would spend a minute of CPU to produce a
+        // second, slightly worse copy of a file we are holding -- re-encoding a
+        // lossy format always loses something -- so this presigns the original.
+        if (AudioDerivatives.isMp3(meeting.getContentType(), source)) {
+            return AudioExportResponse.ready(
+                    storage.presignDownload(source, filename, MP3_TYPE),
+                    filename, MP3_TYPE, storage.presignExpirySeconds());
+        }
+
+        String derivative = AudioDerivatives.mp3Key(source);
+        if (storage.exists(derivative)) {
+            return AudioExportResponse.ready(
+                    storage.presignDownload(derivative, filename, MP3_TYPE),
+                    filename, MP3_TYPE, storage.presignExpirySeconds());
+        }
+
+        AiClient.TranscodeState state = ai.transcodeToMp3(source, derivative);
+        if (state.failed()) {
+            return AudioExportResponse.failed(state.message() == null || state.message().isBlank()
+                    ? "The audio could not be converted just now. Try again in a moment."
+                    : state.message());
+        }
+        if (state.ready()) {
+            // It finished between the HEAD above and the call -- a short window,
+            // and one a long-running conversion started by an earlier poll lands
+            // in constantly. Presigned here rather than made the client ask
+            // again, because it is ready and there is nothing to wait for.
+            return AudioExportResponse.ready(
+                    storage.presignDownload(derivative, filename, MP3_TYPE),
+                    filename, MP3_TYPE, storage.presignExpirySeconds());
+        }
+        return AudioExportResponse.preparing();
+    }
+
+    /** What an MP3 is, spelled the one way every browser and player agrees on. */
+    private static final String MP3_TYPE = "audio/mpeg";
 
     /* ------------------------------ assembly ------------------------------ */
 

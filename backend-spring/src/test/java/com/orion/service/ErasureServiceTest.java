@@ -226,7 +226,37 @@ class ErasureServiceTest {
             service.eraseAudio(USER, MEETING);
 
             order.verify(speakerIdentity).invalidateMeetingVoiceprintsRequired(USER, MEETING);
-            order.verify(storage).deleteOrThrow(anyString());
+            order.verify(storage).deleteOrThrow("meetings/usr_1/mtg_1/audio.mp3");
+        }
+
+        @Test
+        @DisplayName("and takes any converted copy an MP3 export left behind")
+        void takesTheConvertedCopy() {
+            // The MP3 export writes a second object under a key derived from the
+            // recording's own. It plays identically, so "the recording was
+            // deleted" is false while it exists -- and because its key is
+            // derived rather than recorded, there is no row to have forgotten
+            // and nothing that can have drifted.
+            service.eraseAudio(USER, MEETING);
+
+            verify(storage).deleteOrThrow("meetings/usr_1/mtg_1/audio.mp3.mp3");
+        }
+
+        @Test
+        @DisplayName("and a converted copy that will not delete fails the erasure")
+        void aStrandedCopyIsNotReportedAsSuccess() {
+            // Required rather than best-effort, like the original. A meeting
+            // that says "the recording was deleted on Tuesday" over a playable
+            // MP3 still in the bucket is the one outcome a privacy control must
+            // never have -- and it is the more likely one to go unnoticed,
+            // because nothing on screen ever mentions the derivative.
+            doThrow(new RuntimeException("bucket refused"))
+                    .when(storage).deleteOrThrow("meetings/usr_1/mtg_1/audio.mp3.mp3");
+
+            assertThatThrownBy(() -> service.eraseAudio(USER, MEETING))
+                    .isInstanceOf(ApiException.class);
+            assertThat(meeting.getAudioDeletedAt()).isNull();
+            assertThat(meeting.getObjectKey()).isEqualTo("meetings/usr_1/mtg_1/audio.mp3");
         }
 
         @Test
@@ -252,7 +282,8 @@ class ErasureServiceTest {
             Instant second = service.eraseAudio(USER, MEETING);
 
             assertThat(second).isEqualTo(first);
-            verify(storage).deleteOrThrow(anyString());
+            verify(storage).deleteOrThrow("meetings/usr_1/mtg_1/audio.mp3");
+            verify(storage).deleteOrThrow("meetings/usr_1/mtg_1/audio.mp3.mp3");
         }
 
         @Test
@@ -642,6 +673,8 @@ class ErasureServiceTest {
             verify(actionItems).deleteByMeetingId(MEETING);
             verify(translations).deleteByMeetingId(MEETING);
             verify(storage).delete("meetings/usr_1/mtg_1/audio.mp3");
+            // And the converted copy an MP3 export may have written beside it.
+            verify(storage).delete("meetings/usr_1/mtg_1/audio.mp3.mp3");
             verify(meetings).delete(meeting);
         }
 
@@ -672,9 +705,14 @@ class ErasureServiceTest {
 
             int objects = service.eraseAccount(USER);
 
+            // Two recordings, not four objects. The count is what an account
+            // holder is shown as evidence, and a derivative is a second copy of
+            // one recording rather than a second recording.
             assertThat(objects).isEqualTo(2);
             verify(storage).delete("meetings/usr_1/mtg_1/audio.mp3");
             verify(storage).delete("meetings/usr_1/mtg_2/audio.mp3");
+            verify(storage).delete("meetings/usr_1/mtg_1/audio.mp3.mp3");
+            verify(storage).delete("meetings/usr_1/mtg_2/audio.mp3.mp3");
             verify(users).delete(user);
         }
 

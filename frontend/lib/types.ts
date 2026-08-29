@@ -850,6 +850,26 @@ export interface AudioDownload {
   expiresInSeconds: number;
 }
 
+/**
+ * The recording as an MP3, which may have to be made first.
+ *
+ * <p>Three states rather than a link, because converting an hour of audio takes
+ * tens of seconds and no HTTP request survives waiting for it. `preparing` is
+ * not an error and carries no URL — one that 404'd if followed would turn a
+ * clear waiting state into an intermittent broken download.
+ */
+export interface Mp3Export {
+  status: "ready" | "preparing" | "failed";
+  /** Only when ready. A short-lived link straight to object storage. */
+  url: string | null;
+  filename: string | null;
+  /** `audio/mpeg` when ready, signed into the URL rather than merely promised. */
+  contentType: string | null;
+  expiresInSeconds: number;
+  /** Only when failed, and always written to be read by a person. */
+  message: string | null;
+}
+
 export interface AvailableTranslation {
   language: string;
   languageName: string;

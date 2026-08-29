@@ -406,6 +406,7 @@ link when audio or a transcript is erased — there is no link to narrow.
 |---|---|---|---|
 | GET | `/api/v1/meetings/{id}/export` | `format`, `transcript?`, `language?`, `tz?` | the file, `Content-Disposition: attachment` |
 | GET | `/api/v1/meetings/{id}/audio` | — | `AudioDownloadResponse` |
+| GET | `/api/v1/meetings/{id}/audio/mp3` | — | `AudioExportResponse` |
 
 `format` is `pdf`, `docx`, `md` or `txt`, and also accepts `word`, `markdown`
 and `text` because the button says "Word (.docx)". Anything else is a 400 naming
@@ -423,6 +424,38 @@ disagreed about most of that.
 **The transcript is opt-in.** It is ten to a hundred times the length of
 everything else, and somebody exporting a PDF to attach to an email wants the
 two pages rather than the forty.
+
+**MP3 export is a real conversion, and therefore a poll.** Orion stores what was
+uploaded — webm/opus from a browser, m4a from a phone, wav from a desk recorder
+— so `/audio` hands back whatever that was. `/audio/mp3` hands back an MP3, and
+renaming the file is not an option: it produces something several players
+refuse and one or two play as noise, under a name that promises otherwise.
+
+`AudioExportResponse` is `{ status, url, filename, contentType, expiresInSeconds,
+message }` where `status` is `ready`, `preparing` or `failed`. Only `ready`
+carries a URL; `preparing` deliberately carries none, because an "almost ready"
+link that 404s if followed turns one clear waiting state into an intermittent
+broken download. `failed` carries a sentence written for a person. The endpoint
+is a GET and safe to repeat: it starts a conversion at most once per recording,
+and every call after that is a HEAD and a signature.
+
+* **Already an MP3?** No conversion. Re-encoding a lossy format always loses
+  something, so the original object is presigned as it is.
+* **Where the copy lives.** `{objectKey}.mp3`, derived rather than recorded —
+  see `AudioDerivatives`. That is why this needs no migration: the object store
+  *is* the record of what has been converted, and it cannot disagree with itself
+  the way a column can. It is also why erasure can find it, months later, from
+  the original key alone.
+* **Who does the work.** The ai-service, which already has ffmpeg and streams the
+  file storage → disk → storage. The bytes never enter Spring's heap; an hour of
+  audio read into a request thread would be a denial-of-service tool with a
+  login.
+* **Old meetings included.** There is no backfill. A recording made before this
+  existed converts on its first export and is instant thereafter.
+* **Erasure.** Deleting a recording deletes the derivative, and `eraseAudio`
+  treats that as required rather than best-effort: a meeting saying "the
+  recording was deleted on Tuesday" over a playable MP3 still in the bucket is
+  the one outcome a privacy control must never have.
 
 **Exporting a translation does not translate anything.** A download is a GET;
 `?language=es` reads a translation that already exists and 404s otherwise,
@@ -1311,6 +1344,7 @@ Base: `http://ai-service:8000`
 | POST | `/ai/semantic-search` | `{ "userId","query","limit"? }` | `{ "hits":[SemanticSearchHit] }` |
 | POST | `/ai/translate` | `{ "text","targetLanguage" }` | `{ "text","targetLanguage" }` |
 | POST | `/ai/translate-lines` | `{ "lines":[],"targetLanguage" }` | `{ "lines":[] }` — **same length, same order** |
+| POST | `/ai/transcode` | `{ "objectKey","targetKey","format":"mp3" }` | `{ "status","message"? }` — `ready` \| `running` \| `failed` |
 | GET  | `/health` | — | `{ "status":"ok","provider":"openai\|mock" }` |
 
 `/ai/summarize` returns `insights` as well as `sections`, derived from those

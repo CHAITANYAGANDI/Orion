@@ -41,6 +41,8 @@ from app.schemas import (
     SummarizeRequest,
     SummaryResponse,
     SummaryTemplate,
+    TranscodeRequest,
+    TranscodeResponse,
     TranscribeRequest,
     TranscriptInput,
     TranscriptResponse,
@@ -59,6 +61,7 @@ from app.speaker_identity import (
 )
 from app.storage import fetch_audio
 from app.streaming import StreamingTokenError, StreamingTokenService
+from app.transcode import Mp3Transcoder
 from app.suggestions import blend, meeting_material, signal_questions
 from app.templates import BUILT_IN, resolve
 
@@ -80,6 +83,15 @@ def get_rag(request: Request) -> RagService:
 def get_speakers(request: Request) -> SpeakerIdentityService:
     """Resolve the app-wide SpeakerIdentityService built during startup."""
     return request.app.state.speakers
+
+
+def get_transcoder(request: Request) -> Mp3Transcoder:
+    """Resolve the app-wide Mp3Transcoder built during startup.
+
+    One per process, and it has to be: the guard that stops two clicks becoming
+    two conversions is state on that object.
+    """
+    return request.app.state.transcoder
 
 
 def _turns(rows: list[SpeakerTurnsDto]) -> list[SpeakerTurns]:
@@ -254,6 +266,35 @@ async def process_meeting(
     )
     # No progress_hook here: HTTP callers get the result synchronously.
     return await pipeline.process(body.meeting_id, audio, filename)
+
+
+@router.post("/transcode", response_model=TranscodeResponse)
+async def transcode(
+    body: TranscodeRequest,
+    transcoder: Mp3Transcoder = Depends(get_transcoder),
+) -> TranscodeResponse:
+    """Make sure an MP3 copy of a recording exists; say how far along it is.
+
+    Returns immediately, always. The conversion of a long meeting takes tens of
+    seconds and the caller is a web request behind a proxy that will not wait
+    for it -- so this starts the work and answers ``running``, and Spring asks
+    again. A synchronous version would do all the work and still time out.
+
+    Safe to call repeatedly and safe to call twice at once: at most one
+    conversion runs per target key. Two Orion instances polling the same
+    meeting is the exception, and it is harmless rather than prevented -- both
+    would write identical bytes to the same key, which costs CPU and cannot
+    corrupt anything.
+
+    Never a 5xx for a conversion that failed. A failure here is a fact about one
+    recording, and the caller turns it into a sentence for the user; raising
+    would make it indistinguishable from this service being down, which is a
+    different thing and has a different remedy.
+    """
+    if body.format and body.format.lower() != "mp3":
+        raise HTTPException(status_code=400, detail="Only mp3 is supported.")
+    state = await transcoder.ensure(body.object_key, body.target_key)
+    return TranscodeResponse(status=state.status, message=state.message)
 
 
 @router.post("/index", response_model=IndexResponse)

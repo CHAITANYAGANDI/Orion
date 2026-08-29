@@ -8,18 +8,47 @@
  * blob and handed to a synthetic link, which is also what lets the filename come
  * from `Content-Disposition` rather than from a guess made here.
  *
- * <p>Everything except the two `download…` functions is pure, so the awkward
- * parts — the query string and the header parsing — are testable without a
- * browser.
+ * <h2>Why most of this file is about failure</h2>
+ *
+ * <p>Export was reported as intermittent: sometimes nothing arrived, and all the
+ * screen said was "Couldn't export this meeting." Three separate faults were
+ * producing that, and none of them were the network being flaky.
+ *
+ * <ol>
+ *   <li><b>The object URL was revoked in the same tick as the click.</b>
+ *       {@link save} called `URL.revokeObjectURL` immediately after
+ *       `link.click()`. A browser starts the download asynchronously; revoking
+ *       the URL before it has read it aborts the download with no error
+ *       anywhere. It worked most of the time, which is the worst amount.</li>
+ *   <li><b>Several programmatic downloads in a row are refused.</b> Choosing a
+ *       summary and a transcript fired two synthetic clicks, and browsers treat
+ *       that as a site pushing files at you — Chrome prompts once per origin and
+ *       silently drops everything after the first if the prompt is denied or
+ *       dismissed. Hence {@link buildBundle}: more than one document is one
+ *       archive and one download.</li>
+ *   <li><b>One failure cancelled the exports after it.</b> The parts were
+ *       awaited in sequence inside a single `try`, so a summary that failed took
+ *       the transcript and the audio down with it — neither attempted, and
+ *       nothing said so. That is fixed in `lib/export-run.ts`, which runs each
+ *       part on its own.</li>
+ * </ol>
+ *
+ * <p>Everything except {@link save} and {@link openSignedDownload} is pure or
+ * injectable, so the awkward parts — the query string, the header parsing, the
+ * retry rule and the wording of a failure — are testable without a browser.
  */
 
 import { API_BASE } from "@/lib/api";
 import { buildAuthHeaders } from "@/lib/auth-store";
+import { zip } from "@/lib/zip";
 
 export type ExportFormat = "pdf" | "docx" | "md" | "txt";
 
 /** How much of the back-and-forth to flatten away. */
 export type CombineMode = "none" | "speaker" | "all";
+
+/** The three things a meeting can be taken away as, for naming a failure. */
+export type ExportPart = "summary" | "transcript" | "audio";
 
 export interface ExportOptions {
   /** The brief. Defaults to included, which is what the endpoint does. */
@@ -96,17 +125,7 @@ export function filenameFrom(disposition: string | null, fallback: string): stri
   return plain?.[1] || fallback;
 }
 
-/** Put a blob on the disk under a name. */
-export function save(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
+/* ------------------------------- failures -------------------------------- */
 
 /**
  * A failure the server explained in words.
@@ -119,13 +138,115 @@ export function save(blob: Blob, filename: string): void {
 export class ExportError extends Error {}
 
 /**
- * Fetch an authenticated file and put it on the disk.
+ * A failure with a status and nothing worth quoting.
  *
- * <p>Shared by the two downloads that go through the API rather than through a
- * signed storage URL, so they cannot come to disagree about how a failure reads
- * or where the filename comes from.
+ * <p>Its message is for a log. {@link describeExportFailure} is what a person
+ * sees, and it never contains this one — "Download failed (502)" tells somebody
+ * their export did not happen and gives them no idea what to do about it.
  */
-async function fetchAndSave(path: string, fallbackName: string): Promise<void> {
+export class DownloadFailure extends Error {
+  constructor(readonly status: number | string) {
+    super(`Download failed (${status})`);
+    this.name = "DownloadFailure";
+  }
+}
+
+/** Gateways and proxies. A 500 is a bug: repeating it repeats the bug. */
+const RETRYABLE_STATUS = new Set([502, 503, 504]);
+
+/** RTK Query's non-HTTP statuses. The first two are worth another go. */
+const TRANSPORT_STATUS = new Set(["FETCH_ERROR", "TIMEOUT_ERROR"]);
+
+function statusOf(error: unknown): number | string | null {
+  if (error instanceof DownloadFailure) return error.status;
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === "number" || typeof status === "string" ? status : null;
+}
+
+/**
+ * Whether trying the same request again could plausibly work.
+ *
+ * <p>Deliberately narrow. A network that dropped and a gateway that was
+ * restarting are the cases where the second attempt is different from the
+ * first; a 404, a 403 or a 400 will produce exactly the same answer, and
+ * retrying them doubles the load at the moment the server is least able to
+ * take it. A 500 is excluded for the same reason — it means the request
+ * reached the application and broke it.
+ *
+ * <p>Only used for GETs. Every download in this module is one; nothing here
+ * retries anything that writes.
+ */
+export function isTransientFailure(error: unknown): boolean {
+  // A rejected fetch. The browser's own message is "Failed to fetch" or
+  // "NetworkError when attempting to fetch resource" depending on the engine,
+  // which is why this checks the type rather than the words.
+  if (error instanceof TypeError) return true;
+  const status = statusOf(error);
+  if (typeof status === "number") return RETRYABLE_STATUS.has(status);
+  if (typeof status === "string") return TRANSPORT_STATUS.has(status);
+  return false;
+}
+
+/**
+ * The server's own sentence, when it wrote one meant for a person.
+ *
+ * <p>Only from a 4xx. Those are Orion refusing something and explaining why —
+ * "this meeting has not been translated into German", "you have reached this
+ * month's limit" — and repeating them is the whole value. A 5xx body is either
+ * the generic "An unexpected error occurred" or, when a proxy answered instead
+ * of the application, a page of HTML; neither is worth putting in front of
+ * anybody, and the HTML case is how technical detail leaks into a UI.
+ */
+function serverSentence(error: unknown): string | null {
+  if (error instanceof ExportError) return error.message;
+  const status = statusOf(error);
+  if (typeof status !== "number" || status < 400 || status >= 500) return null;
+  const message = (error as { data?: { message?: unknown } })?.data?.message;
+  if (typeof message !== "string") return null;
+  const trimmed = message.trim();
+  // Length and shape as a last guard. A stack trace or a serialised exception
+  // that reached a `message` field is not a sentence somebody wrote to be read.
+  if (!trimmed || trimmed.length > 300 || /\n\s*at\s/.test(trimmed)) return null;
+  return trimmed;
+}
+
+const PART_NOUN: Record<ExportPart, string> = {
+  summary: "the summary",
+  transcript: "the transcript",
+  audio: "the audio",
+};
+
+/**
+ * What to put on screen when one part of an export did not happen.
+ *
+ * <p>Names the part. "Couldn't export this meeting" after choosing three things
+ * leaves somebody checking their downloads folder to work out which of them
+ * arrived; "Couldn't export the transcript" is answerable.
+ *
+ * <p>Never carries a status code, a stack, a URL or the browser's own phrasing.
+ * Those go to the console, where they help; "TypeError: Failed to fetch" in a
+ * toast is true and useless.
+ */
+export function describeExportFailure(part: ExportPart, error: unknown): string {
+  const sentence = serverSentence(error);
+  if (sentence) return sentence;
+  const base = `Couldn't export ${PART_NOUN[part]}.`;
+  return isTransientFailure(error)
+    ? `${base} Check your connection and try again.`
+    : base;
+}
+
+/* ------------------------------- fetching -------------------------------- */
+
+/** How long to wait before the single retry. */
+export const RETRY_DELAY_MS = 600;
+
+export interface ExportFile {
+  blob: Blob;
+  filename: string;
+}
+
+async function requestFile(path: string, fallbackName: string): Promise<ExportFile> {
   const response = await fetch(`${API_BASE}/api/v1${path}`, {
     headers: await buildAuthHeaders(),
   });
@@ -136,27 +257,140 @@ async function fetchAndSave(path: string, fallbackName: string): Promise<void> {
     try {
       message = (await response.json())?.message ?? "";
     } catch {
+      // Not JSON at all. A 502 from a proxy is an HTML page; a truncated
+      // response is nothing. Both land here, and both must be a status-only
+      // failure rather than a body quoted at the user.
       message = "";
     }
-    // Two different failures, and they are thrown as two different types so
-    // the caller does not have to guess. `ExportError` carries a sentence the
-    // server wrote to be read; a plain Error carries a status code, which is
-    // not something to put in front of anybody.
-    if (message) throw new ExportError(message);
-    throw new Error(`Download failed (${response.status})`);
+    // Two different failures, thrown as two different types so the caller does
+    // not have to guess. `ExportError` carries a sentence the server wrote to
+    // be read, and is never retried — the server has decided. `DownloadFailure`
+    // carries a status, which is not something to put in front of anybody, and
+    // may be worth one more attempt.
+    if (message && response.status >= 400 && response.status < 500) {
+      throw new ExportError(message);
+    }
+    throw new DownloadFailure(response.status);
   }
-  save(
-    await response.blob(),
-    filenameFrom(response.headers.get("Content-Disposition"), fallbackName),
-  );
+  return {
+    blob: await response.blob(),
+    filename: filenameFrom(response.headers.get("Content-Disposition"), fallbackName),
+  };
 }
 
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Ask for a rendered document, once more if the first attempt was unlucky.
+ *
+ * <p>One retry, not three. A second attempt covers the whole of what a retry is
+ * for here — a connection that dropped mid-request, a gateway that was being
+ * replaced — and each further attempt buys less while making a genuinely broken
+ * export take longer to say so. The export is also a GET with no side effects,
+ * which is what makes repeating it safe at all.
+ */
+export async function fetchExportFile(
+  meetingId: string,
+  format: ExportFormat,
+  options: ExportOptions = {},
+  retryDelayMs: number = RETRY_DELAY_MS,
+): Promise<ExportFile> {
+  const path = exportPath(meetingId, format, options);
+  const fallback = `meeting.${format}`;
+  try {
+    return await requestFile(path, fallback);
+  } catch (error) {
+    if (!isTransientFailure(error)) throw error;
+    if (retryDelayMs > 0) await sleep(retryDelayMs);
+    return requestFile(path, fallback);
+  }
+}
+
+/**
+ * Fetch a rendered document and put it straight on the disk.
+ *
+ * <p>Kept for the single-file case and for callers outside the dialog. When
+ * more than one document is wanted, `lib/export-run.ts` collects them and hands
+ * the browser one archive instead — see the note at the top of this file about
+ * what browsers do with the second synthetic click.
+ */
 export async function downloadExport(
   meetingId: string,
   format: ExportFormat,
   options: ExportOptions = {},
 ): Promise<void> {
-  return fetchAndSave(exportPath(meetingId, format, options), `meeting.${format}`);
+  const file = await fetchExportFile(meetingId, format, options);
+  save(file.blob, file.filename);
+}
+
+/* ------------------------------- delivery -------------------------------- */
+
+/**
+ * How long the object URL is kept alive after the click.
+ *
+ * <p>The bug this replaces was revoking it in the same tick. A browser does not
+ * read a blob URL during `click()`; it schedules the download and reads it
+ * afterwards, so revoking immediately is a race against the download the user
+ * asked for — one that a fast machine usually wins and a slow one, or a large
+ * transcript, sometimes does not. Nothing throws when it loses.
+ *
+ * <p>A minute is far longer than any browser needs and costs one blob held in
+ * memory until then. Orion's documents are measured in megabytes; the audio
+ * never comes through here at all.
+ */
+export const REVOKE_DELAY_MS = 60_000;
+
+/** Put a blob on the disk under a name. */
+export function save(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.rel = "noopener";
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  // Both on a timer, and the anchor could safely go sooner — it is the URL that
+  // matters. Doing them together keeps it to one deferred action to reason
+  // about, and a hidden anchor for a minute is invisible either way.
+  setTimeout(() => {
+    link.remove();
+    URL.revokeObjectURL(url);
+  }, REVOKE_DELAY_MS);
+}
+
+/**
+ * Several documents as one archive.
+ *
+ * <p>The alternative — a synthetic click per file — is what browsers block, and
+ * they block it silently. See `lib/zip.ts` for why the archive is written here
+ * rather than fetched from the server: the parts are requested independently so
+ * that one failing does not lose the others, and only the client knows which
+ * ones arrived.
+ */
+export async function buildBundle(files: ExportFile[]): Promise<Blob> {
+  const entries = await Promise.all(
+    files.map(async (file) => ({
+      name: file.filename,
+      bytes: new Uint8Array(await file.blob.arrayBuffer()),
+    })),
+  );
+  return zip(entries);
+}
+
+/**
+ * What to call the archive.
+ *
+ * <p>After the meeting, because that is what somebody will be looking for in a
+ * downloads folder six months later. The stem is taken from a filename the
+ * server already produced, so it has already been through the same slugging as
+ * the files inside it.
+ */
+export function bundleName(files: ExportFile[]): string {
+  const first = files[0]?.filename ?? "meeting";
+  const dot = first.lastIndexOf(".");
+  const stem = dot > 0 ? first.slice(0, dot) : first;
+  return `${stem || "meeting"}.zip`;
 }
 
 /**
@@ -166,12 +400,19 @@ export async function downloadExport(
  * hundreds of megabytes, and pulling it into memory to hand it straight back
  * would be slower and could exhaust a tab. The link already carries the
  * disposition that names the file, signed into the URL.
+ *
+ * <p>No `target`, on purpose. A link with `target="_blank"` opened after an
+ * `await` is no longer inside a user gesture and gets caught by the popup
+ * blocker; a same-tab navigation to a `Content-Disposition: attachment`
+ * response downloads without navigating anywhere, which is what makes this work
+ * after a conversion the user waited for.
  */
 export function openSignedDownload(url: string): void {
   const link = document.createElement("a");
   link.href = url;
   link.rel = "noreferrer noopener";
+  link.style.display = "none";
   document.body.appendChild(link);
   link.click();
-  document.body.removeChild(link);
+  setTimeout(() => link.remove(), 0);
 }

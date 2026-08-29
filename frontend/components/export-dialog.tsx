@@ -10,28 +10,39 @@
  * forty-page transcript and a two-page brief are the same button, and the
  * difference was discovered after the download.
  *
- * <p>Each part is its own file, which is why the button counts them. A summary
- * to paste into a reply and a transcript to search are not one document with a
- * heading between them; making them one was a limitation of having a single
- * endpoint, not a decision.
- *
  * <p>What a file <em>says</em> is still decided entirely by the server. The
  * preview here is a sketch of the text export and says so — the alternative is
  * two implementations of the same document that drift, which is exactly what
  * happened before when this component formatted anything itself.
+ *
+ * <h2>What changed when export turned out to be unreliable</h2>
+ *
+ * <p>This component used to await the three parts in one `try`, save each blob
+ * with its own synthetic click, and report every failure as "Couldn't export
+ * this meeting." That produced three distinct user-visible bugs — a failed
+ * summary cancelling the transcript, a second download the browser silently
+ * refused, and a message that did not say which part went wrong. The mechanics
+ * moved to `lib/export-run.ts` and `lib/exports.ts`, where they can be tested;
+ * what is left here is the choosing, the waiting and the wording.
+ *
+ * <p>The dialog now stays open after any failure. Closing it was the old
+ * behaviour and it threw away the selection, so retrying meant reconstructing
+ * every tickbox from memory.
  */
 
 import * as React from "react";
 import { toast } from "sonner";
-import { Download, Loader2, Music, FileText, ListChecks } from "lucide-react";
-import { useLazyGetAudioDownloadQuery } from "@/lib/api";
+import { Download, Loader2, Music, FileText, ListChecks, AlertCircle } from "lucide-react";
+import { useLazyGetAudioDownloadQuery, useLazyGetMp3ExportQuery } from "@/lib/api";
 import {
-  downloadExport,
+  describeExportFailure,
+  fetchExportFile,
   openSignedDownload,
-  ExportError,
   type CombineMode,
   type ExportFormat,
 } from "@/lib/exports";
+import { runExport, type DocumentRequest, type ExportFailure } from "@/lib/export-run";
+import { linkIsFresh, prepareMp3, type Mp3Link } from "@/lib/mp3-export";
 import type { ActionItemResponse, SummaryResponse, TranscriptSegment } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,12 +57,15 @@ import { timecode } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 /** The four document formats, in the order people want them. */
-const FORMATS: { value: ExportFormat; label: string }[] = [
+const FORMATS: { value: string; label: string }[] = [
   { value: "pdf", label: "PDF" },
   { value: "docx", label: "Word (docx)" },
   { value: "md", label: "Markdown" },
   { value: "txt", label: "Plain text (txt)" },
 ];
+
+/** Which of the two things the recording can be handed over as. */
+export type AudioFormat = "original" | "mp3";
 
 export interface ExportDialogProps {
   open: boolean;
@@ -70,7 +84,7 @@ export interface ExportDialogProps {
   sourceLanguageName?: string | null;
   /** False for meetings imported as documents, which never had a recording. */
   hasAudio?: boolean;
-  /** What the recording actually is. There is no transcoding, so this is it. */
+  /** What the recording actually is, which is what "Original" will give you. */
   audioContentType?: string | null;
 }
 
@@ -105,8 +119,27 @@ export function ExportDialog({
   const [combine, setCombine] = React.useState<CombineMode>("none");
 
   const [wantAudio, setWantAudio] = React.useState(false);
+  const [audioFormat, setAudioFormat] = React.useState<AudioFormat>("original");
+
   const [busy, setBusy] = React.useState(false);
+  const [preparing, setPreparing] = React.useState(false);
+  const [failures, setFailures] = React.useState<ExportFailure[]>([]);
+  const [mp3Link, setMp3Link] = React.useState<Mp3Link | null>(null);
+
+  /*
+   * The duplicate-click guard, and it is a ref rather than the `busy` state on
+   * purpose. `disabled={busy}` only takes effect after React has re-rendered,
+   * so two clicks dispatched before that paint both pass — which on a slow
+   * machine starts two conversions and two downloads. A ref is written
+   * synchronously, in the handler, before the first `await`.
+   */
+  const running = React.useRef(false);
+  // Read inside the export closure, which was created before the last link
+  // arrived; state alone would give it a stale one.
+  const heldMp3 = React.useRef<Mp3Link | null>(null);
+
   const [fetchAudio] = useLazyGetAudioDownloadQuery();
+  const [fetchMp3] = useLazyGetMp3ExportQuery();
 
   // Sections arrive after the dialog mounts, so this fills in rather than
   // seeding state: ticking everything at mount would tick an empty list.
@@ -117,10 +150,9 @@ export function ExportDialog({
 
   const summaryParts =
     (chosen.size > 0 || sections.length === 0 ? 1 : 0) + (wantActionItems ? 1 : 0);
-  const files =
-    (wantSummary && summaryParts > 0 ? 1 : 0) +
-    (wantTranscript && hasTranscript ? 1 : 0) +
-    (wantAudio && hasAudio ? 1 : 0);
+  const documentCount =
+    (wantSummary && summaryParts > 0 ? 1 : 0) + (wantTranscript && hasTranscript ? 1 : 0);
+  const files = documentCount + (wantAudio && hasAudio ? 1 : 0);
 
   function toggleSection(key: string) {
     setChosen((prev) => {
@@ -137,49 +169,116 @@ export function ExportDialog({
     setWantAudio(false);
   }
 
-  async function onExport() {
-    setBusy(true);
+  /**
+   * A link to the recording as an MP3, waiting for the conversion if there is
+   * one to wait for.
+   *
+   * <p>The held link is checked rather than trusted. It is signed and
+   * short-lived, and the case it exists for — a second press after something
+   * else failed — is exactly the case where enough time has passed for it to
+   * have died. Asking again for a recording already converted costs a signature.
+   */
+  async function mp3(): Promise<Mp3Link> {
+    const held = heldMp3.current;
+    if (linkIsFresh(held, Date.now())) return held;
+    setPreparing(true);
     try {
-      // Sequential, and separate files. Firing them together makes the browser
-      // discard all but one of the downloads on several platforms, which looks
-      // exactly like an export that half worked.
-      if (wantSummary && summaryParts > 0) {
-        await downloadExport(meetingId, summaryFormat, {
-          summary: true,
-          // All of them is expressed by sending none, so a summary whose
-          // sections have not loaded still exports in full.
-          sections: chosen.size === sections.length ? [] : [...chosen],
-          actionItems: wantActionItems,
-          transcript: false,
-          language,
-        });
-      }
-      if (wantTranscript && hasTranscript) {
-        await downloadExport(meetingId, transcriptFormat, {
-          summary: false,
-          actionItems: false,
-          transcript: true,
-          speakers,
-          timestamps,
-          combine,
-          language,
-        });
-      }
-      if (wantAudio && hasAudio) {
-        const link = await fetchAudio(meetingId).unwrap();
-        openSignedDownload(link.url);
-      }
-      onOpenChange(false);
-    } catch (e) {
-      // The server's sentence when it wrote one -- "this meeting has not been
-      // translated into German" is the whole of what somebody needs. Never a
-      // bare `e.message`, which for a dropped connection or a 500 is "Failed to
-      // fetch" or "Download failed (500)": true, and no help to anyone.
-      toast.error(e instanceof ExportError ? e.message : "Couldn't export this meeting.");
+      const link = await prepareMp3(() => fetchMp3(meetingId).unwrap());
+      heldMp3.current = link;
+      setMp3Link(link);
+      return link;
     } finally {
-      setBusy(false);
+      setPreparing(false);
     }
   }
+
+  async function deliverAudio() {
+    if (audioFormat === "mp3") {
+      openSignedDownload((await mp3()).url);
+      return;
+    }
+    const link = await fetchAudio(meetingId).unwrap();
+    openSignedDownload(link.url);
+  }
+
+  async function onExport() {
+    if (running.current) return;
+    running.current = true;
+    setBusy(true);
+    setFailures([]);
+
+    const documents: DocumentRequest[] = [];
+    if (wantSummary && summaryParts > 0) {
+      documents.push({
+        part: "summary",
+        fetch: () =>
+          fetchExportFile(meetingId, summaryFormat, {
+            summary: true,
+            // All of them is expressed by sending none, so a summary whose
+            // sections have not loaded still exports in full.
+            sections: chosen.size === sections.length ? [] : [...chosen],
+            actionItems: wantActionItems,
+            transcript: false,
+            language,
+          }),
+      });
+    }
+    if (wantTranscript && hasTranscript) {
+      documents.push({
+        part: "transcript",
+        fetch: () =>
+          fetchExportFile(meetingId, transcriptFormat, {
+            summary: false,
+            actionItems: false,
+            transcript: true,
+            speakers,
+            timestamps,
+            combine,
+            language,
+          }),
+      });
+    }
+
+    try {
+      const outcome = await runExport({
+        documents,
+        audio: wantAudio && hasAudio ? deliverAudio : undefined,
+      });
+
+      setFailures(outcome.failures);
+      for (const failure of outcome.failures) {
+        toast.error(failure.message);
+      }
+      if (outcome.complete) {
+        onOpenChange(false);
+      } else if (outcome.delivered.length > 0) {
+        // Said explicitly, because the toast above is about what went wrong and
+        // somebody who only reads that will assume nothing arrived.
+        toast.success(
+          `${outcome.delivered.length} of ${outcome.delivered.length + outcome.failures.length} downloaded.`,
+        );
+      }
+    } catch (error) {
+      /*
+       * `runExport` handles every failure it expects, so reaching here means
+       * something outside the parts went wrong. Caught anyway: an export that
+       * throws silently, leaves the button re-enabled and says nothing is the
+       * exact shape of the bug this whole change exists to remove.
+       */
+      const message = describeExportFailure("summary", error);
+      setFailures([{ part: "summary", message }]);
+      toast.error(message);
+    } finally {
+      running.current = false;
+      setBusy(false);
+      setPreparing(false);
+    }
+  }
+
+  const audioChoices = [
+    { value: "original", label: `Original (${audioLabel(audioContentType)})` },
+    { value: "mp3", label: "MP3" },
+  ];
 
   return (
     <Dialog open={open} onOpenChange={busy ? () => {} : onOpenChange}>
@@ -202,8 +301,10 @@ export function ExportDialog({
               label="Summary"
               on={wantSummary}
               onToggle={setWantSummary}
-              format={summaryFormat}
-              onFormat={setSummaryFormat}
+              choiceLabel="File format"
+              choices={FORMATS}
+              choice={summaryFormat}
+              onChoice={(v) => setSummaryFormat(v as ExportFormat)}
             >
               {sections.length > 0 ? (
                 sections.map((s) => (
@@ -236,8 +337,10 @@ export function ExportDialog({
               onToggle={setWantTranscript}
               disabled={!hasTranscript}
               disabledNote="There is no transcript for this meeting."
-              format={transcriptFormat}
-              onFormat={setTranscriptFormat}
+              choiceLabel="File format"
+              choices={FORMATS}
+              choice={transcriptFormat}
+              onChoice={(v) => setTranscriptFormat(v as ExportFormat)}
             >
               <Check
                 label="Show speaker names"
@@ -263,16 +366,26 @@ export function ExportDialog({
 
             {/* The recording, which is a different kind of thing from the four
                 documents: not rendered, not small, and not fetched from the
-                same place. No format choice, because there is no transcoding —
-                what was uploaded is what comes back. */}
+                same place. Original hands over exactly what was uploaded; MP3
+                is a real conversion, done once and kept, not a rename. */}
             <Part
               label="Audio"
               on={wantAudio && hasAudio}
               onToggle={setWantAudio}
               disabled={!hasAudio}
               disabledNote="This meeting has no stored recording."
-              formatNote={audioLabel(audioContentType)}
-            />
+              choiceLabel="Format"
+              choices={audioChoices}
+              choice={audioFormat}
+              onChoice={(v) => setAudioFormat(v as AudioFormat)}
+            >
+              {audioFormat === "mp3" && !isAlreadyMp3(audioContentType) && (
+                <p className="text-xs text-muted-foreground">
+                  The recording will be converted the first time. After that it
+                  is ready straight away.
+                </p>
+              )}
+            </Part>
           </div>
 
           {/* ------------------------------ preview ---------------------- */}
@@ -298,19 +411,68 @@ export function ExportDialog({
           </p>
         )}
 
+        {/* What went wrong, kept on screen. A toast is gone in five seconds and
+            takes the only record of which part failed with it. */}
+        {failures.length > 0 && (
+          <div
+            role="alert"
+            className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm"
+          >
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+            <div className="space-y-1">
+              {failures.map((failure) => (
+                <p key={failure.part}>{failure.message}</p>
+              ))}
+              <p className="text-xs text-muted-foreground">
+                Nothing else was affected. You can try again.
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
           <p className="text-sm text-muted-foreground">
             {files === 0
               ? "Nothing selected"
-              : `${files} ${files === 1 ? "file" : "files"} to export`}
+              : `${files} ${files === 1 ? "file" : "files"} to export${
+                  documentCount > 1 ? ", bundled as one .zip" : ""
+                }`}
           </p>
           <div className="flex items-center gap-2">
+            {/* Offered after a conversion so the recording can be taken again
+                without waiting, and without reopening the dialog. The link may
+                have expired by the time it is pressed, which is why this goes
+                back through the same freshness check. */}
+            {mp3Link && (
+              <Button
+                variant="outline"
+                disabled={busy}
+                onClick={() =>
+                  void mp3()
+                    .then((link) => openSignedDownload(link.url))
+                    // The link can have expired, and re-minting it can fail.
+                    // An unhandled rejection here would be a button that does
+                    // nothing and says nothing.
+                    .catch((error) => toast.error(describeExportFailure("audio", error)))
+                }
+              >
+                <Music className="h-4 w-4" />
+                Download MP3
+              </Button>
+            )}
             <Button variant="ghost" onClick={clearAll} disabled={busy || files === 0}>
               Clear
             </Button>
-            <Button onClick={() => void onExport()} disabled={busy || files === 0}>
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-              {busy ? "Exporting…" : "Export"}
+            <Button
+              onClick={() => void onExport()}
+              disabled={busy || preparing || files === 0}
+            >
+              {busy || preparing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+              {preparing ? "Preparing MP3…" : busy ? "Exporting…" : "Export"}
             </Button>
           </div>
         </div>
@@ -328,9 +490,10 @@ function Part({
   onToggle,
   disabled,
   disabledNote,
-  format,
-  onFormat,
-  formatNote,
+  choiceLabel,
+  choices,
+  choice,
+  onChoice,
   children,
 }: {
   label: string;
@@ -338,9 +501,10 @@ function Part({
   onToggle: (v: boolean) => void;
   disabled?: boolean;
   disabledNote?: string;
-  format?: ExportFormat;
-  onFormat?: (f: ExportFormat) => void;
-  formatNote?: string;
+  choiceLabel?: string;
+  choices?: { value: string; label: string }[];
+  choice?: string;
+  onChoice?: (value: string) => void;
   children?: React.ReactNode;
 }) {
   const id = `export-${label.toLowerCase().replace(/\s+/g, "-")}`;
@@ -369,27 +533,21 @@ function Part({
 
       {on && !disabled && (
         <div className="space-y-2 pl-1">
-          {format && onFormat && (
+          {choices && choice !== undefined && onChoice && (
             <div className="flex items-center justify-between gap-3">
-              <span className="text-sm text-muted-foreground">File format</span>
+              <span className="text-sm text-muted-foreground">{choiceLabel}</span>
               <select
-                aria-label={`${label} file format`}
-                value={format}
-                onChange={(e) => onFormat(e.target.value as ExportFormat)}
+                aria-label={`${label} ${(choiceLabel ?? "format").toLowerCase()}`}
+                value={choice}
+                onChange={(e) => onChoice(e.target.value)}
                 className="h-8 rounded-md border bg-background px-2 text-sm"
               >
-                {FORMATS.map((f) => (
-                  <option key={f.value} value={f.value}>
-                    {f.label}
+                {choices.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
                   </option>
                 ))}
               </select>
-            </div>
-          )}
-          {formatNote && (
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-sm text-muted-foreground">File format</span>
-              <span className="text-sm">{formatNote}</span>
             </div>
           )}
           {children && (
@@ -607,18 +765,24 @@ function Bullets({ items }: { items: string[] }) {
 /**
  * What the recording actually is.
  *
- * <p>Read from the stored content type rather than printed as "mp3". Orion
- * does not transcode: a browser recording is webm, an iPhone upload is m4a, and
- * promising mp3 would name a file the user cannot play with the app they chose
- * it for.
+ * <p>Read from the stored content type rather than guessed. It is what
+ * "Original" will hand over — a browser recording is webm, an iPhone upload is
+ * m4a — and naming it is the difference between choosing a format and finding
+ * out afterwards.
  */
-function audioLabel(contentType?: string | null): string {
+export function audioLabel(contentType?: string | null): string {
   if (!contentType) return "original recording";
   const subtype = contentType.split("/")[1]?.split(";")[0] ?? "";
   if (!subtype) return "original recording";
   if (subtype.includes("mpeg")) return "mp3";
   if (subtype.includes("mp4")) return "m4a";
   return subtype;
+}
+
+/** Whether choosing MP3 means a conversion or just a different link. */
+function isAlreadyMp3(contentType?: string | null): boolean {
+  const type = (contentType ?? "").split(";")[0].trim().toLowerCase();
+  return type === "audio/mpeg" || type === "audio/mp3";
 }
 
 /** Kept so the audio row has an icon to sit beside in future layouts. */

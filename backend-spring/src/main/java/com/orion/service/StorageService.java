@@ -11,6 +11,8 @@ import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetBucketEncryptionRequest;
 import software.amazon.awssdk.services.s3.model.GetBucketEncryptionResponse;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
+import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutBucketEncryptionRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.ServerSideEncryptionByDefault;
@@ -86,17 +88,64 @@ public class StorageService {
      * ignored cross-origin.
      */
     public String presignDownload(String objectKey, String downloadFilename) {
+        return presignDownload(objectKey, downloadFilename, null);
+    }
+
+    /**
+     * The same again, insisting on what the bytes are.
+     *
+     * <p>Only the MP3 export passes a content type, and it has to. The
+     * derivative is written by the ai-service with {@code audio/mpeg} on it, but
+     * "written with the right header" is a claim about a PUT that happened once,
+     * possibly months ago, possibly against a bucket that has been copied since.
+     * Signing the type into the URL makes the response header a property of this
+     * download rather than of that upload — so a file named {@code .mp3} is
+     * served as {@code audio/mpeg} or the signature does not match, and there is
+     * no path where the browser is told something else.
+     */
+    public String presignDownload(String objectKey, String downloadFilename, String contentType) {
         GetObjectRequest.Builder get = GetObjectRequest.builder()
                 .bucket(bucket)
                 .key(objectKey);
         if (downloadFilename != null && !downloadFilename.isBlank()) {
             get.responseContentDisposition(Downloads.attachment(downloadFilename));
         }
+        if (contentType != null && !contentType.isBlank()) {
+            get.responseContentType(contentType);
+        }
         GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
                 .signatureDuration(Duration.ofSeconds(presignExpirySeconds))
                 .getObjectRequest(get.build())
                 .build();
         return presigner.presignGetObject(presignRequest).url().toString();
+    }
+
+    /**
+     * Whether an object is there.
+     *
+     * <p>A HEAD, so nothing is transferred. This is what makes the MP3
+     * derivative need no database column: the bucket is asked directly, and the
+     * answer cannot drift from the truth the way a cached flag can.
+     *
+     * <p>False for every failure, not just for 404. A credentials problem or an
+     * unreachable endpoint is not evidence that the object is absent — but the
+     * only thing the caller does with a false is offer to make the object again,
+     * and a conversion that re-runs against a broken store fails loudly one step
+     * later with a better message than this method could write.
+     */
+    public boolean exists(String objectKey) {
+        if (objectKey == null || objectKey.isBlank()) {
+            return false;
+        }
+        try {
+            s3.headObject(HeadObjectRequest.builder().bucket(bucket).key(objectKey).build());
+            return true;
+        } catch (NoSuchKeyException e) {
+            return false;
+        } catch (Exception e) {
+            log.debug("HEAD {} failed ({}); treating it as absent.", objectKey, e.getClass().getSimpleName());
+            return false;
+        }
     }
 
     /**

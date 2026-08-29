@@ -267,6 +267,19 @@ class Settings(BaseSettings):
     # --- HTTP download ---
     download_timeout_seconds: float = 60.0
 
+    # --- MP3 export ---
+    # How long one ffmpeg encode may take. Generous on purpose: LAME runs at
+    # tens of times real time, so a two-hour meeting is a couple of minutes, and
+    # a limit that cut off the longest recordings would fail exactly the exports
+    # that took the most work to reach. The caller is polling, so a slow
+    # conversion costs nobody a held connection.
+    transcode_timeout_seconds: float = 900.0
+    # A ceiling on what will be pulled onto local disk to convert. Nothing Orion
+    # records approaches it; it exists so that a pathological upload is refused
+    # with a sentence rather than by filling the container's filesystem and
+    # taking transcription down with it.
+    transcode_max_bytes: int = 2 * 1024 * 1024 * 1024
+
     # --- Speaker identification (voice templates) ---
     # A urlsafe base64 Fernet key. Unset means the whole feature is off: no
     # embedding is computed, nothing is stored, and "Rematch speakers" reports

@@ -4,6 +4,7 @@ import com.orion.common.ApiException;
 import com.orion.domain.ExportFormat;
 import com.orion.domain.ExportOptions;
 import com.orion.dto.AudioDownloadResponse;
+import com.orion.dto.AudioExportResponse;
 import com.orion.export.Downloads;
 import com.orion.export.ExportFile;
 import com.orion.security.SecurityUtils;
@@ -111,5 +112,23 @@ public class ExportController {
     @GetMapping("/audio")
     public AudioDownloadResponse audio(@PathVariable String id) {
         return exports.audio(SecurityUtils.currentUserId(), id);
+    }
+
+    /**
+     * The recording as an MP3 — the same link when it is already one, a
+     * converted copy when it is not.
+     *
+     * <p>Its own path rather than {@code /audio?format=mp3} because it does not
+     * behave like {@code /audio}. That endpoint always answers with a link; this
+     * one may answer "not yet, ask again", and a caller that reads the two as
+     * one shape will eventually follow a null URL. Keeping them separate also
+     * keeps {@code /audio} exactly as it was for everything already using it.
+     *
+     * <p>A GET, and safe to repeat: it starts a conversion at most once for a
+     * given recording, and every call after that is a HEAD and a signature.
+     */
+    @GetMapping("/audio/mp3")
+    public AudioExportResponse audioAsMp3(@PathVariable String id) {
+        return exports.audioAsMp3(SecurityUtils.currentUserId(), id);
     }
 }

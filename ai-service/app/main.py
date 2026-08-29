@@ -21,6 +21,7 @@ from app.rediarize import SpeakerRefiner
 from app.routers import ai as ai_router
 from app.schemas import HealthResponse
 from app.speaker_identity import SpeakerIdentityService
+from app.transcode import Mp3Transcoder
 
 logging.basicConfig(
     level=logging.INFO,
@@ -62,6 +63,12 @@ async def lifespan(app: FastAPI):
     # and ~80MB, and an ai-service that never identifies a speaker never pays.
     speakers = SpeakerIdentityService(settings, rag)
     app.state.speakers = speakers
+
+    # MP3 export. Holds no resources -- ffmpeg is a subprocess and the object
+    # store is asked per call -- but it must be one object per process, because
+    # the thing that stops two Export clicks becoming two conversions of the
+    # same recording is state on it.
+    app.state.transcoder = Mp3Transcoder(settings)
 
     # Start the Kafka worker (resilient; never crashes on broker outage).
     # It indexes each processed transcript into pgvector for the chat feature.

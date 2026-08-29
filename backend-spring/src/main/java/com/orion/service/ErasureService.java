@@ -4,6 +4,7 @@ import com.orion.common.ApiException;
 import com.orion.domain.MeetingStatus;
 import com.orion.dto.StatusEvent;
 import com.orion.entity.Meeting;
+import com.orion.export.AudioDerivatives;
 import com.orion.repository.MeetingActionItemRepository;
 import com.orion.repository.MeetingRepository;
 import com.orion.repository.MeetingSummaryRepository;
@@ -207,6 +208,16 @@ public class ErasureService {
 
         try {
             storage.deleteOrThrow(meeting.getObjectKey());
+            // The converted copy, if an MP3 export ever made one. Also required
+            // rather than best-effort, and for the reason this whole method is:
+            // "the recording was deleted" must not be true of the original and
+            // false of a derivative that plays identically. Its key is derived
+            // from the original's, so there is no row to consult and nothing
+            // that can have drifted -- see AudioDerivatives.
+            //
+            // Deleting a key that is not there is a success, so meetings that
+            // were never exported as MP3 pay one round trip and nothing else.
+            storage.deleteOrThrow(AudioDerivatives.mp3Key(meeting.getObjectKey()));
         } catch (RuntimeException e) {
             // Not swallowed, and not turned into a 500. The recording is still
             // in the bucket, so the meeting must go on saying it has one --
@@ -366,6 +377,7 @@ public class ErasureService {
         actionItems.deleteByMeetingId(meetingId);
         translations.deleteByMeetingId(meetingId);
         storage.delete(meeting.getObjectKey());
+        storage.delete(AudioDerivatives.mp3Key(meeting.getObjectKey()));
         meetings.delete(meeting);
     }
 
@@ -396,6 +408,12 @@ public class ErasureService {
         for (Meeting meeting : owned) {
             if (meeting.getObjectKey() != null) {
                 storage.delete(meeting.getObjectKey());
+                // And any MP3 made from it. Not counted: the number reported
+                // back is "how many recordings were removed", and a derivative
+                // is a second copy of one recording rather than a second
+                // recording. Counting it would inflate the figure an account
+                // holder is shown as evidence.
+                storage.delete(AudioDerivatives.mp3Key(meeting.getObjectKey()));
                 objects++;
             }
         }

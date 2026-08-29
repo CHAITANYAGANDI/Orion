@@ -736,3 +736,32 @@ class SpeakerForgetResponse(CamelModel):
 
     deleted: int = 0
     confirmed: bool = False
+
+
+class TranscodeRequest(CamelModel):
+    """Make sure a converted copy of one recording exists.
+
+    Sent by Spring, which owns both keys: ``target_key`` is derived from
+    ``object_key`` and is not chosen here. That is deliberate -- this service
+    writes wherever it is told, so the one place that decides where derivatives
+    live is the one place that also deletes them.
+    """
+
+    object_key: str
+    target_key: str
+    #: Only ``mp3`` today. Present so a second format is an added value rather
+    #: than a second endpoint that duplicates the state machine.
+    format: str = "mp3"
+
+
+class TranscodeResponse(CamelModel):
+    """``ready``, ``running`` or ``failed``.
+
+    ``running`` is not an error and the caller must not render it as one; it
+    means "ask again". ``message`` is only ever set alongside ``failed``, and is
+    a sentence written for a person -- never a codec's stderr, which names the
+    object and is in this service's log instead.
+    """
+
+    status: str
+    message: str | None = None

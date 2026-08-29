@@ -114,3 +114,26 @@ if (typeof globalThis.ResizeObserver === "undefined") {
     disconnect() {}
   };
 }
+
+/**
+ * jsdom's `Blob` has no `arrayBuffer()`.
+ *
+ * Every browser has had it since 2019, and the export bundler uses it to read
+ * each rendered document back out before writing it into a zip. Without this,
+ * `lib/zip.test.ts` and `lib/exports.test.ts` fail on a method that exists
+ * everywhere the code actually runs.
+ *
+ * Built on `FileReader`, which jsdom does implement, so the bytes really do
+ * round-trip through jsdom's own Blob rather than through a stand-in that might
+ * agree with the test and not with a browser.
+ */
+if (typeof Blob !== "undefined" && !Blob.prototype.arrayBuffer) {
+  Blob.prototype.arrayBuffer = function arrayBuffer(this: Blob) {
+    return new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(this);
+    });
+  };
+}
