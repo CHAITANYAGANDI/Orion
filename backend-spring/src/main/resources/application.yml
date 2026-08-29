@@ -1,5 +1,20 @@
 server:
   port: 8080
+  # Finish what is already in flight before the process exits.
+  #
+  # Every deploy and every autoscale event sends SIGTERM. Without this Tomcat
+  # stops immediately and whatever was mid-request is severed -- and the
+  # requests most likely to be in flight here are the slow ones: an upload
+  # being presigned, a meeting being confirmed, an export being written. The
+  # user sees a network error on the one action that had already been paid for.
+  #
+  # Not just cosmetic. MeetingService charges the usage allowance and publishes
+  # to the outbox in the same transaction; a connection cut between commit and
+  # response leaves the work done and the caller believing it failed, which is
+  # the shape of bug that ends with somebody uploading twice.
+  shutdown: graceful
+
+spring.lifecycle.timeout-per-shutdown-phase: 20s
 
 spring:
   application:

@@ -1,0 +1,57 @@
+# Settings that apply only when SPRING_PROFILES_ACTIVE=production.
+#
+# render.yaml sets that profile and nothing else does, so everything here is
+# inert locally -- which is the point. The local stack keeps its API browser and
+# its metrics; the deployment does not hand either to the internet.
+#
+# See also DeploymentCheck, which runs under the same profile and refuses to
+# start when a development setting survived into a deployment.
+
+# The API browser, switched off.
+#
+# /swagger-ui/index.html and /v3/api-docs are both `permitAll` in SecurityConfig
+# and both answered 200 unauthenticated. That publishes the entire API surface:
+# every route, every parameter, every request and response shape, in a form
+# designed to be easy to read and try. It is exactly the document you would want
+# if you were probing the service, and it saves whoever is doing that the only
+# genuinely tedious part.
+#
+# It stays on locally because that is where it earns its keep.
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
+# Only the health check.
+#
+# `metrics` was reachable unauthenticated and is more informative than it looks:
+# hikaricp.connections shows database pool pressure, disk.free shows the host,
+# and http.server.requests enumerates every URI template the app has served --
+# which is a map of the API even with the docs above switched off. It also makes
+# request volume, error rates and latency readable by anyone, which is a free
+# progress bar for someone testing whether an attack is working.
+#
+# health stays because Render's healthCheckPath needs it. show-details is
+# already `never` in application.yml, so it answers UP or DOWN and nothing about
+# which dependency is unhappy.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+# Trust the proxy's forwarded headers.
+#
+# Render terminates TLS and forwards over plain HTTP, so without this Tomcat
+# believes every request arrived insecure. Two things follow: Spring Security
+# omits Strict-Transport-Security entirely (it only sets HSTS when
+# request.isSecure()), and anything building an absolute URL from the request
+# writes http:// on a site served over https://.
+#
+# Deliberately NOT in application.yml. ForwardedHeaderFilter takes
+# X-Forwarded-Proto at its word, which is correct behind a proxy that overwrites
+# it and forgeable anywhere else -- so it is enabled only where the proxy is
+# real.
+server:
+  forward-headers-strategy: framework

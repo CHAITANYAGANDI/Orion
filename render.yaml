@@ -204,6 +204,14 @@ services:
       # --- Storage ----------------------------------------------------------
       - key: S3_ENDPOINT
         sync: false
+      # Was missing here while the backend had it, so this service would have
+      # run with it blank -- which does not fail, it silently takes the slow
+      # path. Blank disables AssemblyAI fetching the recording from R2 itself,
+      # so every file is downloaded into this container and uploaded again
+      # instead of never touching it. Same value as S3_ENDPOINT unless a custom
+      # domain fronts the bucket.
+      - key: S3_PUBLIC_ENDPOINT
+        sync: false        # https://<account-id>.r2.cloudflarestorage.com
       - key: S3_ACCESS_KEY
         sync: false
       - key: S3_SECRET_KEY
@@ -212,6 +220,21 @@ services:
         value: orion
       - key: S3_REGION
         value: auto
+
+      # --- Speaker identification -------------------------------------------
+      # Optional, and OFF unless set: no voice template is computed and nothing
+      # is stored. That is the correct default for a deployment that has not
+      # decided where this key lives, because the alternative is encrypting
+      # biometric-shaped data with a key committed to a public repository --
+      # which is what docker-compose does on purpose for local development.
+      #
+      # Generate one with:
+      #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      #
+      # Rotating it does not re-encrypt anything; it orphans the old rows, which
+      # are then ignored and recomputed.
+      - key: SPEAKER_PROFILE_KEY
+        sync: false        # optional -- speaker identification stays off without it
 
       # --- Postgres for RAG -------------------------------------------------
       # The unprivileged role, same as the backend's tenant pool: this service
@@ -255,4 +278,39 @@ services:
       - key: NEXT_PUBLIC_AUTH_MODE
         value: clerk
       - key: NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
-        sync: false
+        sync: false        # pk_live_... from the PRODUCTION Clerk instance
+
+      # Server-side only, and the one variable on this service that is not
+      # NEXT_PUBLIC_. It was missing entirely, which would have taken the whole
+      # site down on the first deploy: middleware.ts runs `clerkMiddleware`,
+      # which reads this from the environment implicitly -- there is no
+      # `process.env.CLERK_SECRET_KEY` anywhere in the source to grep for -- and
+      # THROWS when it is absent. Not a degraded sign-in: every request through
+      # the matcher, including the public marketing page, answers 500.
+      #
+      # It must never gain a NEXT_PUBLIC_ prefix. That would inline the secret
+      # into the browser bundle, where it authenticates as your Clerk backend.
+      - key: CLERK_SECRET_KEY
+        sync: false        # sk_live_... from the PRODUCTION Clerk instance
+
+      # Without these Clerk's components link to its own hosted pages on
+      # accounts.dev -- a different domain, a different look, and a route out of
+      # the product to get back into it. Orion serves both screens itself, at
+      # app/sign-in and app/sign-up.
+      - key: NEXT_PUBLIC_CLERK_SIGN_IN_URL
+        value: /sign-in
+      - key: NEXT_PUBLIC_CLERK_SIGN_UP_URL
+        value: /sign-up
+
+      # Cosmetic, and all optional -- the footer says "dev build" when the SHA
+      # is absent rather than inventing one, and the legal links are simply not
+      # rendered when unset. Listed so that "the footer looks wrong" is a
+      # five-second fix rather than a hunt.
+      - key: NEXT_PUBLIC_APP_VERSION
+        sync: false        # optional, e.g. 1.0.0
+      - key: NEXT_PUBLIC_BUILD_SHA
+        sync: false        # optional, `git rev-parse --short HEAD`
+      - key: NEXT_PUBLIC_TERMS_URL
+        sync: false        # optional
+      - key: NEXT_PUBLIC_PRIVACY_URL
+        sync: false        # optional

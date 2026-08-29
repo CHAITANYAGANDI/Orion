@@ -64,6 +64,39 @@ bundle by `next build`, not read at runtime. Change one and you must *rebuild*,
 not restart — a restart-only redeploy silently keeps serving the old bundle
 pointing at the old API URL.
 
+**`CLERK_SECRET_KEY` is the one that takes the whole site down.** It is the only
+non-`NEXT_PUBLIC_` variable on the frontend service, and `clerkMiddleware` reads
+it from the environment *implicitly* — there is no `process.env.CLERK_SECRET_KEY`
+anywhere in the source to grep for. Without it the middleware throws on every
+request that matches, including the public marketing page, and the site answers
+500 rather than degrading. It must never gain a `NEXT_PUBLIC_` prefix, which
+would inline your Clerk backend credential into the browser bundle.
+
+**Things that are off unless you switch them on.** Neither of these fails; both
+just quietly do less.
+
+| Unset | What silently happens |
+|---|---|
+| `SPEAKER_PROFILE_KEY` (ai-service) | Speaker identification is off entirely — no voice template computed, nothing stored. Correct default: the alternative is encrypting biometric-shaped data with the key committed in `docker-compose.yml`. |
+| `S3_PUBLIC_ENDPOINT` (ai-service) | AssemblyAI stops fetching recordings from R2 itself, so every file is downloaded into the container and uploaded again instead of never touching it. |
+
+---
+
+## 0b. What the `production` profile changes
+
+`render.yaml` sets `SPRING_PROFILES_ACTIVE=production` and nothing else does, so
+none of this affects local development.
+
+| | Local | Production |
+|---|---|---|
+| `DeploymentCheck` | off | refuses to start on any development-shaped setting |
+| `/swagger-ui`, `/v3/api-docs` | 200 | **404** — the full API surface is not published |
+| `/actuator/metrics` | 200 | **404** — pool pressure, disk, and every served URI template |
+| `/actuator/health` | 200 | 200 — Render's health check needs it |
+| `forward-headers-strategy` | off | `framework` — so HSTS is emitted and `isSecure()` is true behind Render's TLS |
+
+Verified by running both profiles side by side, not by reading the config.
+
 ---
 
 ## 1. Neon

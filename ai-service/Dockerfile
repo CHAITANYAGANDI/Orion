@@ -65,6 +65,28 @@ COPY app ./app
 COPY scripts ./scripts
 COPY README.md ./
 
+# Drop root.
+#
+# This container was running as root, unlike the other two -- backend-spring
+# runs as `app`, frontend as `nextjs`. It matters more here than anywhere else
+# in the stack: this is the service that takes an arbitrary media file from an
+# untrusted uploader and feeds it to ffmpeg, which is a large C codebase with a
+# long history of parser CVEs. If anything in that chain is ever exploited, the
+# difference between root and not is the difference between a compromised
+# request and a compromised container.
+#
+# --no-create-home: nothing here writes to a home directory, and
+# PYTHONDONTWRITEBYTECODE is already set so Python will not try to leave .pyc
+# files beside the source.
+#
+# The model baked in above lives in /opt/models/ecapa and is read-only at
+# runtime; world-readable is what the build leaves it as, which is all this
+# needs.
+RUN useradd --create-home --shell /usr/sbin/nologin ai && chown -R ai:ai /app
+USER ai
+
+# 8000, not 80: an unprivileged user cannot bind below 1024, and there is no
+# reason to be down there behind a proxy anyway.
 EXPOSE 8000
 
 # Default provider is the deterministic mock so the container runs with no API key.
