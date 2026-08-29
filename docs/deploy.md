@@ -1,11 +1,45 @@
 # Deploying Orion
 
-Target: **Render** for the three services, with **Neon** (Postgres), **Confluent
-Cloud** (Kafka) and **Cloudflare R2** (object storage).
+Two hosts, not one.
 
-[`render.yaml`](../render.yaml) declares the services. It cannot do the one-time
-provisioning below, and several steps here are the difference between a
-deployment that works and one that comes up healthy while being silently wrong.
+- **Vercel** runs the Next.js frontend.
+- **Render** runs the Spring backend (`orion-backend`) and the FastAPI AI worker
+  (`orion-ai`).
+
+Backing it: **Neon** (Postgres), **Confluent Cloud** (Kafka), **Cloudflare R2**
+(object storage), **Clerk** (identity), **AssemblyAI** (speech-to-text) and
+**OpenAI** (summaries, chat, embeddings).
+
+```
+                    Internet
+                       |
+                       v
+          Vercel  --  Orion frontend (Next.js)
+                       |
+                  HTTPS / WSS
+                       |
+                       v
+          Render  --  orion-backend (Spring, public web service)
+                       |
+                       +--> Neon              Postgres + RLS
+                       +--> Cloudflare R2     recordings, exports
+                       +--> Confluent Cloud   meeting_uploaded
+                       |
+                       v
+          Render  --  orion-ai (FastAPI, PRIVATE service)
+                       |
+                       +--> AssemblyAI        transcription + diarization
+                       +--> OpenAI            summary, chat, embeddings
+```
+
+`orion-ai` is a Render **private service**: it has no public URL, and is reached
+only by the backend and by Kafka. The browser never talks to it.
+
+[`render.yaml`](../render.yaml) declares the two Render services and nothing
+else — the frontend's configuration lives in Vercel's project settings, not in
+that file. Neither can do the one-time provisioning below, and several steps
+here are the difference between a deployment that works and one that comes up
+healthy while being silently wrong.
 
 ---
 
@@ -47,10 +81,15 @@ loud and traceable in a way that silent acceptance is not.
 `fromService` with `property: host` yields a bare `orion-backend.onrender.com`,
 and a bare host is not an origin — CORS compares it against the browser's
 `https://…` and never matches, so every request fails and it reads as "the API
-is down". `APP_FRONTEND_URL`, `APP_PUBLIC_URL`, `SPRING_CALLBACK_URL` and
-`NEXT_PUBLIC_API_URL` are therefore `sync: false` and filled in by hand, with
-the scheme. `AI_SERVICE_URL` is the one exception: it names a private service,
-where `http` is the only possibility, so `AiClient` supplies it.
+is down". `APP_FRONTEND_URL`, `APP_PUBLIC_URL` and `SPRING_CALLBACK_URL` are
+therefore `sync: false` and filled in by hand, with the scheme. `AI_SERVICE_URL`
+is the one exception: it names a private service, where `http` is the only
+possibility, so `AiClient` supplies it.
+
+The same trap exists on the Vercel side for `NEXT_PUBLIC_API_URL`, which is not
+in `render.yaml` at all — see [section 7](#7-vercel--the-frontend). A
+scheme-less value there is worse, because it becomes a *relative* path and the
+app calls itself instead of the API.
 
 **`APP_PUBLIC_URL` is not the frontend URL.** It is where *this API* is
 reachable from the public internet, and only the calendar feed uses it — fetched
@@ -59,18 +98,28 @@ missing from the blueprint entirely, so it fell back to `http://localhost:8080`
 and every subscribed calendar quietly stopped updating. Nothing in the app shows
 this; the feed simply never refreshes.
 
+**`APP_FRONTEND_URL` is the Vercel origin.** Not a Render host — the frontend is
+not on Render. It is the public origin Vercel serves the app from, e.g.
+`https://<your-project>.vercel.app`, with the scheme and no trailing slash. It is
+the *only* allowed CORS origin and the *only* allowed STOMP origin, so a wrong
+value blocks every browser request and every socket while the backend stays
+perfectly healthy — which reads as "the API is down" rather than as a
+misconfiguration.
+
 **Frontend build-time values.** `NEXT_PUBLIC_*` are inlined into the client
-bundle by `next build`, not read at runtime. Change one and you must *rebuild*,
-not restart — a restart-only redeploy silently keeps serving the old bundle
-pointing at the old API URL.
+bundle by `next build`, not read at runtime — and they are set in **Vercel**, not
+in `render.yaml`. Change one and you must trigger a new *build*, not a restart: a
+redeploy of the existing build silently keeps serving the old bundle pointing at
+the old API URL.
 
 **`CLERK_SECRET_KEY` is the one that takes the whole site down.** It is the only
-non-`NEXT_PUBLIC_` variable on the frontend service, and `clerkMiddleware` reads
-it from the environment *implicitly* — there is no `process.env.CLERK_SECRET_KEY`
-anywhere in the source to grep for. Without it the middleware throws on every
-request that matches, including the public marketing page, and the site answers
-500 rather than degrading. It must never gain a `NEXT_PUBLIC_` prefix, which
-would inline your Clerk backend credential into the browser bundle.
+non-`NEXT_PUBLIC_` variable the frontend needs — set it **in Vercel** — and
+`clerkMiddleware` reads it from the environment *implicitly*: there is no
+`process.env.CLERK_SECRET_KEY` anywhere in the source to grep for. Without it the
+middleware throws on every request that matches, including the public marketing
+page, and the site answers 500 rather than degrading. It must never gain a
+`NEXT_PUBLIC_` prefix, which would inline your Clerk backend credential into the
+browser bundle.
 
 **Things that are off unless you switch them on.** Neither of these fails; both
 just quietly do less.
@@ -277,9 +326,21 @@ credentials are right.
 
 Create a bucket named `orion` and an API token with object read/write.
 
+- `S3_BUCKET` — **`orion`**, on **both** `orion-backend` and `orion-ai`. They
+  read and write the same objects; a mismatch is not an error, it is one service
+  quietly writing somewhere the other never looks.
 - `S3_ENDPOINT` — `https://<account-id>.r2.cloudflarestorage.com`
 - `S3_REGION` — `auto` (R2 accepts nothing else)
-- `S3_PUBLIC_ENDPOINT` — the same, unless a custom domain fronts the bucket
+- `S3_PUBLIC_ENDPOINT` — the same, unless a custom domain fronts the bucket.
+  Needed on **both** services. Blank on `orion-ai` does not fail; it silently
+  disables AssemblyAI fetching the recording from R2 itself, so every file is
+  pulled into the container and pushed out again.
+
+> **Historical only.** The bucket was called `recallix` before the rename and
+> its API token was scoped to that name. It is not the deployment bucket and
+> nothing reads it. Buckets cannot be renamed in place, so `orion` was created
+> fresh — if you still have objects in the old one, copy them across and then
+> retire it. Do not point any service at `recallix`.
 
 No code change is needed: `S3Config` already overrides the endpoint and uses
 path-style addressing.
@@ -288,9 +349,12 @@ path-style addressing.
 presigned `PUT`; without a CORS rule that upload fails in the browser while
 every server-side check still passes:
 
+Set `AllowedOrigins` to the **Vercel** origin — the same value that goes into
+`APP_FRONTEND_URL`. List the preview origin too if you upload from staging.
+
 ```json
 [{
-  "AllowedOrigins": ["https://<your-frontend-host>"],
+  "AllowedOrigins": ["https://<your-project>.vercel.app"],
   "AllowedMethods": ["PUT", "GET", "HEAD"],
   "AllowedHeaders": ["*"],
   "ExposeHeaders": ["ETag"],
@@ -313,13 +377,36 @@ The backend logs a WARNING when it sees `.accounts.dev`, and does not refuse to
 start — a staging environment on a development instance is a reasonable thing to
 run, and nothing here can tell staging from production.
 
-Set the instance to production, add the frontend domain, and take:
+### Two instances, two sets of users
 
-- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` (frontend, **build-time** — `pk_live_…`)
-- `CLERK_SECRET_KEY` (frontend service, **runtime only** — `middleware.ts` runs
-  in Node and verifies the session before a page is sent. It must never be a
-  `NEXT_PUBLIC_` name, which would inline it into the browser bundle.)
-- `CLERK_ISSUER` and `CLERK_JWKS_URL` (backend)
+Run staging and production against **different Clerk instances**, and know what
+that costs: the user lists are separate. An account created while testing on
+`dev` does not exist in production. Nobody has to migrate anything, but nobody
+can sign in to production with a staging account either.
+
+| | Staging (`dev` branch) | Production (`main` branch) |
+|---|---|---|
+| Clerk instance | development | production |
+| Publishable key | `pk_test_…` | `pk_live_…` |
+| Secret key | `sk_test_…` | `sk_live_…` |
+| Issuer / JWKS | `…accounts.dev` | your production Clerk domain |
+| `.accounts.dev` warning | **expected — ignore it** | must not appear |
+
+The backend logs that warning whenever it sees `.accounts.dev` and starts
+anyway, because it cannot tell staging from production. On staging that line is
+correct and should be ignored; on production it means the wrong instance is
+wired up.
+
+Where each value goes:
+
+| Variable | Set in | Notes |
+|---|---|---|
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | **Vercel** | build-time — inlined into the bundle |
+| `CLERK_SECRET_KEY` | **Vercel** | runtime only, server-side; never `NEXT_PUBLIC_` |
+| `CLERK_ISSUER` | **Render** (`orion-backend`) | |
+| `CLERK_JWKS_URL` | **Render** (`orion-backend`) | |
+
+Add the production domain to the Clerk instance once Vercel has issued it.
 
 Add an `email` claim to the JWT template. Clerk's default session token
 carries no email, and without it every Clerk-authenticated user lands with a
@@ -361,12 +448,93 @@ code writes it and no limit reads it.
 
 ---
 
-## 7. Deploy
+## 7. Vercel — the frontend
+
+The Next.js app is deployed on Vercel. It is **not** in `render.yaml`, and none
+of the variables below are set through it. They live in the Vercel project's
+Environment Variables, per environment.
+
+### Required
+
+| Variable | Value | Notes |
+|---|---|---|
+| `NEXT_PUBLIC_API_URL` | public **HTTPS** Render backend URL | e.g. `https://orion-backend.onrender.com` |
+| `NEXT_PUBLIC_WS_URL` | public **WSS** backend socket URL | e.g. `wss://orion-backend.onrender.com/ws` |
+| `NEXT_PUBLIC_AUTH_MODE` | `clerk` | never `dev` — that mode trusts an `X-Dev-User` header |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | `pk_test_…` staging / `pk_live_…` production | |
+| `CLERK_SECRET_KEY` | `sk_test_…` staging / `sk_live_…` production | **server-side only**, never `NEXT_PUBLIC_` |
+| `NEXT_PUBLIC_CLERK_SIGN_IN_URL` | `/sign-in` | |
+| `NEXT_PUBLIC_CLERK_SIGN_UP_URL` | `/sign-up` | |
+
+`wss://`, not `https://`, on the socket URL, and it keeps the `/ws` path. And
+both URLs need the scheme: a scheme-less `NEXT_PUBLIC_API_URL` is read as a
+relative path, so the app calls *itself* instead of the API and every request
+404s from the frontend's own origin.
+
+Without the two `SIGN_IN`/`SIGN_UP` URLs, Clerk's components link to its hosted
+pages on `accounts.dev` — a different domain, a different look, and a route out
+of the product to get back into it. Orion serves both screens itself.
+
+### Optional
+
+None of these break anything when unset; they are listed so "the footer looks
+wrong" is a five-second fix rather than a hunt.
+
+| Variable | Effect when unset |
+|---|---|
+| `NEXT_PUBLIC_APP_VERSION` | footer shows no version |
+| `NEXT_PUBLIC_BUILD_SHA` | footer reads "dev build" rather than inventing a hash |
+| `NEXT_PUBLIC_TERMS_URL` | the link is not rendered |
+| `NEXT_PUBLIC_PRIVACY_URL` | the link is not rendered |
+
+### Every `NEXT_PUBLIC_*` is a BUILD-time value
+
+`next build` inlines them into the client bundle. They are not read at runtime.
+Change one and you must trigger a **new deployment** — editing the variable in
+the Vercel dashboard and redeploying the *existing* build changes nothing, and
+the old value keeps being served. This is the single most common way to spend an
+afternoon on a variable that was correct in the dashboard the whole time.
+
+`CLERK_SECRET_KEY` is the exception: it is read at runtime by `middleware.ts`,
+in Node, on the server.
+
+### Branch model
+
+| Branch | Vercel environment |
+|---|---|
+| `dev` | Preview / staging deployment |
+| `main` | Production deployment |
+
+`main` does not exist yet — production is not deployed. Point the staging
+frontend at the staging backend and the staging Clerk instance; keep production
+values in Vercel's Production environment only, so a preview build cannot pick
+up a `sk_live_` key.
+
+---
+
+## 8. Render — two services
+
+`render.yaml` declares exactly two, and no frontend:
+
+| Service | Type | Public? | Runs |
+|---|---|---|---|
+| `orion-backend` | `web` | yes | Spring Boot, Flyway migrations, `production` profile |
+| `orion-ai` | `pserv` | **no** | FastAPI worker, Kafka consumer |
 
 ```bash
 # from the repo root, on the branch you want live
 render blueprint launch     # or point the dashboard at render.yaml
 ```
+
+### Branch model
+
+| Branch | Render services |
+|---|---|
+| `dev` | staging backend + AI, deployed first |
+| `main` | production backend + AI, later |
+
+`main` does not exist yet, so **nothing is in production**. Everything below
+describes bringing staging up from `dev`.
 
 Fill every `sync: false` value in the dashboard before the first build.
 `ORION_INTERNAL_TOKEN` is generated on the backend and referenced by the
@@ -385,6 +553,66 @@ The backend runs migrations, so let it come up first and confirm
 Kafka or Postgres is unreachable, which means it can look healthy while doing
 nothing — check its logs for `RAG connected to Postgres` rather than trusting
 the service status.
+
+---
+
+## 9. Deployment order
+
+### The one circular dependency
+
+The frontend needs the backend's URL at **build** time. The backend needs the
+frontend's origin for CORS and for the STOMP allowed-origins check. Neither host
+will tell you its URL before the service exists, so this cannot be done in one
+pass.
+
+It resolves because only one side needs its value *up front*:
+
+```
+backend deployed  ->  URL exists  ->  frontend built with it
+                                          |
+                                          v
+                                    Vercel URL exists
+                                          |
+                                          v
+                      APP_FRONTEND_URL filled -> backend RESTARTED
+```
+
+The backend is deployed with `APP_FRONTEND_URL` still blank. `DeploymentCheck`
+will refuse to start on a blank value, so put a placeholder origin in — any
+`https://` URL — bring it up, get the Vercel URL, then replace the placeholder
+and restart. A **restart** is enough on the backend: `APP_FRONTEND_URL` is read
+at runtime. The frontend needs a full **rebuild**, because its variables are
+inlined.
+
+### Steps
+
+1. **Provision the managed dependencies** — Neon (sections 1), Confluent (2),
+   R2 (3), Clerk (4). Nothing deploys until these exist.
+2. **Deploy the Render staging services from `dev`** — `orion-backend` and
+   `orion-ai`. `APP_FRONTEND_URL` gets a placeholder for now.
+3. **Take the public backend URL**, e.g. `https://orion-backend.onrender.com`.
+   Confirm `/actuator/health` is `UP` before going further.
+4. **Configure the Vercel Preview environment** — every variable in section 7,
+   with `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL` built from step 3, and
+   the **development** Clerk keys.
+5. **Deploy the frontend from `dev`** and take its URL, e.g.
+   `https://<your-project>.vercel.app`.
+6. **Put that URL into `APP_FRONTEND_URL`** on `orion-backend`. Add it to the
+   R2 CORS `AllowedOrigins` (section 3) and to the Clerk instance's allowed
+   domains at the same time — all three want the same value, and forgetting the
+   R2 one fails only at upload.
+7. **Restart `orion-backend`** so it picks the value up.
+8. **Run the end-to-end staging checks**: sign in, record and upload a meeting,
+   watch the status arrive over the socket, open the finished summary, ask the
+   chat a question, export. Each exercises a different one of the four
+   dependencies, which is the point of doing all five rather than just the
+   first.
+9. **Only then create `main`** and repeat 2–8 with the production Clerk
+   instance, production Vercel environment, and a fresh `ORION_INTERNAL_TOKEN`.
+
+Steps 6 and 7 are the ones people skip, because the frontend loads fine without
+them — it is every API call behind it that fails, which reads as "the backend is
+down".
 
 ---
 
