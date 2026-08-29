@@ -456,6 +456,27 @@ and every call after that is a HEAD and a signature.
   treats that as required rather than best-effort: a meeting saying "the
   recording was deleted on Tuesday" over a playable MP3 still in the bucket is
   the one outcome a privacy control must never have.
+* **The browser fetches the MP3 itself.** Once `ready`, the frontend GETs the
+  presigned URL directly from R2 and puts the bytes in the archive alongside the
+  documents. The API never carries the audio. This needs a CORS rule on the
+  bucket allowing GET from the app's origin — see `docs/deploy.md`.
+
+**Audio export is MP3 only.** The `Original` option was removed from the UI:
+Orion stores whatever was uploaded, and handing back a webm was offering
+somebody a file several players refuse. `GET /audio` is unchanged and still
+serves the stored object, but nothing in the frontend calls it any more: the
+export dialog uses `/audio/mp3`, and the meeting page's player reads the
+presigned `audioUrl` already on the meeting response. Storage is untouched
+either way — the MP3 is a derived copy, and the original is never replaced or
+deleted.
+
+**Export delivery is all-or-nothing.** One selected item is downloaded as
+itself; two or more arrive as a single `.zip` containing all of them, the
+recording included. If any selected part fails, nothing at all is downloaded and
+the dialog stays open with the selection intact. The previous behaviour —
+deliver what worked, report "2 of 3 downloaded" — is gone: partial delivery is a
+quieter failure than none, because somebody who receives an archive missing the
+recording finds out weeks later.
 
 **Exporting a translation does not translate anything.** A download is a GET;
 `?language=es` reads a translation that already exists and 404s otherwise,

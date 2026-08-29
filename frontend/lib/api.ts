@@ -809,11 +809,19 @@ export const api = createApi({
     }),
 
     /**
-     * A short-lived link to the original recording.
+     * A short-lived link to the original recording, in whatever format it was
+     * stored in.
      *
      * Asked for on click rather than loaded with the meeting, because the link
      * is signed and expires: one fetched when the page opened would be dead by
      * the time somebody left the tab overnight and came back to it.
+     *
+     * **Not an export path.** The export dialog is MP3-only and uses
+     * `getMp3Export`; handing somebody the stored webm was offering them a file
+     * several players refuse. This remains as the binding for the endpoint,
+     * which still serves the stored object for anything that wants the original
+     * bytes — but reaching for it to export audio would put the removed
+     * behaviour back.
      */
     getAudioDownload: builder.query<AudioDownload, string>({
       query: (id) => `/meetings/${id}/audio`,

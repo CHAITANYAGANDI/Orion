@@ -8,9 +8,11 @@ import {
   buildBundle,
   describeExportFailure,
   DownloadFailure,
+  entryName,
   exportPath,
   ExportError,
   fetchExportFile,
+  fetchSignedFile,
   filenameFrom,
   isTransientFailure,
   REVOKE_DELAY_MS,
@@ -391,15 +393,16 @@ describe("save", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("bundling", () => {
-  it("puts every document in one archive", async () => {
+  it("puts every selected part in one archive", async () => {
     const blob = await buildBundle([
-      { blob: new Blob(["summary"]), filename: "sprint-planning.txt" },
+      { blob: new Blob(["summary"]), filename: "sprint-planning-summary.txt" },
       { blob: new Blob(["transcript"]), filename: "sprint-planning-transcript.md" },
+      { blob: new Blob(["audio"]), filename: "sprint-planning-audio.mp3" },
     ]);
 
     const view = new DataView(await blob.arrayBuffer());
-    // Two entries, counted where an extractor counts them.
-    expect(view.getUint16(view.byteLength - 12, true)).toBe(2);
+    // Three entries, counted where an extractor counts them.
+    expect(view.getUint16(view.byteLength - 12, true)).toBe(3);
     expect(blob.type).toBe("application/zip");
   });
 
@@ -407,13 +410,110 @@ describe("bundling", () => {
     // What somebody will search for in a downloads folder six months later.
     expect(
       bundleName([
-        { blob: new Blob([]), filename: "sprint-planning.txt" },
-        { blob: new Blob([]), filename: "sprint-planning.md" },
+        { blob: new Blob([]), filename: "sprint-planning-summary.txt" },
+        { blob: new Blob([]), filename: "sprint-planning-audio.mp3" },
       ]),
-    ).toBe("sprint-planning.zip");
+    ).toBe("sprint-planning-summary-export.zip");
   });
 
   it("has a name even for a file that had none", () => {
-    expect(bundleName([])).toBe("meeting.zip");
+    expect(bundleName([])).toBe("meeting-export.zip");
+  });
+});
+
+describe("entryName", () => {
+  it("spells out which part a file is", () => {
+    // The server names both documents after the meeting, so a summary and a
+    // transcript exported in the same format arrive under one name. Inside an
+    // archive that means an extractor may overwrite one with the other.
+    expect(entryName("summary", "sprint-planning.txt")).toBe("sprint-planning-summary.txt");
+    expect(entryName("transcript", "sprint-planning.txt")).toBe(
+      "sprint-planning-transcript.txt",
+    );
+  });
+
+  it("keeps the extension, which is what opens the file", () => {
+    expect(entryName("audio", "sprint-planning.mp3")).toBe("sprint-planning-audio.mp3");
+    expect(entryName("summary", "四半期.pdf")).toBe("四半期-summary.pdf");
+  });
+
+  it("copes with a name that has no extension", () => {
+    expect(entryName("summary", "meeting")).toBe("meeting-summary");
+  });
+});
+
+describe("fetchSignedFile", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const audio = () => ({
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    blob: async () => new Blob([new Uint8Array([0xff, 0xfb, 0x90])], { type: "audio/mpeg" }),
+  });
+
+  it("returns the bytes under the name the API chose", async () => {
+    fetchMock.mockResolvedValue(audio());
+
+    const file = await fetchSignedFile("https://r2/signed.mp3", "sprint-planning.mp3", 0);
+
+    expect(file.filename).toBe("sprint-planning.mp3");
+    expect(new Uint8Array(await file.blob.arrayBuffer())[0]).toBe(0xff);
+  });
+
+  it("sends no headers at all", async () => {
+    // The credential is in the URL. An Authorization header would fall outside
+    // the signature and, worse, turn a simple cross-origin GET into a
+    // preflighted one that the bucket has to be configured to answer.
+    fetchMock.mockResolvedValue(audio());
+
+    await fetchSignedFile("https://r2/signed.mp3", "a.mp3", 0);
+
+    expect(fetchMock).toHaveBeenCalledWith("https://r2/signed.mp3");
+    expect(fetchMock.mock.calls[0][1]).toBeUndefined();
+  });
+
+  it("tries once more when the connection drops", async () => {
+    fetchMock
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(audio());
+
+    await expect(fetchSignedFile("https://r2/x.mp3", "a.mp3", 0)).resolves.toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry an expired signature", async () => {
+    // Object storage answers an expired or malformed signature with 403. It
+    // will answer the same way a second later; the fix is a fresh URL, which
+    // is a level up from here.
+    fetchMock.mockResolvedValue({ ok: false, status: 403, headers: { get: () => null } });
+
+    await expect(fetchSignedFile("https://r2/x.mp3", "a.mp3", 0)).rejects.toBeInstanceOf(
+      DownloadFailure,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("never quotes object storage's error document", async () => {
+    // R2 and S3 answer with XML naming the bucket, the key and a request id.
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 404,
+      headers: { get: () => null },
+      text: async () => "<Error><Key>meetings/usr_1/mtg_1/a.webm.mp3</Key></Error>",
+    });
+
+    const failure = await fetchSignedFile("https://r2/x.mp3", "a.mp3", 0).catch((e) => e);
+
+    expect(describeExportFailure("audio", failure)).toBe("Couldn't export the audio.");
   });
 });

@@ -24,13 +24,13 @@
  *       summary and a transcript fired two synthetic clicks, and browsers treat
  *       that as a site pushing files at you — Chrome prompts once per origin and
  *       silently drops everything after the first if the prompt is denied or
- *       dismissed. Hence {@link buildBundle}: more than one document is one
- *       archive and one download.</li>
+ *       dismissed. Hence {@link buildBundle}: more than one selected item is one
+ *       archive and one download — the recording included.</li>
  *   <li><b>One failure cancelled the exports after it.</b> The parts were
  *       awaited in sequence inside a single `try`, so a summary that failed took
  *       the transcript and the audio down with it — neither attempted, and
- *       nothing said so. That is fixed in `lib/export-run.ts`, which runs each
- *       part on its own.</li>
+ *       nothing said so. That is fixed in `lib/export-run.ts`, which fetches
+ *       every selected part before it delivers any of them.</li>
  * </ol>
  *
  * <p>Everything except {@link save} and {@link openSignedDownload} is pure or
@@ -306,22 +306,15 @@ export async function fetchExportFile(
   }
 }
 
-/**
- * Fetch a rendered document and put it straight on the disk.
- *
- * <p>Kept for the single-file case and for callers outside the dialog. When
- * more than one document is wanted, `lib/export-run.ts` collects them and hands
- * the browser one archive instead — see the note at the top of this file about
- * what browsers do with the second synthetic click.
+/*
+ * There was a `downloadExport(meetingId, format, options)` here that fetched a
+ * document and saved it immediately. It is gone, and deliberately not kept as a
+ * convenience: fetching one part and putting it straight on the disk is now
+ * precisely the thing a multi-part export must not do, and leaving a function
+ * that does exactly that one import away is an invitation. Delivery decisions
+ * belong to `lib/export-run.ts`, which is the only place that knows whether
+ * this is the whole export or a third of it.
  */
-export async function downloadExport(
-  meetingId: string,
-  format: ExportFormat,
-  options: ExportOptions = {},
-): Promise<void> {
-  const file = await fetchExportFile(meetingId, format, options);
-  save(file.blob, file.filename);
-}
 
 /* ------------------------------- delivery -------------------------------- */
 
@@ -360,22 +353,40 @@ export function save(blob: Blob, filename: string): void {
 }
 
 /**
- * Several documents as one archive.
+ * Everything selected, as one archive.
  *
  * <p>The alternative — a synthetic click per file — is what browsers block, and
- * they block it silently. See `lib/zip.ts` for why the archive is written here
- * rather than fetched from the server: the parts are requested independently so
- * that one failing does not lose the others, and only the client knows which
- * ones arrived.
+ * they block it silently. Written here rather than fetched from the server
+ * because only the client knows what was selected, and because the recording
+ * comes from object storage rather than from the API: there is no one place on
+ * the server that has all three pieces.
+ *
+ * <p>Blobs go in and are never converted. The recording can be a hundred
+ * megabytes, and turning it into a `Uint8Array` on the way past would put a
+ * second copy of it in this tab's heap for no reason at all.
  */
 export async function buildBundle(files: ExportFile[]): Promise<Blob> {
-  const entries = await Promise.all(
-    files.map(async (file) => ({
-      name: file.filename,
-      bytes: new Uint8Array(await file.blob.arrayBuffer()),
-    })),
-  );
-  return zip(entries);
+  return zip(files.map((file) => ({ name: file.filename, blob: file.blob })));
+}
+
+/**
+ * What to call one file inside the archive.
+ *
+ * <p>The server names both documents after the meeting, so a summary and a
+ * transcript exported in the same format both arrive as
+ * {@code sprint-planning.txt}. Inside an archive that is a real problem: an
+ * extractor is entitled to overwrite one with the other, and the user loses a
+ * file they asked for without being told. So the part is spelled out.
+ *
+ * <p>Only inside the archive. A single file keeps the name the server gave it —
+ * the qualifier exists to disambiguate, and there is nothing to disambiguate
+ * when one file is all there is.
+ */
+export function entryName(part: ExportPart, filename: string): string {
+  const dot = filename.lastIndexOf(".");
+  const stem = dot > 0 ? filename.slice(0, dot) : filename;
+  const ext = dot > 0 ? filename.slice(dot) : "";
+  return `${stem || "meeting"}-${part}${ext}`;
 }
 
 /**
@@ -390,22 +401,21 @@ export function bundleName(files: ExportFile[]): string {
   const first = files[0]?.filename ?? "meeting";
   const dot = first.lastIndexOf(".");
   const stem = dot > 0 ? first.slice(0, dot) : first;
-  return `${stem || "meeting"}.zip`;
+  return `${stem || "meeting"}-export.zip`;
 }
 
 /**
  * Send the browser to a presigned link.
  *
- * <p>Not fetched and re-saved like the documents above: the recording is tens or
- * hundreds of megabytes, and pulling it into memory to hand it straight back
- * would be slower and could exhaust a tab. The link already carries the
- * disposition that names the file, signed into the URL.
+ * <p>Kept for a caller that wants a navigation rather than bytes. Nothing in the
+ * export dialog uses it any more: an atomic export has to know the recording
+ * arrived before it offers the user anything, and a navigation cannot be
+ * observed — the tab never learns whether it worked.
  *
  * <p>No `target`, on purpose. A link with `target="_blank"` opened after an
  * `await` is no longer inside a user gesture and gets caught by the popup
  * blocker; a same-tab navigation to a `Content-Disposition: attachment`
- * response downloads without navigating anywhere, which is what makes this work
- * after a conversion the user waited for.
+ * response downloads without navigating anywhere.
  */
 export function openSignedDownload(url: string): void {
   const link = document.createElement("a");
@@ -415,4 +425,50 @@ export function openSignedDownload(url: string): void {
   document.body.appendChild(link);
   link.click();
   setTimeout(() => link.remove(), 0);
+}
+
+/**
+ * Pull a presigned object out of storage as bytes.
+ *
+ * <h2>Why the recording now comes through the tab</h2>
+ *
+ * <p>It used to be a navigation to the signed URL, which is cheaper: the file
+ * goes straight from object storage to the disk and never touches this process.
+ * That is incompatible with an atomic export. To put the MP3 in the same archive
+ * as the documents — and to know it arrived <em>before</em> anything is offered
+ * to the user — the bytes have to be here.
+ *
+ * <p>It is still not proxied through Spring, which is the part that mattered.
+ * The request goes browser → R2 carrying a short-lived signature, and the API
+ * neither sees the transfer nor pays for it. What lands here is a {@link Blob},
+ * which browsers back with disk rather than script memory once it is large, and
+ * which the archive references rather than copies.
+ *
+ * <p><b>No headers at all</b>, deliberately. The credential is in the URL;
+ * adding `Authorization` would both fall outside the signature and turn a
+ * simple cross-origin GET into a preflighted one. This does require the bucket
+ * to allow GET from the app's origin — see docs/deploy.md.
+ */
+export async function fetchSignedFile(
+  url: string,
+  filename: string,
+  retryDelayMs: number = RETRY_DELAY_MS,
+): Promise<ExportFile> {
+  const once = async (): Promise<ExportFile> => {
+    const response = await fetch(url);
+    if (!response.ok) {
+      // Never the body. Object storage answers with an XML error document
+      // naming the bucket, the key and a request id, and none of that is for a
+      // person to read.
+      throw new DownloadFailure(response.status);
+    }
+    return { blob: await response.blob(), filename };
+  };
+  try {
+    return await once();
+  } catch (error) {
+    if (!isTransientFailure(error)) throw error;
+    if (retryDelayMs > 0) await sleep(retryDelayMs);
+    return once();
+  }
 }

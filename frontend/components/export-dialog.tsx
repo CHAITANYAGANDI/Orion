@@ -28,20 +28,41 @@
  * <p>The dialog now stays open after any failure. Closing it was the old
  * behaviour and it threw away the selection, so retrying meant reconstructing
  * every tickbox from memory.
+ *
+ * <h2>All of it, or none of it</h2>
+ *
+ * <p>Delivery is atomic. Everything selected is fetched first — documents from
+ * the API, the recording from object storage — and only then is anything handed
+ * to the browser: one file when one thing was chosen, one archive when more
+ * were. If any part fails, nothing is downloaded at all.
+ *
+ * <p>That replaces a version that delivered whatever had worked and reported
+ * "2 of 3 downloaded". Partial delivery is a worse failure than none, because
+ * it is quiet: somebody who receives nothing knows to try again, and somebody
+ * who receives an archive missing the recording finds out weeks later.
+ *
+ * <h2>Audio means MP3</h2>
+ *
+ * <p>There is no format choice for the recording. Orion stores whatever was
+ * uploaded — webm from a browser, m4a from a phone — and handing that back was
+ * offering somebody a file their music player may refuse. What it exports is an
+ * MP3, converted once and kept; a recording that is already an MP3 skips the
+ * conversion and costs nothing extra. Storage is untouched: the original is
+ * still the original.
  */
 
 import * as React from "react";
 import { toast } from "sonner";
 import { Download, Loader2, Music, FileText, ListChecks, AlertCircle } from "lucide-react";
-import { useLazyGetAudioDownloadQuery, useLazyGetMp3ExportQuery } from "@/lib/api";
+import { useLazyGetMp3ExportQuery } from "@/lib/api";
 import {
-  describeExportFailure,
   fetchExportFile,
-  openSignedDownload,
+  fetchSignedFile,
   type CombineMode,
+  type ExportFile,
   type ExportFormat,
 } from "@/lib/exports";
-import { runExport, type DocumentRequest, type ExportFailure } from "@/lib/export-run";
+import { runExport, type ExportFailure, type ExportItem } from "@/lib/export-run";
 import { linkIsFresh, prepareMp3, type Mp3Link } from "@/lib/mp3-export";
 import type { ActionItemResponse, SummaryResponse, TranscriptSegment } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -64,9 +85,6 @@ const FORMATS: { value: string; label: string }[] = [
   { value: "txt", label: "Plain text (txt)" },
 ];
 
-/** Which of the two things the recording can be handed over as. */
-export type AudioFormat = "original" | "mp3";
-
 export interface ExportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -84,7 +102,11 @@ export interface ExportDialogProps {
   sourceLanguageName?: string | null;
   /** False for meetings imported as documents, which never had a recording. */
   hasAudio?: boolean;
-  /** What the recording actually is, which is what "Original" will give you. */
+  /**
+   * What the recording is in storage. Not a choice any more — the export is
+   * always MP3 — but it decides whether a conversion has to happen, which is
+   * the difference between an instant export and one with a wait in it.
+   */
   audioContentType?: string | null;
 }
 
@@ -119,12 +141,10 @@ export function ExportDialog({
   const [combine, setCombine] = React.useState<CombineMode>("none");
 
   const [wantAudio, setWantAudio] = React.useState(false);
-  const [audioFormat, setAudioFormat] = React.useState<AudioFormat>("original");
 
   const [busy, setBusy] = React.useState(false);
   const [preparing, setPreparing] = React.useState(false);
   const [failures, setFailures] = React.useState<ExportFailure[]>([]);
-  const [mp3Link, setMp3Link] = React.useState<Mp3Link | null>(null);
 
   /*
    * The duplicate-click guard, and it is a ref rather than the `busy` state on
@@ -138,7 +158,6 @@ export function ExportDialog({
   // arrived; state alone would give it a stale one.
   const heldMp3 = React.useRef<Mp3Link | null>(null);
 
-  const [fetchAudio] = useLazyGetAudioDownloadQuery();
   const [fetchMp3] = useLazyGetMp3ExportQuery();
 
   // Sections arrive after the dialog mounts, so this fills in rather than
@@ -150,9 +169,10 @@ export function ExportDialog({
 
   const summaryParts =
     (chosen.size > 0 || sections.length === 0 ? 1 : 0) + (wantActionItems ? 1 : 0);
-  const documentCount =
-    (wantSummary && summaryParts > 0 ? 1 : 0) + (wantTranscript && hasTranscript ? 1 : 0);
-  const files = documentCount + (wantAudio && hasAudio ? 1 : 0);
+  const files =
+    (wantSummary && summaryParts > 0 ? 1 : 0) +
+    (wantTranscript && hasTranscript ? 1 : 0) +
+    (wantAudio && hasAudio ? 1 : 0);
 
   function toggleSection(key: string) {
     setChosen((prev) => {
@@ -185,20 +205,26 @@ export function ExportDialog({
     try {
       const link = await prepareMp3(() => fetchMp3(meetingId).unwrap());
       heldMp3.current = link;
-      setMp3Link(link);
       return link;
     } finally {
       setPreparing(false);
     }
   }
 
-  async function deliverAudio() {
-    if (audioFormat === "mp3") {
-      openSignedDownload((await mp3()).url);
-      return;
-    }
-    const link = await fetchAudio(meetingId).unwrap();
-    openSignedDownload(link.url);
+  /**
+   * The recording, as bytes this tab is holding.
+   *
+   * <p>Two steps, and the split matters. `mp3()` waits for the conversion and
+   * comes back with a short-lived signed URL; `fetchSignedFile` then reads that
+   * URL directly from object storage. The recording never passes through the
+   * API — the transfer is browser to bucket — but it does now pass through this
+   * tab, because an export that promises all-or-nothing has to know the audio
+   * arrived before it offers anybody an archive, and a navigation to a signed
+   * URL tells you nothing.
+   */
+  async function fetchAudioFile(): Promise<ExportFile> {
+    const link = await mp3();
+    return fetchSignedFile(link.url, link.filename);
   }
 
   async function onExport() {
@@ -207,9 +233,9 @@ export function ExportDialog({
     setBusy(true);
     setFailures([]);
 
-    const documents: DocumentRequest[] = [];
+    const items: ExportItem[] = [];
     if (wantSummary && summaryParts > 0) {
-      documents.push({
+      items.push({
         part: "summary",
         fetch: () =>
           fetchExportFile(meetingId, summaryFormat, {
@@ -224,7 +250,7 @@ export function ExportDialog({
       });
     }
     if (wantTranscript && hasTranscript) {
-      documents.push({
+      items.push({
         part: "transcript",
         fetch: () =>
           fetchExportFile(meetingId, transcriptFormat, {
@@ -239,24 +265,24 @@ export function ExportDialog({
       });
     }
 
+    // Last, because it is the one that may have to wait for a conversion, and
+    // converting a recording for an export whose documents have already failed
+    // is a minute of somebody's CPU spent on nothing.
+    if (wantAudio && hasAudio) {
+      items.push({ part: "audio", fetch: fetchAudioFile });
+    }
+
     try {
-      const outcome = await runExport({
-        documents,
-        audio: wantAudio && hasAudio ? deliverAudio : undefined,
-      });
+      const outcome = await runExport({ items });
 
       setFailures(outcome.failures);
       for (const failure of outcome.failures) {
         toast.error(failure.message);
       }
+      // Nothing to say on partial success, because there is no longer any such
+      // thing: `complete` is the only path on which a file was delivered.
       if (outcome.complete) {
         onOpenChange(false);
-      } else if (outcome.delivered.length > 0) {
-        // Said explicitly, because the toast above is about what went wrong and
-        // somebody who only reads that will assume nothing arrived.
-        toast.success(
-          `${outcome.delivered.length} of ${outcome.delivered.length + outcome.failures.length} downloaded.`,
-        );
       }
     } catch (error) {
       /*
@@ -265,8 +291,9 @@ export function ExportDialog({
        * throws silently, leaves the button re-enabled and says nothing is the
        * exact shape of the bug this whole change exists to remove.
        */
-      const message = describeExportFailure("summary", error);
-      setFailures([{ part: "summary", message }]);
+      void error;
+      const message = "Couldn't finish this export. Nothing was downloaded — try again.";
+      setFailures([{ part: null, message }]);
       toast.error(message);
     } finally {
       running.current = false;
@@ -274,11 +301,6 @@ export function ExportDialog({
       setPreparing(false);
     }
   }
-
-  const audioChoices = [
-    { value: "original", label: `Original (${audioLabel(audioContentType)})` },
-    { value: "mp3", label: "MP3" },
-  ];
 
   return (
     <Dialog open={open} onOpenChange={busy ? () => {} : onOpenChange}>
@@ -365,9 +387,11 @@ export function ExportDialog({
             </Part>
 
             {/* The recording, which is a different kind of thing from the four
-                documents: not rendered, not small, and not fetched from the
-                same place. Original hands over exactly what was uploaded; MP3
-                is a real conversion, done once and kept, not a rename. */}
+                documents: not rendered, not small, and not fetched from the same
+                place. No format choice — it is always MP3. Handing back the
+                original webm was offering somebody a file their music player may
+                refuse, and there is no version of that worth a picker. What is
+                stored is untouched; this is a converted copy. */}
             <Part
               label="Audio"
               on={wantAudio && hasAudio}
@@ -375,11 +399,9 @@ export function ExportDialog({
               disabled={!hasAudio}
               disabledNote="This meeting has no stored recording."
               choiceLabel="Format"
-              choices={audioChoices}
-              choice={audioFormat}
-              onChoice={(v) => setAudioFormat(v as AudioFormat)}
+              fixedChoice="MP3"
             >
-              {audioFormat === "mp3" && !isAlreadyMp3(audioContentType) && (
+              {!isAlreadyMp3(audioContentType) && (
                 <p className="text-xs text-muted-foreground">
                   The recording will be converted the first time. After that it
                   is ready straight away.
@@ -421,45 +443,31 @@ export function ExportDialog({
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
             <div className="space-y-1">
               {failures.map((failure) => (
-                <p key={failure.part}>{failure.message}</p>
+                <p key={failure.part ?? "export"}>{failure.message}</p>
               ))}
+              {/* Said plainly, because it is the thing somebody most needs to
+                  know and the opposite of what the old behaviour did. Nothing
+                  was downloaded, so there is no half-finished set of files to
+                  reconcile -- pressing Export again is the whole of the fix. */}
               <p className="text-xs text-muted-foreground">
-                Nothing else was affected. You can try again.
+                Nothing was downloaded. Your selection is still here — try again.
               </p>
             </div>
           </div>
         )}
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+          {/* The count now matches what arrives, which it did not before: the
+              recording used to be counted here and then delivered separately,
+              so "3 files, bundled as one .zip" produced an archive of two. */}
           <p className="text-sm text-muted-foreground">
             {files === 0
               ? "Nothing selected"
               : `${files} ${files === 1 ? "file" : "files"} to export${
-                  documentCount > 1 ? ", bundled as one .zip" : ""
+                  files > 1 ? ", bundled as one .zip" : ""
                 }`}
           </p>
           <div className="flex items-center gap-2">
-            {/* Offered after a conversion so the recording can be taken again
-                without waiting, and without reopening the dialog. The link may
-                have expired by the time it is pressed, which is why this goes
-                back through the same freshness check. */}
-            {mp3Link && (
-              <Button
-                variant="outline"
-                disabled={busy}
-                onClick={() =>
-                  void mp3()
-                    .then((link) => openSignedDownload(link.url))
-                    // The link can have expired, and re-minting it can fail.
-                    // An unhandled rejection here would be a button that does
-                    // nothing and says nothing.
-                    .catch((error) => toast.error(describeExportFailure("audio", error)))
-                }
-              >
-                <Music className="h-4 w-4" />
-                Download MP3
-              </Button>
-            )}
             <Button variant="ghost" onClick={clearAll} disabled={busy || files === 0}>
               Clear
             </Button>
@@ -494,6 +502,7 @@ function Part({
   choices,
   choice,
   onChoice,
+  fixedChoice,
   children,
 }: {
   label: string;
@@ -505,6 +514,14 @@ function Part({
   choices?: { value: string; label: string }[];
   choice?: string;
   onChoice?: (value: string) => void;
+  /**
+   * A format with nothing to choose between, stated rather than offered.
+   *
+   * <p>A select with one option is a control that looks like a decision and
+   * is not one; a plain label says the same thing without inviting a click
+   * that does nothing.
+   */
+  fixedChoice?: string;
   children?: React.ReactNode;
 }) {
   const id = `export-${label.toLowerCase().replace(/\s+/g, "-")}`;
@@ -533,6 +550,12 @@ function Part({
 
       {on && !disabled && (
         <div className="space-y-2 pl-1">
+          {fixedChoice && (
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-muted-foreground">{choiceLabel}</span>
+              <span className="text-sm">{fixedChoice}</span>
+            </div>
+          )}
           {choices && choice !== undefined && onChoice && (
             <div className="flex items-center justify-between gap-3">
               <span className="text-sm text-muted-foreground">{choiceLabel}</span>
@@ -763,23 +786,13 @@ function Bullets({ items }: { items: string[] }) {
 }
 
 /**
- * What the recording actually is.
+ * Whether exporting means a conversion or just a signature.
  *
- * <p>Read from the stored content type rather than guessed. It is what
- * "Original" will hand over — a browser recording is webm, an iPhone upload is
- * m4a — and naming it is the difference between choosing a format and finding
- * out afterwards.
+ * <p>Only decides whether to warn about a wait. There is no branch in the
+ * export itself: the endpoint returns the original object when it is already an
+ * MP3, so the fast path is the server's decision and not this component's
+ * guess about a content type it was handed as a prop.
  */
-export function audioLabel(contentType?: string | null): string {
-  if (!contentType) return "original recording";
-  const subtype = contentType.split("/")[1]?.split(";")[0] ?? "";
-  if (!subtype) return "original recording";
-  if (subtype.includes("mpeg")) return "mp3";
-  if (subtype.includes("mp4")) return "m4a";
-  return subtype;
-}
-
-/** Whether choosing MP3 means a conversion or just a different link. */
 function isAlreadyMp3(contentType?: string | null): boolean {
   const type = (contentType ?? "").split(";")[0].trim().toLowerCase();
   return type === "audio/mpeg" || type === "audio/mp3";

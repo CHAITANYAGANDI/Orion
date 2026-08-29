@@ -1,78 +1,95 @@
 /**
- * Running an export, one part at a time, so one failure is one failure.
+ * Running an export: everything, or nothing.
  *
- * <h2>The bug this replaces</h2>
+ * <h2>What this used to do, and why it was wrong</h2>
  *
- * <p>The dialog awaited the summary, then the transcript, then the audio,
- * inside a single `try`. Three consequences, all of which were reported as
- * "sometimes the export doesn't work":
+ * <p>The first version of this file fixed a real bug — the dialog awaited the
+ * summary, then the transcript, then the audio inside one `try`, so a failed
+ * summary silently cancelled the other two. The fix was to run each part
+ * independently and report what arrived.
  *
- * <ul>
- *   <li>A summary that failed <b>cancelled the transcript and the audio</b>. The
- *       user had asked for three files and got none, with nothing on screen
- *       saying that two of them were never attempted.</li>
- *   <li>The message was "Couldn't export this meeting", which does not say
- *       <em>which</em> — leaving somebody to work it out from their downloads
- *       folder.</li>
- *   <li>Two documents meant two synthetic link clicks in a row, which browsers
- *       treat as a site pushing files at you and drop silently after the first.
- *       That one is why the documents are collected and delivered together.</li>
- * </ul>
+ * <p>It fixed the wrong half. Independent parts meant <em>partial</em>
+ * delivery: somebody who ticked three things could receive two, be told "2 of 3
+ * downloaded", and be left to work out which two. It also meant the recording
+ * was delivered separately from the documents, so a dialog that said "3 files,
+ * bundled as one .zip" produced an archive with two things in it and a second
+ * download that might never arrive.
  *
- * <h2>The shape</h2>
+ * <p>Partial success is a worse failure mode than total failure, because it is
+ * quiet. A user who gets nothing knows to try again; a user who gets an archive
+ * missing the recording finds out weeks later, if at all.
  *
- * <p>Every part is attempted regardless of what the parts before it did. Then
- * whatever was actually fetched is delivered: one document as itself, several as
- * one archive. What comes back is a list of what arrived and a list of what did
- * not, and the caller decides what to say — this module never touches a toast,
- * a dialog or the DOM, which is what makes the whole of it testable.
+ * <h2>What it does now</h2>
  *
- * <p>The IO it does need is injected for the same reason. `save` and the
- * archive builder are the only parts that need a browser.
+ * <ol>
+ *   <li>Fetch the selected parts in order, stopping at the first failure. The
+ *       failure is attributed to the part that caused it, which is what the
+ *       original single-`try` version could not do.</li>
+ *   <li><b>If anything failed, deliver nothing.</b> No archive, no individual
+ *       file, no download of any kind. The caller keeps the dialog open with the
+ *       selections intact and shows which part failed.</li>
+ *   <li>One part: hand it over as itself. A single summary should not arrive
+ *       inside an archive.</li>
+ *   <li>Two or more: exactly one archive containing exactly those parts.</li>
+ * </ol>
+ *
+ * <p><b>Why stopping is right here, when carrying on was right before.</b> The
+ * earlier version continued past a failure so it could report every part that
+ * went wrong, and that made sense while parts were delivered independently.
+ * Nothing is delivered now unless all of it is, so the only thing continuing
+ * buys is a longer list of failures — and the recording is last and can take
+ * minutes to convert. Continuing would mean a summary that failed instantly
+ * leaves somebody watching "Preparing MP3…" for five minutes before being told
+ * about the summary, for a conversion whose result is thrown away. One clear
+ * failure, quickly, beats a complete list nobody asked for.
+ *
+ * <p>Nothing here touches a toast, a dialog or the DOM, which is what makes all
+ * of it testable. The IO it does need — saving a file, building an archive — is
+ * injected for the same reason.
  */
 
 import {
   buildBundle,
   bundleName as defaultBundleName,
   describeExportFailure,
+  entryName,
   save as defaultSave,
   type ExportFile,
   type ExportPart,
 } from "@/lib/exports";
 
-export interface DocumentRequest {
-  /** Which part this is, for naming a failure the user can act on. */
-  part: Exclude<ExportPart, "audio">;
+export interface ExportItem {
+  /** Which part this is: for naming a failure, and for naming it in the archive. */
+  part: ExportPart;
+  /**
+   * Get the bytes.
+   *
+   * <p>The recording is a `fetch` too now, not a navigation. It still comes
+   * straight from object storage rather than through the API — but an export
+   * that promises all-or-nothing has to know the audio arrived, and a
+   * navigation to a signed URL cannot be observed from here.
+   */
   fetch: () => Promise<ExportFile>;
 }
 
 export interface ExportPlan {
-  documents: DocumentRequest[];
-  /**
-   * The recording, which is delivered rather than fetched: it goes straight
-   * from object storage to the browser and never passes through this tab. A
-   * hundred-megabyte recording pulled into memory to be handed back is slower
-   * and can take the tab with it.
-   */
-  audio?: () => Promise<void>;
+  items: ExportItem[];
 }
 
 export interface ExportFailure {
-  part: ExportPart;
+  /**
+   * Which part could not be produced, or null when the export as a whole
+   * failed after every part had arrived — packaging them into one archive is
+   * the only thing that can do that, and blaming it on the summary would be a
+   * small lie in the one message the user has to go on.
+   */
+  part: ExportPart | null;
   /** Already user-facing. Never a status code, a URL or a stack. */
   message: string;
 }
 
 export interface ExportOutcome {
-  /**
-   * What was handed to the browser.
-   *
-   * <p>For the documents that means the bytes arrived and a download was
-   * started. For the audio it means the browser was sent to a working signed
-   * link — whether the file finishes downloading is between the browser and
-   * object storage, and this tab never learns the answer. Saying so is better
-   * than pretending to know.
-   */
+  /** What was handed to the browser: everything, or nothing at all. */
   delivered: ExportPart[];
   failures: ExportFailure[];
   /** Nothing failed. The dialog closes on this and stays open otherwise. */
@@ -83,81 +100,92 @@ export interface ExportIo {
   save: (blob: Blob, filename: string) => void;
   bundle: (files: ExportFile[]) => Promise<Blob>;
   bundleName: (files: ExportFile[]) => string;
-  pause: (ms: number) => Promise<void>;
 }
-
-/**
- * A gap between the archive and the recording.
- *
- * <p>Two downloads is the floor when somebody asks for documents and audio: the
- * recording cannot go in the archive without pulling it through the tab, which
- * is the thing the presigned link exists to avoid. Spacing them is what keeps
- * the second from being read as the automatic-multiple-download pattern
- * browsers throttle.
- */
-export const STAGGER_MS = 700;
 
 const defaultIo: ExportIo = {
   save: defaultSave,
   bundle: buildBundle,
   bundleName: defaultBundleName,
-  pause: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 };
 
 export async function runExport(
   plan: ExportPlan,
   io: ExportIo = defaultIo,
 ): Promise<ExportOutcome> {
-  const delivered: ExportPart[] = [];
   const failures: ExportFailure[] = [];
   const fetched: { part: ExportPart; file: ExportFile }[] = [];
 
-  // Sequential rather than parallel, and on purpose: two renders of the same
-  // meeting at once double the load on the export endpoint for no gain a user
-  // can perceive, and rendering a forty-page transcript is not cheap. What
-  // matters is that a rejection here is caught here.
-  for (const document of plan.documents) {
+  /*
+   * Sequential rather than parallel, and on purpose: rendering a forty-page
+   * transcript is not cheap, and two renders of the same meeting at once double
+   * the load on the export endpoint for no gain a user can perceive.
+   *
+   * The order the caller passes matters, and it puts the recording last -- it is
+   * the only part that can take minutes, so stopping early is worth most when
+   * the thing being skipped is the conversion.
+   */
+  for (const item of plan.items) {
     try {
-      fetched.push({ part: document.part, file: await document.fetch() });
+      fetched.push({ part: item.part, file: await item.fetch() });
     } catch (error) {
-      failures.push({
-        part: document.part,
-        message: describeExportFailure(document.part, error),
-      });
+      failures.push({ part: item.part, message: describeExportFailure(item.part, error) });
+      // Nothing after this can be delivered, so nothing after this is fetched.
+      break;
     }
+  }
+
+  if (failures.length > 0) {
+    /*
+     * Nothing is saved. Not the parts that succeeded, not an archive of them --
+     * the user asked for a set, and half a set delivered without comment is the
+     * quiet failure this is arranged to prevent. What they get instead is an
+     * intact selection and a sentence naming the part that did not work.
+     *
+     * The bytes that did arrive are dropped here. They cost a second fetch on
+     * retry, which is the right price: the alternative is holding a hundred
+     * megabytes of audio against a retry that may never come.
+     */
+    return { delivered: [], failures, complete: false };
   }
 
   if (fetched.length === 1) {
-    io.save(fetched[0].file.blob, fetched[0].file.filename);
-    delivered.push(fetched[0].part);
-  } else if (fetched.length > 1) {
-    const files = fetched.map((entry) => entry.file);
+    const only = fetched[0];
+    io.save(only.file.blob, only.file.filename);
+    return { delivered: [only.part], failures: [], complete: true };
+  }
+
+  if (fetched.length > 1) {
+    // Named per part inside the archive: the server calls both documents after
+    // the meeting, so two of them in the same format would otherwise collide.
+    const files = fetched.map((entry) => ({
+      blob: entry.file.blob,
+      filename: entryName(entry.part, entry.file.filename),
+    }));
+    let archive: Blob;
     try {
-      io.save(await io.bundle(files), io.bundleName(files));
-      delivered.push(...fetched.map((entry) => entry.part));
+      archive = await io.bundle(files);
     } catch {
-      // The archive could not be built. Every document is in hand and giving
-      // them up over the packaging would be the worst outcome available, so
-      // this falls back to the old way — separate downloads, spaced out. The
-      // browser may still refuse the second, which is exactly why it is the
-      // fallback and not the plan.
-      for (const [index, entry] of fetched.entries()) {
-        if (index > 0) await io.pause(STAGGER_MS);
-        io.save(entry.file.blob, entry.file.filename);
-        delivered.push(entry.part);
-      }
+      /*
+       * Every part arrived and the packaging failed -- realistically, running
+       * out of room for a very large recording. There is deliberately no
+       * fallback to separate downloads: that is exactly the partial delivery
+       * this function exists to prevent, and it would be triggered by the one
+       * condition under which it is most likely to half-work.
+       */
+      return {
+        delivered: [],
+        failures: [{
+          part: null,
+          message: "Couldn't package your export into one file. Try again, "
+            + "or export fewer things at once.",
+        }],
+        complete: false,
+      };
     }
+    io.save(archive, io.bundleName(files));
+    return { delivered: fetched.map((entry) => entry.part), failures: [], complete: true };
   }
 
-  if (plan.audio) {
-    if (delivered.length > 0) await io.pause(STAGGER_MS);
-    try {
-      await plan.audio();
-      delivered.push("audio");
-    } catch (error) {
-      failures.push({ part: "audio", message: describeExportFailure("audio", error) });
-    }
-  }
-
-  return { delivered, failures, complete: failures.length === 0 };
+  // Nothing selected. Not a failure, and not a download either.
+  return { delivered: [], failures: [], complete: true };
 }

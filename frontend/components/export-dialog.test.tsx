@@ -16,17 +16,20 @@ import userEvent from "@testing-library/user-event";
  * same document. A preview that ignores a tickbox is worse than no preview,
  * because it is evidence for the wrong answer.
  *
- * <p>And a fourth, added after export was reported as intermittent: <b>a part
- * that did not download must never look like one that did</b>. One failure must
- * not cancel the parts after it, the message must say which part, and the
- * choices must survive so the retry is a click rather than a reconstruction.
+ * <p>And a fourth: <b>a part that did not download must never look like one
+ * that did</b>. Delivery is all-or-nothing — one file when one thing was
+ * chosen, one archive when more were, and nothing at all if any part failed.
+ * The message must say which part, and the choices must survive so the retry is
+ * a click rather than a reconstruction.
+ *
+ * <p>Audio has no format choice: it is always MP3. The Original option is gone,
+ * and one test below exists purely to make sure it stays gone.
  */
-const { fetchExportFile, openSignedDownload, save, fetchAudio, fetchMp3, toastError, toastSuccess } =
+const { fetchExportFile, fetchSignedFile, save, fetchMp3, toastError, toastSuccess } =
   vi.hoisted(() => ({
     fetchExportFile: vi.fn(),
-    openSignedDownload: vi.fn(),
+    fetchSignedFile: vi.fn(),
     save: vi.fn(),
-    fetchAudio: vi.fn(),
     fetchMp3: vi.fn(),
     toastError: vi.fn(),
     toastSuccess: vi.fn(),
@@ -40,16 +43,12 @@ const { fetchExportFile, openSignedDownload, save, fetchAudio, fetchMp3, toastEr
 vi.mock("@/lib/exports", async (orig) => ({
   ...(await orig<typeof import("@/lib/exports")>()),
   fetchExportFile: (...args: unknown[]) => fetchExportFile(...args),
-  openSignedDownload: (...args: unknown[]) => openSignedDownload(...args),
+  fetchSignedFile: (...args: unknown[]) => fetchSignedFile(...args),
   save: (...args: unknown[]) => save(...args),
 }));
 
 vi.mock("@/lib/api", () => ({
   API_BASE: "http://api.test",
-  useLazyGetAudioDownloadQuery: () => [
-    (id: string) => ({ unwrap: () => fetchAudio(id) }),
-    { isFetching: false },
-  ],
   useLazyGetMp3ExportQuery: () => [
     (id: string) => ({ unwrap: () => fetchMp3(id) }),
     { isFetching: false },
@@ -133,11 +132,25 @@ const READY_MP3 = {
   expiresInSeconds: 900,
 };
 
+/** Real MPEG framing, so an assertion about "contains audio" means something. */
+const MPEG = new Uint8Array([0xff, 0xfb, 0x90, 0x00, 0x11, 0x22]);
+
 beforeEach(() => {
-  vi.clearAllMocks();
+  /*
+   * `resetAllMocks`, not `clearAllMocks`. The latter clears recorded calls and
+   * leaves queued `...Once` implementations in place, so a test that queues two
+   * and consumes one leaks the other into whatever runs next -- which happens
+   * routinely now that a failed part stops the ones after it from being
+   * fetched at all. It cost an afternoon once; every implementation this file
+   * relies on is re-established immediately below.
+   */
+  vi.resetAllMocks();
   fetchExportFile.mockResolvedValue(document_("sprint-planning.txt"));
-  fetchAudio.mockResolvedValue({ url: "https://minio/signed", filename: "a.m4a" });
   fetchMp3.mockResolvedValue(READY_MP3);
+  fetchSignedFile.mockImplementation(async (_url: string, filename: string) => ({
+    blob: new Blob([MPEG], { type: "audio/mpeg" }),
+    filename,
+  }));
 });
 
 describe("ExportDialog choosing", () => {
@@ -162,7 +175,7 @@ describe("ExportDialog choosing", () => {
     expect(screen.getByText(/2 files to export/)).toBeInTheDocument();
   });
 
-  it("says when the two documents will arrive as one archive", async () => {
+  it("says when the selection will arrive as one archive", async () => {
     open();
 
     await userEvent.click(screen.getByRole("switch", { name: "Transcript" }));
@@ -170,6 +183,26 @@ describe("ExportDialog choosing", () => {
     // Told beforehand, because a .zip nobody expected looks like the wrong
     // thing downloaded.
     expect(screen.getByText(/bundled as one \.zip/)).toBeInTheDocument();
+  });
+
+  it("counts the recording as part of the archive", async () => {
+    // It used to be counted here and delivered separately, so "3 files,
+    // bundled as one .zip" produced an archive containing two.
+    open({ hasAudio: true });
+
+    await userEvent.click(screen.getByRole("switch", { name: "Transcript" }));
+    await userEvent.click(screen.getByRole("switch", { name: "Audio" }));
+
+    expect(screen.getByText("3 files to export, bundled as one .zip")).toBeInTheDocument();
+  });
+
+  it("does not promise an archive for a single file", async () => {
+    open({ hasAudio: true });
+
+    await userEvent.click(screen.getByRole("switch", { name: "Audio" }));
+    await userEvent.click(screen.getByRole("switch", { name: "Summary" }));
+
+    expect(screen.getByText("1 file to export")).toBeInTheDocument();
   });
 
   it("asks for each part separately", async () => {
@@ -229,6 +262,34 @@ describe("ExportDialog choosing", () => {
   });
 });
 
+/** Read the archive a `save` call was given, and list what is in it. */
+async function archiveEntries(blob: Blob): Promise<string[]> {
+  const view = new DataView(await blob.arrayBuffer());
+  // The end-of-central-directory record is the last 22 bytes: total entries at
+  // +10, the directory's offset at +16.
+  const count = view.getUint16(view.byteLength - 22 + 10, true);
+  let at = view.getUint32(view.byteLength - 22 + 16, true);
+  const names: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const nameLength = view.getUint16(at + 28, true);
+    names.push(new TextDecoder().decode(new Uint8Array(view.buffer, at + 46, nameLength)));
+    at += 46 + nameLength;
+  }
+  return names;
+}
+
+/** The stored bytes of one entry, found through its local header. */
+async function archiveEntryBytes(blob: Blob, index: number): Promise<Uint8Array> {
+  const view = new DataView(await blob.arrayBuffer());
+  let at = 0;
+  for (let i = 0; i < index; i++) {
+    at += 30 + view.getUint16(at + 26, true) + view.getUint32(at + 18, true);
+  }
+  const nameLength = view.getUint16(at + 26, true);
+  const size = view.getUint32(at + 18, true);
+  return new Uint8Array(view.buffer, at + 30 + nameLength, size);
+}
+
 describe("ExportDialog delivering the files", () => {
   it("hands the browser one download for one document", async () => {
     open();
@@ -239,36 +300,87 @@ describe("ExportDialog delivering the files", () => {
     expect(save.mock.calls[0][1]).toBe("sprint-planning.txt");
   });
 
+  it("hands the browser one .mp3 for audio on its own", async () => {
+    open({ hasAudio: true });
+
+    await userEvent.click(screen.getByRole("switch", { name: "Audio" }));
+    await userEvent.click(screen.getByRole("switch", { name: "Summary" }));
+    await userEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0][1]).toBe("sprint-planning.mp3");
+    // Not an archive: one thing selected is one file.
+    expect((save.mock.calls[0][0] as Blob).type).toBe("audio/mpeg");
+  });
+
   it("hands the browser one archive for two documents", async () => {
     // The reliability fix. Two synthetic clicks in a row is what browsers
     // block, and they block it silently — Chrome prompts once per origin and
     // drops everything after the first if the prompt is denied or dismissed.
     fetchExportFile
-      .mockResolvedValueOnce(document_("sprint-planning.txt", "summary"))
-      .mockResolvedValueOnce(document_("sprint-planning-transcript.md", "transcript"));
+      .mockResolvedValueOnce(document_("sprint-planning.pdf", "summary"))
+      .mockResolvedValueOnce(document_("sprint-planning.txt", "transcript"));
     open();
 
     await userEvent.click(screen.getByRole("switch", { name: "Transcript" }));
     await userEvent.click(screen.getByRole("button", { name: "Export" }));
 
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-    expect(save.mock.calls[0][1]).toBe("sprint-planning.zip");
+    expect(save.mock.calls[0][1]).toBe("sprint-planning-summary-export.zip");
+    expect(await archiveEntries(save.mock.calls[0][0] as Blob)).toEqual([
+      "sprint-planning-summary.pdf",
+      "sprint-planning-transcript.txt",
+    ]);
   });
 
-  it("puts both requested files inside the archive", async () => {
-    // Written by the real bundler, so this is the actual archive a user would
-    // receive rather than a stand-in that agrees with the test.
-    fetchExportFile
-      .mockResolvedValueOnce(document_("sprint-planning.txt", "summary"))
-      .mockResolvedValueOnce(document_("sprint-planning-transcript.md", "transcript"));
-    open();
+  it("hands the browser one archive for a summary and the recording", async () => {
+    fetchExportFile.mockResolvedValue(document_("sprint-planning.pdf", "summary"));
+    open({ hasAudio: true });
 
-    await userEvent.click(screen.getByRole("switch", { name: "Transcript" }));
+    await userEvent.click(screen.getByRole("switch", { name: "Audio" }));
     await userEvent.click(screen.getByRole("button", { name: "Export" }));
 
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-    const archive = new DataView(await (save.mock.calls[0][0] as Blob).arrayBuffer());
-    expect(archive.getUint16(archive.byteLength - 12, true)).toBe(2);
+    expect(await archiveEntries(save.mock.calls[0][0] as Blob)).toEqual([
+      "sprint-planning-summary.pdf",
+      "sprint-planning-audio.mp3",
+    ]);
+  });
+
+  it("hands the browser one archive for all three", async () => {
+    fetchExportFile
+      .mockResolvedValueOnce(document_("sprint-planning.pdf", "summary"))
+      .mockResolvedValueOnce(document_("sprint-planning.txt", "transcript"));
+    open({ hasAudio: true });
+
+    await userEvent.click(screen.getByRole("switch", { name: "Transcript" }));
+    await userEvent.click(screen.getByRole("switch", { name: "Audio" }));
+    await userEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(await archiveEntries(save.mock.calls[0][0] as Blob)).toEqual([
+      "sprint-planning-summary.pdf",
+      "sprint-planning-transcript.txt",
+      "sprint-planning-audio.mp3",
+    ]);
+  });
+
+  it("puts real MPEG audio in the archive, not a renamed webm", async () => {
+    // The claim the whole MP3 feature rests on, asserted on the bytes that
+    // actually land in the file the user receives. Written by the real
+    // bundler, so this is the archive rather than a stand-in for it.
+    fetchExportFile.mockResolvedValue(document_("sprint-planning.pdf", "summary"));
+    open({ hasAudio: true });
+
+    await userEvent.click(screen.getByRole("switch", { name: "Audio" }));
+    await userEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    const archive = save.mock.calls[0][0] as Blob;
+    expect((await archiveEntries(archive))[1]).toMatch(/\.mp3$/);
+    const bytes = await archiveEntryBytes(archive, 1);
+    // 0xFF 0xFB is an MPEG-1 Layer III frame sync. A webm starts 0x1A 0x45.
+    expect([bytes[0], bytes[1]]).toEqual([0xff, 0xfb]);
   });
 
   it("closes only when everything asked for arrived", async () => {
@@ -416,25 +528,33 @@ describe("ExportDialog preview", () => {
 });
 
 describe("ExportDialog the recording", () => {
-  it("fetches the original audio alongside the documents", async () => {
-    open({ hasAudio: true });
+  it("offers no choice of format, because there is only one", async () => {
+    // Original is gone. Orion stores whatever was uploaded, and handing that
+    // back was offering somebody a webm their music player may refuse.
+    open({ hasAudio: true, audioContentType: "audio/webm;codecs=opus" });
+
+    await userEvent.click(screen.getByRole("switch", { name: "Audio" }));
+
+    expect(screen.queryByLabelText("Audio format")).toBeNull();
+    expect(screen.queryByRole("option", { name: /original/i })).toBeNull();
+    expect(screen.queryByText(/webm/i)).toBeNull();
+  });
+
+  it("says the format is MP3", async () => {
+    open({ hasAudio: true, audioContentType: "audio/webm;codecs=opus" });
+
+    await userEvent.click(screen.getByRole("switch", { name: "Audio" }));
+
+    expect(screen.getByText("MP3")).toBeInTheDocument();
+  });
+
+  it("always takes the MP3 path", async () => {
+    open({ hasAudio: true, audioContentType: "audio/webm;codecs=opus" });
 
     await userEvent.click(screen.getByRole("switch", { name: "Audio" }));
     await userEvent.click(screen.getByRole("button", { name: "Export" }));
 
-    await waitFor(() => expect(fetchAudio).toHaveBeenCalledWith("mtg_1"));
-    expect(openSignedDownload).toHaveBeenCalledWith("https://minio/signed");
-  });
-
-  it("names what Original will actually give you", async () => {
-    open({ hasAudio: true, audioContentType: "audio/mp4" });
-
-    await userEvent.click(screen.getByRole("switch", { name: "Audio" }));
-
-    // The point of the label: Original hands over exactly what was uploaded,
-    // and knowing that it is m4a is what makes the MP3 option a choice rather
-    // than a discovery after the download.
-    expect(screen.getByRole("option", { name: "Original (m4a)" })).toBeInTheDocument();
+    await waitFor(() => expect(fetchMp3).toHaveBeenCalledWith("mtg_1"));
   });
 
   it("offers nothing for a meeting that was never a recording", () => {
@@ -450,132 +570,91 @@ describe("ExportDialog the recording", () => {
     await userEvent.click(screen.getByRole("button", { name: "Export" }));
 
     await waitFor(() => expect(save).toHaveBeenCalled());
-    expect(fetchAudio).not.toHaveBeenCalled();
     expect(fetchMp3).not.toHaveBeenCalled();
   });
 });
-
 describe("ExportDialog exporting an MP3", () => {
   function openWithAudio(props: Partial<React.ComponentProps<typeof ExportDialog>> = {}) {
     return open({ hasAudio: true, audioContentType: "audio/webm;codecs=opus", ...props });
   }
 
-  async function chooseMp3() {
+  /** Audio alone, so the export produces the .mp3 rather than an archive. */
+  async function audioOnly() {
     await userEvent.click(screen.getByRole("switch", { name: "Audio" }));
-    await userEvent.selectOptions(screen.getByLabelText("Audio format"), "mp3");
+    await userEvent.click(screen.getByRole("switch", { name: "Summary" }));
   }
-
-  it("offers Original and MP3", async () => {
-    openWithAudio();
-
-    await userEvent.click(screen.getByRole("switch", { name: "Audio" }));
-
-    expect(screen.getByRole("option", { name: /^Original/ })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "MP3" })).toBeInTheDocument();
-  });
-
-  it("defaults to the original, so nothing is converted by accident", async () => {
-    openWithAudio();
-
-    await userEvent.click(screen.getByRole("switch", { name: "Audio" }));
-    await userEvent.click(screen.getByRole("button", { name: "Export" }));
-
-    await waitFor(() => expect(fetchAudio).toHaveBeenCalled());
-    expect(fetchMp3).not.toHaveBeenCalled();
-  });
 
   it("warns that the first conversion takes a moment", async () => {
     openWithAudio();
-    await chooseMp3();
+
+    await userEvent.click(screen.getByRole("switch", { name: "Audio" }));
 
     expect(screen.getByText(/converted the first time/i)).toBeInTheDocument();
   });
 
   it("says nothing about converting when the recording is already an MP3", async () => {
+    // There is nothing to wait for -- the endpoint presigns the stored object --
+    // and promising a wait that will not happen is its own small dishonesty.
     openWithAudio({ audioContentType: "audio/mpeg" });
-    await chooseMp3();
 
-    // There is nothing to wait for, and promising a wait that will not happen
-    // is its own small dishonesty.
+    await userEvent.click(screen.getByRole("switch", { name: "Audio" }));
+
     expect(screen.queryByText(/converted the first time/i)).not.toBeInTheDocument();
   });
 
-  it("downloads the converted file without being asked twice", async () => {
+  it("fetches the converted file from the signed storage URL, not from the API", async () => {
+    // The whole point of the presigned link: the recording goes browser to
+    // bucket. Spring never sees the bytes, which is what stops an export
+    // tying up a request thread for the length of a download.
     openWithAudio();
-    await chooseMp3();
+    await audioOnly();
+
     await userEvent.click(screen.getByRole("button", { name: "Export" }));
 
-    await waitFor(() => expect(openSignedDownload).toHaveBeenCalledWith("https://r2/signed.mp3"));
+    await waitFor(() =>
+      expect(fetchSignedFile).toHaveBeenCalledWith(
+        "https://r2/signed.mp3",
+        "sprint-planning.mp3",
+      ),
+    );
   });
 
   it("says it is preparing while the conversion runs", async () => {
     let answer: (v: unknown) => void = () => {};
     fetchMp3.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
     openWithAudio();
-    await chooseMp3();
+    await audioOnly();
 
     await userEvent.click(screen.getByRole("button", { name: "Export" }));
 
     await waitFor(() => expect(screen.getByText("Preparing MP3…")).toBeInTheDocument());
     answer(READY_MP3);
-    await waitFor(() => expect(openSignedDownload).toHaveBeenCalled());
+    await waitFor(() => expect(save).toHaveBeenCalled());
   });
 
-  it("keeps offering the file without reopening the dialog", async () => {
-    // The dialog only stays open when something else failed, so the button is
-    // for exactly that case: take the recording you waited for while retrying
-    // the part that did not work.
-    fetchExportFile.mockRejectedValue(new DownloadFailure(500));
+  it("builds no archive until the conversion says ready", async () => {
+    // The ordering that makes the promise true: an archive assembled while the
+    // MP3 was still converting would be an archive missing the MP3.
+    let answer: (v: unknown) => void = () => {};
+    fetchMp3.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    fetchExportFile.mockResolvedValue(document_("sprint-planning.pdf", "summary"));
     openWithAudio();
-    await chooseMp3();
+    await userEvent.click(screen.getByRole("switch", { name: "Audio" }));
+
     await userEvent.click(screen.getByRole("button", { name: "Export" }));
+    await waitFor(() => expect(screen.getByText("Preparing MP3…")).toBeInTheDocument());
 
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: /download mp3/i })).toBeInTheDocument(),
-    );
-    openSignedDownload.mockClear();
-    await userEvent.click(screen.getByRole("button", { name: /download mp3/i }));
+    // The summary has already been fetched and is being held. Nothing has been
+    // handed to the browser.
+    expect(fetchExportFile).toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
 
-    await waitFor(() => expect(openSignedDownload).toHaveBeenCalledWith("https://r2/signed.mp3"));
+    answer(READY_MP3);
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(await archiveEntries(save.mock.calls[0][0] as Blob)).toHaveLength(2);
   });
 
-  it("replaces a link that has expired rather than following it", async () => {
-    // Presigned URLs are short-lived by design, and the case the button exists
-    // for — coming back to retry — is exactly the case where enough time has
-    // passed. Following a dead one starts a download that fails partway with a
-    // message about a token, which reads as the recording being gone.
-    fetchExportFile.mockRejectedValue(new DownloadFailure(500));
-    fetchMp3.mockResolvedValueOnce({ ...READY_MP3, expiresInSeconds: 0 });
-    openWithAudio();
-    await chooseMp3();
-    await userEvent.click(screen.getByRole("button", { name: "Export" }));
-
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: /download mp3/i })).toBeInTheDocument(),
-    );
-    fetchMp3.mockResolvedValue({ ...READY_MP3, url: "https://r2/fresh.mp3" });
-    await userEvent.click(screen.getByRole("button", { name: /download mp3/i }));
-
-    await waitFor(() => expect(openSignedDownload).toHaveBeenCalledWith("https://r2/fresh.mp3"));
-  });
-
-  it("does not re-ask for a link that is still good", async () => {
-    fetchExportFile.mockRejectedValue(new DownloadFailure(500));
-    openWithAudio();
-    await chooseMp3();
-    await userEvent.click(screen.getByRole("button", { name: "Export" }));
-
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: /download mp3/i })).toBeInTheDocument(),
-    );
-    fetchMp3.mockClear();
-    await userEvent.click(screen.getByRole("button", { name: /download mp3/i }));
-
-    await waitFor(() => expect(openSignedDownload).toHaveBeenCalledTimes(2));
-    expect(fetchMp3).not.toHaveBeenCalled();
-  });
-
-  it("explains a conversion that failed, and leaves a way to try again", async () => {
+  it("downloads nothing when the conversion fails", async () => {
     fetchMp3.mockResolvedValue({
       status: "failed",
       url: null,
@@ -584,26 +663,82 @@ describe("ExportDialog exporting an MP3", () => {
     });
     const onOpenChange = vi.fn();
     openWithAudio({ onOpenChange });
-    await chooseMp3();
+    await userEvent.click(screen.getByRole("switch", { name: "Audio" }));
 
     await userEvent.click(screen.getByRole("button", { name: "Export" }));
 
     await waitFor(() =>
-      expect(screen.getByRole("alert")).toHaveTextContent("This recording has no audio to convert."),
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "This recording has no audio to convert.",
+      ),
     );
+    // The summary arrived and is still not delivered: all of it, or none.
+    expect(save).not.toHaveBeenCalled();
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
     expect(screen.getByRole("button", { name: "Export" })).toBeEnabled();
   });
 
-  it("keeps the summary that did arrive when the conversion fails", async () => {
-    fetchMp3.mockResolvedValue({ status: "failed", url: null, expiresInSeconds: 0 });
+  it("can be retried after a conversion failure and produces one archive", async () => {
+    fetchMp3.mockResolvedValueOnce({
+      status: "failed",
+      url: null,
+      expiresInSeconds: 0,
+      message: "The audio could not be converted.",
+    });
+    fetchExportFile.mockResolvedValue(document_("sprint-planning.pdf", "summary"));
     openWithAudio();
-    await chooseMp3();
+    await userEvent.click(screen.getByRole("switch", { name: "Audio" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "Export" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
 
     await userEvent.click(screen.getByRole("button", { name: "Export" }));
 
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-    expect(save.mock.calls[0][1]).toBe("sprint-planning.txt");
+    expect(await archiveEntries(save.mock.calls[0][0] as Blob)).toEqual([
+      "sprint-planning-summary.pdf",
+      "sprint-planning-audio.mp3",
+    ]);
+  });
+
+  it("asks again for a link that has expired rather than following it", async () => {
+    // Presigned URLs are short-lived by design, and a retry after a failure is
+    // exactly the case where enough time has passed. Following a dead one
+    // starts a download that fails partway with a message about a token.
+    fetchMp3
+      .mockResolvedValueOnce({ ...READY_MP3, expiresInSeconds: 0 })
+      .mockResolvedValueOnce({ ...READY_MP3, url: "https://r2/fresh.mp3" });
+    fetchSignedFile.mockRejectedValueOnce(new DownloadFailure(403));
+    openWithAudio();
+    await audioOnly();
+
+    await userEvent.click(screen.getByRole("button", { name: "Export" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(fetchSignedFile).toHaveBeenLastCalledWith(
+      "https://r2/fresh.mp3",
+      "sprint-planning.mp3",
+    );
+  });
+
+  it("does not ask again for a link that is still good", async () => {
+    // The conversion is the expensive half. A second export in the same dialog
+    // should cost a fetch, not another poll.
+    fetchSignedFile.mockRejectedValueOnce(new DownloadFailure(500));
+    openWithAudio();
+    await audioOnly();
+
+    await userEvent.click(screen.getByRole("button", { name: "Export" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    fetchMp3.mockClear();
+
+    await userEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(fetchMp3).not.toHaveBeenCalled();
   });
 });
 
@@ -672,22 +807,63 @@ describe("ExportDialog when it fails", () => {
     expect(toastError.mock.calls[0][0]).toContain("Couldn't export the transcript");
   });
 
-  it("still delivers the part that worked", async () => {
-    // The bug, at the level a user sees it: asking for two things and getting
-    // neither because one of them failed.
-    fetchExportFile
-      .mockRejectedValueOnce(new DownloadFailure(500))
-      .mockResolvedValueOnce(document_("sprint-planning-transcript.md"));
+  it("downloads nothing when the summary fails", async () => {
+    fetchExportFile.mockRejectedValue(new DownloadFailure(500));
     open();
 
     await userEvent.click(screen.getByRole("switch", { name: "Transcript" }));
     await userEvent.click(screen.getByRole("button", { name: "Export" }));
 
-    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-    expect(save.mock.calls[0][1]).toBe("sprint-planning-transcript.md");
+    // The user asked for two files. One handed over without comment is the
+    // quiet failure this change exists to remove, so neither is.
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(save).not.toHaveBeenCalled();
   });
 
-  it("does not report a partial export as a success", async () => {
+  it("stops fetching once a part has failed", async () => {
+    // Nothing after a failure can be delivered, so nothing after it is asked
+    // for. It matters most for the recording, which is last and can take
+    // minutes to convert -- continuing would leave somebody watching
+    // "Preparing MP3…" for a file that was never going to be handed over.
+    fetchExportFile.mockRejectedValue(new DownloadFailure(500));
+    open({ hasAudio: true });
+
+    await userEvent.click(screen.getByRole("switch", { name: "Transcript" }));
+    await userEvent.click(screen.getByRole("switch", { name: "Audio" }));
+    await userEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(fetchExportFile).toHaveBeenCalledTimes(1);
+    expect(fetchMp3).not.toHaveBeenCalled();
+  });
+
+  it("downloads nothing when the transcript fails", async () => {
+    fetchExportFile
+      .mockResolvedValueOnce(document_("sprint-planning.txt"))
+      .mockRejectedValueOnce(new DownloadFailure(500));
+    open();
+
+    await userEvent.click(screen.getByRole("switch", { name: "Transcript" }));
+    await userEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("downloads nothing when the recording fails", async () => {
+    fetchSignedFile.mockRejectedValue(new DownloadFailure(500));
+    open({ hasAudio: true });
+
+    await userEvent.click(screen.getByRole("switch", { name: "Audio" }));
+    await userEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("never claims a partial success", async () => {
+    // The wording is gone because the behaviour is. There is no path on which
+    // some of a selection is delivered, so there is nothing to count.
     fetchExportFile
       .mockResolvedValueOnce(document_("sprint-planning.txt"))
       .mockRejectedValueOnce(new DownloadFailure(500));
@@ -698,24 +874,25 @@ describe("ExportDialog when it fails", () => {
     await userEvent.click(screen.getByRole("button", { name: "Export" }));
 
     await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(toastSuccess).not.toHaveBeenCalled();
+    expect(screen.queryByText(/of 2 downloaded/)).toBeNull();
     // Closing is how this dialog says "done", so it must not close.
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
-    // And it says plainly how much arrived, because somebody who only read the
-    // error will assume none of it did.
-    expect(toastSuccess).toHaveBeenCalledWith("1 of 2 downloaded.");
   });
 
-  it("leaves the failure on screen after the toast has gone", async () => {
+  it("says plainly that nothing was downloaded", async () => {
     // A toast lasts five seconds and takes the only record of which part failed
-    // with it.
+    // with it. The banner also has to answer the question the old wording left
+    // open -- did some of it work?
     fetchExportFile.mockRejectedValue(new DownloadFailure(500));
     open();
 
     await userEvent.click(screen.getByRole("button", { name: "Export" }));
 
-    await waitFor(() =>
-      expect(screen.getByRole("alert")).toHaveTextContent("Couldn't export the summary."),
-    );
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Couldn't export the summary.");
+    expect(alert).toHaveTextContent(/nothing was downloaded/i);
+    expect(alert).not.toHaveTextContent(/nothing else was affected/i);
   });
 
   it("stays open so the choice is not lost", async () => {
@@ -737,12 +914,18 @@ describe("ExportDialog when it fails", () => {
     await userEvent.click(screen.getByRole("button", { name: "Export" }));
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
 
-    fetchExportFile.mockResolvedValue(document_("sprint-planning.txt"));
+    fetchExportFile
+      .mockResolvedValueOnce(document_("sprint-planning.pdf"))
+      .mockResolvedValueOnce(document_("sprint-planning.txt"));
     await userEvent.click(screen.getByRole("button", { name: "Export" }));
 
-    // Still two documents: the tickboxes survived the failure.
-    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
-    expect(fetchExportFile.mock.calls.filter((c) => (c[2] as { transcript?: boolean }).transcript))
-      .toHaveLength(2);
+    // Both tickboxes survived the failure, so the retry produces the whole
+    // archive rather than whatever was left selected.
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(await archiveEntries(save.mock.calls[0][0] as Blob)).toEqual([
+      "sprint-planning-summary.pdf",
+      "sprint-planning-transcript.txt",
+    ]);
   });
 });

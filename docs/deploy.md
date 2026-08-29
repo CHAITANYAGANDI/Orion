@@ -341,6 +341,46 @@ Create a bucket named `orion` and an API token with object read/write.
   and a read-only token turns that into a conversion that runs, succeeds, and
   fails on the very last step, every time.
 
+### The bucket must allow the app's origin to GET
+
+**Required, or MP3 export silently produces nothing.** The browser now fetches
+the converted recording straight from R2 with a presigned URL, so that it can go
+into the same archive as the summary and the transcript. That is a cross-origin
+request from the Vercel app to `*.r2.cloudflarestorage.com`, and without a CORS
+rule the browser refuses it before it is sent — the API sees nothing, R2 sees
+nothing, and the only evidence is a console message.
+
+It is deliberately not proxied through Spring: an hour of audio through a
+request thread is a denial-of-service tool with a login.
+
+In the Cloudflare dashboard, **R2 → `orion` → Settings → CORS policy**:
+
+```json
+[
+  {
+    "AllowedOrigins": ["https://your-app.vercel.app"],
+    "AllowedMethods": ["GET"],
+    "AllowedHeaders": [],
+    "ExposeHeaders": ["Content-Length", "Content-Type"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+- **`AllowedOrigins`** is the frontend's origin — the same value as
+  `APP_FRONTEND_URL` on `orion-backend`. Add the preview origin too if MP3
+  export is tested from one.
+- **`AllowedHeaders` is empty on purpose.** The request carries no headers at
+  all: the credential is the signature in the URL, and adding `Authorization`
+  would both fall outside the signature and turn a simple GET into a preflighted
+  one. Empty keeps it simple, which means no `OPTIONS` round trip per download.
+- **`GET` only.** Uploads are presigned PUTs performed by the browser too, and
+  if that ever needs a rule it is a separate one; nothing here needs write.
+
+Nothing else in Orion depends on this. Document exports come from the API, and
+the audio player uses a presigned URL as an element `src`, which is not a
+`fetch` and is not subject to CORS.
+
 > **Historical only.** The bucket was called `recallix` before the rename and
 > its API token was scoped to that name. It is not the deployment bucket and
 > nothing reads it. Buckets cannot be renamed in place, so `orion` was created

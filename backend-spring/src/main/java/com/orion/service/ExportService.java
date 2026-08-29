@@ -23,6 +23,8 @@ import com.orion.repository.MeetingActionItemRepository;
 import com.orion.repository.MeetingRepository;
 import com.orion.repository.MeetingSummaryRepository;
 import com.orion.repository.TranscriptSegmentRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -62,6 +64,8 @@ import java.util.stream.Collectors;
  */
 @Service
 public class ExportService {
+
+    private static final Logger log = LoggerFactory.getLogger(ExportService.class);
 
     private final MeetingRepository meetings;
     private final MeetingSummaryRepository summaries;
@@ -200,7 +204,20 @@ public class ExportService {
      */
     public AudioExportResponse audioAsMp3(String userId, String meetingId) {
         Meeting meeting = meetings.findByIdAndUserId(meetingId, userId)
-                .orElseThrow(() -> ApiException.notFound("Meeting not found"));
+                .orElseThrow(() -> {
+                    // Logged, and only here, because this is the one 404 in the
+                    // export paths that has been hard to tell apart from a
+                    // deployment problem. "Meeting not found" is written by this
+                    // line and nowhere else; a request that reached a build with
+                    // no /audio/mp3 route gets "Not found" from
+                    // GlobalExceptionHandler instead, and one with no session
+                    // gets "Authentication required". So the presence or absence
+                    // of this line in the log settles which of the three
+                    // happened, without anyone having to reason about it.
+                    log.warn("MP3 export: meeting {} is not the caller's, or does not exist.",
+                            meetingId);
+                    return ApiException.notFound("Meeting not found");
+                });
 
         if (meeting.getSourceType() == SourceType.DOCUMENT) {
             throw ApiException.badRequest("This meeting was imported from a document, so there is no recording.");
