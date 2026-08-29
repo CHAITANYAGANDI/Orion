@@ -1,5 +1,28 @@
 # Env / secrets
+#
+# Real environment files hold live credentials -- the Clerk secret key, the Neon
+# password, R2 access keys, the Confluent API secret. None of them belong in a
+# repository, and this one is public.
+#
+# `.env.*` rather than a list of names. The variants multiply -- .env.production,
+# .env.staging, .env.development, .env.production.local, and whatever the next
+# tool decides to read -- and a list only protects the ones somebody thought of
+# in advance. Ignore the shape instead, then carve the templates back out.
+#
+# No leading slash on any of these, so they match at every depth: frontend/.env
+# is covered by the same rule as the root one.
 .env
+.env.*
+
+# ...except templates, which carry key NAMES and no values, and are the only
+# documentation of what a deployment actually needs.
+#
+# Order is load-bearing. Git applies the last matching pattern, so these
+# negations have to follow the `.env.*` above -- moved before it, they do
+# nothing and the templates silently vanish from the repository.
+!.env.example
+!.env.*.example
+
 *.local
 
 # Node / Next.js

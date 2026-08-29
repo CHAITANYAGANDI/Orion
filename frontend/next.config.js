@@ -11,11 +11,6 @@ const nextConfig = {
    * for anybody else.
    */
   poweredByHeader: false,
-  eslint: {
-    // Do not fail the production build on lint errors (demo-friendly).
-    ignoreDuringBuilds: true,
-  },
-
   /**
    * Folders used to live at /projects.
    *
