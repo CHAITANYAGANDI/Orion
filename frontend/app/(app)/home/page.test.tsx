@@ -23,27 +23,91 @@ import type { MeetingResponse, MeetingListQuery, Page } from "@/lib/types";
  * that is invisible in development.
  */
 const query = vi.hoisted(() => ({ last: null as MeetingListQuery | null }));
+/** The retry button is wired to this. */
+const refetch = vi.hoisted(() => vi.fn());
+
 let rows: MeetingResponse[];
 let loading: boolean;
 /** How many meetings exist at all, filed or not. Only the empty states ask. */
 let workspaceTotal: number;
 
+/* ---------------------------------------------------------------------------
+ * The states the old mock could not express.
+ *
+ * It returned `{ data, isLoading }` and nothing else, which is exactly the
+ * subset of RTK Query the page used -- so the mock agreed with the bug. A
+ * failed request and an empty one were indistinguishable to both, and no test
+ * could tell them apart either.
+ * ------------------------------------------------------------------------ */
+
+/** A refetch is in flight over whatever is cached. */
+let fetching: boolean;
+/** The request settled as rejected. */
+let errored: boolean;
+/** Nothing usable is cached -- `data` is undefined, not an empty page. */
+let noData: boolean;
+/** The one-row probe behind the empty states failed. */
+let probeErrored: boolean;
+
 function aPage(content: MeetingResponse[], total = content.length): Page<MeetingResponse> {
   return { content, page: 0, size: 50, totalElements: total, totalPages: 1 };
 }
 
+/** An RTK Query result with every flag the page reads, kept mutually consistent. */
+function result<T>(data: T | undefined, opts: {
+  isLoading?: boolean;
+  isFetching?: boolean;
+  isError?: boolean;
+} = {}) {
+  const isLoading = opts.isLoading ?? false;
+  const isFetching = opts.isFetching ?? isLoading;
+  const isError = opts.isError ?? false;
+  return {
+    data,
+    isLoading,
+    isFetching,
+    isError,
+    // RTK sets exactly one of these. Success means settled and not rejected --
+    // note it stays true during a background refetch that has stale data, which
+    // is why `isFetching` has to be read separately.
+    isSuccess: !isLoading && !isError && data !== undefined,
+    isUninitialized: false,
+    error: isError ? { status: 500, data: { message: "boom" } } : undefined,
+    refetch,
+  };
+}
+
 vi.mock("@/lib/api", () => ({
   useGetMeetingsQuery: (q: MeetingListQuery, options?: { skip?: boolean }) => {
-    if (options?.skip) return { data: undefined, isLoading: false, isUninitialized: true };
+    if (options?.skip) {
+      return {
+        data: undefined,
+        isLoading: false,
+        isFetching: false,
+        isError: false,
+        isSuccess: false,
+        isUninitialized: true,
+        error: undefined,
+        refetch,
+      };
+    }
     // The one-row probe behind the empty state: is anything filed elsewhere, or
     // is this account new? It asks for a count, not for rows.
-    if (q.size === 1) return { data: aPage([], workspaceTotal), isLoading: false };
+    if (q.size === 1) {
+      if (probeErrored) return result<Page<MeetingResponse>>(undefined, { isError: true });
+      return result(aPage([], workspaceTotal));
+    }
 
     query.last = q;
     // Filtering happens in the query, so the mock returns what it was asked
     // for. Asserting on the request is the point: a client-side filter would
     // pass a test that fed it both kinds of row and hid one.
-    return { data: loading ? undefined : aPage(rows), isLoading: loading };
+    if (loading) return result<Page<MeetingResponse>>(undefined, { isLoading: true });
+    // An error keeps whatever was cached -- RTK does not throw the last good
+    // page away -- so `noData` is what separates "failed with nothing" from
+    // "failed over meetings already on screen".
+    const data = noData ? undefined : aPage(rows);
+    return result(data, { isFetching: fetching, isError: errored });
   },
 }));
 
@@ -90,7 +154,12 @@ async function choose(label: string) {
 
 beforeEach(() => {
   query.last = null;
+  refetch.mockClear();
   loading = false;
+  fetching = false;
+  errored = false;
+  noData = false;
+  probeErrored = false;
   rows = [aMeeting()];
   workspaceTotal = rows.length;
   // The filters outlive a page now, so without this they would outlive a test
@@ -481,6 +550,169 @@ describe("the scope Home opens on", () => {
     render(<HomePage />);
 
     expect(screen.queryByText("Everything is in a folder")).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Never tell somebody their archive is empty because a request failed.
+ *
+ * <h2>The bug</h2>
+ *
+ * <p>Home showed "No conversations — Record / Import" to accounts with hundreds
+ * of meetings, over a picker still reading "All Conversations" and "Any time".
+ *
+ * <p>It decided with `groupByDay(data?.content ?? [])` and
+ * `groups.length === 0`, guarded only by `isLoading`. The `?? []` is the whole
+ * fault: it reads *no answer* as *the answer is none*. A failed request, a
+ * refetch in flight, and a genuinely empty workspace all became the same screen
+ * — and `isLoading` does not cover the first two, because it is true only for
+ * the very first load of a cache entry. A refetch sets `isFetching`; an error
+ * sets neither.
+ *
+ * <p>The rule these pin: the empty screen is a *claim about the account*, and
+ * only a settled, successful, genuinely empty response is allowed to make it.
+ */
+describe("what Home shows when the request does not simply succeed", () => {
+  const EMPTY = "No conversations";
+  const LOAD_ERROR = /couldn.t load your conversations/i;
+
+  it("does not claim an empty account when the request failed and left no data", () => {
+    // The production symptom, at its root: data undefined, isLoading false.
+    errored = true;
+    noData = true;
+
+    render(<HomePage />);
+
+    expect(screen.queryByText(EMPTY)).not.toBeInTheDocument();
+    expect(screen.getByText(LOAD_ERROR)).toBeInTheDocument();
+  });
+
+  it("offers a retry on a failed request, wired to refetch", async () => {
+    errored = true;
+    noData = true;
+
+    render(<HomePage />);
+    await userEvent.click(screen.getByRole("button", { name: /try again/i }));
+
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("announces the failure to assistive technology", () => {
+    errored = true;
+    noData = true;
+
+    render(<HomePage />);
+
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+  });
+
+  it("keeps backend detail off the screen", () => {
+    // The mock's error carries `status: 500` and `message: "boom"`. Neither is
+    // any use to a reader, and both describe the shape of the backend on a page
+    // anybody signed in can reach.
+    errored = true;
+    noData = true;
+
+    render(<HomePage />);
+
+    expect(screen.queryByText(/500/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/boom/i)).not.toBeInTheDocument();
+  });
+
+  it("does not claim an empty account when there is simply no data yet", () => {
+    /*
+     * The exact `?? []` bug, with no error to mask it. Every other test here
+     * that has no data also has an error, and the error branch answers first --
+     * so mutating the rule to treat undefined as empty left all of them passing.
+     * Measured, not assumed. See lib/home-list-state.test.ts.
+     */
+    noData = true;
+
+    render(<HomePage />);
+
+    expect(screen.queryByText(EMPTY)).not.toBeInTheDocument();
+  });
+
+  it("shows the skeleton before the first response, not an empty message", () => {
+    loading = true;
+
+    const { container } = render(<HomePage />);
+
+    expect(screen.queryByText(EMPTY)).not.toBeInTheDocument();
+    expect(screen.queryByText(LOAD_ERROR)).not.toBeInTheDocument();
+    expect(container.querySelectorAll(".animate-pulse").length).toBeGreaterThan(0);
+  });
+
+  it("does not confirm an empty account while a refetch over an empty page is in flight", () => {
+    // The cached page says zero, but a request that may replace it is running.
+    // Announcing an empty account now is a guess that is about to be checked.
+    rows = [];
+    workspaceTotal = 0;
+    fetching = true;
+
+    render(<HomePage />);
+
+    expect(screen.queryByText(EMPTY)).not.toBeInTheDocument();
+  });
+
+  it("keeps meetings on screen during a background refetch", () => {
+    // Replacing a list somebody is reading with a skeleton, because a refresh
+    // they did not ask for is running, is the other half of this bug.
+    rows = [aMeeting({ id: "mtg_keep", title: "Still here" })];
+    fetching = true;
+
+    render(<HomePage />);
+
+    expect(screen.getByText("Still here")).toBeInTheDocument();
+  });
+
+  it("keeps meetings on screen when a background refetch fails", () => {
+    // Known-good rows beat a failed refresh. Throwing away the good copy
+    // because the new one did not arrive is strictly worse than showing it.
+    rows = [aMeeting({ id: "mtg_keep", title: "Still here" })];
+    errored = true;
+
+    render(<HomePage />);
+
+    expect(screen.getByText("Still here")).toBeInTheDocument();
+    expect(screen.queryByText(LOAD_ERROR)).not.toBeInTheDocument();
+    expect(screen.queryByText(EMPTY)).not.toBeInTheDocument();
+  });
+
+  it("allows the empty screen once the request settles successfully with nothing", () => {
+    // The fix must not make the empty state unreachable -- that would trade a
+    // false negative for a permanent skeleton on a genuinely new account.
+    rows = [];
+    workspaceTotal = 0;
+
+    render(<HomePage />);
+
+    expect(screen.getByText(EMPTY)).toBeInTheDocument();
+  });
+
+  it("shows meetings on a successful non-empty response", () => {
+    rows = [aMeeting({ id: "mtg_a", title: "Tuesday design review" })];
+
+    render(<HomePage />);
+
+    expect(screen.getByText("Tuesday design review")).toBeInTheDocument();
+    expect(screen.queryByText(EMPTY)).not.toBeInTheDocument();
+  });
+
+  it("does not treat a failed folder probe as proof the account is empty", async () => {
+    /*
+     * The same rule, one layer down. The probe answers "is anything filed
+     * elsewhere?", and reading a failed probe as zero produces the
+     * first-recording screen for somebody whose meetings are all in folders.
+     */
+    rows = [];
+    probeErrored = true;
+
+    render(<HomePage />);
+    await choose("Recent Conversations");
+
+    expect(screen.queryByText(EMPTY)).not.toBeInTheDocument();
+    expect(screen.getByText("Nothing outside your folders")).toBeInTheDocument();
   });
 });
 

@@ -29,6 +29,7 @@ import {
   Upload,
   Mic,
   CalendarDays,
+  RotateCw,
 } from "lucide-react";
 import { useGetMeetingsQuery } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -49,6 +50,7 @@ import { HomeChatPanel } from "@/components/home-chat-panel";
 import { SidePane } from "@/components/side-pane";
 import { formatDuration, isTerminal } from "@/lib/format";
 import { groupByDay } from "@/lib/days";
+import { homeListState } from "@/lib/home-list-state";
 import type { MeetingResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { recordHref } from "@/lib/routes";
@@ -199,7 +201,7 @@ export default function HomePage() {
   // happened to be outside one, and would look right until somebody had more
   // than fifty meetings. The scope used to be applied here, over the page,
   // which is half of why it did nothing.
-  const { data, isLoading } = useGetMeetingsQuery(
+  const meetings = useGetMeetingsQuery(
     {
       page: 0,
       size: 50,
@@ -233,6 +235,26 @@ export default function HomePage() {
   // is a new value on every render, which would make the grouping below rerun
   // — and `new Date()` inside it produce different day boundaries — on renders
   // that have nothing to do with the data changing.
+  const { data } = meetings;
+
+  /*
+   * Four states, decided in one place -- see lib/home-list-state.ts.
+   *
+   * `count` is `null` when there is no page cached, NOT 0. That distinction is
+   * the bug: `data?.content ?? []` read "no answer yet" as "the answer is
+   * none", so a failed request told people with hundreds of meetings that they
+   * had none.
+   */
+  const listState = homeListState({
+    restored,
+    isUninitialized: meetings.isUninitialized,
+    isLoading: meetings.isLoading,
+    isFetching: meetings.isFetching,
+    isError: meetings.isError,
+    isSuccess: meetings.isSuccess,
+    count: data ? data.content.length : null,
+  });
+
   const groups = React.useMemo(() => groupByDay(data?.content ?? []), [data]);
 
   return (
@@ -255,16 +277,15 @@ export default function HomePage() {
             <ScopePicker value={scope} onChange={setScope} />
           </div>
 
-          {/* `!restored` too: until the remembered filters are back the query
-              has not been asked, so `isLoading` is false over a list that does
-              not exist yet. Without it the empty state flashes on every visit. */}
-          {isLoading || !restored ? (
+          {listState === "skeleton" ? (
             <div className="space-y-3">
               {Array.from({ length: 4 }).map((_, i) => (
                 <Skeleton key={i} className="h-24 w-full" />
               ))}
             </div>
-          ) : groups.length === 0 ? (
+          ) : listState === "error" ? (
+            <HomeLoadError onRetry={() => void meetings.refetch()} />
+          ) : listState === "empty" ? (
             <EmptyState
               scope={scope}
               when={when}
@@ -482,6 +503,41 @@ function ConversationRow({ meeting }: { meeting: MeetingResponse }) {
 }
 
 /**
+ * The list could not be fetched, and we are not going to pretend otherwise.
+ *
+ * <p>This is the screen that was missing. Without it a failed request fell
+ * through to "No conversations — Record / Import", which tells somebody with a
+ * full archive that it is empty and offers to help them start their first
+ * meeting. The two readings are opposites and only one of them is recoverable
+ * by waiting.
+ *
+ * <p>No status code, no message from the server, no URL. The cause is in the
+ * network tab for whoever wants it; on the page it would be noise at best, and
+ * at worst it leaks the shape of the backend to a screen anybody can reach.
+ *
+ * <p>`role="alert"` because this replaces content the reader was waiting for --
+ * somebody who has already moved on would otherwise never learn it did not
+ * arrive.
+ */
+function HomeLoadError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div
+      role="alert"
+      className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center"
+    >
+      <RotateCw className="h-8 w-8 text-muted-foreground" />
+      <p className="mt-3 font-medium">Couldn&apos;t load your conversations</p>
+      <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+        Your conversations are still here. Something went wrong fetching them.
+      </p>
+      <Button variant="outline" className="mt-4" onClick={onRetry}>
+        Try again
+      </Button>
+    </div>
+  );
+}
+
+/**
  * Nothing to show, and why.
  *
  * <p>A filter that empties the list has to say so, and offer the way back.
@@ -529,7 +585,18 @@ function EmptyState({
     { page: 0, size: 1 },
     { skip: scope !== "recent" || filtered },
   );
-  const filedElsewhere = (workspace.data?.totalElements ?? 0) > 0;
+  /*
+   * The same truthfulness rule as the main list, on the probe behind it.
+   *
+   * `workspace.data?.totalElements ?? 0` would read a FAILED probe as "the
+   * workspace contains zero meetings" -- which is the screen that says the
+   * account is empty and offers a first recording. A request that never
+   * answered proves nothing, so `null` is kept distinct from `0` here too.
+   */
+  const total = workspace.isSuccess ? workspace.data?.totalElements ?? 0 : null;
+  const filedElsewhere = total !== null && total > 0;
+  /** The probe was asked and did not answer, so neither screen below is known. */
+  const probeUnresolved = scope === "recent" && !filtered && !workspace.isSuccess;
 
   if (filtered) {
     return (
@@ -554,7 +621,30 @@ function EmptyState({
   // Nothing rather than a guess, for the moment between the two answers. It is
   // one row over a warm connection, and a sentence that turns out to be wrong
   // is worse than a blank half-second.
-  if (scope === "recent" && workspace.isLoading) return null;
+  if (scope === "recent" && (workspace.isLoading || workspace.isFetching)) return null;
+
+  /*
+   * The probe failed. Both screens below make a claim it was supposed to
+   * settle -- "everything is filed" or "you have nothing" -- and neither is
+   * known now, so this says only what is certainly true: this list is empty,
+   * and the wider list is one click away. It never tells somebody their
+   * account is empty on the strength of a request that failed.
+   */
+  if (probeUnresolved) {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center">
+        <FolderOpen className="h-8 w-8 text-muted-foreground" />
+        <p className="mt-3 font-medium">Nothing outside your folders</p>
+        <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+          This list leaves out anything filed into a folder. Your other
+          conversations may be in one.
+        </p>
+        <Button variant="outline" className="mt-4" onClick={onShowAll}>
+          Show all conversations
+        </Button>
+      </div>
+    );
+  }
 
   /*
    * `scope === "recent"` as well as the count, though the probe above is
