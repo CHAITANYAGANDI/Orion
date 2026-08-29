@@ -51,6 +51,54 @@ export function ProcessingDock() {
 }
 
 /**
+ * Everything the AI result callback writes, expressed as cache tags.
+ *
+ * <h2>The bug</h2>
+ *
+ * <p>This used to invalidate `Meeting` and `Meetings` and stop there. Those two
+ * are what the *status* lives in, so the badge flipped to Ready and Home
+ * stopped saying "Processing" -- and the page behind it still showed no
+ * summary, no transcript and no action items until you refreshed or switched
+ * tabs and back.
+ *
+ * <p>Which made it look like the backend had not finished. It had. The callback
+ * writes the transcript, the summary, the action items and the insights in the
+ * same transaction that sets READY; only this list had not kept up with it, so
+ * RTK Query went on serving the empty results it had cached while the meeting
+ * was still processing. Switching tabs "fixed" it because remounting refetches.
+ *
+ * <h2>Why a named list</h2>
+ *
+ * <p>Because the next person to add something to that callback has to find
+ * this. Inline in the dispatch it reads as plumbing; here it reads as the
+ * answer to "what does finishing a meeting change?", which is the question
+ * being asked.
+ *
+ * <p>Tag shapes are matched to the `providesTags` in lib/api.ts and are not
+ * interchangeable -- `ActionItems` is a single `LIST` (the list is queried
+ * across meetings and filtered by id, so there is no per-meeting tag to
+ * invalidate) and `Usage` is `ME`, while the rest are keyed by meeting id.
+ * Getting one wrong fails silently, in the direction of stale data.
+ */
+export function completedMeetingTags(meetingId: string) {
+  return [
+    // Status, duration, title -- the meeting row and its header.
+    { type: "Meeting" as const, id: meetingId },
+    { type: "Meetings" as const, id: "LIST" },
+    // The three the user actually came for.
+    { type: "Transcript" as const, id: meetingId },
+    { type: "Summary" as const, id: meetingId },
+    { type: "ActionItems" as const, id: "LIST" },
+    // Written by the same callback, and read by panels on the same page.
+    { type: "Insights" as const, id: meetingId },
+    { type: "Moments" as const, id: meetingId },
+    // Transcribed minutes are charged when the job completes, so the allowance
+    // in the sidebar is stale from this moment until something refetches it.
+    { type: "Usage" as const, id: "ME" },
+  ];
+}
+
+/**
  * One meeting being followed to its end.
  *
  * <p>A component per job rather than a loop inside one, because each needs its
@@ -111,7 +159,7 @@ function JobWatcher({ meetingId }: { meetingId: string }) {
   React.useEffect(() => {
     if (!done || settled.current) return;
     settled.current = true;
-    dispatch(api.util.invalidateTags([{ type: "Meeting", id: meetingId }, "Meetings"]));
+    dispatch(api.util.invalidateTags(completedMeetingTags(meetingId)));
     // Untracked either way. A finished meeting is not something to keep
     // polling, whether or not there was anything worth saying about it.
     untrackProcessing(meetingId);

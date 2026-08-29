@@ -1,4 +1,5 @@
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
+import type { FetchBaseQueryError } from "@reduxjs/toolkit/query";
 import { buildAuthHeaders } from "@/lib/auth-store";
 import type {
   ActionItemComment,
@@ -1195,3 +1196,33 @@ export const {
   useDeleteActionItemCommentMutation,
   useGetUsageQuery,
 } = api;
+
+
+/**
+ * Did the server actually say this does not exist?
+ *
+ * <h2>Why the distinction is worth a function</h2>
+ *
+ * <p>An RTK Query error is a union. A `FetchBaseQueryError` carries a numeric
+ * HTTP `status` when the server answered, and one of `FETCH_ERROR`,
+ * `PARSING_ERROR`, `TIMEOUT_ERROR` or `CUSTOM_ERROR` when it did not. Treating
+ * the whole union as "missing" is how a page comes to tell somebody their
+ * meeting does not exist because their wifi dropped, or because the token was
+ * not attached yet and the answer was 401.
+ *
+ * <p>That is not a cosmetic difference. "Not found" is final and invites you to
+ * give up and go back; a network blip or a 500 is temporary and wants a retry.
+ * Saying the first when you mean the second is the app lying about somebody's
+ * data being gone, and the response to it — closing the tab — is the one action
+ * that does not recover.
+ *
+ * <p>Only 404. Not 403: a meeting somebody else owns is deliberately answered
+ * as not-found by the API, so 403 arriving here would mean something else
+ * entirely and should not be flattened into the same screen.
+ */
+export function isNotFoundError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("status" in error)) {
+    return false;
+  }
+  return (error as FetchBaseQueryError).status === 404;
+}

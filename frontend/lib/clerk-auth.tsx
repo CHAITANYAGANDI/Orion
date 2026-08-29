@@ -5,7 +5,7 @@
 
 import * as React from "react";
 import { ClerkProvider, useAuth as useClerkAuth } from "@clerk/nextjs";
-import { authStore } from "@/lib/auth-store";
+import { setTokenGetter } from "@/lib/auth-store";
 import { clearPreferences } from "@/lib/preference-store";
 import type { AuthContextValue } from "@/lib/auth";
 
@@ -20,10 +20,21 @@ function ClerkBridge({
 }) {
   const { getToken, userId, sessionId, isSignedIn, isLoaded, signOut } = useClerkAuth();
 
+  /*
+   * Hand the token getter to the non-React store.
+   *
+   * This still runs in an effect, which means it still happens after the tree
+   * below has mounted -- that is React, and moving the assignment into render
+   * would be a side effect during render for no gain. What changed is that the
+   * assignment now *announces itself* (`setTokenGetter` rather than a bare
+   * write), and <AuthGate> holds the authenticated part of the app back until
+   * it has. So the ordering is unchanged and the race is gone: nothing that
+   * needs a token is mounted before the getter exists.
+   */
   React.useEffect(() => {
-    authStore.tokenGetter = () => getToken();
+    setTokenGetter(() => getToken());
     return () => {
-      authStore.tokenGetter = null;
+      setTokenGetter(null);
     };
   }, [getToken]);
 

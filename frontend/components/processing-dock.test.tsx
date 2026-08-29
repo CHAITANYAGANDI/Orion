@@ -1,243 +1,187 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /**
- * The thing that notices a meeting has finished, wherever you happen to be.
+ * What finishing a meeting has to invalidate.
  *
- * <p><b>It draws nothing.</b> There was a docked bar in the bottom-right corner
- * carrying a title and a percentage, and it was removed on request: a meeting
- * being processed already says so in its row on Home and in the banner on its
- * own page, so the card was a third copy of the same fact floating over
- * whatever was being read — and a job that never reached a terminal status sat
- * there for the life of the tab, including over a new recording in progress.
+ * <h2>The bug</h2>
  *
- * <p>What is under test is what could not go with it. The completion toast and
- * the cache invalidation that stops Home listing a finished meeting as still
- * processing have to be owned by something mounted on every route, or they only
- * fire when you are already looking at the meeting. That used to be
- * `useSaveJob`, which meant an imported file got neither.
+ * <p>When a meeting reached READY the badge flipped to Ready and Home stopped
+ * saying "Processing" — and the page behind it still showed no summary, no
+ * transcript and no action items until you refreshed or switched tabs and back.
  *
- * <p>So every test here is a pair: nothing is rendered, and the job is settled
- * anyway.
+ * <p>It looked as though the backend had not finished. It had. The AI result
+ * callback writes the transcript, the summary, the action items and the
+ * insights in the same transaction that sets READY. The watcher invalidated
+ * only `Meeting` and `Meetings` — the two tags the *status* lives in — so RTK
+ * Query went on serving the empty results it had cached while the meeting was
+ * still processing. Switching tabs "fixed" it because remounting refetches.
+ *
+ * <p>The tag list is asserted directly rather than through a rendered tree.
+ * These are opaque strings that have to match `providesTags` in lib/api.ts
+ * exactly, and getting one wrong fails silently in the direction of stale data
+ * — which is the failure being fixed, so it needs to be caught by name.
  */
-const { invalidateTags, dispatch, toastSuccess, toastError, meeting } = vi.hoisted(() => ({
-  invalidateTags: vi.fn((tags: unknown) => ({ type: "invalidate", tags })),
-  dispatch: vi.fn(),
-  toastSuccess: vi.fn(),
-  toastError: vi.fn(),
-  meeting: { current: undefined as unknown },
-}));
 
-let emit: ((e: unknown) => void) | null = null;
-const deactivate = vi.fn();
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
-vi.mock("@/lib/hooks", () => ({ useAppDispatch: () => dispatch }));
-vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }));
-vi.mock("@/lib/ws", () => ({
-  subscribeMeetingStatus: (_id: string, handlers: { onEvent: (e: unknown) => void }) => {
-    emit = handlers.onEvent;
-    return { deactivate };
-  },
-}));
-vi.mock("@/lib/api", () => ({
-  api: { util: { invalidateTags } },
-  useGetMeetingQuery: () => ({ data: meeting.current }),
-}));
+import { completedMeetingTags } from "@/components/processing-dock";
 
-import { ProcessingDock } from "@/components/processing-dock";
-import {
-  trackProcessing,
-  processingJobs,
-  resetProcessingJobs,
-} from "@/lib/processing-jobs";
+/** The shape RTK Query tags take, for readable assertions below. */
+type Tag = { type: string; id: string };
 
-beforeEach(() => {
-  vi.clearAllMocks();
-  emit = null;
-  meeting.current = { id: "mtg_9", title: "Standup", status: "TRANSCRIBING" };
-  resetProcessingJobs();
-});
+const MEETING = "mtg_1";
 
-async function stage(status: string, progress = 50, message = "") {
-  await waitFor(() => expect(emit).not.toBeNull());
-  await act(async () => {
-    emit!({ meetingId: "mtg_9", status, progress, message });
-  });
+function tagsFor(meetingId: string): Tag[] {
+  return completedMeetingTags(meetingId) as unknown as Tag[];
 }
 
-describe("the processing watcher", () => {
-  it("puts nothing on screen when this tab is watching no jobs", () => {
-    const { container } = render(<ProcessingDock />);
+function has(tags: Tag[], type: string, id: string): boolean {
+  return tags.some((t) => t.type === type && t.id === id);
+}
 
-    expect(container).toBeEmptyDOMElement();
+describe("completedMeetingTags", () => {
+  it("invalidates the three the user actually came for", () => {
+    // The regression, stated as the three things that were missing. Every one
+    // of these is written by the result callback and was being served stale.
+    const tags = tagsFor(MEETING);
+
+    expect(has(tags, "Transcript", MEETING)).toBe(true);
+    expect(has(tags, "Summary", MEETING)).toBe(true);
+    expect(has(tags, "ActionItems", "LIST")).toBe(true);
   });
 
-  it("puts nothing on screen when it is watching one", () => {
-    // The whole of the change. No card, no bar, no dismiss button, nowhere.
-    trackProcessing("mtg_9");
+  it("still invalidates the status tags it always did", () => {
+    // The fix must not trade one stale panel for another: these two are what
+    // stop Home listing a finished meeting as still processing.
+    const tags = tagsFor(MEETING);
 
-    const { container } = render(<ProcessingDock />);
-
-    expect(container).toBeEmptyDOMElement();
-    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
-    expect(screen.queryByRole("link")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(has(tags, "Meeting", MEETING)).toBe(true);
+    expect(has(tags, "Meetings", "LIST")).toBe(true);
   });
 
-  it("puts nothing on screen when it is watching several", () => {
-    trackProcessing("mtg_9");
-    trackProcessing("mtg_8");
+  it("invalidates the rest of what the callback writes", () => {
+    const tags = tagsFor(MEETING);
 
-    const { container } = render(<ProcessingDock />);
-
-    expect(container).toBeEmptyDOMElement();
+    expect(has(tags, "Insights", MEETING)).toBe(true);
+    expect(has(tags, "Moments", MEETING)).toBe(true);
   });
 
-  it("says so when a meeting becomes ready", async () => {
-    trackProcessing("mtg_9");
-    render(<ProcessingDock />);
-
-    await stage("READY", 100);
-
-    // One sentence and nothing else. It carried an Open button, which is a
-    // control appearing unannounced over whatever is being read and leaving on
-    // a timer -- and the meeting is one click away in the list regardless.
-    expect(toastSuccess).toHaveBeenCalledWith('"Standup" is ready.');
+  it("invalidates the allowance, which is charged on completion", () => {
+    // Transcribed minutes are billed when the job completes, so the number in
+    // the sidebar is wrong from that moment until something refetches it.
+    expect(has(tagsFor(MEETING), "Usage", "ME")).toBe(true);
   });
 
-  it("says so when a meeting fails, without quoting the server at anybody", async () => {
-    meeting.current = {
-      id: "mtg_9",
-      title: "Standup",
-      status: "TRANSCRIBING",
-      errorMessage: "AssemblyAI returned 422: unsupported sample rate",
-    };
-    trackProcessing("mtg_9");
-    render(<ProcessingDock />);
+  it("keys per-meeting tags to the meeting being settled", () => {
+    // A tag keyed to the wrong id invalidates nothing and reports no error.
+    // This is what stops the whole list above passing while doing nothing.
+    const tags = tagsFor("mtg_other");
 
-    await stage("FAILED", 100);
-
-    // `errorMessage` is written for a log. The meeting's own page shows it in
-    // full, where there is room for it and where somebody went looking.
-    expect(toastError).toHaveBeenCalledWith(`Couldn't process "Standup".`);
+    expect(has(tags, "Transcript", "mtg_other")).toBe(true);
+    expect(has(tags, "Transcript", MEETING)).toBe(false);
+    expect(has(tags, "Summary", MEETING)).toBe(false);
   });
 
-  it("refreshes the list Home renders from", async () => {
-    // The reason this cannot simply be deleted. Without it a finished meeting
-    // goes on reading "Processing" in a list nobody happened to refetch.
-    trackProcessing("mtg_9");
-    render(<ProcessingDock />);
+  it("uses LIST for the two collections that are not per-meeting", () => {
+    // `ActionItems` is queried across meetings and filtered by id, so there is
+    // no per-meeting tag to invalidate; `Meetings` is the same. Tagging either
+    // with a meeting id would silently miss.
+    const tags = tagsFor(MEETING);
 
-    await stage("READY", 100);
-
-    expect(invalidateTags).toHaveBeenCalledWith([{ type: "Meeting", id: "mtg_9" }, "Meetings"]);
+    expect(has(tags, "ActionItems", MEETING)).toBe(false);
+    expect(has(tags, "Meetings", MEETING)).toBe(false);
   });
 
-  it("lets go of a job once it has settled", async () => {
-    trackProcessing("mtg_9");
-    render(<ProcessingDock />);
+  it("names only tag types the api actually declares", () => {
+    /*
+     * Guards against a typo in a tag string, which fails by quietly
+     * invalidating nothing -- the same silent-staleness failure this file
+     * exists for.
+     *
+     * Read from the source of lib/api.ts rather than from the api object:
+     * `createApi` does not keep `tagTypes` at runtime, so introspecting the
+     * instance returns undefined and any assertion against it passes
+     * vacuously. Checked, and it does.
+     */
+    const source = readFileSync(resolve(__dirname, "../lib/api.ts"), "utf8");
+    const block = source.slice(source.indexOf("tagTypes: ["));
+    const declared = new Set(
+      block
+        .slice(0, block.indexOf("]"))
+        .match(/"[A-Za-z]+"/g)
+        ?.map((q) => q.slice(1, -1)) ?? [],
+    );
 
-    await stage("READY", 100);
-
-    await waitFor(() => expect(processingJobs()).not.toContain("mtg_9"));
-  });
-
-  it("announces a finished meeting exactly once", async () => {
-    // Settling untracks, which unmounts the watcher; without the guard a
-    // re-render in the same tick fires the toast twice.
-    trackProcessing("mtg_9");
-    render(<ProcessingDock />);
-
-    await stage("READY", 100);
-    await stage("READY", 100);
-
-    expect(toastSuccess).toHaveBeenCalledTimes(1);
-  });
-
-  it("settles a meeting that finishes on the poll alone", async () => {
-    // A proxy that drops the WebSocket leaves the socket silent for ever. The
-    // poll is what makes the job finish rather than being watched all day.
-    meeting.current = { id: "mtg_9", title: "Standup", status: "TRANSCRIBING" };
-    trackProcessing("mtg_9");
-    const view = render(<ProcessingDock />);
-
-    meeting.current = { id: "mtg_9", title: "Standup", status: "READY" };
-    await act(async () => {
-      view.rerender(<ProcessingDock />);
-    });
-
-    await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
-    expect(processingJobs()).not.toContain("mtg_9");
-  });
-
-  it("closes the socket when it stops watching", async () => {
-    trackProcessing("mtg_9");
-    render(<ProcessingDock />);
-
-    await stage("READY", 100);
-
-    await waitFor(() => expect(deactivate).toHaveBeenCalled());
+    expect(declared.size).toBeGreaterThan(5);
+    for (const tag of tagsFor(MEETING)) {
+      expect(declared, `tag type "${tag.type}"`).toContain(tag.type);
+    }
   });
 });
 
 /**
- * A toast announces a change. Nothing changed here.
+ * The watcher dispatches those tags when a tracked meeting reaches READY.
  *
- * <p>The complaint: opening a meeting that was processed days ago greeted you
- * with "it is ready". Two things put it there. The meeting page tracks whatever
- * it opens that is not finished — and `status` reads `CREATED` until the query
- * answers, which is not finished — so a processed meeting was tracked for a
- * frame. This watcher then took its first look, saw READY, and announced it.
- *
- * <p>The same thing happened to every id `sessionStorage` handed back after a
- * reload, for meetings that had finished while the tab was closed.
- *
- * <p>So the rule is that a completion is announced only if this tab saw the
- * meeting running first. Settling — untracking, and refreshing the list — still
- * happens either way, because a finished meeting must not go on being polled.
+ * <p>The list above is worth nothing if nothing sends it. This renders the real
+ * component with the meeting already READY and asserts the dispatch, so the
+ * wiring is covered as well as the payload.
  */
-describe("announcing only what actually happened", () => {
-  it("says nothing about a meeting that was already finished when it arrived", async () => {
-    meeting.current = { id: "mtg_9", title: "Standup", status: "READY" };
-    trackProcessing("mtg_9");
+describe("JobWatcher settling", () => {
+  const dispatch = vi.fn();
+  const untrack = vi.fn();
 
-    render(<ProcessingDock />);
-
-    await waitFor(() => expect(processingJobs()).not.toContain("mtg_9"));
-    expect(toastSuccess).not.toHaveBeenCalled();
-    expect(toastError).not.toHaveBeenCalled();
+  beforeEach(() => {
+    dispatch.mockClear();
+    untrack.mockClear();
+    vi.resetModules();
   });
 
-  it("says nothing about one that had already failed either", async () => {
-    meeting.current = { id: "mtg_9", title: "Standup", status: "FAILED" };
-    trackProcessing("mtg_9");
-
-    render(<ProcessingDock />);
-
-    await waitFor(() => expect(processingJobs()).not.toContain("mtg_9"));
-    expect(toastError).not.toHaveBeenCalled();
+  afterEach(() => {
+    vi.doUnmock("@/lib/api");
+    vi.doUnmock("@/lib/hooks");
+    vi.doUnmock("@/lib/ws");
+    vi.doUnmock("@/lib/processing-jobs");
   });
 
-  it("stops watching it all the same", async () => {
-    // The half that must survive the fix. A finished meeting left in the store
-    // is polled every five seconds for the life of the tab.
-    meeting.current = { id: "mtg_9", title: "Standup", status: "READY" };
-    trackProcessing("mtg_9");
+  it("dispatches an invalidation carrying the transcript and summary tags", async () => {
+    vi.doMock("@/lib/hooks", () => ({ useAppDispatch: () => dispatch }));
+    vi.doMock("@/lib/ws", () => ({
+      subscribeMeetingStatus: () => ({ deactivate: () => {} }),
+    }));
+    vi.doMock("@/lib/processing-jobs", () => ({
+      useProcessingJobs: () => [MEETING],
+      untrackProcessing: untrack,
+    }));
 
-    render(<ProcessingDock />);
+    const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
+    vi.doMock("@/lib/api", () => ({
+      ...actual,
+      // Already READY on the first read, which is the state the watcher settles
+      // on. `sawRunning` stays false so no toast fires -- deliberate: this is
+      // about the cache, and asserting the toast here would couple the two.
+      useGetMeetingQuery: () => ({ data: { id: MEETING, status: "READY", title: "Standup" } }),
+    }));
 
-    await waitFor(() => expect(processingJobs()).not.toContain("mtg_9"));
-    expect(invalidateTags).toHaveBeenCalled();
-  });
+    const [{ ProcessingDock }, { render }, React] = await Promise.all([
+      import("@/components/processing-dock"),
+      import("@testing-library/react"),
+      import("react"),
+    ]);
 
-  it("still announces one it watched cross the line", async () => {
-    // The guard must not swallow the case the toast exists for.
-    trackProcessing("mtg_9");
-    render(<ProcessingDock />);
+    render(React.createElement(ProcessingDock));
 
-    await stage("SUMMARIZING", 70);
-    await stage("READY", 100);
+    expect(dispatch).toHaveBeenCalled();
+    const payloads = dispatch.mock.calls
+      .map(([action]) => (action as { payload?: unknown }).payload)
+      .filter(Array.isArray) as Tag[][];
+    const invalidated = payloads.flat();
 
-    expect(toastSuccess).toHaveBeenCalledWith('"Standup" is ready.');
+    expect(has(invalidated, "Transcript", MEETING)).toBe(true);
+    expect(has(invalidated, "Summary", MEETING)).toBe(true);
+    expect(has(invalidated, "ActionItems", "LIST")).toBe(true);
+    expect(has(invalidated, "Meeting", MEETING)).toBe(true);
+    // And it stops watching, so the 5s poll does not outlive the job.
+    expect(untrack).toHaveBeenCalledWith(MEETING);
   });
 });

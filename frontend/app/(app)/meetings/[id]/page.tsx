@@ -85,6 +85,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import { MeetingLoadError } from "@/components/meeting-load-error";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
@@ -649,16 +650,20 @@ export default function MeetingDetailPage() {
   }
 
   if (meeting.isLoading) return <Skeleton className="h-64 w-full" />;
-  if (meeting.isError || !meeting.data) {
-    return (
-      <div className="text-center">
-        <p className="text-lg font-medium">Meeting not found</p>
-        <Button className="mt-4" variant="outline" asChild>
-          <Link href={HOME}>Back to your conversations</Link>
-        </Button>
-      </div>
-    );
+  /*
+   * Two different failures, two different screens -- see MeetingLoadError.
+   * This used to be `isError || !data` and always said "Meeting not found",
+   * so a dropped connection told the user their meeting did not exist.
+   *
+   * `!meeting.data` is deliberately not part of this condition any more. With
+   * no error and no data the query is between states -- refetching after an
+   * invalidation, most often -- and the honest answer is the skeleton below,
+   * not a verdict.
+   */
+  if (meeting.isError) {
+    return <MeetingLoadError error={meeting.error} onRetry={() => void meeting.refetch()} />;
   }
+  if (!meeting.data) return <Skeleton className="h-64 w-full" />;
 
   const m = meeting.data;
   // A PDF was never spoken: no audio, no timeline, nothing to seek to.
