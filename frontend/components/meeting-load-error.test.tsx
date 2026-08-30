@@ -60,12 +60,12 @@ describe("MeetingLoadError", () => {
     expect(screen.getByText(LOAD_FAILED)).toBeInTheDocument();
   });
 
-  it("tells the user the meeting is still there", () => {
+  it("tells the user the meeting is still here", () => {
     // The specific correction. The old screen's whole problem was implying the
     // opposite, so it is worth asserting the words and not just the heading.
     renderError({ status: 500, data: {} });
 
-    expect(screen.getByText(/still there/i)).toBeInTheDocument();
+    expect(screen.getByText(/still here/i)).toBeInTheDocument();
   });
 
   it("offers a retry on a transient failure, and calls back when used", async () => {

@@ -61,7 +61,7 @@ export function MeetingLoadError({
     <div className="text-center" role="alert">
       <p className="text-lg font-medium">Couldn&apos;t load this meeting</p>
       <p className="mt-1 text-sm text-muted-foreground">
-        The meeting is still there. Something went wrong fetching it.
+        Your meeting is still here. Something went wrong loading it.
       </p>
       <div className="mt-4 flex items-center justify-center gap-2">
         <Button variant="default" onClick={onRetry}>

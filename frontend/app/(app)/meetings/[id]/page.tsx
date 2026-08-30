@@ -58,6 +58,7 @@ import {
   useRenameConversationMutation,
   useDeleteConversationMutation,
   useDeleteChatExchangeMutation,
+  isNotFoundError,
 } from "@/lib/api";
 import type {
   ChatMode,
@@ -80,12 +81,19 @@ import {
   ProcessingChatRail,
 } from "@/components/processing-placeholders";
 import { revealPlan } from "@/lib/processing-stages";
+import {
+  meetingPanels,
+  meetingHas,
+  meetingState,
+  type PanelState,
+} from "@/lib/meeting-panels";
 import { trackProcessing } from "@/lib/processing-jobs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MeetingLoadError } from "@/components/meeting-load-error";
+import { ResourceLoadError } from "@/components/resource-load-error";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
@@ -430,9 +438,26 @@ export default function MeetingDetailPage() {
   const summary = useGetSummaryQuery(id, { skip: failed });
   const transcript = useGetTranscriptQuery(id, { skip: failed });
   const actions = useGetMeetingActionItemsQuery(id, { skip: failed });
-  // What actually exists, which is what every placeholder below keys off.
-  const hasTranscript = (transcript.data?.segments?.length ?? 0) > 0;
-  const hasSummary = Boolean(summary.data);
+  /*
+   * What actually exists -- as three states, not two.
+   *
+   * `hasSummary = Boolean(summary.data)` was the bug behind two of the
+   * screenshots. `data` is undefined for four different reasons -- the request
+   * failed, it is still in flight, it was never asked, or the server really
+   * has nothing -- and only the last of them is "this meeting has no summary".
+   * Collapsing them to a boolean meant a 500 or a 401 on a *finished* meeting
+   * came out the far side as "No summary available.", which is a confident
+   * statement about somebody's data made on the strength of a request that
+   * never answered. The transcript beside it said "Transcript unavailable." for
+   * exactly the same reason.
+   *
+   * There is deliberately no `??` and no `Boolean()` on these three anywhere in
+   * this file. Both are how the distinction gets lost, and both are easy to
+   * write back in without noticing; lib/meeting-panels holds the mapping, and
+   * its tests hold the argument list.
+   */
+  const queries = { summary, transcript, actions };
+  const { hasTranscript, hasSummary } = meetingHas(queries);
   /** Still being made. Distinct from `failed`, which has its own screen. */
   const processing = !terminal;
   /*
@@ -449,6 +474,19 @@ export default function MeetingDetailPage() {
     hasTranscript,
     hasSummary,
   });
+  /*
+   * The two questions, composed -- see lib/meeting-panels.
+   *
+   * `view` answers "is the meeting finished"; these answer "and did the request
+   * succeed", which the page never used to ask. Both are needed: a summary that
+   * has not been written yet is not a summary that failed to load, and a
+   * summary that failed to load is not a summary that does not exist.
+   */
+  const {
+    summary: summaryState,
+    transcript: transcriptState,
+    actionItems: actionsState,
+  } = meetingPanels(queries, view);
   // The tab counts what is left, not what was found. "Action items 6" beside a
   // list where five are ticked off reads as six things to do.
   const openActions = (actions.data ?? []).filter((a) => a.status !== "DONE").length;
@@ -649,20 +687,41 @@ export default function MeetingDetailPage() {
     }
   }
 
-  if (meeting.isLoading) return <Skeleton className="h-64 w-full" />;
   /*
-   * Two different failures, two different screens -- see MeetingLoadError.
-   * This used to be `isError || !data` and always said "Meeting not found",
-   * so a dropped connection told the user their meeting did not exist.
+   * Four outcomes, decided in one place -- see `meetingState` in
+   * lib/meeting-panels, where the matrix is asserted.
    *
-   * `!meeting.data` is deliberately not part of this condition any more. With
-   * no error and no data the query is between states -- refetching after an
-   * invalidation, most often -- and the honest answer is the skeleton below,
-   * not a verdict.
+   * This was `isLoading` -> skeleton, `isError` -> error screen, and the second
+   * half is what made an open meeting vanish. RTK Query sets `isError` on a
+   * *refetch* that fails while keeping the last good `data`, and this page
+   * refetches constantly -- an invalidation after a rename, a socket event, a
+   * tab regaining focus. So a blip during any of those replaced a meeting
+   * somebody was reading with an error card about it, when the meeting was
+   * still right there in the cache.
+   *
+   * Before that it was `isError || !data`, which said "Meeting not found" for
+   * every failure -- the most alarming false thing this page could say.
    */
-  if (meeting.isError) {
+  const loadState = meetingState(
+    {
+      isUninitialized: meeting.isUninitialized,
+      isLoading: meeting.isLoading,
+      isFetching: meeting.isFetching,
+      isError: meeting.isError,
+      isSuccess: meeting.isSuccess,
+      hasData: meeting.data !== undefined,
+      error: meeting.error,
+    },
+    isNotFoundError,
+  );
+  if (loadState === "loading") return <Skeleton className="h-64 w-full" />;
+  if (loadState !== "ready") {
+    // "Meeting not found" only for a real 404; everything else gets the retry
+    // screen. MeetingLoadError makes that split from the error itself.
     return <MeetingLoadError error={meeting.error} onRetry={() => void meeting.refetch()} />;
   }
+  // `ready` means there is a body. Narrowed for TypeScript, which cannot see
+  // that through the function above.
   if (!meeting.data) return <Skeleton className="h-64 w-full" />;
 
   const m = meeting.data;
@@ -1033,10 +1092,12 @@ export default function MeetingDetailPage() {
           <TabsContent value="summary" className="space-y-4 pt-4">
             <SummaryPanel
               meetingId={id}
-              loading={summary.isLoading}
-              // "No summary available" is a statement about a finished meeting.
-              // While one is being made it is not merely unhelpful, it is wrong.
-              pending={view.summary === "ready" || view.summary === "empty" ? undefined : view.summary}
+              // One value rather than `loading` + `pending`, because the two of
+              // them together could not express "the request failed" -- so it
+              // came out as the empty state, which is the screenshot.
+              state={summaryState}
+              onRetry={() => void summary.refetch()}
+              retrying={summary.isFetching}
               summary={summary.data}
               translation={showing}
               onSeek={playFrom}
@@ -1055,20 +1116,29 @@ export default function MeetingDetailPage() {
                   <ListChecks className="h-4 w-4" /> Action items
                 </h3>
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm text-muted-foreground">
-                    {openActions === 0
-                      ? "Everything here is done."
-                      : `${openActions} of ${actions.data?.length ?? 0} still open.`}
-                  </p>
+                  {/* Only over a list that actually arrived. "Everything here is
+                      done." is a claim about what the meeting asked of you, and
+                      deriving it from `(actions.data ?? []).filter(...)` meant a
+                      failed request congratulated the reader on finishing work
+                      it had never seen. */}
+                  {actionsState === "ready" ? (
+                    <p className="text-sm text-muted-foreground">
+                      {openActions === 0
+                        ? "Everything here is done."
+                        : `${openActions} of ${actions.data?.length ?? 0} still open.`}
+                    </p>
+                  ) : (
+                    <span />
+                  )}
                   {/* Nothing here needs a transcript selection: a commitment made
                       in the room and never said aloud is exactly the one the
                       extractor cannot find. */}
                   <NewActionItemDialog meetingId={id} />
                 </div>
 
-                {actions.data && actions.data.length > 0 ? (
+                {actionsState === "ready" ? (
                   <ul className="divide-y divide-border">
-                    {actions.data.map((a) => (
+                    {(actions.data ?? []).map((a) => (
                       <ActionItemRow
                         key={a.id}
                         item={a}
@@ -1084,9 +1154,23 @@ export default function MeetingDetailPage() {
                       />
                     ))}
                   </ul>
-                ) : view.actionItems !== "ready" ? (
-                  <ProcessingActionItems ready={view.actionItems === "extracting"} />
+                ) : actionsState === "extracting" || actionsState === "waiting" ? (
+                  <ProcessingActionItems ready={actionsState === "extracting"} />
+                ) : actionsState === "loading" ? (
+                  <div className="space-y-2 py-2" aria-busy>
+                    <Skeleton className="h-8 w-full" />
+                    <Skeleton className="h-8 w-11/12" />
+                  </div>
+                ) : actionsState === "error" ? (
+                  <ResourceLoadError
+                    title="Couldn't load the action items"
+                    detail="They are still on this meeting. Something went wrong loading them."
+                    onRetry={() => void actions.refetch()}
+                    retrying={actions.isFetching}
+                  />
                 ) : (
+                  /* Reached only from a settled, successful, genuinely empty
+                     list -- see lib/resource-state. */
                   <EmptyText>No action items were extracted.</EmptyText>
                 )}
                 {/* No "manage all" link any more, and no page behind it. This
@@ -1146,11 +1230,25 @@ export default function MeetingDetailPage() {
                   </CardContent>
                 </Card>
               )
-            ) : view.transcript === "preparing" ? (
+            ) : transcriptState === "preparing" ? (
               /* Not an empty TranscriptPanel. An empty transcript looks like a
                  recording that captured nothing, which is the one conclusion
                  that must not be drawn from a meeting still being transcribed. */
               <ProcessingTranscript />
+            ) : transcriptState === "error" ? (
+              /* The other conclusion that must not be drawn from a request that
+                 failed. This is the screenshot: "Transcript unavailable." over a
+                 transcript that was in the database the whole time. */
+              <Card>
+                <CardContent className="pt-6">
+                  <ResourceLoadError
+                    title="Couldn't load the transcript"
+                    detail="Your transcript is still here. Something went wrong loading it."
+                    onRetry={() => void transcript.refetch()}
+                    retrying={transcript.isFetching}
+                  />
+                </CardContent>
+              </Card>
             ) : editingTranscript ? (
               <TranscriptEditor
                 ref={transcriptEditor}
@@ -1162,7 +1260,11 @@ export default function MeetingDetailPage() {
             ) : (
             <TranscriptPanel
               meetingId={id}
-              loading={transcript.isLoading}
+              loading={transcriptState === "loading"}
+              // Whether "Transcript unavailable." is a true sentence, decided
+              // above rather than from `fallbackText` being falsy -- which is
+              // what it used to be, and which is any of four different things.
+              empty={transcriptState === "empty"}
               segments={transcript.data?.segments ?? []}
               speakerStats={transcript.data?.speakers ?? []}
               fallbackText={transcript.data?.transcript}
@@ -1469,23 +1571,33 @@ function SummarySectionView({
 
 function SummaryPanel({
   meetingId,
-  loading,
-  pending,
+  state,
+  onRetry,
+  retrying,
   summary,
   translation,
   onSeek,
 }: {
   meetingId: string;
-  loading: boolean;
   /**
-   * Why there is no summary yet, while the meeting is still being made.
+   * What this panel is allowed to say -- see lib/meeting-panels.
+   *
+   * <p>One value, replacing a `loading` boolean and a `pending` flavour. The
+   * pair of them could express "still loading" and "still being written" but
+   * had no way at all to express "the request failed", so a failure fell
+   * through to the last branch and said "No summary available." over a summary
+   * that existed. That is the screenshot this prop exists for.
    *
    * <p>`"waiting"` is before the transcript exists -- there is nothing to
-   * summarise. `"generating"` is after it, while the model is writing. Undefined
-   * on a finished meeting, which is the only state in which "No summary
-   * available" is a true sentence.
+   * summarise. `"generating"` is after it, while the model is writing.
+   * `"empty"` is the only state in which "No summary available" is a true
+   * sentence, and it is reached only from a settled successful response or a
+   * settled 404 (`getSummary` answers absence with `notFound("Summary not
+   * ready")`).
    */
-  pending?: "waiting" | "generating";
+  state: PanelState;
+  onRetry: () => void;
+  retrying: boolean;
   summary?: SummaryResponse;
   /** The brief in the reading language, when one has been chosen. */
   translation?: MeetingTranslation;
@@ -1561,9 +1673,9 @@ function SummaryPanel({
         // are hard to read.
         dir={translated?.rightToLeft ? "rtl" : undefined}
       >
-        {loading ? (
-          <Skeleton className="h-24 w-full" />
-        ) : view ? (
+        {/* What we have beats any news about the request that fetched it: a
+            refetch that fails must not blank a summary somebody is reading. */}
+        {view ? (
           <>
             {/* The transcript has been corrected since this was written, so the
                 notes and the transcript below them disagree. Not rewritten
@@ -1681,9 +1793,21 @@ function SummaryPanel({
               </>
             )}
           </>
-        ) : pending ? (
-          <ProcessingSummary stage={pending} />
+        ) : state === "waiting" || state === "generating" ? (
+          <ProcessingSummary stage={state} />
+        ) : state === "loading" ? (
+          <Skeleton className="h-24 w-full" />
+        ) : state === "error" ? (
+          <ResourceLoadError
+            title="Couldn't load the summary"
+            detail="Your summary is still here. Something went wrong loading it."
+            onRetry={onRetry}
+            retrying={retrying}
+          />
         ) : (
+          /* Reached only from a settled response that proved there is none.
+             See lib/resource-state -- this branch used to be reached by
+             `!summary.data`, which is also what a 500 looks like. */
           <EmptyText>No summary available.</EmptyText>
         )}
       </CardContent>
@@ -1991,6 +2115,7 @@ function ChatPanel({
 function TranscriptPanel({
   meetingId,
   loading,
+  empty,
   segments,
   speakerStats,
   fallbackText,
@@ -2000,6 +2125,15 @@ function TranscriptPanel({
 }: {
   meetingId: string;
   loading: boolean;
+  /**
+   * Whether the request settled and proved this meeting has no transcript.
+   *
+   * <p>Decided by the page from the query's state, not from `fallbackText`
+   * being falsy -- which is what the old code did, and which is equally true of
+   * a 500, a 401 during the token race, and a refetch still in flight. That is
+   * how "Transcript unavailable." came to be printed over a transcript.
+   */
+  empty: boolean;
   segments: TranscriptSegment[];
   /**
    * Talk-time as the server computed it. Preferred over recomputing here so
@@ -2830,8 +2964,14 @@ function TranscriptPanel({
               </p>
             )}
           </div>
+        ) : empty ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            Transcript unavailable.
+          </p>
         ) : (
-          <p className="whitespace-pre-wrap text-sm">{fallbackText || "Transcript unavailable."}</p>
+          /* No segments, but text -- a document import, or a transcript from
+             before segments existed. Both are real transcripts. */
+          <p className="whitespace-pre-wrap text-sm">{fallbackText}</p>
         )}
       </CardContent>
 

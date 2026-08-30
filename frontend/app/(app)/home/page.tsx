@@ -69,12 +69,22 @@ import { recordHref } from "@/lib/routes";
  * imports file themselves into the folder they were started in — whether this
  * is the whole workspace, or only what was never filed into one.
  *
- * <p><strong>Recent Conversations is about folders, not about time.</strong>
- * Both options are newest-first and both sit inside the same date window, so
- * the label is doing no work that "All" is not; what separates them is the
- * folder. The hint carries that, and it is not decoration — it is the only
- * thing on screen that explains why a meeting recorded ten minutes ago inside a
- * folder is missing from a list called Recent. Do not drop it.
+ * <p><strong>The second option was called "Recent Conversations", and it was
+ * not about time.</strong> Both options are newest-first and both sit inside
+ * the same date window; what separates them is `unfiled=true` on the wire —
+ * whether a meeting was ever put in a folder. A label reading "Recent" over a
+ * folder filter is not a shortening, it is the wrong word: it describes a
+ * property the list does not have, and the property it does have is invisible.
+ *
+ * <p>That wording is most of why the empty state read as a fault. Somebody who
+ * had chosen "Recent" and been shown "Everything is in a folder" had been given
+ * two unrelated sentences — a list named after recency, and an explanation
+ * about filing — and no way to connect them. Named "Unfiled Conversations", the
+ * empty state is simply the list saying what it is.
+ *
+ * <p>The hint stays, and it is not decoration: it is the sentence that explains
+ * why a meeting recorded ten minutes ago inside a folder is missing. Do not
+ * drop it.
  *
  * <p>The hints are written as a pair, and read as one: everything outside your
  * folders, or everything in this workspace. Said that way round they describe
@@ -87,7 +97,13 @@ import { recordHref } from "@/lib/routes";
  */
 const SCOPES = [
   { value: "all", label: "All Conversations", hint: "everything in this workspace" },
-  { value: "recent", label: "Recent Conversations", hint: "everything outside your folders" },
+  /*
+   * The stored value stays `"recent"`. It is internal -- `SCOPE_CODEC` reads
+   * and writes it, nothing renders it -- and renaming it would invalidate every
+   * remembered preference in every browser to change a string nobody sees,
+   * which is a version bump's worth of cost for no user-visible gain.
+   */
+  { value: "recent", label: "Unfiled Conversations", hint: "everything outside your folders" },
 ] as const;
 
 type Scope = (typeof SCOPES)[number]["value"];
@@ -593,10 +609,18 @@ function EmptyState({
    * account is empty and offers a first recording. A request that never
    * answered proves nothing, so `null` is kept distinct from `0` here too.
    */
-  const total = workspace.isSuccess ? workspace.data?.totalElements ?? 0 : null;
+  const total = workspace.isSuccess && workspace.data ? workspace.data.totalElements : null;
   const filedElsewhere = total !== null && total > 0;
-  /** The probe was asked and did not answer, so neither screen below is known. */
-  const probeUnresolved = scope === "recent" && !filtered && !workspace.isSuccess;
+  /**
+   * The probe was asked and did not answer, so neither screen below is known.
+   *
+   * <p>Keyed off `total` rather than off `isSuccess`, so the one expression
+   * decides it. `isSuccess` with no body is not a state RTK Query produces, but
+   * splitting the question across two lines is how the pair drifts apart -- and
+   * the drift would land on the screen that tells somebody their account is
+   * empty.
+   */
+  const probeUnresolved = scope === "recent" && !filtered && total === null;
 
   if (filtered) {
     return (

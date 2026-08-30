@@ -55,6 +55,22 @@ import { cn } from "@/lib/utils";
  * summary tab ends at the action items, which is where it ended before any of
  * this was extracted.
  */
+/*
+ * Audited alongside the transcript, the summary and the action items, and
+ * deliberately left alone.
+ *
+ * <p>Those three each had a sentence to say when they had nothing -- "No
+ * summary available.", "Transcript unavailable." -- and each was saying it on
+ * the strength of `data` being undefined, which is equally what a failed
+ * request looks like. This panel has no such sentence: with nothing to show it
+ * renders nothing at all, for the reasons in the header above. So a failed
+ * insights request produces an absent card rather than a false claim, and there
+ * is no empty state here to make honest.
+ *
+ * <p>Which also means: <b>do not add one.</b> A "No decisions were recorded"
+ * card derived from `(data ?? [])` would be this bug, freshly introduced, in
+ * the one place on the page that did not have it.
+ */
 export function InsightsPanel({ meetingId }: { meetingId: string }) {
   const { data, isLoading } = useGetInsightsQuery(meetingId);
   const decisions = React.useMemo(

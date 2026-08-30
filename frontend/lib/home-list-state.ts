@@ -41,7 +41,23 @@
  *
  * <p>Pure and separate from the component so each rule can be asserted on its
  * own. The bug was a boolean expression nobody could see all of at once.
+ *
+ * <h2>Where the rules actually live now</h2>
+ *
+ * <p>In lib/resource-state, which is the same four rules in the same order for
+ * every async panel in the app — because the same bug was in all of them, and
+ * the meeting page's transcript, summary and action items were each fixing it
+ * their own slightly different way. This file is that rule with Home's names on
+ * it: `skeleton`/`list` rather than `loading`/`ready`, and a row count rather
+ * than a `Presence`.
+ *
+ * <p>Kept as its own function rather than inlined at the call site so the
+ * matrix below it stays asserted against Home's vocabulary, and so a future
+ * rule that is genuinely Home's alone has somewhere to go that is not
+ * everybody's.
  */
+import { resourceState } from "@/lib/resource-state";
+
 export type HomeListState = "skeleton" | "error" | "empty" | "list";
 
 export interface HomeListInput {
@@ -69,26 +85,36 @@ export interface HomeListInput {
 }
 
 export function homeListState(q: HomeListInput): HomeListState {
-  // Nothing has been asked yet. Not an empty account -- an unasked question.
-  if (!q.restored || q.isUninitialized) return "skeleton";
+  const state = resourceState({
+    // The remembered filters not being read back yet is Home's version of "the
+    // question has not been put to the server" -- the query is skipped until
+    // then, which is why every other flag reads as settled-with-nothing.
+    asked: q.restored,
+    isUninitialized: q.isUninitialized,
+    isLoading: q.isLoading,
+    isFetching: q.isFetching,
+    isError: q.isError,
+    isSuccess: q.isSuccess,
+    /*
+     * `null` stays `unknown` and 0 stays `none`. The whole bug is one line
+     * away here: `q.count ?? 0` would compile, pass the type checker, and put
+     * "No conversations" back over a full archive.
+     *
+     * A 404 is never absence for this list. `GET /meetings` answers an empty
+     * workspace with an empty page, so a 404 from it means the route is not on
+     * the deployed build -- which is a fault to report, not zero meetings.
+     */
+    content: q.count === null ? "unknown" : q.count > 0 ? "some" : "none",
+  });
 
-  // Rule 1. Known-good rows survive a failed or in-flight refresh.
-  if (q.count !== null && q.count > 0) return "list";
-
-  // Rule 2. Settled as rejected, with nothing worth showing behind it.
-  if (q.isError) return "error";
-
-  // Rule 3. Still in motion, or holding nothing to reason about.
-  if (q.isLoading || q.isFetching || q.count === null) return "skeleton";
-
-  // Rule 4. The only route to the empty screen.
-  if (q.isSuccess && q.count === 0) return "empty";
-
-  /*
-   * Unreachable with RTK Query's flags as documented, and deliberately not an
-   * exhaustiveness error. A state nobody predicted should cost a skeleton for a
-   * frame, not a false statement about somebody's data -- which is the entire
-   * lesson of the bug this file exists for.
-   */
-  return "skeleton";
+  switch (state) {
+    case "ready":
+      return "list";
+    case "error":
+      return "error";
+    case "empty":
+      return "empty";
+    default:
+      return "skeleton";
+  }
 }

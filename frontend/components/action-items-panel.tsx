@@ -38,6 +38,8 @@ import type { ActionItemResponse } from "@/lib/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { dueLabel, dueTone } from "@/lib/due";
 import { cn } from "@/lib/utils";
+import { resourceState, presenceOfList } from "@/lib/resource-state";
+import { ResourceLoadError } from "@/components/resource-load-error";
 
 export function ActionItemsPanel() {
   /*
@@ -55,10 +57,28 @@ export function ActionItemsPanel() {
    * Everything, finished included, because the completed section is part of the
    * answer. One request rather than two: the split is a property of the rows.
    */
-  const { data, isLoading } = useGetActionItemsQuery({
+  const query = useGetActionItemsQuery({
     status: undefined,
     standalone: true,
     size: 100,
+  });
+  const { data } = query;
+  /*
+   * The same rule as everywhere else -- see lib/resource-state.
+   *
+   * `data?.content ?? []` below was enough to make this panel say "Nothing on
+   * your list" whenever the request failed, which is the Home-side-pane version
+   * of the meeting page's "No action items were extracted.": a sentence about
+   * what somebody has committed to, produced by a dropped connection.
+   */
+  const listState = resourceState({
+    isUninitialized: query.isUninitialized,
+    isLoading: query.isLoading,
+    isFetching: query.isFetching,
+    isError: query.isError,
+    isSuccess: query.isSuccess,
+    // `undefined` stays `unknown`. Never `data?.content ?? []` before this line.
+    content: presenceOfList(data?.content),
   });
   const [patch] = usePatchActionItemMutation();
   const [create, { isLoading: creating }] = useCreateStandaloneActionItemMutation();
@@ -67,6 +87,8 @@ export function ActionItemsPanel() {
   const [adding, setAdding] = React.useState(false);
   const [showDone, setShowDone] = React.useState(false);
 
+  // Safe below this point: every branch that reads them is gated on
+  // `listState`, which is `ready` or `empty` only for a settled response.
   const items = data?.content ?? [];
   const open = items.filter((i) => i.status !== "DONE");
   const done = items.filter((i) => i.status === "DONE");
@@ -136,12 +158,24 @@ export function ActionItemsPanel() {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
 
-        {isLoading ? (
+        {listState === "loading" ? (
           <div className="space-y-2 p-3">
             <Skeleton className="h-8 w-full" />
             <Skeleton className="h-8 w-3/4" />
           </div>
+        ) : listState === "error" ? (
+          <div className="p-3">
+            <ResourceLoadError
+              title="Couldn't load your action items"
+              detail="They are still on your list. Something went wrong loading them."
+              onRetry={() => void query.refetch()}
+              retrying={query.isFetching}
+            />
+          </div>
         ) : open.length === 0 ? (
+          /* Nothing *open*. Reached only from a settled response, so it is a
+             statement about the list rather than about the network -- and the
+             completed section below still shows what is there. */
           <Empty />
         ) : (
           <ul className="p-2">

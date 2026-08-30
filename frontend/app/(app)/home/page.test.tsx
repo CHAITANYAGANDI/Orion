@@ -48,6 +48,8 @@ let errored: boolean;
 let noData: boolean;
 /** The one-row probe behind the empty states failed. */
 let probeErrored: boolean;
+/** The one-row probe has not answered yet. */
+let probeLoading: boolean;
 
 function aPage(content: MeetingResponse[], total = content.length): Page<MeetingResponse> {
   return { content, page: 0, size: 50, totalElements: total, totalPages: 1 };
@@ -95,6 +97,7 @@ vi.mock("@/lib/api", () => ({
     // is this account new? It asks for a count, not for rows.
     if (q.size === 1) {
       if (probeErrored) return result<Page<MeetingResponse>>(undefined, { isError: true });
+      if (probeLoading) return result<Page<MeetingResponse>>(undefined, { isLoading: true });
       return result(aPage([], workspaceTotal));
     }
 
@@ -160,6 +163,7 @@ beforeEach(() => {
   errored = false;
   noData = false;
   probeErrored = false;
+  probeLoading = false;
   rows = [aMeeting()];
   workspaceTotal = rows.length;
   // The filters outlive a page now, so without this they would outlive a test
@@ -183,7 +187,7 @@ describe("the scope picker", () => {
     // still.
     expect(options).toHaveLength(2);
     expect(options[0]).toHaveTextContent("All Conversations");
-    expect(options[1]).toHaveTextContent("Recent Conversations");
+    expect(options[1]).toHaveTextContent("Unfiled Conversations");
     // The label is about folders, not about time, and only the hint says so.
     expect(within(menu).getByText("everything outside your folders")).toBeInTheDocument();
     // It counted twenty rows and called them unread. Nothing tracks whether a
@@ -204,7 +208,7 @@ describe("the scope picker", () => {
   it("asks the server for what is outside a folder only when asked to", async () => {
     render(<HomePage />);
 
-    await choose("Recent Conversations");
+    await choose("Unfiled Conversations");
 
     // Recent still works and still reaches the server. It used to narrow the
     // page in the browser, and narrow it by nothing: both options ran through a
@@ -214,7 +218,7 @@ describe("the scope picker", () => {
 
   it("asks for the whole workspace again on the way back", async () => {
     render(<HomePage />);
-    await choose("Recent Conversations");
+    await choose("Unfiled Conversations");
 
     await choose("All Conversations");
 
@@ -224,7 +228,7 @@ describe("the scope picker", () => {
   it("keeps the date window while the scope changes", async () => {
     render(<HomePage />);
 
-    await choose("Recent Conversations");
+    await choose("Unfiled Conversations");
 
     // Two filters over one list. Losing one when the other moves is the bug
     // that follows from rebuilding the query object per control.
@@ -253,7 +257,7 @@ describe("when there is nothing to show", () => {
     render(<HomePage />);
     // Explicitly, because Home no longer starts here. This screen describes a
     // list that is hiding rows, which is only true of Recent.
-    await choose("Recent Conversations");
+    await choose("Unfiled Conversations");
 
     // Without this the page offers Record and Import to somebody with a
     // hundred meetings, which reads as an archive that lost them.
@@ -346,7 +350,7 @@ describe("filters that stay where you left them", () => {
 
   it("remembers going back to the default just as firmly", async () => {
     const first = render(<HomePage />);
-    await choose("Recent Conversations");
+    await choose("Unfiled Conversations");
     first.unmount();
 
     const second = render(<HomePage />);
@@ -378,7 +382,7 @@ describe("filters that stay where you left them", () => {
 
   it("asks the server once, with the filters it restored", async () => {
     const visit = render(<HomePage />);
-    await choose("Recent Conversations");
+    await choose("Unfiled Conversations");
     visit.unmount();
 
     query.last = null;
@@ -398,7 +402,7 @@ describe("filters that stay where you left them", () => {
  *
  * <h2>The bug</h2>
  *
- * <p>Home defaulted to Recent Conversations, and Recent is `unfiled=true` on the
+ * <p>Home defaulted to Unfiled Conversations, and Recent is `unfiled=true` on the
  * wire — conversations that were never put in a folder. So the default Home was
  * not "your meetings", it was "your meetings, minus the ones you organised". An
  * account that had filed everything opened Home to "Everything is in a folder"
@@ -481,7 +485,7 @@ describe("the scope Home opens on", () => {
     // has traded one broken list for a missing feature.
     render(<HomePage />);
 
-    await choose("Recent Conversations");
+    await choose("Unfiled Conversations");
 
     expect(lastQuery()?.unfiled).toBe(true);
   });
@@ -490,18 +494,18 @@ describe("the scope Home opens on", () => {
     // Stickiness survives the version bump for choices made under v2, where a
     // stored value is unambiguous because it differs from the default.
     const visit = render(<HomePage />);
-    await choose("Recent Conversations");
+    await choose("Unfiled Conversations");
     visit.unmount();
 
     render(<HomePage />);
 
-    expect(screen.getByRole("button", { name: /Recent Conversations/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Unfiled Conversations/ })).toBeInTheDocument();
     expect(lastQuery()?.unfiled).toBe(true);
   });
 
   it("keeps an explicit All across a return visit", async () => {
     const visit = render(<HomePage />);
-    await choose("Recent Conversations");
+    await choose("Unfiled Conversations");
     await choose("All Conversations");
     visit.unmount();
 
@@ -513,7 +517,7 @@ describe("the scope Home opens on", () => {
 
   it("returns to All for a new session, discarding an explicit Recent", async () => {
     const visit = render(<HomePage />);
-    await choose("Recent Conversations");
+    await choose("Unfiled Conversations");
     expect(lastQuery()?.unfiled).toBe(true);
     visit.unmount();
 
@@ -699,6 +703,20 @@ describe("what Home shows when the request does not simply succeed", () => {
     expect(screen.queryByText(EMPTY)).not.toBeInTheDocument();
   });
 
+  it("says nothing at all while the folder probe is still in flight", async () => {
+    // "Everything is in a folder" and "you have nothing" are opposite claims
+    // and the probe is what decides between them. A sentence that turns out to
+    // be wrong is worse than a blank half-second.
+    rows = [];
+    probeLoading = true;
+
+    render(<HomePage />);
+    await choose("Unfiled Conversations");
+
+    expect(screen.queryByText("Everything is in a folder")).not.toBeInTheDocument();
+    expect(screen.queryByText(EMPTY)).not.toBeInTheDocument();
+  });
+
   it("does not treat a failed folder probe as proof the account is empty", async () => {
     /*
      * The same rule, one layer down. The probe answers "is anything filed
@@ -709,7 +727,7 @@ describe("what Home shows when the request does not simply succeed", () => {
     probeErrored = true;
 
     render(<HomePage />);
-    await choose("Recent Conversations");
+    await choose("Unfiled Conversations");
 
     expect(screen.queryByText(EMPTY)).not.toBeInTheDocument();
     expect(screen.getByText("Nothing outside your folders")).toBeInTheDocument();
@@ -791,5 +809,46 @@ describe("a meeting that is still processing", () => {
     render(<HomePage />);
 
     expect(screen.getAllByRole("progressbar")).toHaveLength(2);
+  });
+});
+
+/**
+ * The label has to mean what the filter does.
+ *
+ * <p>This option was called "Recent Conversations" and sends `unfiled=true` --
+ * a folder filter under a name about time. Both options are newest-first and
+ * both sit inside the same date window, so "Recent" described nothing the list
+ * actually did, and the property it did have was invisible.
+ *
+ * <p>It is most of why the empty state read as a fault: somebody shown
+ * "Everything is in a folder" under a list named after recency has been handed
+ * two unrelated sentences and no way to connect them.
+ */
+describe("the scope picker says what it filters on", () => {
+  it("does not call a folder filter a recency filter", async () => {
+    render(<HomePage />);
+
+    await userEvent.click(screen.getByRole("button", { name: /All Conversations/ }));
+    const options = screen.getAllByRole("menuitemradio");
+
+    expect(options[1]).toHaveTextContent(/Unfiled/i);
+    expect(options[1]).not.toHaveTextContent(/Recent/i);
+  });
+
+  it("still names folders in the hint, which is the sentence that explains it", async () => {
+    // Not decoration: it is the only thing on screen that explains why a
+    // meeting recorded ten minutes ago inside a folder is missing from it.
+    render(<HomePage />);
+
+    await userEvent.click(screen.getByRole("button", { name: /All Conversations/ }));
+
+    expect(screen.getAllByRole("menuitemradio")[1]).toHaveTextContent(/outside your folders/i);
+  });
+
+  it("sends unfiled=true under that name, so the label and the wire agree", async () => {
+    render(<HomePage />);
+    await choose("Unfiled Conversations");
+
+    expect(query.last?.unfiled).toBe(true);
   });
 });

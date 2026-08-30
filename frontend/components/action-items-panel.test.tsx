@@ -23,22 +23,113 @@ import type { ActionItemResponse } from "@/lib/types";
  * answer "did I do that", which is the second question anybody asks it, so
  * completed items are folded away with a count rather than dropped.
  */
-const { patch, create } = vi.hoisted(() => ({
+const { patch, create, refetch } = vi.hoisted(() => ({
   patch: vi.fn(),
   create: vi.fn(),
+  refetch: vi.fn(),
 }));
 
 let items: ActionItemResponse[] = [];
 /** What the panel last asked the server for. */
 let lastQuery: Record<string, unknown> | undefined;
 
+/**
+ * How the request is going.
+ *
+ * <p>The mock used to return `{ data, isLoading: false }` and nothing else,
+ * which quietly asserted that the only two states worth testing were "loading"
+ * and "done" -- the exact assumption that let a failed request render "Nothing
+ * on your list". The full flag set is here so the panel can be put in the
+ * states RTK Query actually produces.
+ */
+let queryState:
+  | "success"
+  | "loading"
+  | "uninitialized"
+  | "error"
+  | "refetching"
+  | "failed-refetch" = "success";
+
+function queryResult() {
+  const page = {
+    content: items,
+    page: 0,
+    size: 100,
+    totalElements: items.length,
+    totalPages: 1,
+  };
+  const settled = { isUninitialized: false, refetch };
+  switch (queryState) {
+    case "uninitialized":
+      /*
+       * Nothing asked yet. The trap: every flag reads as "settled with
+       * nothing" -- `isLoading` is false, so anything keyed off it alone falls
+       * straight through to the empty message for a question that has not been
+       * put to the server.
+       */
+      return {
+        refetch,
+        isUninitialized: true,
+        data: undefined,
+        isLoading: false,
+        isFetching: false,
+        isError: false,
+        isSuccess: false,
+      };
+    case "loading":
+      return {
+        ...settled,
+        data: undefined,
+        isLoading: true,
+        isFetching: true,
+        isError: false,
+        isSuccess: false,
+      };
+    case "error":
+      // Failed with nothing cached behind it.
+      return {
+        ...settled,
+        data: undefined,
+        isLoading: false,
+        isFetching: false,
+        isError: true,
+        isSuccess: false,
+      };
+    case "refetching":
+      return {
+        ...settled,
+        data: page,
+        isLoading: false,
+        isFetching: true,
+        isError: false,
+        isSuccess: true,
+      };
+    case "failed-refetch":
+      // RTK Query keeps the last good body when a refetch fails.
+      return {
+        ...settled,
+        data: page,
+        isLoading: false,
+        isFetching: false,
+        isError: true,
+        isSuccess: true,
+      };
+    default:
+      return {
+        ...settled,
+        data: page,
+        isLoading: false,
+        isFetching: false,
+        isError: false,
+        isSuccess: true,
+      };
+  }
+}
+
 vi.mock("@/lib/api", () => ({
   useGetActionItemsQuery: (q: Record<string, unknown>) => {
     lastQuery = q;
-    return {
-      data: { content: items, page: 0, size: 100, totalElements: items.length, totalPages: 1 },
-      isLoading: false,
-    };
+    return queryResult();
   },
   usePatchActionItemMutation: () => [
     (arg: unknown) => {
@@ -87,6 +178,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   items = [];
   lastQuery = undefined;
+  queryState = "success";
 });
 
 describe("when there is nothing to do", () => {
@@ -216,5 +308,93 @@ describe("finished work", () => {
     render(<ActionItemsPanel />);
 
     expect(screen.queryByText(/completed/i)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * The same rule as the meeting page and the Home list: an empty state is a
+ * claim about the server's answer, so it needs one.
+ *
+ * <p>This panel had the Home-side-pane version of the bug. `data?.content ?? []`
+ * meant a failed request produced "Nothing on your list" over somebody's
+ * to-do list -- with an explanation underneath saying where their items had
+ * gone, which made it read as deliberate rather than broken.
+ */
+describe("what the panel shows when the request does not simply succeed", () => {
+  it("does not claim an empty list when the request failed", () => {
+    queryState = "error";
+
+    render(<ActionItemsPanel />);
+
+    expect(screen.queryByText("Nothing on your list")).toBeNull();
+    expect(screen.getByText(/couldn't load your action items/i)).toBeInTheDocument();
+  });
+
+  it("says the items are still there, and offers a retry wired to refetch", async () => {
+    queryState = "error";
+
+    render(<ActionItemsPanel />);
+    await userEvent.click(screen.getByRole("button", { name: /try again/i }));
+
+    expect(screen.getByText(/still on your list/i)).toBeInTheDocument();
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("announces the failure to assistive technology", () => {
+    queryState = "error";
+
+    render(<ActionItemsPanel />);
+
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+  });
+
+  it("does not claim an empty list before the first response", () => {
+    queryState = "loading";
+
+    render(<ActionItemsPanel />);
+
+    expect(screen.queryByText("Nothing on your list")).toBeNull();
+    expect(screen.queryByText(/couldn't load/i)).toBeNull();
+  });
+
+  it("does not claim an empty list for a question nobody has asked yet", () => {
+    // `isLoading` is false on a query that has not started, so a panel keyed off
+    // it alone announces an empty list for a request that was never made. This
+    // is why the decision reads `isUninitialized` too.
+    queryState = "uninitialized";
+
+    render(<ActionItemsPanel />);
+
+    expect(screen.queryByText("Nothing on your list")).toBeNull();
+    expect(screen.queryByText(/couldn't load/i)).toBeNull();
+  });
+
+  it("keeps the items on screen during a background refetch", () => {
+    items = [item({ id: "a", title: "Book the room" })];
+    queryState = "refetching";
+
+    render(<ActionItemsPanel />);
+
+    expect(screen.getByText("Book the room")).toBeInTheDocument();
+  });
+
+  it("keeps the items on screen when a background refetch fails", () => {
+    // The priority rule. A transient failure must not make a visible list
+    // disappear -- the cached copy is still the best thing on the screen.
+    items = [item({ id: "a", title: "Book the room" })];
+    queryState = "failed-refetch";
+
+    render(<ActionItemsPanel />);
+
+    expect(screen.getByText("Book the room")).toBeInTheDocument();
+    expect(screen.queryByText(/couldn't load/i)).toBeNull();
+  });
+
+  it("allows the empty message once the request settles successfully with nothing", () => {
+    queryState = "success";
+
+    render(<ActionItemsPanel />);
+
+    expect(screen.getByText("Nothing on your list")).toBeInTheDocument();
   });
 });
