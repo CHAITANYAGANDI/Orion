@@ -45,6 +45,7 @@ import {
   UserCheck,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { identityPermissions } from "@/lib/identity-owner";
 import {
   useGetPreferencesQuery,
   useUpdatePreferencesMutation,
@@ -96,16 +97,32 @@ export function GeneralTab() {
  * block is read far more often than it is edited.
  */
 function IdentityBlock() {
-  const { userId, mode } = useAuth();
+  const { userId, mode, profile } = useAuth();
   const prefs = useGetPreferencesQuery();
   const [update, { isLoading }] = useUpdatePreferencesMutation();
   const [editing, setEditing] = React.useState(false);
 
-  const name = prefs.data?.displayName ?? "";
-  const email = prefs.data?.email ?? null;
-  const passwordNote =
-    mode === "clerk"
-      ? "Managed by your sign-in provider."
+  /*
+   * Two kinds of account, and until now this block could not tell them apart.
+   * It asked whether the deployment used Clerk, which is true for a Google
+   * sign-in and for an email-and-password sign-up alike -- so it locked the
+   * address for both and offered a password dialog to both, when the truth is
+   * the exact opposite in each case. See lib/identity-owner.
+   */
+  const permissions = identityPermissions({
+    mode,
+    provider: profile.provider,
+    hasPassword: profile.hasPassword,
+  });
+
+  // The provider's address is the real one under Clerk; Orion's column is a
+  // copy that can lag until the next sign-in.
+  const name = prefs.data?.displayName || profile.name || "";
+  const email = prefs.data?.email || profile.email || null;
+  const passwordNote = permissions.password
+    ? "Set here. Changing it signs out your other sessions."
+    : permissions.owner === "external"
+      ? `You sign in with ${permissions.ownerLabel}.`
       : "Development session — there is no password.";
 
   const initial: ProfileForm = {
@@ -164,7 +181,7 @@ function IdentityBlock() {
       <ProfileDialog
         open={editing}
         initial={initial}
-        mode={mode}
+        permissions={permissions}
         saving={isLoading}
         onClose={() => setEditing(false)}
         onSave={(form) => void save(form)}

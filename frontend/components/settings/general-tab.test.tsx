@@ -39,6 +39,7 @@ const {
 
 let prefs: PreferencesResponse;
 let overview: PrivacyOverview;
+let identity: { name: string; email: string; imageUrl: string; provider: string; hasPassword: boolean };
 let mode: "dev" | "clerk";
 let speakers: SpeakerSettings;
 let failure: unknown = null;
@@ -47,7 +48,9 @@ let retentionFailure: unknown = null;
 vi.mock("next/navigation", () => ({ usePathname: () => "/settings" }));
 
 vi.mock("@/lib/auth", () => ({
-  useAuth: () => ({ userId: "usr_dev", mode, signOut }),
+  // `profile` carries how this person signed in, which is what decides whether
+  // the name, the address and the password are theirs to change here.
+  useAuth: () => ({ userId: "usr_dev", mode, signOut, profile: identity }),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -116,6 +119,7 @@ beforeEach(() => {
   failure = null;
   retentionFailure = null;
   mode = "dev";
+  identity = { name: "", email: "", imageUrl: "", provider: "", hasPassword: false };
   speakers = { learningEnabled: false, profiles: [] };
   window.confirm = vi.fn(() => true);
   overview = {
@@ -171,11 +175,24 @@ describe("who you are", () => {
     expect(screen.queryByText("Individual contributor")).not.toBeInTheDocument();
   });
 
-  it("says where the password lives rather than pretending to hold one", () => {
+  it("names the provider somebody actually signed in with", () => {
+    // It used to say "Managed by your sign-in provider" to every Clerk account,
+    // which is both vaguer than it needs to be and wrong for half of them --
+    // an account made here with an email has a password, held for Orion by
+    // Clerk, and it is the account holder's to change.
     mode = "clerk";
+    identity = { ...identity, provider: "google" };
     render(<GeneralTab />);
 
-    expect(screen.getByText("Managed by your sign-in provider.")).toBeInTheDocument();
+    expect(screen.getByText("You sign in with Google.")).toBeInTheDocument();
+  });
+
+  it("says the password is theirs when the account was made here", () => {
+    mode = "clerk";
+    identity = { ...identity, hasPassword: true };
+    render(<GeneralTab />);
+
+    expect(screen.getByText(/Set here\. Changing it signs out/)).toBeInTheDocument();
   });
 
   it("is honest that a development session has no password", () => {

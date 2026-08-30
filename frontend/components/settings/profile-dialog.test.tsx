@@ -37,6 +37,7 @@ vi.mock("@/components/settings/camera-capture", () => ({
 }));
 
 import { ProfileDialog, type ProfileForm } from "@/components/settings/profile-dialog";
+import { identityPermissions } from "@/lib/identity-owner";
 
 const PNG = "data:image/png;base64,iVBORw0KGgo=";
 
@@ -46,14 +47,26 @@ const EMPTY: ProfileForm = {
   avatarUrl: "",
 };
 
-function show(initial: ProfileForm = EMPTY, mode = "dev") {
+/**
+ * The three kinds of account, which this dialog now tells apart.
+ *
+ * <p>It used to ask one question -- "is this deployment using Clerk?" -- and a
+ * Google sign-in and an email-and-password sign-up answer that identically. So
+ * the address was locked for both and both were offered a password dialog,
+ * when in fact one owns all three fields and the other owns none of them.
+ */
+const DEV = { mode: "dev", provider: "", hasPassword: false };
+const ORION = { mode: "clerk", provider: "", hasPassword: true };
+const GOOGLE = { mode: "clerk", provider: "google", hasPassword: false };
+
+function show(initial: ProfileForm = EMPTY, credential = DEV) {
   const onSave = vi.fn();
   const onClose = vi.fn();
   render(
     <ProfileDialog
       open
       initial={initial}
-      mode={mode}
+      permissions={identityPermissions(credential)}
       onClose={onClose}
       onSave={onSave}
     />,
@@ -167,46 +180,104 @@ describe("the photo", () => {
 });
 
 describe("the email", () => {
-  it("can be edited where Orion owns it", async () => {
-    show(EMPTY, "dev");
+  it("can be edited inline where Orion owns the column", async () => {
+    show(EMPTY, DEV);
     expect(screen.getByLabelText("Email")).toBeEnabled();
   });
 
-  it("cannot be edited when a provider owns it", () => {
-    // Not politeness: the server refuses it too, because the column is
-    // rewritten from the sign-in token on the next request, so an accepted
-    // edit would appear to work and silently revert.
-    show(EMPTY, "clerk");
+  it("cannot be touched at all when Google owns it", () => {
+    /*
+     * Not politeness: the server refuses it too, because the column is
+     * rewritten from the sign-in token on the next request, so an accepted edit
+     * would appear to work and silently revert. And there is no Change button
+     * either -- the address lives at Google, and a dialog here could only fail.
+     */
+    show(EMPTY, GOOGLE);
 
     expect(screen.getByLabelText("Email")).toBeDisabled();
-    expect(screen.getByText(/Managed by your sign-in provider/)).toBeInTheDocument();
+    expect(screen.getByText(/Your email comes from Google/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Change email" })).not.toBeInTheDocument();
+  });
+
+  it("is changed at the provider, with a code, for an account made here", async () => {
+    // The address is the credential under Clerk -- it is what sign-in matches
+    // on -- so it cannot be a text field with a Save button beside it. A typo
+    // would lock somebody out of their own workspace.
+    show(EMPTY, ORION);
+
+    expect(screen.getByLabelText("Email")).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Change email" }));
+
+    expect(screen.getByRole("heading", { name: "Change email" })).toBeInTheDocument();
+    expect(screen.getByLabelText("New email")).toBeInTheDocument();
+  });
+
+  it("never sends an address Orion's own API would refuse", async () => {
+    // `UserService.cleanAccountEmail` throws under an identity provider. The
+    // name has to save anyway, so the address is stripped rather than sent and
+    // rejected along with everything else in the same request.
+    const { onSave } = show(EMPTY, ORION);
+
+    await userEvent.clear(screen.getByLabelText("Full Name"));
+    await userEvent.type(screen.getByLabelText("Full Name"), "Ada");
+    await userEvent.click(screen.getByRole("button", { name: "Finish" }));
+
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ displayName: "Ada", email: EMPTY.email }),
+    );
+  });
+});
+
+describe("the name", () => {
+  it("is editable for an account made here", () => {
+    show(EMPTY, ORION);
+    expect(screen.getByLabelText("Full Name")).toBeEnabled();
+  });
+
+  it("is Google's when the account is Google's", () => {
+    show(EMPTY, GOOGLE);
+
+    expect(screen.getByLabelText("Full Name")).toBeDisabled();
+    expect(screen.getByText(/Your name comes from Google/)).toBeInTheDocument();
   });
 });
 
 describe("the password", () => {
   it("is never a typed field on this form", () => {
-    show(EMPTY, "clerk");
+    show(EMPTY, ORION);
     expect(screen.getByLabelText("Password")).toBeDisabled();
   });
 
   it("cannot be changed in a session that has no password", () => {
-    show(EMPTY, "dev");
+    show(EMPTY, DEV);
 
-    expect(screen.getByRole("button", { name: "Change" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Change password" })).toBeDisabled();
     expect(screen.getByText(/no password to change/)).toBeInTheDocument();
   });
 
-  it("opens the change dialog under a provider", async () => {
-    show(EMPTY, "clerk");
+  it("is not offered at all to somebody who signs in with Google", () => {
+    /*
+     * The other half of the bug. This dialog was offered to every Clerk
+     * account, and `updatePassword` needs a current password -- which a Google
+     * account does not have, anywhere. The button could only ever fail.
+     */
+    show(EMPTY, GOOGLE);
 
-    await userEvent.click(screen.getByRole("button", { name: "Change" }));
+    expect(screen.getByRole("button", { name: "Change password" })).toBeDisabled();
+    expect(screen.getByText(/You sign in with Google, so there is no password/)).toBeInTheDocument();
+  });
+
+  it("opens the change dialog under a provider", async () => {
+    show(EMPTY, ORION);
+
+    await userEvent.click(screen.getByRole("button", { name: "Change password" }));
 
     expect(screen.getByRole("heading", { name: "Change Password" })).toBeInTheDocument();
   });
 
   it("hands the current and new password to the provider", async () => {
-    show(EMPTY, "clerk");
-    await userEvent.click(screen.getByRole("button", { name: "Change" }));
+    show(EMPTY, ORION);
+    await userEvent.click(screen.getByRole("button", { name: "Change password" }));
 
     await userEvent.type(screen.getByLabelText("Current password"), "OldPass1");
     await userEvent.type(screen.getByLabelText("New password"), "NewPass99");
@@ -223,8 +294,8 @@ describe("the password", () => {
     changePassword.mockRejectedValue(
       new AccountActionError("That password has appeared in a data breach."),
     );
-    show(EMPTY, "clerk");
-    await userEvent.click(screen.getByRole("button", { name: "Change" }));
+    show(EMPTY, ORION);
+    await userEvent.click(screen.getByRole("button", { name: "Change password" }));
 
     await userEvent.type(screen.getByLabelText("Current password"), "OldPass1");
     await userEvent.type(screen.getByLabelText("New password"), "NewPass99");

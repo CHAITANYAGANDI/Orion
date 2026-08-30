@@ -65,10 +65,28 @@ export interface UserProfile {
   email: string;
   /** A photo URL, or "". */
   imageUrl: string;
+  /**
+   * The connected OAuth provider — "google" — or "" for an account made with
+   * an email and a password.
+   *
+   * <p>This is what decides whether the profile page offers to change a name,
+   * an address and a password, or explains that Google holds them. See
+   * lib/identity-owner: an account signed in through Google has no password to
+   * rotate and an address that the next sign-in would overwrite.
+   */
+  provider: string;
+  /** Whether Clerk holds a password for this account. */
+  hasPassword: boolean;
 }
 
 /** Dev mode has an id and nothing else — there is no provider to ask. */
-export const NO_PROFILE: UserProfile = { name: "", email: "", imageUrl: "" };
+export const NO_PROFILE: UserProfile = {
+  name: "",
+  email: "",
+  imageUrl: "",
+  provider: "",
+  hasPassword: false,
+};
 
 const AuthContext = React.createContext<AuthContextValue | null>(null);
 

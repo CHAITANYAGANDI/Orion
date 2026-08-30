@@ -14,6 +14,7 @@ import {
   tokenProbeAttempt,
 } from "@/lib/auth-store";
 import { clearPreferences } from "@/lib/preference-store";
+import { normalizeProvider } from "@/lib/identity-owner";
 import type { AuthContextValue, UserProfile } from "@/lib/auth";
 
 type Ctx = React.Context<AuthContextValue | null>;
@@ -138,6 +139,14 @@ function ClerkBridge({
       name: user?.fullName?.trim() || user?.firstName?.trim() || "",
       email: user?.primaryEmailAddress?.emailAddress ?? "",
       imageUrl: user?.hasImage ? user.imageUrl : "",
+      /*
+       * The first connected account, which in this product is Google or
+       * nothing. Its presence is what makes the name and the address somebody
+       * else's -- see lib/identity-owner for what the profile page does with
+       * it.
+       */
+      provider: normalizeProvider(user?.externalAccounts?.[0]?.provider),
+      hasPassword: Boolean(user?.passwordEnabled),
     }),
     [user],
   );
