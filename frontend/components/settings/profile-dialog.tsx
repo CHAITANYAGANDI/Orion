@@ -39,6 +39,8 @@ import {
   changePassword,
   confirmEmailChange,
   resendEmailCode,
+  ReverificationRequiredError,
+  reverifyWithPassword,
   startEmailChange,
   type PendingEmail,
 } from "@/lib/account-actions";
@@ -109,6 +111,13 @@ export function ProfileDialog({
   const [emailError, setEmailError] = React.useState<string | null>(null);
   const [emailPending, setEmailPending] = React.useState<PendingEmail | null>(null);
   const [emailResent, setEmailResent] = React.useState(false);
+  /*
+   * Clerk refuses to add an address to a session that has not proved a first
+   * factor lately. Held here rather than asked for up front: most people are
+   * inside the window and would be typing a password for nothing.
+   */
+  const [emailNeedsPassword, setEmailNeedsPassword] = React.useState(false);
+  const [emailWanted, setEmailWanted] = React.useState("");
   const fileRef = React.useRef<HTMLInputElement | null>(null);
 
   // Reset from props each time it opens, so cancelling really discards. Keyed
@@ -168,11 +177,35 @@ export function ProfileDialog({
     setEmailResent(false);
     try {
       setEmailPending(await startEmailChange(address));
+      setEmailNeedsPassword(false);
     } catch (err) {
+      if (err instanceof ReverificationRequiredError) {
+        // Not a failure to report -- it is the next step. Remember what was
+        // being attempted so it can carry on by itself afterwards.
+        setEmailWanted(address);
+        setEmailNeedsPassword(true);
+        return;
+      }
       setEmailError(err instanceof AccountActionError ? err.message : "That address could not be added.");
     } finally {
       setEmailBusy(false);
     }
+  }
+
+  /** Prove it is you, then pick the change back up where it was refused. */
+  async function confirmIdentity(password: string) {
+    setEmailBusy(true);
+    setEmailError(null);
+    try {
+      await reverifyWithPassword(password);
+    } catch (err) {
+      setEmailError(err instanceof AccountActionError ? err.message : "That password is not right.");
+      return;
+    } finally {
+      setEmailBusy(false);
+    }
+    setEmailNeedsPassword(false);
+    await sendEmailCode(emailWanted);
   }
 
   /** Another code to the same address, for mail that is slow or filed as spam. */
@@ -203,6 +236,7 @@ export function ProfileDialog({
     setEmailPending(null);
     setEmailError(null);
     setEmailResent(false);
+    setEmailNeedsPassword(false);
   }
 
   async function confirmEmailCode(code: string) {
@@ -238,6 +272,7 @@ export function ProfileDialog({
     setEmailPending(null);
     setEmailError(null);
     setEmailResent(false);
+    setEmailNeedsPassword(false);
     setEmailOpen(false);
   }
 
@@ -445,11 +480,13 @@ export function ProfileDialog({
         error={emailError}
         sentTo={emailPending?.address ?? null}
         resent={emailResent}
+        needsPassword={emailNeedsPassword}
         onClose={abandonEmailChange}
         onSend={(address) => void sendEmailCode(address)}
         onResend={() => void resendCode()}
         onRetype={retypeEmail}
         onConfirm={(code) => void confirmEmailCode(code)}
+        onConfirmIdentity={(password) => void confirmIdentity(password)}
       />
 
       <ChangePasswordDialog

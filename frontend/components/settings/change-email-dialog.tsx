@@ -30,12 +30,26 @@
  * needed — a hint beside the field, never a refusal, because plenty of real
  * domains are one letter from a famous one.
  *
+ * <h2>The password it asks for first</h2>
+ *
+ * <p>Clerk guards its sensitive user operations with reverification: a session
+ * that has not proved a first factor in the last few minutes may read anything
+ * but may not change the credential. Adding an address is one of the guarded
+ * ones, and rightly - changing the address you sign in with is precisely what
+ * somebody at a borrowed, still-signed-in laptop would do.
+ *
+ * <p>Clerk's own profile component answers that by opening a dialog of its own.
+ * This one asks in Orion's words, and only when Clerk actually asks: the step
+ * appears in response to the refusal rather than in front of everybody every
+ * time, because most people are already inside the window and would be typing
+ * their password for nothing.
+ *
  * <p>Offered only for accounts Orion's own sign-up made. Under Google the
  * address belongs to Google — see lib/identity-owner.
  */
 
 import * as React from "react";
-import { Loader2, Mail } from "lucide-react";
+import { Loader2, Lock, Mail } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -57,11 +71,14 @@ export function ChangeEmailDialog({
   sentTo,
   /** Set when a second code has just gone out, so the button is not silent. */
   resent,
+  /** Set when Clerk wants the password again before it will allow the change. */
+  needsPassword,
   onClose,
   onSend,
   onResend,
   onRetype,
   onConfirm,
+  onConfirmIdentity,
 }: {
   open: boolean;
   /** The address being replaced, shown so nobody changes the wrong account. */
@@ -70,15 +87,18 @@ export function ChangeEmailDialog({
   error?: string | null;
   sentTo: string | null;
   resent?: boolean;
+  needsPassword?: boolean;
   onClose: () => void;
   onSend: (address: string) => void;
   onResend: () => void;
   /** Back to the first step, taking the unverified address off the account. */
   onRetype: () => void;
   onConfirm: (code: string) => void;
+  onConfirmIdentity: (password: string) => void;
 }) {
   const [address, setAddress] = React.useState("");
   const [code, setCode] = React.useState("");
+  const [password, setPassword] = React.useState("");
 
   // Cleared on the way out, so a half-finished change is not sitting in state
   // behind a closed dialog waiting to be reopened into.
@@ -86,10 +106,11 @@ export function ChangeEmailDialog({
     if (!open) {
       setAddress("");
       setCode("");
+      setPassword("");
     }
   }, [open]);
 
-  const step = sentTo ? "code" : "address";
+  const step = needsPassword ? "identity" : sentTo ? "code" : "address";
   /*
    * Deliberately not cleared when the code step opens. Coming back to fix one
    * character is the whole point of the way back, and an empty field would make
@@ -103,7 +124,12 @@ export function ChangeEmailDialog({
         <DialogHeader>
           <DialogTitle>Change email</DialogTitle>
           <DialogDescription>
-            {step === "address" ? (
+            {step === "identity" ? (
+              <>
+                Changing the address you sign in with is how an account is taken, so your password
+                is asked for first. It is not asked again for a few minutes.
+              </>
+            ) : step === "address" ? (
               <>
                 You sign in with <span className="text-foreground">{current}</span>. The new address
                 has to be confirmed before it takes over.
@@ -121,11 +147,24 @@ export function ChangeEmailDialog({
           className="space-y-4"
           onSubmit={(e) => {
             e.preventDefault();
-            if (step === "address") onSend(address.trim());
+            if (step === "identity") onConfirmIdentity(password);
+            else if (step === "address") onSend(address.trim());
             else onConfirm(code.trim());
           }}
         >
-          {step === "address" ? (
+          {step === "identity" ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="reverify-password">Current password</Label>
+              <Input
+                id="reverify-password"
+                type="password"
+                autoComplete="current-password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
+          ) : step === "address" ? (
             <div className="space-y-1.5">
               <Label htmlFor="new-email">New email</Label>
               <Input
@@ -200,8 +239,14 @@ export function ChangeEmailDialog({
               Cancel
             </Button>
             <Button type="submit" disabled={busy} className="gap-1.5">
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
-              {step === "address" ? "Send code" : "Confirm address"}
+              {busy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : step === "identity" ? (
+                <Lock className="h-4 w-4" />
+              ) : (
+                <Mail className="h-4 w-4" />
+              )}
+              {step === "identity" ? "Confirm" : step === "address" ? "Send code" : "Confirm address"}
             </Button>
           </div>
         </form>

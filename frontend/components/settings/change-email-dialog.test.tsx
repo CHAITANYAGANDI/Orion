@@ -22,6 +22,7 @@ const handlers = {
   onResend: vi.fn(),
   onRetype: vi.fn(),
   onConfirm: vi.fn(),
+  onConfirmIdentity: vi.fn(),
 };
 
 function show(props: Partial<React.ComponentProps<typeof ChangeEmailDialog>> = {}) {
@@ -176,5 +177,59 @@ describe("waiting for a code that has not come", () => {
     show({ ...SENT, error: "That code did not confirm the address." });
 
     expect(screen.getByRole("alert")).toHaveTextContent(/did not confirm/);
+  });
+});
+
+/**
+ * Clerk refuses to add an address to a session that has not proved a first
+ * factor lately, and answers with "You need to provide additional verification
+ * to perform this operation" — a sentence that arrived in a dialog with no
+ * field to provide it in.
+ */
+describe("proving it is you first", () => {
+  it("asks for the password when Clerk does", () => {
+    show({ needsPassword: true });
+
+    expect(screen.getByLabelText("Current password")).toHaveAttribute("type", "password");
+  });
+
+  it("says why it is asking, since nothing else on this screen wanted a password", () => {
+    show({ needsPassword: true });
+
+    expect(screen.getByText(/how an account is taken/)).toBeInTheDocument();
+  });
+
+  it("hands the password over and nothing else", async () => {
+    show({ needsPassword: true });
+
+    await userEvent.type(screen.getByLabelText("Current password"), "hunter2");
+    await userEvent.click(screen.getByRole("button", { name: /Confirm$/ }));
+
+    expect(handlers.onConfirmIdentity).toHaveBeenCalledWith("hunter2");
+    expect(handlers.onSend).not.toHaveBeenCalled();
+  });
+
+  it("is not in the way of anybody already inside the window", () => {
+    // Most people are. Asking everybody every time would be a password typed
+    // for nothing on the way to a screen that would have opened anyway.
+    show();
+
+    expect(screen.queryByLabelText("Current password")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("New email")).toBeInTheDocument();
+  });
+
+  it("takes precedence over the step it interrupted", () => {
+    // The refusal can arrive with an address already pending from an earlier
+    // go. One field at a time, and it is the one Clerk is waiting for.
+    show({ needsPassword: true, sentTo: "new@example.com" });
+
+    expect(screen.getByLabelText("Current password")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Code")).not.toBeInTheDocument();
+  });
+
+  it("shows a wrong password where it can be seen", () => {
+    show({ needsPassword: true, error: "That password is not right." });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("That password is not right.");
   });
 });

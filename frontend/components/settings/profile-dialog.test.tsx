@@ -15,14 +15,19 @@ import userEvent from "@testing-library/user-event";
  */
 const { avatarFromFile } = vi.hoisted(() => ({ avatarFromFile: vi.fn() }));
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
-const { changePassword, startEmailChange, resendEmailCode, cancelEmailChange } = vi.hoisted(
-  () => ({
-    changePassword: vi.fn(),
-    startEmailChange: vi.fn(),
-    resendEmailCode: vi.fn(),
-    cancelEmailChange: vi.fn(),
-  }),
-);
+const {
+  changePassword,
+  startEmailChange,
+  resendEmailCode,
+  cancelEmailChange,
+  reverifyWithPassword,
+} = vi.hoisted(() => ({
+  changePassword: vi.fn(),
+  startEmailChange: vi.fn(),
+  resendEmailCode: vi.fn(),
+  cancelEmailChange: vi.fn(),
+  reverifyWithPassword: vi.fn(),
+}));
 
 vi.mock("@/lib/avatar", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/avatar")>();
@@ -31,7 +36,14 @@ vi.mock("@/lib/avatar", async (importOriginal) => {
 
 vi.mock("@/lib/account-actions", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/account-actions")>();
-  return { ...real, changePassword, startEmailChange, resendEmailCode, cancelEmailChange };
+  return {
+    ...real,
+    changePassword,
+    startEmailChange,
+    resendEmailCode,
+    cancelEmailChange,
+    reverifyWithPassword,
+  };
 });
 
 vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
@@ -88,6 +100,7 @@ beforeEach(() => {
   startEmailChange.mockResolvedValue({ id: "eml_1", address: "new@example.com" });
   resendEmailCode.mockResolvedValue(undefined);
   cancelEmailChange.mockResolvedValue(undefined);
+  reverifyWithPassword.mockResolvedValue(undefined);
 });
 
 describe("what it asks for", () => {
@@ -275,6 +288,71 @@ describe("the email", () => {
     expect(await screen.findByLabelText("New email")).toBeInTheDocument();
     // Still inside the dialog: this is a correction, not a cancellation.
     expect(screen.getByRole("heading", { name: "Change email" })).toBeInTheDocument();
+  });
+
+  it("asks for the password when Clerk wants the session proved again", async () => {
+    /*
+     * "You need to provide additional verification to perform this operation"
+     * used to arrive as a red line in a dialog with no field to provide it in.
+     * Clerk is right to guard this -- changing the address you sign in with is
+     * what somebody at a borrowed, still-signed-in laptop would do -- so the
+     * answer is to ask, in Orion's words.
+     */
+    const { ReverificationRequiredError } = await import("@/lib/account-actions");
+    startEmailChange.mockRejectedValueOnce(new ReverificationRequiredError("Confirm your password."));
+    show(EMPTY, ORION);
+    await userEvent.click(screen.getByRole("button", { name: "Change email" }));
+
+    await userEvent.type(screen.getByLabelText("New email"), "new@example.com");
+    await userEvent.click(screen.getByRole("button", { name: /Send code/ }));
+
+    expect(await screen.findByLabelText("Current password")).toBeInTheDocument();
+    // Not an error. It is the next step, and a red line beside it would read as
+    // something having gone wrong.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("picks the change back up by itself once the password lands", async () => {
+    const { ReverificationRequiredError } = await import("@/lib/account-actions");
+    startEmailChange.mockRejectedValueOnce(new ReverificationRequiredError("Confirm your password."));
+    show(EMPTY, ORION);
+    await userEvent.click(screen.getByRole("button", { name: "Change email" }));
+    await userEvent.type(screen.getByLabelText("New email"), "new@example.com");
+    await userEvent.click(screen.getByRole("button", { name: /Send code/ }));
+
+    await userEvent.type(await screen.findByLabelText("Current password"), "hunter2");
+    await userEvent.click(screen.getByRole("button", { name: /^Confirm$/ }));
+
+    await waitFor(() => expect(reverifyWithPassword).toHaveBeenCalledWith("hunter2"));
+    // The address is not asked for a second time: it was remembered.
+    expect(startEmailChange).toHaveBeenLastCalledWith("new@example.com");
+    expect(await screen.findByLabelText("Code")).toBeInTheDocument();
+  });
+
+  it("stays on the password step when the password is wrong", async () => {
+    const { AccountActionError, ReverificationRequiredError } = await import(
+      "@/lib/account-actions"
+    );
+    startEmailChange.mockRejectedValueOnce(new ReverificationRequiredError("Confirm your password."));
+    reverifyWithPassword.mockRejectedValue(new AccountActionError("That password is not right."));
+    show(EMPTY, ORION);
+    await userEvent.click(screen.getByRole("button", { name: "Change email" }));
+    await userEvent.type(screen.getByLabelText("New email"), "new@example.com");
+    await userEvent.click(screen.getByRole("button", { name: /Send code/ }));
+
+    await userEvent.type(await screen.findByLabelText("Current password"), "wrong");
+    await userEvent.click(screen.getByRole("button", { name: /^Confirm$/ }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("That password is not right.");
+    expect(screen.getByLabelText("Current password")).toBeInTheDocument();
+  });
+
+  it("does not ask for a password when Clerk does not", async () => {
+    // Most of the time the session is already inside the window, and a password
+    // typed for nothing is a step nobody needed.
+    await reachTheCode();
+
+    expect(screen.queryByLabelText("Current password")).not.toBeInTheDocument();
   });
 
   it("takes the unverified address off the account on the way back", async () => {
