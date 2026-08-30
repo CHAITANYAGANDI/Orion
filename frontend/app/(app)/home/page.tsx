@@ -97,13 +97,11 @@ const SCOPES = [
 ] as const;
 
 /*
- * The order here is the order in the menu, and it is NOT the default.
- *
- * Recent is listed first and Home still opens on All -- see DEFAULT_SCOPE
- * below, and SCOPE_PREF_KEY for why opening on Recent was a bug worth a
- * version bump. The two are easy to conflate because a picker usually leads
- * with the option it is on; anyone tempted to "tidy" this by making the first
- * entry the default should read that note first.
+ * The order here is the order in the menu, and Recent leads it because Recent
+ * is where Home opens -- but those are two decisions rather than one, and they
+ * have not always agreed. There was a stretch where this list led with Recent
+ * and DEFAULT_SCOPE below said `all`, which is a picker that does not lead with
+ * the option it is on. Moving one is not moving the other.
  */
 
 type Scope = (typeof SCOPES)[number]["value"];
@@ -123,56 +121,63 @@ const SCOPE_CODEC: PreferenceCodec<Scope> = {
 };
 
 /**
- * Home shows the whole workspace unless somebody says otherwise.
+ * Where the chosen scope is written down, and why the name carries a version.
  *
- * <h2>The bug</h2>
+ * <h2>What v1 could not answer</h2>
  *
- * <p>This defaulted to `recent`, and `recent` means `unfiled=true` on the wire
- * -- conversations that were never put in a folder. So the default Home was not
- * "your meetings", it was "your meetings, minus the ones you organised". An
- * account that had tidied everything away opened Home to "Everything is in a
- * folder" and a button, with no meetings visible anywhere.
+ * <p>A stored value is only worth honouring if it was a choice. Under v1 the
+ * default was `recent` and the picker wrote on every interaction, so a stored
+ * `"recent"` meant either "I chose this" or "I opened the menu once and it
+ * wrote down where I already was" -- and nothing on disk told them apart. That
+ * mattered then, because `recent` was hiding filed meetings with nothing on
+ * screen to say so, and honouring the ambiguous value carried that through the
+ * deployment into exactly the browsers it was happening in.
  *
- * <p>Being remembered made it stick. The scope is persisted, so once `recent`
- * was written down -- which happened the first time anybody touched the picker,
- * and the default was already `recent` besides -- every later visit restored it.
- * Opening a meeting and coming back landed on the empty state again.
+ * <p>So v1 was abandoned wholesale rather than repaired. Everything under v2 is
+ * a value somebody selected, because nothing writes this key except the picker
+ * -- which is still true now that the default has moved back to Recent. A
+ * stored `"all"` is honoured, and so is a stored `"recent"`.
  *
- * <h2>Why a new key rather than a new default</h2>
- *
- * <p>Changing the default alone would fix nothing for anyone already using the
- * app: their browser has `home.scope: "recent"` in localStorage, and a restored
- * value beats a default every time. The bug would survive the deployment in
- * exactly the browsers that hit it.
- *
- * <p>And the stored value cannot be repaired in place, because it is ambiguous.
- * Under v1 the default *was* `recent`, so a stored `"recent"` means either "I
- * chose this" or "I touched the picker once and it wrote down where I already
- * was" -- and nothing distinguishes them. Honouring it keeps the bug; dropping
- * it silently discards a real preference for the few who meant it.
- *
- * <p>A version bump resolves that by not pretending to know: v1 is abandoned
- * wholesale, everyone starts on `all`, and the first explicit choice under v2 is
- * unambiguous because the default it differs from is now the safe one. One
- * preference lost once, for the minority who had set it deliberately, against a
- * broken first screen for everybody who had not.
- *
- * <p>The old `home.scope` entry is left where it is rather than deleted. It is
- * inert -- nothing reads that name any more -- and clearing it would mean a
- * write on load, from a page whose whole problem was doing something surprising
- * on load.
+ * <p><b>The key stays at v2.</b> Bumping it again would throw away real choices
+ * to fix an ambiguity that no longer exists. And the old `home.scope` entry is
+ * left where it is rather than deleted: nothing reads that name any more, and
+ * clearing it would mean a write on load, from a page whose whole problem once
+ * was doing something surprising on load.
  */
 const SCOPE_PREF_KEY = "home.scope.v2";
 
 /**
- * All Conversations, and only an explicit choice moves off it.
+ * Recent Conversations: what has not been filed anywhere else.
  *
- * <p>Recent stays in the picker: filing is real, and "what I have not filed
- * yet" is a genuine question. It is just not the question Home should answer
- * before being asked -- a list that hides rows by default has to be chosen, not
- * arrived at.
+ * <h2>This has moved twice, and the middle step is the one to understand</h2>
+ *
+ * <p>`recent`, then `all`, and now `recent` again. The move to `all` was not a
+ * preference -- it was a bug fix, and undoing it blind would put the bug back.
+ *
+ * <p>`recent` is `unfiled=true` on the wire, so the list it draws is "your
+ * meetings, minus the ones you organised". An account that had filed everything
+ * therefore opened Home to a list with nothing in it -- and the page said <b>No
+ * conversations</b> and offered to help with a first recording. The
+ * archive-lost screen, over a full archive, reached by doing nothing at all.
+ *
+ * <p>But the default was only how people arrived there. What made it
+ * unrecoverable is that an empty list never said <em>which filter had emptied
+ * it</em>: the same screen appeared whether the workspace was empty or merely
+ * tidy, and the way out was a control you had to remember you had never
+ * touched.
+ *
+ * <p>That is now answered. An empty Recent asks the server whether the
+ * workspace holds anything at all, and the two cases get opposite screens --
+ * "Everything is in a folder" with the way to the whole list, or the
+ * first-recording screen. See {@link EmptyState}, and note that the probe is
+ * the only reason this is safe to open on: anybody moving the default again
+ * should move that guard with it rather than through it.
+ *
+ * <p>So this is a product choice once more instead of a trap, and the choice is
+ * Recent. Home is what you have not filed yet; the folders in the rail are
+ * where the rest of it went.
  */
-const DEFAULT_SCOPE: Scope = "all";
+const DEFAULT_SCOPE: Scope = "recent";
 
 const WHEN_CODEC: PreferenceCodec<DateWindow> = {
   // The choice, not the window. Storing the instants would pin "Last 7 days" to
@@ -185,15 +190,15 @@ export default function HomePage() {
   // Home opens on Recent: what has not been filed anywhere else. A meeting
   // recorded inside a folder is therefore not on this list until you switch to
   // All — deliberately, because the folder is where it was put and the rail on
-  // the left is how you get back to it.
+  // the left is how you get back to it. See DEFAULT_SCOPE for why that is safe
+  // to open on now and was not before.
   //
-  // Home counts the whole workspace now. It used to open on Recent, where the
-  // count excluded anything filed -- see SCOPE_PREF_KEY for why that default
-  // was wrong and why the key is versioned.
-  // Both of these are remembered until sign-out. Home is a page people leave
-  // and come back to constantly — open a meeting, come back, open another — and
-  // a filter that reset on every return meant narrowing the list was work you
-  // did once per visit rather than once.
+  // Both filters are remembered until sign-out. Home is a page people leave and
+  // come back to constantly — open a meeting, come back, open another — and a
+  // filter that reset on every return meant narrowing the list was work you did
+  // once per visit rather than once. A new sign-in starts from the defaults;
+  // see lib/preferences.ts for why a preference must never outlive its
+  // session.
   const scopePref = useStickyPreference<Scope>(SCOPE_PREF_KEY, DEFAULT_SCOPE, SCOPE_CODEC);
   const whenPref = useStickyPreference<DateWindow>("home.when", ANY_TIME, WHEN_CODEC);
   const { value: scope, set: setScope } = scopePref;
@@ -573,13 +578,17 @@ function HomeLoadError({ onRetry }: { onRetry: () => void }) {
  * recording. One row is enough to tell them apart, and it is only ever asked
  * for when there is nothing to show.
  *
- * <p><b>Only when Recent was chosen.</b> "Everything is in a folder" describes
- * a list that is hiding rows, which is only true of Recent — and Home no longer
- * opens there. On All Conversations an empty list means the workspace is empty,
- * full stop, so the probe below is skipped and the first-recording screen is
- * what shows. That skip is the whole guard: get it wrong and a new account is
- * told its meetings are filed somewhere, and handed a button to another empty
- * list.
+ * <p><b>Only on Recent.</b> "Everything is in a folder" describes a list that
+ * is hiding rows, which is only true of Recent. On All Conversations an empty
+ * list means the workspace is empty, full stop, so the probe below is skipped
+ * and the first-recording screen is what shows. That skip is the whole guard:
+ * get it wrong and a new account is told its meetings are filed somewhere, and
+ * handed a button to another empty list.
+ *
+ * <p>Home opens on Recent, so this is the common path rather than a corner —
+ * which is exactly why it exists. It is the difference between a default that
+ * explains itself and the one that used to say "No conversations" to somebody
+ * with a hundred of them.
  */
 function EmptyState({
   scope,
