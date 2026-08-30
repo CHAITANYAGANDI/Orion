@@ -73,16 +73,6 @@ export interface ChatHistoryProps {
    * the other is a statement about where you are.
    */
   atNewChat?: boolean;
-  /**
-   * Put the icons against the far edge, rather than beside the title.
-   *
-   * For the full-width page. The rails stretch the trigger to fill the row —
-   * right at four hundred pixels, where the header is the picker and nothing
-   * else — and wrong at the width of a monitor, which turns a two-word label
-   * into a hover target that lights up the whole top of the screen on the way
-   * to the buttons.
-   */
-  spread?: boolean;
 }
 
 export function ChatHistory({
@@ -97,7 +87,6 @@ export function ChatHistory({
   expanded,
   expandDisabled,
   atNewChat,
-  spread,
 }: ChatHistoryProps) {
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<string | null>(null);
@@ -159,10 +148,22 @@ export function ChatHistory({
           // leaving a screen reader with two controls called the same thing and
           // no way to tell which opens the history.
           aria-label="Previous chat history"
-          className={cn(
-            "flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm font-medium transition-colors hover:bg-accent",
-            spread ? "max-w-sm" : "flex-1",
-          )}
+          /*
+           * Wide enough for its label and no wider.
+           *
+           * It used to be `flex-1` in a rail, on the reasoning that the header
+           * is the picker and there is nothing else up there to hit — so
+           * filling the row made the whole thing one big target. What that
+           * actually does is put a hover shade across the full width of the
+           * panel for a two-word label, and the shade is what tells you where
+           * the control ends. A block the width of the rail says the control is
+           * the rail.
+           *
+           * `min-w-0` so a long conversation title shrinks and truncates rather
+           * than shoving the buttons off the edge; `max-w-sm` so it stops
+           * growing on the full-width page, where there is room to run on.
+           */
+          className="flex min-w-0 max-w-sm items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm font-medium transition-colors hover:bg-accent"
         >
           <Sparkles className="h-4 w-4 shrink-0 text-primary" />
           <span className="truncate">{label}</span>
@@ -174,9 +175,11 @@ export function ChatHistory({
           />
         </button>
 
-        {/* One group, so a spread header has two things to push apart rather
-            than three to space out evenly. */}
-        <div className={cn("flex items-center gap-1", spread && "ml-auto")}>
+        {/* One group, so the header has two things to push apart rather than
+            three to space out evenly. `ml-auto` rather than the trigger
+            growing: the gap between the title and the buttons should be empty
+            space, not part of the control. */}
+        <div className="ml-auto flex items-center gap-1">
           <Button
             type="button"
             variant="ghost"

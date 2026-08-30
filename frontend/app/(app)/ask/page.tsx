@@ -79,7 +79,6 @@ export default function AskPage() {
           // reads as a panel that has lost something rather than one that is
           // already at its largest.
           expandDisabled
-          spread
           onSelect={chat.setConversationId}
           onNew={() => void chat.startNew()}
           onRename={chat.rename}

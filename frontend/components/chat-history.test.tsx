@@ -56,17 +56,27 @@ beforeEach(() => {
 });
 
 describe("ChatHistory", () => {
-  it("does not stretch the trigger across a full-width header", () => {
-    picker({ spread: true, onExpand: vi.fn() });
+  it("does not stretch the trigger across the header", () => {
+    // The trigger carries a hover shade, and the shade is what tells you where
+    // the control ends. Filling the row makes a two-word label light up the
+    // whole top of the panel, which reads as the header being the button.
+    picker({ onExpand: vi.fn() });
 
-    // In a rail the trigger fills the row, so the whole header opens the
-    // history and there is nothing else up there to hit. At the width of a
-    // monitor that same rule makes a two-word label a hover target that lights
-    // up on the way to the buttons at the other end.
     const trigger = screen.getByRole("button", { name: /previous chat history/i });
     expect(trigger).not.toHaveClass("flex-1");
+    expect(trigger).toHaveClass("max-w-sm");
     expect(screen.getByRole("button", { name: /^new chat$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /expand the chat/i })).toBeInTheDocument();
+  });
+
+  it("still keeps the buttons at the far edge", () => {
+    // The gap between the title and the buttons is empty space now, not part
+    // of the control -- so it has to come from the group, not from the trigger
+    // growing into it.
+    picker({ onExpand: vi.fn() });
+
+    const group = screen.getByRole("button", { name: /^new chat$/i }).parentElement;
+    expect(group).toHaveClass("ml-auto");
   });
 
   it("starts closed", () => {
