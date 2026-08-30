@@ -31,24 +31,45 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 export function AccountMenu() {
-  const { userId, mode, signOut } = useAuth();
+  const { userId, mode, signOut, profile } = useAuth();
   // The profile is already fetched by the settings page and cached, so this
   // costs nothing on any screen that has been there; elsewhere it is one small
   // request for the thing a person most expects to recognise.
   const prefs = useGetPreferencesQuery();
-  const name = prefs.data?.displayName || null;
-  const photo = prefs.data?.avatarUrl || null;
   /*
-   * The address, where there is one. `userId` is `user_2abc…` — an opaque
-   * string that tells the reader nothing and cannot be checked against anything
-   * they know. With real accounts the useful answer to "who am I signed in as"
-   * is the email, and it is the one that catches signing in as the wrong
-   * person. The id is the fallback, not the label.
+   * Three sources, in order of who is most entitled to answer "what is my
+   * name": what this person typed into Settings, then what they told their
+   * identity provider, then nothing.
+   *
+   * <p>The id is not in that list any more, and that is the fix. This button
+   * used to render `user_3IUiqZSNuF0gbjwWA…` for anybody who signed in with
+   * Google — because `users.display_name` is only ever set by hand and
+   * `users.email` is null unless a Clerk JWT template sends one — and an opaque
+   * id in the place a name goes does not read as "you". It reads as somebody
+   * else's account, which is exactly how it was reported.
    */
-  const account = prefs.data?.email || (mode === "dev" ? userId : "");
+  const name = prefs.data?.displayName?.trim() || profile.name || null;
+  const photo = prefs.data?.avatarUrl || profile.imageUrl || null;
+  /** The address, which is the line that catches being signed in as the wrong person. */
+  const account = prefs.data?.email || profile.email || (mode === "dev" ? userId : "");
   // Real initials, not the tail of an opaque id: "k5" said nothing about
   // anybody, and a person who has told us their name should see it.
-  const initials = initialsOf(name, userId);
+  const initials = initialsOf(name, account || userId);
+
+  /**
+   * The two lines on the button, which must not be the same line twice.
+   *
+   * <p>With no name at all the address is promoted to the top line -- and then
+   * repeating it underneath is a button that says one fact twice. The second
+   * line only carries the address when the first one is carrying a name.
+   */
+  const label = name || account || "Your account";
+  const detail =
+    mode === "dev"
+      ? "Development session"
+      : account && account !== label
+        ? account
+        : "Signed in";
 
   return (
     <div className="px-3 pb-2">
@@ -72,11 +93,12 @@ export function AccountMenu() {
             )}
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium">
-                {name || userId || "user"}
+                {/* Never the id. An address is a poor name but a true one; with
+                    neither, "Your account" says what the button is for without
+                    claiming to know who is behind it. */}
+                {label}
               </span>
-              <span className="block truncate text-xs text-muted-foreground">
-                {mode === "dev" ? "Development session" : account || "Signed in"}
-              </span>
+              <span className="block truncate text-xs text-muted-foreground">{detail}</span>
             </span>
             {/* Radix writes data-state on the trigger, which is the only thing
                 that knows whether the menu is showing -- `open` lives inside
@@ -86,7 +108,9 @@ export function AccountMenu() {
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-56">
-          <DropdownMenuLabel className="truncate">{account || userId}</DropdownMenuLabel>
+          <DropdownMenuLabel className="truncate font-normal text-muted-foreground">
+            {account || "Signed in"}
+          </DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
             <Link href="/settings">

@@ -48,6 +48,13 @@ const isPublic = createRouteMatcher([
   "/",
   "/sign-in(.*)",
   "/sign-up(.*)",
+  /*
+   * Where Google sends somebody back to. It has to be reachable signed out:
+   * the whole job of that route is to turn the token in the URL into the
+   * session, so requiring a session to reach it would be a door that can only
+   * be opened from inside.
+   */
+  "/sso-callback(.*)",
 ]);
 
 /*

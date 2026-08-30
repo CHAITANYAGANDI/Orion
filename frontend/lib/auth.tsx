@@ -33,7 +33,42 @@ interface AuthContextValue {
   isSignedIn: boolean;
   isLoaded: boolean;
   signOut?: () => void;
+  /**
+   * Who the person is, as the identity provider knows them.
+   *
+   * <h3>Why this is here rather than fetched</h3>
+   *
+   * <p>The account button showed `user_3IUiqZSNuF0gbjwWA...` — an opaque id
+   * that tells the reader nothing and, worse, looks like somebody else's
+   * account. It fell back to the id because the two things it preferred were
+   * both empty: `users.display_name` is only ever set by hand in Settings, and
+   * `users.email` is null for most Clerk accounts, because Clerk's default
+   * session token carries no email claim (see `EMAIL_CLAIMS` in
+   * AuthenticationFilter — it needs a JWT template).
+   *
+   * <p>Meanwhile the browser already had all of it. Signing in with Google
+   * hands Clerk a name, an address and a picture, and `useUser()` has them
+   * client-side with no request at all. So the provider carries them, and the
+   * name somebody chose in Settings still wins where they have chosen one.
+   *
+   * <p>Empty strings rather than nulls: every consumer is rendering these into
+   * a string, and `""` is falsy in the one expression that matters.
+   */
+  profile: UserProfile;
 }
+
+/** What the identity provider knows about the person signed in. */
+export interface UserProfile {
+  /** "Ada Lovelace", or "" if the provider has no name for them. */
+  name: string;
+  /** Their primary address, or "". */
+  email: string;
+  /** A photo URL, or "". */
+  imageUrl: string;
+}
+
+/** Dev mode has an id and nothing else — there is no provider to ask. */
+export const NO_PROFILE: UserProfile = { name: "", email: "", imageUrl: "" };
 
 const AuthContext = React.createContext<AuthContextValue | null>(null);
 
@@ -114,6 +149,9 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
     isSignedIn: true,
     isLoaded,
     signOut,
+    // Nothing to know. Dev mode has an id, and the account button says
+    // "Development session" under it rather than pretending to a name.
+    profile: NO_PROFILE,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

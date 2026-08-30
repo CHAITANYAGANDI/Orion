@@ -4,7 +4,7 @@
 // Dev builds never evaluate this module, so no Clerk key is required to run.
 
 import * as React from "react";
-import { ClerkProvider, useAuth as useClerkAuth } from "@clerk/nextjs";
+import { ClerkProvider, useAuth as useClerkAuth, useUser } from "@clerk/nextjs";
 import {
   setTokenGetter,
   publishAuthState,
@@ -14,7 +14,7 @@ import {
   tokenProbeAttempt,
 } from "@/lib/auth-store";
 import { clearPreferences } from "@/lib/preference-store";
-import type { AuthContextValue } from "@/lib/auth";
+import type { AuthContextValue, UserProfile } from "@/lib/auth";
 
 type Ctx = React.Context<AuthContextValue | null>;
 
@@ -26,6 +26,16 @@ function ClerkBridge({
   children: React.ReactNode;
 }) {
   const { getToken, userId, sessionId, isSignedIn, isLoaded, signOut } = useClerkAuth();
+  /*
+   * The person, as Google (or the sign-up form) gave them to Clerk.
+   *
+   * Already in the browser -- `useUser` reads the session Clerk has loaded, so
+   * this costs no request. It is here because the alternative was the account
+   * button rendering `user_3IU...`: the backend only knows a name if somebody
+   * typed one into Settings, and it only knows an address if a JWT template
+   * was configured to send one.
+   */
+  const { user } = useUser();
 
   /*
    * Bumped when somebody presses Try again on the gate's failure screen. A
@@ -120,6 +130,18 @@ function ClerkBridge({
     };
   }, [isLoaded, isSignedIn, sessionId, attempt]);
 
+  const profile: UserProfile = React.useMemo(
+    () => ({
+      // `fullName` is null when somebody signed up with an address and never
+      // gave a name, which is every email sign-up -- the form deliberately does
+      // not ask. `username` is not consulted at all: Orion never collects one.
+      name: user?.fullName?.trim() || user?.firstName?.trim() || "",
+      email: user?.primaryEmailAddress?.emailAddress ?? "",
+      imageUrl: user?.hasImage ? user.imageUrl : "",
+    }),
+    [user],
+  );
+
   const value: AuthContextValue = {
     mode: "clerk",
     userId: userId ?? "",
@@ -132,6 +154,7 @@ function ClerkBridge({
     sessionKey: isLoaded ? sessionId ?? "" : "",
     isSignedIn: Boolean(isSignedIn),
     isLoaded,
+    profile,
     signOut: () => {
       // Belt to the session key's braces, and the part that runs even when the
       // next person to sign in on this browser is somebody else.

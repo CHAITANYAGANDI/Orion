@@ -27,6 +27,8 @@ import { render, act } from "@testing-library/react";
  */
 
 const clerk = vi.hoisted(() => ({
+  /** What `useUser` hands back. Null until Clerk has loaded a session. */
+  user: null as { fullName: string | null; primaryEmailAddress: { emailAddress: string } | null; hasImage: boolean; imageUrl: string } | null,
   state: {
     isLoaded: false,
     isSignedIn: false,
@@ -42,6 +44,10 @@ vi.mock("@clerk/nextjs", () => ({
     ...clerk.state,
     signOut: vi.fn(),
   }),
+  // The bridge reads the person's name and picture from here, so the account
+  // button can stop rendering a primary key. Nothing in this file asserts on
+  // them; the mock exists so the component can mount.
+  useUser: () => ({ user: clerk.user }),
 }));
 
 vi.mock("@/lib/preference-store", () => ({ clearPreferences: vi.fn() }));

@@ -16,6 +16,14 @@
 /** Home, and the fallback for anywhere that cannot be returned to. */
 export const HOME = "/home";
 
+/**
+ * The first screen inside a new account.
+ *
+ * <p>Written by both sign-up roads and read by the screen itself, which is
+ * exactly the shape of thing this file exists for.
+ */
+export const WELCOME = "/welcome";
+
 /** Every folder. */
 export const FOLDERS = "/folders";
 

@@ -107,7 +107,10 @@ export const INCLUDED: FeatureGroup[] = [
     heading: "Getting things out",
     features: [
       { label: "Exporting a meeting as PDF, Word, Markdown or plain text" },
-      { label: "Email recaps and a daily digest of what is due" },
+      {
+        label: "Downloading the original recording",
+        detail: "The file you recorded or imported, as it was stored.",
+      },
     ],
   },
 ];
