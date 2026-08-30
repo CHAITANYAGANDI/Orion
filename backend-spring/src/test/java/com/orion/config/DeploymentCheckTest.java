@@ -31,9 +31,10 @@ class DeploymentCheckTest {
     private static final String FRONTEND = "https://orion-frontend.onrender.com";
     private static final String PUBLIC = "https://orion-backend.onrender.com";
     private static final String AI = "http://orion-ai:10000";
+    private static final String DB = "jdbc:postgresql://ep-cool-sun-123.us-east-2.aws.neon.tech/neondb";
 
     private static DeploymentCheck ready() {
-        return new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI);
+        return new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI, DB);
     }
 
     @Test
@@ -53,7 +54,7 @@ class DeploymentCheckTest {
         @DisplayName("dev mode is refused, and the message says what it costs")
         void devModeIsRefused() {
             List<String> problems =
-                    new DeploymentCheck("dev", ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI).problems();
+                    new DeploymentCheck("dev", ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI, DB).problems();
 
             assertThat(problems).hasSize(1);
             // Named as the consequence, not as the setting. "ORION_AUTH_MODE
@@ -69,7 +70,7 @@ class DeploymentCheckTest {
             // fail-closed default on the @Value never got a say.
             for (String mode : new String[] { "", "  ", "development", "DEV", "prod", "clerkk" }) {
                 List<String> problems =
-                        new DeploymentCheck(mode, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI).problems();
+                        new DeploymentCheck(mode, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI, DB).problems();
 
                 assertThat(problems).as("mode=%s", mode).isNotEmpty();
             }
@@ -82,7 +83,7 @@ class DeploymentCheckTest {
             // three problems when there is one sends somebody to configure
             // Clerk when what they need to do is stop using dev mode.
             List<String> problems =
-                    new DeploymentCheck("dev", "", "", TOKEN, FRONTEND, PUBLIC, AI).problems();
+                    new DeploymentCheck("dev", "", "", TOKEN, FRONTEND, PUBLIC, AI, DB).problems();
 
             assertThat(problems).hasSize(1);
         }
@@ -99,7 +100,7 @@ class DeploymentCheckTest {
             // deployment docs. Anybody who has read any of those can forge a
             // transcript callback.
             List<String> problems = new DeploymentCheck(
-                    MODE, ISSUER, JWKS, "dev-internal-token", FRONTEND, PUBLIC, AI).problems();
+                    MODE, ISSUER, JWKS, "dev-internal-token", FRONTEND, PUBLIC, AI, DB).problems();
 
             assertThat(problems).hasSize(1);
             assertThat(problems.get(0)).contains("forge a result callback");
@@ -109,7 +110,7 @@ class DeploymentCheckTest {
         @DisplayName("an unset token is refused")
         void anUnsetTokenIsRefused() {
             List<String> problems =
-                    new DeploymentCheck(MODE, ISSUER, JWKS, "", FRONTEND, PUBLIC, AI).problems();
+                    new DeploymentCheck(MODE, ISSUER, JWKS, "", FRONTEND, PUBLIC, AI, DB).problems();
 
             assertThat(problems).hasSize(1);
         }
@@ -127,7 +128,7 @@ class DeploymentCheckTest {
             // wrong makes every request from the browser fail, and it looks
             // exactly like the API being down.
             List<String> problems = new DeploymentCheck(
-                    MODE, ISSUER, JWKS, TOKEN, "http://localhost:3000", PUBLIC, AI).problems();
+                    MODE, ISSUER, JWKS, TOKEN, "http://localhost:3000", PUBLIC, AI, DB).problems();
 
             assertThat(problems).hasSize(1);
             assertThat(problems.get(0)).contains("only this container can reach");
@@ -151,7 +152,7 @@ class DeploymentCheckTest {
                     "http://[::1]",
             }) {
                 List<String> problems =
-                        new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, url, PUBLIC, AI).problems();
+                        new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, url, PUBLIC, AI, DB).problems();
 
                 assertThat(problems).as("url=%s", url).isNotEmpty();
             }
@@ -165,7 +166,7 @@ class DeploymentCheckTest {
             // a bare host is not an origin -- CORS compares it against
             // `https://host` and never matches.
             List<String> problems = new DeploymentCheck(
-                    MODE, ISSUER, JWKS, TOKEN, "orion-frontend.onrender.com", PUBLIC, AI).problems();
+                    MODE, ISSUER, JWKS, TOKEN, "orion-frontend.onrender.com", PUBLIC, AI, DB).problems();
 
             assertThat(problems).hasSize(1);
             assertThat(problems.get(0)).contains("https://orion-frontend.onrender.com");
@@ -178,7 +179,7 @@ class DeploymentCheckTest {
             // browser, so this is the one URL where "it works on my machine" is
             // literally the failure.
             List<String> problems = new DeploymentCheck(
-                    MODE, ISSUER, JWKS, TOKEN, FRONTEND, "http://localhost:8080", AI).problems();
+                    MODE, ISSUER, JWKS, TOKEN, FRONTEND, "http://localhost:8080", AI, DB).problems();
 
             assertThat(problems).hasSize(1);
             assertThat(problems.get(0)).contains("APP_PUBLIC_URL");
@@ -191,15 +192,15 @@ class DeploymentCheckTest {
             // internal network can only mean http. Refusing it here would make
             // the blueprint's auto-wiring unusable for no gain.
             assertThat(new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC,
-                    "orion-ai:10000").problems()).isEmpty();
+                    "orion-ai:10000", DB).problems()).isEmpty();
             assertThat(new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC,
-                    "http://orion-ai:10000").problems()).isEmpty();
+                    "http://orion-ai:10000", DB).problems()).isEmpty();
         }
 
         @Test
         @DisplayName("but an unset ai-service URL is still refused")
         void theInternalUrlMustExist() {
-            assertThat(new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, "")
+            assertThat(new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, "", DB)
                     .problems()).hasSize(1);
         }
     }
@@ -218,7 +219,7 @@ class DeploymentCheckTest {
                     MODE,
                     "https://touching-locust-18.clerk.accounts.dev",
                     "https://touching-locust-18.clerk.accounts.dev/.well-known/jwks.json",
-                    TOKEN, FRONTEND, PUBLIC, AI);
+                    TOKEN, FRONTEND, PUBLIC, AI, DB);
 
             assertThat(check.problems()).isEmpty();
             assertThat(check.warnings()).singleElement()
@@ -232,7 +233,7 @@ class DeploymentCheckTest {
         // Fixing a deploy one restart per variable, each cycle revealing the
         // next thing wrong, is how a five-minute checklist becomes an afternoon.
         DeploymentCheck check = new DeploymentCheck(
-                "dev", "", "", "dev-internal-token", "http://localhost:3000", "", "");
+                "dev", "", "", "dev-internal-token", "http://localhost:3000", "", "", DB);
 
         assertThat(check.problems()).hasSize(5);
     }
@@ -241,7 +242,7 @@ class DeploymentCheckTest {
     @DisplayName("startup fails, and the exception carries the list")
     void theContextRefusesToStart() {
         DeploymentCheck check = new DeploymentCheck(
-                "dev", "", "", "dev-internal-token", "http://localhost:3000", "", "");
+                "dev", "", "", "dev-internal-token", "http://localhost:3000", "", "", DB);
 
         assertThatThrownBy(check::check)
                 .isInstanceOf(IllegalStateException.class)
@@ -253,5 +254,70 @@ class DeploymentCheckTest {
     @DisplayName("a ready deployment starts")
     void aReadyDeploymentStarts() {
         ready().check();
+    }
+
+    @Nested
+    @DisplayName("the pooler that silently empties an account")
+    class PooledDatabase {
+
+        /*
+         * This one shipped, and it cost four days of looking in the wrong place.
+         *
+         * Row-level security is armed with a session-level `set_config` on each
+         * pooled connection. A transaction-mode pooler hands the next
+         * transaction a different server connection, where that setting was
+         * never made -- so the policies match nothing and the API answers, with
+         * a straight face, that the account is empty. Per request, at random,
+         * with no error anywhere. Reloading re-rolls which backend you get,
+         * which is why reloading appears to fix it.
+         *
+         * docs/deploy.md recommended exactly this configuration, which is how
+         * it got there.
+         */
+        @Test
+        @DisplayName("a Neon pooled host is refused, and the message says what it looks like")
+        void pooledHostIsRefused() {
+            List<String> problems = new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND,
+                    PUBLIC, AI,
+                    "jdbc:postgresql://ep-cool-sun-123-pooler.us-east-2.aws.neon.tech/neondb"
+            ).problems();
+
+            assertThat(problems).hasSize(1);
+            // The symptom, not the setting. Somebody reading this at 2am is
+            // looking at an empty screen, not at a connection string.
+            assertThat(problems.get(0))
+                    .contains("no conversations")
+                    .contains("DIRECT");
+        }
+
+        @Test
+        @DisplayName("a pgbouncer=true parameter is the same mistake spelled differently")
+        void pgbouncerParameterIsRefused() {
+            assertThat(new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI,
+                    "jdbc:postgresql://db.example.com/orion?sslmode=require&pgbouncer=true"
+            ).problems()).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("the direct endpoint passes")
+        void directHostPasses() {
+            assertThat(ready().problems()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("a host that merely contains the word pooler is not the mistake")
+        void anUnrelatedHostPasses() {
+            // The hyphen is what identifies it. Matching on `pooler` alone
+            // would accuse this host, which is a perfectly ordinary one.
+            assertThat(new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI,
+                    "jdbc:postgresql://carpooler-db.example.com/orion").problems()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("an unset url is left to Spring, which has its own complaint")
+        void unsetUrlIsNotThisCheckSProblem() {
+            assertThat(new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI, "")
+                    .problems()).isEmpty();
+        }
     }
 }

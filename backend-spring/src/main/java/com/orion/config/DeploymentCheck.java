@@ -61,6 +61,16 @@ public class DeploymentCheck {
     private static final List<String> LOCAL_HOSTS =
             List.of("localhost", "127.0.0.1", "0.0.0.0", "::1", "host.docker.internal");
 
+    /**
+     * What a transaction-mode connection pooler looks like in a JDBC URL.
+     *
+     * <p>Neon spells it in the host — {@code ep-xxx-pooler.region.aws.neon.tech}
+     * — and Supabase and others take a {@code pgbouncer=true} parameter. Both
+     * are the same thing for this purpose: a pooler that reassigns the server
+     * connection between transactions.
+     */
+    private static final List<String> POOLER_MARKERS = List.of("-pooler", "pgbouncer=true");
+
     private final String authMode;
     private final String issuer;
     private final String jwksUrl;
@@ -68,6 +78,7 @@ public class DeploymentCheck {
     private final String frontendUrl;
     private final String publicUrl;
     private final String aiServiceUrl;
+    private final String datasourceUrl;
 
     public DeploymentCheck(
             @Value("${orion.auth-mode:clerk}") String authMode,
@@ -76,7 +87,8 @@ public class DeploymentCheck {
             @Value("${orion.internal-token:}") String internalToken,
             @Value("${app.frontend-url:}") String frontendUrl,
             @Value("${app.public-url:}") String publicUrl,
-            @Value("${app.ai-service-url:}") String aiServiceUrl) {
+            @Value("${app.ai-service-url:}") String aiServiceUrl,
+            @Value("${spring.datasource.url:}") String datasourceUrl) {
         this.authMode = authMode;
         this.issuer = issuer;
         this.jwksUrl = jwksUrl;
@@ -84,6 +96,7 @@ public class DeploymentCheck {
         this.frontendUrl = frontendUrl;
         this.publicUrl = publicUrl;
         this.aiServiceUrl = aiServiceUrl;
+        this.datasourceUrl = datasourceUrl;
     }
 
     @PostConstruct
@@ -149,6 +162,8 @@ public class DeploymentCheck {
         if (trim(aiServiceUrl).isEmpty()) {
             problems.add("AI_SERVICE_URL is not set. Nothing can be transcribed or summarised.");
         }
+
+        problems.addAll(poolerProblem());
         // Deliberately not checked for a scheme, unlike the two above. It names
         // a private service on the internal network, so there is exactly one
         // thing a missing scheme can mean and AiClient repairs it rather than
@@ -157,6 +172,67 @@ public class DeploymentCheck {
         // is worse than stopping.
 
         return problems;
+    }
+
+    /**
+     * The runtime must not reach Postgres through a transaction-mode pooler.
+     *
+     * <h2>What goes wrong</h2>
+     *
+     * <p>Row-level security is armed per connection: {@link TenantAwareDataSource}
+     * runs {@code set_config('app.user_id', ?, false)} as each pooled connection
+     * is handed out, and every policy in V9 tests what that set. The {@code
+     * false} makes it <em>session</em>-level, which is correct for a connection
+     * that belongs to this process — and wrong through a pooler that does not
+     * keep sessions.
+     *
+     * <p>A transaction-mode pooler assigns a server connection per
+     * <em>transaction</em>. The {@code set_config} lands on whichever backend
+     * served it; the query that follows is a different transaction and may be
+     * given a different backend, where {@code app.user_id} was never set. RLS
+     * then matches nothing, and — this is the part that cost four days — that
+     * is not an error. It is a 200 with an empty list and a perfectly ordinary
+     * 404:
+     *
+     * <ul>
+     *   <li>{@code GET /meetings} answers "you have no conversations",</li>
+     *   <li>{@code GET /projects} answers "you have no folders",</li>
+     *   <li>{@code GET /meetings/{id}} and {@code /transcript} answer 404,</li>
+     * </ul>
+     *
+     * <p>each of them intermittently, per request, to an account that is
+     * perfectly intact — because whether a given request works depends on which
+     * backend the pooler happened to give it. Reloading re-rolls it, which is
+     * why reloading "fixes" it.
+     *
+     * <p>And the same mechanism runs the other way: a backend still carrying a
+     * previous borrower's {@code app.user_id} answers <em>this</em> request with
+     * <em>that</em> tenant's rows. Nothing in the application can detect either
+     * case, because from here both are the database answering honestly.
+     *
+     * <h2>Why refusing to start</h2>
+     *
+     * <p>Because the failure is silent and looks like data loss to the person
+     * using it. The direct endpoint is the same host with {@code -pooler}
+     * removed, and Hikari is already the connection pool this process needs.
+     */
+    List<String> poolerProblem() {
+        String url = trim(datasourceUrl).toLowerCase(Locale.ROOT);
+        boolean pooled = POOLER_MARKERS.stream().anyMatch(url::contains);
+        if (!pooled) {
+            return List.of();
+        }
+        // ASCII only: the build sets no source encoding, so a non-ASCII
+        // character in a literal is decoded with whatever the platform
+        // default happens to be.
+        return List.of("SPRING_DATASOURCE_URL goes through a transaction-mode connection "
+                + "pooler. Row-level security is armed with a session-level setting on each "
+                + "connection, and such a pooler gives the next transaction a different "
+                + "server connection, where that setting was never made. Requests are then "
+                + "answered with no tenant - an intact account that reads as empty: no "
+                + "conversations, no folders, 404 on a meeting - or with the previous "
+                + "borrower's rows. Point the runtime at the DIRECT endpoint: the same host "
+                + "with `-pooler` removed, which is what FLYWAY_URL already uses.");
     }
 
     /**

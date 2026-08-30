@@ -164,8 +164,18 @@ host (the same name with `-pooler` removed). You need both:
 
 | Use | Endpoint | Why |
 |---|---|---|
-| Runtime (`SPRING_DATASOURCE_URL`, `PG_HOST`) | pooled | many short connections |
+| Runtime (`SPRING_DATASOURCE_URL`, `PG_HOST`) | **direct** | Row-level security is armed with a session-level setting on each connection, and a transaction-mode pooler gives the next transaction a different server connection. Hikari is already the pool this process needs |
 | Migrations (`FLYWAY_URL`) | **direct** | Flyway holds an advisory lock across several transactions; a transaction-mode pooler will not keep it |
+
+> **Both are the direct host.** This table used to say `pooled` for the runtime,
+> and that shipped. The result is not an error: RLS matches nothing on a
+> connection that never received the tenant, so the API answers 200 with an
+> empty list and a straight-faced 404 — an intact account showing "No
+> conversations", an empty folder rail, "Meeting not found", "Transcript
+> unavailable" — intermittently, per request, because it depends on which
+> backend the pooler handed that transaction. Reloading re-rolls it, which is
+> why reloading looks like a fix. The same mechanism can hand one tenant's rows
+> to another. `DeploymentCheck` now refuses to start on a `-pooler` runtime URL.
 
 > `.env` currently has `DEPLOY_DATABASE_URL_POOLED` set and
 > `DEPLOY_DATABASE_URL_DIRECT` **empty**. Fill the direct one in before

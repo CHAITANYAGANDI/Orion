@@ -27,6 +27,25 @@ import java.sql.SQLException;
  * because connections are borrowed outside an explicit transaction as well as
  * inside one, and a transaction-scoped setting would evaporate before the
  * statement that needs it.
+ *
+ * <p><b>Which is why the runtime must not reach Postgres through a
+ * transaction-mode pooler.</b> The setting above belongs to the session, and a
+ * pooler in transaction mode does not keep sessions: it assigns a server
+ * connection per transaction, so the {@code set_config} lands on one backend
+ * and the query that follows can be given another, where {@code app.user_id}
+ * was never set. Every policy then matches nothing — which is not an error
+ * anywhere in this application. It is a 200 with an empty list and an ordinary
+ * 404: an intact account that reads as "No conversations", an empty folder
+ * rail, a meeting that cannot be found, a transcript that is unavailable, each
+ * of them intermittently, per request. The same mechanism runs the other way,
+ * handing a backend that still carries a previous borrower's tenant to whoever
+ * asks next.
+ *
+ * <p>This is enforced rather than documented: {@link DeploymentCheck} refuses
+ * to start a production deployment whose datasource URL names a pooler. If the
+ * pooler is ever genuinely wanted, the tenant has to be set <em>inside</em>
+ * each transaction instead — and this class is the wrong shape for that, since
+ * checkout is not where the transaction begins.
  */
 public class TenantAwareDataSource extends DelegatingDataSource {
 

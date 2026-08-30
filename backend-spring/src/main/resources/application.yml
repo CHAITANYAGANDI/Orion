@@ -70,10 +70,12 @@ spring:
     baseline-on-migrate: true
     locations: classpath:db/migration
     # Defaults to the runtime URL, which is right locally where both point at
-    # the same server. Against a managed Postgres they must differ: Flyway
-    # holds an advisory lock across several transactions, and a transaction-mode
-    # connection pooler does not keep it — so FLYWAY_URL should name the direct
-    # endpoint while the runtime pool uses the pooled one.
+    # the same server, and right against a managed Postgres too: both want the
+    # DIRECT endpoint. Flyway because it holds an advisory lock across several
+    # transactions that a transaction-mode pooler will not keep; the runtime
+    # because row-level security is armed with a session-level setting on each
+    # connection, which such a pooler separates from the query it was set for.
+    # They still differ in one respect — Flyway connects as the schema owner.
     url: ${FLYWAY_URL:${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/orion}}
     user: ${FLYWAY_USER:orion}
     password: ${FLYWAY_PASSWORD:orion}

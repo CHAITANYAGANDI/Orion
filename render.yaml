@@ -57,8 +57,14 @@ services:
       #
       # jdbc: form, and note `channel_binding` is a libpq parameter the JDBC
       # driver does not understand — strip it when converting the Neon URL.
+      # The DIRECT host, not the pooled one. Row-level security is armed with a
+      # session-level setting on each connection (TenantAwareDataSource), and a
+      # transaction-mode pooler gives the next transaction a different server
+      # connection -- so requests come back with no tenant, which reads as an
+      # empty account rather than as an error. DeploymentCheck refuses to start
+      # on a `-pooler` URL. Hikari is already the pool this process needs.
       - key: SPRING_DATASOURCE_URL
-        sync: false        # jdbc:postgresql://<pooled-host>/neondb?sslmode=require
+        sync: false        # jdbc:postgresql://<DIRECT-host>/neondb?sslmode=require
       - key: SPRING_DATASOURCE_USERNAME
         value: orion_app
       - key: SPRING_DATASOURCE_PASSWORD

@@ -8,9 +8,15 @@ services:
     ports:
       - "8080:8080"
     environment:
-      # Postgres is Neon. The JDBC form of Neon's pooled URL, with
-      # `channel_binding` stripped -- that is a libpq parameter the JDBC driver
-      # does not understand and rejects.
+      # Postgres is Neon. The JDBC form of Neon's DIRECT URL -- the host
+      # WITHOUT `-pooler` -- with `channel_binding` stripped, that being a
+      # libpq parameter the JDBC driver does not understand and rejects.
+      #
+      # Direct because row-level security is armed with a session-level setting
+      # on each connection (TenantAwareDataSource), and a transaction-mode
+      # pooler gives the next transaction a different server connection: the
+      # tenant is lost and the API answers with an empty account rather than an
+      # error. DeploymentCheck refuses to start on a `-pooler` URL.
       SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL:?set it in .env}
       # Runtime: unprivileged, so row-level security binds.
       SPRING_DATASOURCE_USERNAME: ${APP_DB_USER:-orion_app}
