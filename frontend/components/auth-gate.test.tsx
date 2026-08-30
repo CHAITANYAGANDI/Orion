@@ -32,6 +32,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import * as React from "react";
 import { render, screen, act } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { AuthGate } from "@/components/auth-gate";
 import {
   authStore,
@@ -41,6 +42,8 @@ import {
   claimApiCache,
   resetAuthReadiness,
   isAuthReady,
+  authPhase,
+  tokenProbeAttempt,
   buildAuthHeaders,
   type TokenStatus,
 } from "@/lib/auth-store";
@@ -277,6 +280,43 @@ describe("AuthGate", () => {
     });
 
     expect(screen.queryByText("workspace")).toBeNull();
+  });
+
+  it("says the sign-in could not be finished, rather than waiting for ever", () => {
+    /*
+     * `failed` is not a wait. The probe finished and there is no credential --
+     * the network went while the token was being minted, or the only token on
+     * offer belongs to a session that has ended. Drawing the shape of something
+     * arriving, indefinitely, is the same lie as an empty state over a failed
+     * request, and the only way out of it used to be a reload.
+     */
+    act(() => {
+      publishAuthState({ sessionId: "sess_1", phase: "preparing-session" });
+      resolveTokenProbe("sess_1", false);
+    });
+
+    renderGate();
+
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(screen.getByText(/couldn't finish signing you in/i)).toBeInTheDocument();
+    expect(screen.queryByText(/loading your workspace/i)).toBeNull();
+    expect(screen.queryByText("workspace")).toBeNull();
+  });
+
+  it("offers a way to try again that is not a reload", async () => {
+    act(() => {
+      publishAuthState({ sessionId: "sess_1", phase: "preparing-session" });
+      resolveTokenProbe("sess_1", false);
+    });
+    renderGate();
+
+    const before = tokenProbeAttempt();
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+
+    // A counter the bridge watches, bumped by a person. Nothing schedules it.
+    expect(tokenProbeAttempt()).toBe(before + 1);
+    expect(authPhase()).toBe("preparing-session");
+    expect(screen.getByText(/loading your workspace/i)).toBeInTheDocument();
   });
 
   it("shows a busy state rather than an empty screen while it waits", () => {

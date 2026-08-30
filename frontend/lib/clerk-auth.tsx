@@ -9,6 +9,9 @@ import {
   setTokenGetter,
   publishAuthState,
   resolveTokenProbe,
+  acquireSessionToken,
+  subscribeAuthReady,
+  tokenProbeAttempt,
 } from "@/lib/auth-store";
 import { clearPreferences } from "@/lib/preference-store";
 import type { AuthContextValue } from "@/lib/auth";
@@ -23,6 +26,14 @@ function ClerkBridge({
   children: React.ReactNode;
 }) {
   const { getToken, userId, sessionId, isSignedIn, isLoaded, signOut } = useClerkAuth();
+
+  /*
+   * Bumped when somebody presses Try again on the gate's failure screen. A
+   * probe that failed leaves the app with nothing to do and no way to ask
+   * again; this is that way. It is a counter and not a timer -- nothing here
+   * re-runs on its own.
+   */
+  const attempt = React.useSyncExternalStore(subscribeAuthReady, tokenProbeAttempt, () => 0);
 
   /*
    * Hand the token getter to the non-React store.
@@ -42,22 +53,22 @@ function ClerkBridge({
       setTokenGetter(null);
       return;
     }
-    setTokenGetter(() => getToken());
+    // `options` forwarded rather than dropped: `acquireSessionToken` needs
+    // `skipCache` to get past a cached token belonging to a session that has
+    // ended. See lib/token-claims for what that cache does across a sign-in.
+    setTokenGetter((options) => getToken(options));
     return () => {
       setTokenGetter(null);
     };
   }, [getToken, isLoaded, isSignedIn]);
 
   /*
-   * The latest getter, without making it a dependency of the probe below.
-   *
-   * Clerk hands back a fresh `getToken` identity on renders that have nothing
-   * to do with the session changing. Keying the probe on it would re-run a
-   * network call on those renders; keying it on the session is what the probe
-   * is actually about.
+   * The probe below reads the getter out of the store rather than closing over
+   * `getToken`, which is also what keeps `getToken` out of its dependencies:
+   * Clerk hands back a fresh identity for it on renders that have nothing to do
+   * with the session changing, and keying a network call on that would re-run
+   * it on every one of them. The effect above keeps the store's copy current.
    */
-  const tokenRef = React.useRef(getToken);
-  tokenRef.current = getToken;
 
   /*
    * Prove a token can actually be had for THIS session, and say so.
@@ -71,12 +82,18 @@ function ClerkBridge({
    * the probe is the ordinary `getToken()` call every request makes, and its
    * resolution is the event being awaited.
    *
-   * <p><b>Two independent guards against a stale answer.</b> The `cancelled`
+   * <p><b>Three independent guards against a stale answer.</b> The `cancelled`
    * flag stops a superseded effect from publishing at all, and
    * `resolveTokenProbe` re-checks the session id on the way in -- because the
    * consequence of getting this wrong is opening the app for session B on the
    * strength of session A's credential, and one flag in a closure is a thin
    * thing to hang tenant isolation on.
+   *
+   * <p>The third is inside `acquireSessionToken`, and it is the one the other
+   * two could not give: they establish which session <em>asked</em>, and it
+   * establishes which session the token that came back was actually minted
+   * for. Clerk can hand out the previous session's cached JWT here, and a gate
+   * opened on that credential is a gate opened onto somebody else's account.
    */
   React.useEffect(() => {
     if (!isLoaded) {
@@ -92,20 +109,16 @@ function ClerkBridge({
 
     let cancelled = false;
     void (async () => {
-      try {
-        const token = await tokenRef.current();
-        if (!cancelled) resolveTokenProbe(sessionId, Boolean(token));
-      } catch {
-        // Not rethrown and not logged: what Clerk throws names the instance and
-        // the token template. `failed` is the whole of what this needs to say.
-        if (!cancelled) resolveTokenProbe(sessionId, false);
-      }
+      // The same call every request makes, so what the gate opens on and what
+      // the wire carries cannot come apart. It does not throw.
+      const token = await acquireSessionToken(sessionId);
+      if (!cancelled) resolveTokenProbe(sessionId, Boolean(token));
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [isLoaded, isSignedIn, sessionId]);
+  }, [isLoaded, isSignedIn, sessionId, attempt]);
 
   const value: AuthContextValue = {
     mode: "clerk",

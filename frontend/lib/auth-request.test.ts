@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { configureStore } from "@reduxjs/toolkit";
 import { api, isNotFoundError } from "@/lib/api";
 import { fetchExportFile } from "@/lib/exports";
-import { authStore, setTokenGetter, resetAuthReadiness } from "@/lib/auth-store";
+import {
+  authStore,
+  setTokenGetter,
+  resetAuthReadiness,
+  publishAuthState,
+} from "@/lib/auth-store";
 
 /**
  * A signed-in application never knowingly sends a request without its
@@ -101,11 +106,21 @@ function store() {
 
 const previousMode = authStore.mode;
 
+/** A JWT naming the session it was minted for. */
+function jwtFor(sessionId: string): string {
+  const payload = Buffer.from(JSON.stringify({ sid: sessionId, sub: "user_1" })).toString(
+    "base64url",
+  );
+  return `eyJhbGciOiJSUzI1NiJ9.${payload}.c2ln`;
+}
+
 beforeEach(() => {
   seen = [];
   authStore.mode = "clerk";
   setTokenGetter(null);
   resetAuthReadiness();
+  // Signed in, on the session every request below is made on behalf of.
+  publishAuthState({ sessionId: "sess_1", phase: "preparing-session" });
 });
 
 afterEach(() => {
@@ -205,6 +220,59 @@ describe("a query with a token", () => {
       expect(request.url, request.url).toContain("/api/v1/");
       expect(request.headers.authorization, request.url).toBe("Bearer tok_real");
     }
+  });
+});
+
+describe("a token belonging to a session that has ended", () => {
+  /*
+   * The wire-level version of the tenant rule. `getToken()` can still be
+   * holding the last sign-in's JWT after somebody signs back in; it verifies,
+   * so the API answers it -- with the other account's meetings, or with the
+   * empty view of an account that has none. Nothing above this layer can tell
+   * that apart from the truth, so it has to stop here.
+   */
+  it("is never put on the wire", async () => {
+    const fetchStub = stubFetch();
+    setTokenGetter(async () => jwtFor("sess_PREVIOUS"));
+
+    await store().dispatch(api.endpoints.getMeetings.initiate({ page: 0, size: 50 }));
+
+    expect(fetchStub).not.toHaveBeenCalled();
+  });
+
+  it("fails the request rather than emptying the screen", async () => {
+    stubFetch();
+    setTokenGetter(async () => jwtFor("sess_PREVIOUS"));
+
+    const result = await store().dispatch(
+      api.endpoints.getMeetings.initiate({ page: 0, size: 50 }),
+    );
+
+    // An error is a thing Home can say. An empty page from somebody else's
+    // account is "No conversations" over a full archive.
+    expect(result.isError).toBe(true);
+    expect(isNotFoundError(result.error)).toBe(false);
+  });
+
+  it("goes out on the fresh token when Clerk can mint one", async () => {
+    const fetchStub = stubFetch();
+    setTokenGetter(async (options) =>
+      options?.skipCache ? jwtFor("sess_1") : jwtFor("sess_PREVIOUS"),
+    );
+
+    await store().dispatch(api.endpoints.getMeetings.initiate({ page: 0, size: 50 }));
+
+    expect(fetchStub).toHaveBeenCalledTimes(1);
+    expect(seen[0].headers.authorization).toBe(`Bearer ${jwtFor("sess_1")}`);
+  });
+
+  it("keeps the socket off it too", async () => {
+    // lib/ws.ts builds its CONNECT headers from the same call, so the rule
+    // reaches the one authenticated path that is not an HTTP request.
+    setTokenGetter(async () => jwtFor("sess_PREVIOUS"));
+    const { buildAuthHeaders } = await import("@/lib/auth-store");
+
+    await expect(buildAuthHeaders()).rejects.toThrow();
   });
 });
 

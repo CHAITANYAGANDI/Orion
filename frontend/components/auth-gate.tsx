@@ -2,8 +2,9 @@
 
 import * as React from "react";
 import { useSyncExternalStore } from "react";
-import { isAuthReady, subscribeAuthReady } from "@/lib/auth-store";
+import { authPhase, isAuthReady, retryTokenProbe, subscribeAuthReady } from "@/lib/auth-store";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 
 /**
  * Nothing that needs a token renders before there is one.
@@ -96,11 +97,50 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
    * `loading` and the authenticated app never renders.
    */
   const ready = useSyncExternalStore(subscribeAuthReady, isAuthReady, () => false);
+  /*
+   * Read separately because one of the four not-ready states is not a wait at
+   * all. `failed` means the probe finished and there is no credential -- and
+   * drawing the shape of something arriving, for ever, is the same lie as an
+   * empty state over a failed request.
+   */
+  const phase = useSyncExternalStore(subscribeAuthReady, authPhase, () => "loading" as const);
 
   if (!ready) {
-    return <AuthGateFallback />;
+    return phase === "failed" ? <AuthGateError /> : <AuthGateFallback />;
   }
   return <>{children}</>;
+}
+
+/**
+ * The sign-in could not be finished, and the app says so.
+ *
+ * <p>Reachable when Clerk cannot produce a usable credential for the session it
+ * says is current: the network went while the token was being minted, or the
+ * only token on offer belongs to a session that has ended (see
+ * lib/token-claims). Either way there is nothing left to wait for.
+ *
+ * <p>Try again re-runs the probe. It does not reload the page and nothing
+ * schedules it — the counter it bumps changes only when somebody presses this,
+ * which is the difference between a retry and a loop.
+ *
+ * <p>No status, no provider name, no token detail. Two lines: what happened,
+ * and that the account is still there.
+ */
+function AuthGateError() {
+  return (
+    <div
+      role="alert"
+      className="flex min-h-screen w-full flex-col items-center justify-center gap-3 p-6 text-center"
+    >
+      <p className="font-medium">Couldn&apos;t finish signing you in</p>
+      <p className="max-w-sm text-sm text-muted-foreground">
+        Your workspace is still here. Something went wrong renewing your session.
+      </p>
+      <Button variant="outline" onClick={retryTokenProbe}>
+        Try again
+      </Button>
+    </div>
+  );
 }
 
 /**

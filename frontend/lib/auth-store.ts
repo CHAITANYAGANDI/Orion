@@ -1,6 +1,8 @@
 // Framework-agnostic auth state, readable from non-React code (RTK Query
 // prepareHeaders). Kept in sync by the React AuthProvider in lib/auth.tsx.
 
+import { tokenBelongsTo } from "@/lib/token-claims";
+
 export type AuthMode = "dev" | "clerk";
 
 /**
@@ -87,6 +89,18 @@ export type AuthPhase =
 /** What the token half of the answer can be. `app-ready` is derived, not set. */
 export type TokenStatus = "loading" | "signed-out" | "preparing-session" | "proven" | "failed";
 
+/**
+ * How the app asks for a credential.
+ *
+ * <p>`skipCache` is passed through to Clerk and is the whole reason this takes
+ * options at all: `getToken()` answers from a cache that can outlive the
+ * session it was filled for, and asking again without it is the only way to
+ * make the SDK mint a new one. It is used exactly once, and only after a token
+ * has proven itself to belong to another session — see
+ * {@link acquireSessionToken}.
+ */
+export type TokenGetter = (options?: { skipCache?: boolean }) => Promise<string | null>;
+
 interface AuthStore {
   mode: AuthMode;
   devUserId: string;
@@ -96,7 +110,7 @@ interface AuthStore {
    * <p><b>No longer evidence of anything.</b> It says a function exists, which
    * was the original mistake.
    */
-  tokenGetter: (() => Promise<string | null>) | null;
+  tokenGetter: TokenGetter | null;
   /**
    * The generation everything else here is a statement about.
    *
@@ -209,7 +223,7 @@ export function subscribeAuthReady(listener: () => void): () => void {
  * exists so `buildAuthHeaders` has something to call; whether that call will
  * succeed is what the phase answers.
  */
-export function setTokenGetter(getter: (() => Promise<string | null>) | null): void {
+export function setTokenGetter(getter: TokenGetter | null): void {
   if (authStore.tokenGetter === getter) return;
   authStore.tokenGetter = getter;
   notify();
@@ -277,6 +291,34 @@ export function resolveTokenProbe(sessionId: string, usable: boolean): void {
 }
 
 /**
+ * How many times a person has asked to try the sign-in again.
+ *
+ * <p>The bridge's probe runs once per session, which is right — and leaves
+ * nothing to do when it fails. Until this, `failed` was a skeleton that never
+ * resolved: the app had given up and was still drawing the shape of something
+ * arriving, which is the same lie as an empty state over a failed request.
+ *
+ * <p>A counter rather than a timer, and deliberately. It changes when somebody
+ * presses a button, so the re-probe is an event with a cause rather than a loop
+ * with an interval.
+ */
+let probeAttempt = 0;
+
+export function tokenProbeAttempt(): number {
+  return probeAttempt;
+}
+
+/** Ask the bridge to probe this session again. */
+export function retryTokenProbe(): void {
+  probeAttempt += 1;
+  // Back to preparing, so the screen says it is trying. Set here rather than
+  // published, because `supersedes` deliberately refuses to un-prove a settled
+  // session on a re-render, and this is not a re-render.
+  if (authStore.status === "failed") authStore.status = "preparing-session";
+  notify();
+}
+
+/**
  * This session now owns the API cache.
  *
  * <p>Called by `SessionCacheGuard` once it has emptied whatever the previous
@@ -304,6 +346,7 @@ export function resetAuthReadiness(): void {
   authStore.sessionId = dev ? DEV_SESSION : null;
   authStore.status = dev ? "proven" : "loading";
   authStore.cacheSession = dev ? DEV_SESSION : null;
+  probeAttempt = 0;
   notify();
 }
 
@@ -340,6 +383,67 @@ export class AuthUnavailableError extends Error {
 }
 
 /**
+ * A credential that belongs to `expected`, or nothing.
+ *
+ * <h2>The bug this exists for</h2>
+ *
+ * <p>Asking Clerk for a token and being given one was treated as proof that the
+ * token was <em>this session's</em>. It is not. `getToken()` returns the last
+ * JWT it minted until that JWT is near expiry, and a sign-out does not empty
+ * that cache or revoke what is in it — Clerk's tokens are short-lived rather
+ * than revocable. So the first requests after signing back in could carry the
+ * previous session's credential, and the API, which has no way of knowing the
+ * browser has moved on, answered honestly for whoever that was.
+ *
+ * <p>When the previous session belonged to somebody else that is one account
+ * reading another's screen. When it belonged to an account with nothing in it,
+ * it is 200 with an empty meeting list, 200 with an empty folder list, and a
+ * perfectly real 404 for a meeting id that is not theirs: no errors anywhere,
+ * an empty product, and a reload that fixes it because a reload discards the
+ * cache.
+ *
+ * <h2>What it does about it</h2>
+ *
+ * <p>Reads the `sid` claim and compares. A token for another session is not
+ * sent — and, once, Clerk is asked again with `skipCache` so it mints a fresh
+ * one. That is not a retry loop and not a timer: it happens only when a token
+ * has proven itself to belong elsewhere, it happens once, and if the second
+ * answer is wrong too the request simply does not go out.
+ *
+ * @param expected the session the app is currently open for
+ */
+export async function acquireSessionToken(expected: string | null): Promise<string | null> {
+  const getter = authStore.tokenGetter;
+  if (getter === null) return null;
+
+  /*
+   * No current session means the gate is shut, and a request from behind a shut
+   * gate is a bug somewhere else. There is also nothing to check a token
+   * against, and sending an unverifiable credential is the habit this whole
+   * function exists to break.
+   */
+  if (expected === null) return null;
+
+  const first = await ask(getter);
+  if (first === null || tokenBelongsTo(first, expected)) return first;
+
+  // It named another session. One fresh mint, then take the answer or leave it.
+  const fresh = await ask(getter, { skipCache: true });
+  if (fresh !== null && tokenBelongsTo(fresh, expected)) return fresh;
+  return null;
+}
+
+async function ask(getter: TokenGetter, options?: { skipCache?: boolean }): Promise<string | null> {
+  try {
+    return (await getter(options)) || null;
+  } catch {
+    // Swallowed rather than propagated: what Clerk throws names the instance
+    // and the token template, and no caller of this has any use for either.
+    return null;
+  }
+}
+
+/**
  * Headers attached to every Spring `/api/v1/**` request.
  *
  * <p>Asked fresh every time, on purpose. The readiness probe proves a token
@@ -347,21 +451,16 @@ export class AuthUnavailableError extends Error {
  * it refreshes them behind this call, so caching one here would work for about
  * a minute and then quietly stop.
  *
- * @throws AuthUnavailableError in clerk mode when no token can be obtained
+ * @throws AuthUnavailableError in clerk mode when no token for the current
+ *     session can be obtained — including when the only token on offer belongs
+ *     to a different one, which is the case that used to send it anyway
  */
 export async function buildAuthHeaders(): Promise<Record<string, string>> {
   if (authStore.mode !== "clerk") {
     // dev mode: hydrated at module load, so there is nothing to fail.
     return { "X-Dev-User": authStore.devUserId || DEFAULT_DEV_USER };
   }
-  let token: string | null = null;
-  try {
-    token = authStore.tokenGetter ? await authStore.tokenGetter() : null;
-  } catch {
-    // Swallowed and re-raised as our own below: what Clerk throws is not
-    // something to propagate into a UI or a log.
-    token = null;
-  }
+  const token = await acquireSessionToken(authStore.sessionId);
   if (!token) throw new AuthUnavailableError();
   return { Authorization: `Bearer ${token}` };
 }

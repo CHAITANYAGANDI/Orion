@@ -55,6 +55,7 @@ import {
   currentSessionId,
   setTokenGetter,
   resetAuthReadiness,
+  retryTokenProbe,
 } from "@/lib/auth-store";
 
 /** A promise whose resolution this test controls. */
@@ -80,6 +81,14 @@ function signedIn(sessionId: string, userId = "user_1") {
   clerk.state.isSignedIn = true;
   clerk.state.sessionId = sessionId;
   clerk.state.userId = userId;
+}
+
+/** A JWT naming the session it was minted for. */
+function jwtFor(sessionId: string): string {
+  const payload = Buffer.from(JSON.stringify({ sid: sessionId, sub: "user_1" })).toString(
+    "base64url",
+  );
+  return `eyJhbGciOiJSUzI1NiJ9.${payload}.c2ln`;
 }
 
 function mount() {
@@ -362,5 +371,88 @@ describe("ClerkBridge across a session change", () => {
 
     expect(authPhase()).toBe("loading");
     expect(authPhase()).not.toBe("token-ready");
+  });
+});
+
+/* ---------------------------------------------------------------------------
+ * Whose token did Clerk actually hand back?
+ * ------------------------------------------------------------------------ */
+
+describe("a token minted for the session that just ended", () => {
+  /*
+   * `getToken()` answers from a cache that a sign-out does not empty, and a
+   * Clerk JWT is short-lived rather than revocable. So the first probe after
+   * signing back in can be answered with the *previous* session's credential --
+   * which verifies, which the API accepts, and which describes the account that
+   * session belonged to.
+   *
+   * Opening the gate on that is how a first login lands on somebody else's
+   * empty workspace, with no error anywhere to say so.
+   */
+  it("does not open the app on it", async () => {
+    signedIn("sess_NEW");
+    clerk.state.getToken = async () => jwtFor("sess_OLD");
+
+    await act(async () => {
+      mount();
+    });
+
+    expect(authPhase()).not.toBe("token-ready");
+    expect(isAuthReady()).toBe(false);
+  });
+
+  it("opens on the fresh one when Clerk can mint it", async () => {
+    signedIn("sess_NEW");
+    clerk.state.getToken = async (options?: { skipCache?: boolean }) =>
+      options?.skipCache ? jwtFor("sess_NEW") : jwtFor("sess_OLD");
+
+    await act(async () => {
+      mount();
+    });
+
+    expect(authPhase()).toBe("token-ready");
+  });
+
+  it("opens on a token that names this session", async () => {
+    signedIn("sess_NEW");
+    clerk.state.getToken = async () => jwtFor("sess_NEW");
+
+    await act(async () => {
+      mount();
+    });
+
+    expect(authPhase()).toBe("token-ready");
+    expect(currentSessionId()).toBe("sess_NEW");
+  });
+});
+
+describe("asking again after a failed probe", () => {
+  it("runs the probe a second time, and can succeed on it", async () => {
+    /*
+     * What the gate's Try again is wired to. A probe that failed leaves the app
+     * with a credential it could not get and nothing to do about it; before
+     * this the only way through was a reload.
+     *
+     * Nothing here is scheduled: the counter changes when somebody presses a
+     * button, which is the difference between this and a retry loop.
+     */
+    signedIn("sess_1");
+    let attempts = 0;
+    clerk.state.getToken = async () => {
+      attempts += 1;
+      return attempts === 1 ? null : jwtFor("sess_1");
+    };
+
+    await act(async () => {
+      mount();
+    });
+    expect(authPhase()).toBe("failed");
+
+    await act(async () => {
+      retryTokenProbe();
+    });
+
+    expect(attempts).toBe(2);
+    expect(authPhase()).toBe("token-ready");
   });
 });

@@ -47,6 +47,17 @@ afterEach(() => {
   authStore.mode = "clerk";
 });
 
+/**
+ * A JWT that names a session, near enough — nothing in the browser verifies one.
+ *
+ * <p>Real Clerk tokens carry `sid`, and it is the only thing that can tell this
+ * session's credential from the last one's.
+ */
+function jwtFor(sessionId: string, user = "user_1"): string {
+  const payload = Buffer.from(JSON.stringify({ sid: sessionId, sub: user })).toString("base64url");
+  return `eyJhbGciOiJSUzI1NiJ9.${payload}.c2ln`;
+}
+
 /** Take a session all the way to app-ready, the way the app does. */
 function fullyReady(sessionId: string) {
   publishAuthState({ sessionId, phase: "preparing-session" });
@@ -378,6 +389,12 @@ describe("dev mode", () => {
 });
 
 describe("buildAuthHeaders", () => {
+  beforeEach(() => {
+    // There is a session on, because in clerk mode a request without one is a
+    // request from behind a closed gate. See the last case in this block.
+    publishAuthState({ sessionId: "sess_1", phase: "preparing-session" });
+  });
+
   it("attaches a bearer token when there is one", async () => {
     setTokenGetter(async () => "tok_123");
 
@@ -426,5 +443,100 @@ describe("buildAuthHeaders", () => {
     await buildAuthHeaders();
 
     expect(issued).toBe(2);
+  });
+
+  it("refuses when there is no session to send it on behalf of", async () => {
+    // Nothing renders behind a closed gate, so this is a bug somewhere else --
+    // and an unverifiable credential is the habit the block below is about.
+    publishAuthState({ sessionId: null, phase: "signed-out" });
+    setTokenGetter(async () => jwtFor("sess_1"));
+
+    await expect(buildAuthHeaders()).rejects.toBeInstanceOf(AuthUnavailableError);
+  });
+});
+
+/* ---------------------------------------------------------------------------
+ * Whose token is this?
+ * ------------------------------------------------------------------------ */
+
+describe("a credential minted for a different session", () => {
+  /*
+   * THE production bug, and it is not a loading state -- it is one account
+   * reading another's screen.
+   *
+   * `getToken()` is a cache in front of a network call: it keeps the last JWT
+   * it minted and hands it back until that JWT is close to expiring. Signing
+   * out does not empty that cache, and a Clerk JWT is short-lived rather than
+   * revocable, so for a minute after signing back in the SDK can answer with
+   * the *previous* session's token. It verifies. The API accepts it. And the
+   * answer describes whoever that session belonged to.
+   *
+   * When that is an account with nothing in it, every symptom is a 200: an
+   * empty meeting list, an empty folder list, and a genuine 404 for a meeting
+   * id that is not theirs. No errors, no retries, nothing on screen that looks
+   * like a fault -- and a reload fixes it, because a reload throws the cache
+   * away.
+   */
+  beforeEach(() => {
+    publishAuthState({ sessionId: "sess_NEW", phase: "preparing-session" });
+  });
+
+  it("never sends it", async () => {
+    setTokenGetter(async () => jwtFor("sess_OLD"));
+
+    await expect(buildAuthHeaders()).rejects.toBeInstanceOf(AuthUnavailableError);
+  });
+
+  it("asks Clerk once more, past its cache, and sends what comes back", async () => {
+    const asked: Array<{ skipCache?: boolean } | undefined> = [];
+    setTokenGetter(async (options) => {
+      asked.push(options);
+      return options?.skipCache ? jwtFor("sess_NEW") : jwtFor("sess_OLD");
+    });
+
+    await expect(buildAuthHeaders()).resolves.toEqual({
+      Authorization: `Bearer ${jwtFor("sess_NEW")}`,
+    });
+    expect(asked).toEqual([undefined, { skipCache: true }]);
+  });
+
+  it("gives up after that one fresh attempt", async () => {
+    // Not a retry loop. One re-ask, with a proven reason for it, and then the
+    // request does not go out.
+    let asked = 0;
+    setTokenGetter(async () => {
+      asked += 1;
+      return jwtFor("sess_OLD");
+    });
+
+    await expect(buildAuthHeaders()).rejects.toBeInstanceOf(AuthUnavailableError);
+    expect(asked).toBe(2);
+  });
+
+  it("does not ask twice when the first token is already this session's", async () => {
+    let asked = 0;
+    setTokenGetter(async () => {
+      asked += 1;
+      return jwtFor("sess_NEW");
+    });
+
+    await buildAuthHeaders();
+
+    expect(asked).toBe(1);
+  });
+
+  it("still accepts a token that names no session", async () => {
+    // A JWT template can be configured without `sid`. Refusing those would turn
+    // a supported Clerk configuration into an app that never loads.
+    setTokenGetter(async () => "tok_no_claims");
+
+    await expect(buildAuthHeaders()).resolves.toEqual({ Authorization: "Bearer tok_no_claims" });
+  });
+
+  it("leaves dev mode alone, which has no sessions at all", async () => {
+    authStore.mode = "dev";
+    authStore.devUserId = "usr_test";
+
+    await expect(buildAuthHeaders()).resolves.toEqual({ "X-Dev-User": "usr_test" });
   });
 });

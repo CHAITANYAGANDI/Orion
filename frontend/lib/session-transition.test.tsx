@@ -52,11 +52,22 @@ import {
   publishAuthState,
   resolveTokenProbe,
   resetAuthReadiness,
+  acquireSessionToken,
 } from "@/lib/auth-store";
 
 /* ------------------------------- the wire -------------------------------- */
 
 let served: string[] = [];
+/** The credential each request actually carried. */
+let sent: string[] = [];
+
+/** A JWT naming the session it was minted for, as Clerk's carry `sid`. */
+function jwtFor(sessionId: string): string {
+  const payload = Buffer.from(JSON.stringify({ sid: sessionId, sub: "user_1" })).toString(
+    "base64url",
+  );
+  return `eyJhbGciOiJSUzI1NiJ9.${payload}.c2ln`;
+}
 
 function bodyFor(url: string): unknown {
   if (url.includes("/projects")) return [{ id: "prj_1", name: "Design" }];
@@ -67,9 +78,13 @@ function bodyFor(url: string): unknown {
 function stubFetch() {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: unknown) => {
+    vi.fn(async (input: unknown, init?: RequestInit) => {
       const url = typeof input === "string" ? input : (input as Request).url;
       served.push(url);
+      const headers = ((typeof input === "string" ? init?.headers : (input as Request).headers) ??
+        null) as Headers | null;
+      const authorization = headers?.get?.("authorization") ?? "";
+      sent.push(authorization.replace("Bearer ", ""));
       const body = JSON.stringify(bodyFor(url));
       return {
         ok: true,
@@ -209,7 +224,22 @@ function signOut() {
 
 /** What ClerkBridge publishes when Clerk reports a session. */
 function clerkSawSession(sessionId: string) {
-  setTokenGetter(async () => `tok_${sessionId}`);
+  setTokenGetter(async () => jwtFor(sessionId));
+  publishAuthState({ sessionId, phase: "preparing-session" });
+}
+
+/**
+ * Clerk with a token cache that has not caught up with the sign-in.
+ *
+ * <p>`getToken()` keeps the last JWT it minted and answers with it until it is
+ * near expiry; signing out neither empties that cache nor revokes what is in
+ * it. So the first ask after signing back in can be answered with the previous
+ * session's credential — which verifies, which the API accepts, and which
+ * describes the account that session belonged to. Only `skipCache` gets past
+ * it.
+ */
+function clerkSawSessionHoldingStaleToken(sessionId: string, stale: string) {
+  setTokenGetter(async (options) => (options?.skipCache ? jwtFor(sessionId) : jwtFor(stale)));
   publishAuthState({ sessionId, phase: "preparing-session" });
 }
 
@@ -219,6 +249,7 @@ function tokenArrived(sessionId: string) {
 
 beforeEach(() => {
   served = [];
+  sent = [];
   actions = [];
   mounts.folders = 0;
   mounts.meetings = 0;
@@ -432,5 +463,76 @@ describe("within one session", () => {
     });
 
     expect(actions).not.toContain("api/resetApiState");
+  });
+});
+
+/* ---------------------------------------------------------------------------
+ * The credential itself
+ * ------------------------------------------------------------------------ */
+
+describe("signing in while Clerk still holds the last session's token", () => {
+  /**
+   * The production failure, end to end.
+   *
+   * <p>Everything downstream of this is honest: the token verifies, the API
+   * answers it, and every panel renders exactly what came back. What came back
+   * belongs to the previous session — an empty meeting list and an empty folder
+   * list if that account had nothing, somebody else's meetings if it did. No
+   * request fails, so nothing anywhere says a word about it, and a reload is
+   * the only thing that helps because a reload discards the cache.
+   */
+  async function signInHoldingStale(store: ReturnType<typeof makeStore>) {
+    signIn("sess_B", "user_2");
+    const view = render(<App store={store} />);
+    await act(async () => {
+      clerkSawSessionHoldingStaleToken("sess_B", "sess_A");
+      view.rerender(<App store={store} />);
+    });
+    // Exactly what ClerkBridge's probe does, down to the call it makes: the
+    // gate opens on the same acquisition every request goes through.
+    await act(async () => {
+      const token = await acquireSessionToken("sess_B");
+      resolveTokenProbe("sess_B", Boolean(token));
+    });
+    return view;
+  }
+
+  it("never puts the old session's credential on the wire", async () => {
+    await signInHoldingStale(makeStore());
+    await settled();
+
+    expect(sent.length).toBeGreaterThan(0);
+    for (const token of sent) {
+      expect(token, `a request carried ${token}`).toBe(jwtFor("sess_B"));
+    }
+  });
+
+  it("still loads the whole page on the fresh one", async () => {
+    // The recovery matters as much as the refusal: a correct app that shows
+    // nothing is not an improvement on an incorrect one that shows something.
+    await signInHoldingStale(makeStore());
+    await settled();
+
+    await foldersLoaded();
+    await loaded("meetings");
+    await loaded("usage");
+  });
+
+  it("keeps the gate shut when no fresh token can be had", async () => {
+    // Clerk offering nothing but the previous session's token is not a session
+    // this app can open. Better a screen that says so than one filled with
+    // another account's data.
+    signIn("sess_B", "user_2");
+    const store = makeStore();
+    const view = render(<App store={store} />);
+    await act(async () => {
+      setTokenGetter(async () => jwtFor("sess_A"));
+      publishAuthState({ sessionId: "sess_B", phase: "preparing-session" });
+      resolveTokenProbe("sess_B", false);
+      view.rerender(<App store={store} />);
+    });
+
+    expect(screen.queryByTestId("meetings")).toBeNull();
+    expect(sent).toEqual([]);
   });
 });
