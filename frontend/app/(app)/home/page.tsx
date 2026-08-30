@@ -26,7 +26,7 @@ import {
   FolderOpen,
   Youtube,
   FileText,
-  Upload,
+  Download,
   Mic,
   CalendarDays,
   RotateCw,
@@ -710,7 +710,7 @@ function EmptyState({
         </Button>
         <Button variant="outline" asChild>
           <Link href="/upload">
-            <Upload className="mr-2 h-4 w-4" /> Import
+            <Download className="mr-2 h-4 w-4" /> Import
           </Link>
         </Button>
       </div>

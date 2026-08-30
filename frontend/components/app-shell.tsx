@@ -51,7 +51,7 @@ import {
   Menu,
   Mic,
   Search,
-  Upload,
+  Download,
   Plus,
   PanelRightClose,
   PanelRightOpen,
@@ -368,7 +368,11 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
                     className="gap-2"
                     onClick={() => setImporting(true)}
                   >
-                    <Upload className="h-4 w-4" />
+                    {/* Down: into Orion. The pair with Export's up arrow —
+                        read from the app's side, not the device's, so the two
+                        point at each other rather than both meaning "file
+                        transfer". */}
+                    <Download className="h-4 w-4" />
                     <span className="hidden sm:inline">Import</span>
                   </Button>
                   {/* Told where it is being pressed. A recording started

@@ -53,7 +53,7 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { Download, Loader2, Music, FileText, ListChecks, AlertCircle } from "lucide-react";
+import { Upload, Loader2, Music, FileText, ListChecks, AlertCircle } from "lucide-react";
 import { useLazyGetMp3ExportQuery } from "@/lib/api";
 import {
   fetchExportFile,
@@ -478,7 +478,7 @@ export function ExportDialog({
               {busy || preparing ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <Download className="h-4 w-4" />
+                <Upload className="h-4 w-4" />
               )}
               {preparing ? "Preparing MP3…" : busy ? "Exporting…" : "Export"}
             </Button>

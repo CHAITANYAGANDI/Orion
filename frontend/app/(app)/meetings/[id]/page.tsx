@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { rematchMessage } from "@/lib/rematch";
 import {
   RefreshCw,
-  Download,
+  Upload,
   Loader2,
   AlertTriangle,
   Clock,
@@ -866,7 +866,9 @@ export default function MeetingDetailPage() {
                   other operation, so a control named Export now does exactly
                   what it says. */}
               <Button variant="outline" size="sm" className="gap-2" onClick={() => setExporting(true)}>
-                <Download className="h-4 w-4" /> Export
+                {/* Up: out of Orion. See the Import button in
+                    components/app-shell.tsx for the pairing. */}
+                <Upload className="h-4 w-4" /> Export
               </Button>
               <ExportDialog
                 open={exporting}
