@@ -16,6 +16,14 @@ import { render, act } from "@testing-library/react";
  * <p>Clerk is mocked rather than driven, because the states worth asserting —
  * a session replaced while a token request is in flight, most of all — are not
  * ones a real SDK can be asked for on demand.
+ *
+ * <h2>What it does not do</h2>
+ *
+ * <p>It never reaches `app-ready`. Proving a token is half the barrier; the
+ * other half is that the API cache belongs to this session, which
+ * `SessionCacheGuard` publishes. So the assertions here stop at `token-ready`
+ * — and the fact that `token-ready` does not open the gate is the point of the
+ * whole arrangement, asserted in lib/auth-store.test and components/auth-gate.test.
  */
 
 const clerk = vi.hoisted(() => ({
@@ -100,7 +108,7 @@ describe("ClerkBridge readiness", () => {
     });
 
     expect(authPhase()).toBe("loading");
-    expect(isAuthReady()).toBe(false);
+    expect(authPhase()).not.toBe("token-ready");
   });
 
   it("publishes signed-out, and registers no token getter, while nobody is in", async () => {
@@ -156,8 +164,8 @@ describe("ClerkBridge readiness", () => {
       mount();
     });
 
-    expect(authPhase()).toBe("acquiring");
-    expect(isAuthReady()).toBe(false);
+    expect(authPhase()).toBe("preparing-session");
+    expect(authPhase()).not.toBe("token-ready");
   });
 
   it("reports ready only once the token request has actually resolved", async () => {
@@ -172,7 +180,7 @@ describe("ClerkBridge readiness", () => {
       token.resolve("tok_real");
     });
 
-    expect(authPhase()).toBe("ready");
+    expect(authPhase()).toBe("token-ready");
     expect(currentSessionId()).toBe("sess_A");
   });
 
@@ -185,7 +193,7 @@ describe("ClerkBridge readiness", () => {
     });
 
     expect(authPhase()).toBe("failed");
-    expect(isAuthReady()).toBe(false);
+    expect(authPhase()).not.toBe("token-ready");
   });
 
   it("reports failed when the token request throws, and says nothing about it", async () => {
@@ -234,7 +242,7 @@ describe("ClerkBridge across a session change", () => {
     clerk.state.getToken = async () => "tok_A";
     signedIn("sess_A");
     const view = await act(async () => mount());
-    expect(isAuthReady()).toBe(true);
+    expect(authPhase()).toBe("token-ready");
 
     const next = deferred<string | null>();
     clerk.state.getToken = () => next.promise;
@@ -247,13 +255,13 @@ describe("ClerkBridge across a session change", () => {
       );
     });
 
-    expect(isAuthReady()).toBe(false);
+    expect(authPhase()).not.toBe("token-ready");
     expect(currentSessionId()).toBe("sess_B");
 
     await act(async () => {
       next.resolve("tok_B");
     });
-    expect(isAuthReady()).toBe(true);
+    expect(authPhase()).toBe("token-ready");
   });
 
   it("drops readiness on sign-out", async () => {
@@ -278,7 +286,7 @@ describe("ClerkBridge across a session change", () => {
     clerk.state.getToken = async () => "tok_1";
     signedIn("sess_A1", "user_1");
     const view = await act(async () => mount());
-    expect(isAuthReady()).toBe(true);
+    expect(authPhase()).toBe("token-ready");
 
     const again = deferred<string | null>();
     clerk.state.getToken = () => again.promise;
@@ -293,7 +301,7 @@ describe("ClerkBridge across a session change", () => {
       );
     });
 
-    expect(isAuthReady()).toBe(false);
+    expect(authPhase()).not.toBe("token-ready");
   });
 
   it("does not let a superseded session's token open the app for the next one", async () => {
@@ -310,7 +318,7 @@ describe("ClerkBridge across a session change", () => {
     clerk.state.getToken = () => slowA.promise;
     signedIn("sess_A", "user_1");
     const view = await act(async () => mount());
-    expect(authPhase()).toBe("acquiring");
+    expect(authPhase()).toBe("preparing-session");
 
     const pendingB = deferred<string | null>();
     clerk.state.getToken = () => pendingB.promise;
@@ -328,20 +336,20 @@ describe("ClerkBridge across a session change", () => {
       slowA.resolve("tok_A");
     });
 
-    expect(isAuthReady()).toBe(false);
+    expect(authPhase()).not.toBe("token-ready");
     expect(currentSessionId()).toBe("sess_B");
 
     await act(async () => {
       pendingB.resolve("tok_B");
     });
-    expect(isAuthReady()).toBe(true);
+    expect(authPhase()).toBe("token-ready");
   });
 
   it("survives Clerk unloading and reinitialising", async () => {
     clerk.state.getToken = async () => "tok_A";
     signedIn("sess_A");
     const view = await act(async () => mount());
-    expect(isAuthReady()).toBe(true);
+    expect(authPhase()).toBe("token-ready");
 
     clerk.state.isLoaded = false;
     await act(async () => {
@@ -353,6 +361,6 @@ describe("ClerkBridge across a session change", () => {
     });
 
     expect(authPhase()).toBe("loading");
-    expect(isAuthReady()).toBe(false);
+    expect(authPhase()).not.toBe("token-ready");
   });
 });

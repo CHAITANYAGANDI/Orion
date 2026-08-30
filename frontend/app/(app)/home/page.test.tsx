@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, within, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { MeetingResponse, MeetingListQuery, Page } from "@/lib/types";
 
@@ -861,6 +861,65 @@ describe("the scope picker explains what it filters on", () => {
   it("sends unfiled=true under that name, so the label and the wire agree", async () => {
     render(<HomePage />);
     await choose("Recent Conversations");
+
+    expect(query.last?.unfiled).toBe(true);
+  });
+});
+
+/**
+ * A sign-in change under a page that is already open.
+ *
+ * <p>The other Home tests here start a fresh render for each session, which is
+ * what a full page load does. Production does not always do that: signing out
+ * and back in are both client navigations, so Home can be re-rendered under a
+ * new `sessionKey` without ever unmounting -- and that is the render in which
+ * the previous session's remembered scope was still being reported as ready.
+ */
+describe("when the sign-in changes under an open page", () => {
+  /** Read through a call so TypeScript does not narrow it to the null we just set. */
+  const lastUnfiled = () => query.last?.unfiled;
+
+  it("never asks for the previous session's scope", async () => {
+    // The production screenshot: "Recent Conversations" and "Everything is in
+    // a folder" on a first login, for somebody who had chosen Recent under a
+    // different sign-in. `recent` is `unfiled=true`, and an account that files
+    // everything has nothing unfiled.
+    const view = render(<HomePage />);
+    await choose("Recent Conversations");
+    expect(query.last?.unfiled).toBe(true);
+
+    const asked: Array<boolean | undefined> = [];
+    query.last = null;
+    auth.sessionKey = "sess_2";
+    await act(async () => {
+      view.rerender(<HomePage />);
+    });
+    asked.push(lastUnfiled());
+
+    // Whatever it asked for, it was not the previous sign-in's filter.
+    expect(asked).not.toContain(true);
+  });
+
+  it("starts the new sign-in on All Conversations", async () => {
+    const view = render(<HomePage />);
+    await choose("Recent Conversations");
+
+    auth.sessionKey = "sess_2";
+    await act(async () => {
+      view.rerender(<HomePage />);
+    });
+
+    expect(screen.getByRole("button", { name: /All Conversations/ })).toBeInTheDocument();
+    expect(query.last?.unfiled).toBe(false);
+  });
+
+  it("keeps an explicit choice while the sign-in does not change", async () => {
+    const view = render(<HomePage />);
+    await choose("Recent Conversations");
+
+    await act(async () => {
+      view.rerender(<HomePage />);
+    });
 
     expect(query.last?.unfiled).toBe(true);
   });

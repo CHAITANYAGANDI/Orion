@@ -88,7 +88,7 @@ function ClerkBridge({
       return;
     }
 
-    publishAuthState({ sessionId, phase: "acquiring" });
+    publishAuthState({ sessionId, phase: "preparing-session" });
 
     let cancelled = false;
     void (async () => {

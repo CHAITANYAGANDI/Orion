@@ -4,39 +4,38 @@ import {
   isAuthReady,
   authPhase,
   currentSessionId,
+  cacheOwner,
   setTokenGetter,
   publishAuthState,
   resolveTokenProbe,
+  claimApiCache,
   resetAuthReadiness,
   subscribeAuthReady,
   buildAuthHeaders,
   AuthUnavailableError,
+  type TokenStatus,
 } from "@/lib/auth-store";
 
 /**
  * Readiness, as a state machine, asserted directly.
  *
- * <h2>Why this file exists</h2>
+ * <h2>Two bugs, one file</h2>
  *
- * <p>The first fix held the authenticated subtree back until
- * `authStore.tokenGetter !== null`, and its tests asserted exactly that. Which
- * they did correctly — the tests and the code agreed, and both were wrong about
- * what the app needed to know.
+ * <p>The first: readiness meant `tokenGetter !== null` — "a function that can
+ * ask for a token exists" — which a signed-out visitor on `/sign-in` satisfied,
+ * because the bridge wraps the root layout and registered it unconditionally.
  *
- * <p>"A function that can ask for a token exists" is not "a token for the
- * session we are in has been obtained", and the distance between those two is
- * a signed-out visitor on `/sign-in` — where `ClerkBridge` is mounted, the
- * getter is registered, and Clerk has long since loaded. Every condition the
- * old gate checked was already satisfied before anybody signed in.
+ * <p>The second: fixing that left a proven token as the whole of the answer,
+ * and it is only half. The other half — that the RTK Query cache in the store
+ * belongs to this session rather than the last one — lived in a passive effect
+ * with no ordering relationship to the gate. Both halves are here now, and
+ * `app-ready` is the single barrier that requires them together.
  *
- * <p>So the machine is pure and the matrix is asserted here. Several of these
- * states are unreachable through a component in a test — a probe resolving
- * after the session it was about has been replaced, most of all — and that one
- * is the difference between opening the app for the right person and the wrong
- * one.
+ * <p>Several of these states cannot be staged through a component: a probe
+ * resolving after the session it was about has been replaced, a cache claimed
+ * for a session that is no longer current. Those are the two that decide
+ * whether one person's data can be shown to another.
  */
-
-const CLERK = { mode: "clerk" as const };
 
 beforeEach(() => {
   authStore.mode = "clerk";
@@ -45,8 +44,15 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  authStore.mode = CLERK.mode;
+  authStore.mode = "clerk";
 });
+
+/** Take a session all the way to app-ready, the way the app does. */
+function fullyReady(sessionId: string) {
+  publishAuthState({ sessionId, phase: "preparing-session" });
+  resolveTokenProbe(sessionId, true);
+  claimApiCache(sessionId);
+}
 
 describe("what readiness means", () => {
   it("starts knowing nothing in clerk mode", () => {
@@ -55,8 +61,8 @@ describe("what readiness means", () => {
   });
 
   it("is not made ready by a token getter existing", () => {
-    // THE bug, in one line. This is the state a signed-out visitor sitting on
-    // /sign-in was in, and it used to open the whole app.
+    // The first bug, in one line. This is the state a signed-out visitor
+    // sitting on /sign-in was in, and it used to open the whole app.
     setTokenGetter(async () => "tok_123");
 
     expect(isAuthReady()).toBe(false);
@@ -64,7 +70,7 @@ describe("what readiness means", () => {
 
   it("is not ready while Clerk is still loading", () => {
     publishAuthState({ sessionId: null, phase: "loading" });
-    expect(isAuthReady()).toBe(false);
+    expect(authPhase()).toBe("loading");
   });
 
   it("is not ready when Clerk is loaded and nobody is signed in", () => {
@@ -75,117 +81,161 @@ describe("what readiness means", () => {
   });
 
   it("is not ready while the token for this session is still being fetched", () => {
-    // The precise moment the old gate opened in: Clerk believes there is a
-    // session, and has not yet produced a credential for it.
-    publishAuthState({ sessionId: "sess_A", phase: "acquiring" });
+    publishAuthState({ sessionId: "sess_A", phase: "preparing-session" });
 
+    expect(authPhase()).toBe("preparing-session");
     expect(isAuthReady()).toBe(false);
   });
 
   it("is not ready when the token came back empty", () => {
-    publishAuthState({ sessionId: "sess_A", phase: "acquiring" });
+    publishAuthState({ sessionId: "sess_A", phase: "preparing-session" });
     resolveTokenProbe("sess_A", false);
 
     expect(authPhase()).toBe("failed");
     expect(isAuthReady()).toBe(false);
   });
 
-  it("is ready only once a usable token for this session has been held", () => {
-    publishAuthState({ sessionId: "sess_A", phase: "acquiring" });
-    resolveTokenProbe("sess_A", true);
+  it("is ready only when the token is proven AND the cache is this session's", () => {
+    fullyReady("sess_A");
 
-    expect(authPhase()).toBe("ready");
+    expect(authPhase()).toBe("app-ready");
     expect(isAuthReady()).toBe(true);
   });
 
-  it("never reports ready from any phase but ready", () => {
-    for (const phase of ["loading", "signed-out", "acquiring", "failed"] as const) {
+  it("never reports ready from any phase but app-ready", () => {
+    const statuses: TokenStatus[] = ["loading", "signed-out", "preparing-session", "failed"];
+    for (const phase of statuses) {
       publishAuthState({ sessionId: "sess_A", phase });
       expect(isAuthReady(), phase).toBe(false);
     }
   });
 });
 
+describe("the barrier needs both halves", () => {
+  it("does not open on a proven token while the cache is another session's", () => {
+    /*
+     * THE second bug. This is the state the app used to mount in: Clerk has a
+     * credential for B, and the store is still full of A's meetings, folders
+     * and usage. Every cache key in this app is endpoint + argument, with no
+     * user in it, so B's first request is a hit on A's entry.
+     */
+    fullyReady("sess_A");
+    publishAuthState({ sessionId: "sess_B", phase: "preparing-session" });
+    resolveTokenProbe("sess_B", true);
+
+    expect(authPhase()).toBe("token-ready");
+    expect(isAuthReady()).toBe(false);
+    expect(cacheOwner()).toBe("sess_A");
+  });
+
+  it("does not open on an owned cache while the token is still being fetched", () => {
+    // The mirror. Order does not matter; both are required.
+    publishAuthState({ sessionId: "sess_B", phase: "preparing-session" });
+    claimApiCache("sess_B");
+
+    expect(authPhase()).toBe("preparing-session");
+    expect(isAuthReady()).toBe(false);
+  });
+
+  it("opens as soon as the second half arrives, whichever it is", () => {
+    publishAuthState({ sessionId: "sess_B", phase: "preparing-session" });
+
+    claimApiCache("sess_B");
+    expect(isAuthReady()).toBe(false);
+    resolveTokenProbe("sess_B", true);
+    expect(isAuthReady()).toBe(true);
+
+    // …and the other way round.
+    resetAuthReadiness();
+    publishAuthState({ sessionId: "sess_C", phase: "preparing-session" });
+    resolveTokenProbe("sess_C", true);
+    expect(isAuthReady()).toBe(false);
+    claimApiCache("sess_C");
+    expect(isAuthReady()).toBe(true);
+  });
+
+  it("leaves ownership behind when the session changes, so somebody must clear it", () => {
+    // Ownership is a fact about the store's contents, not about the session.
+    // Clearing it on a session change would make the gate open on an unclaimed
+    // cache the moment a token arrived -- which is the whole bug.
+    fullyReady("sess_A");
+
+    publishAuthState({ sessionId: "sess_B", phase: "preparing-session" });
+
+    expect(cacheOwner()).toBe("sess_A");
+  });
+
+  it("starts with nobody owning the cache, so a cold start clears nothing", () => {
+    expect(cacheOwner()).toBeNull();
+  });
+});
+
 describe("a proof belongs to the session it was about", () => {
-  function readyOn(sessionId: string) {
-    publishAuthState({ sessionId, phase: "acquiring" });
-    resolveTokenProbe(sessionId, true);
-  }
-
   it("drops readiness when the session id changes", () => {
-    readyOn("sess_A");
+    fullyReady("sess_A");
 
-    publishAuthState({ sessionId: "sess_B", phase: "acquiring" });
+    publishAuthState({ sessionId: "sess_B", phase: "preparing-session" });
 
     expect(isAuthReady()).toBe(false);
     expect(currentSessionId()).toBe("sess_B");
   });
 
   it("drops readiness on sign-out", () => {
-    readyOn("sess_A");
+    fullyReady("sess_A");
 
     publishAuthState({ sessionId: null, phase: "signed-out" });
 
     expect(isAuthReady()).toBe(false);
-    expect(authPhase()).toBe("signed-out");
   });
 
   it("requires a fresh proof after signing out and back in as the same person", () => {
-    // The same account is a different *session*, and the credential is per
-    // session. Nothing about A's proof says anything about A-again.
-    readyOn("sess_A1");
+    fullyReady("sess_A1");
     publishAuthState({ sessionId: null, phase: "signed-out" });
-    publishAuthState({ sessionId: "sess_A2", phase: "acquiring" });
+    publishAuthState({ sessionId: "sess_A2", phase: "preparing-session" });
 
     expect(isAuthReady()).toBe(false);
 
     resolveTokenProbe("sess_A2", true);
+    claimApiCache("sess_A2");
     expect(isAuthReady()).toBe(true);
   });
 
   it("drops readiness when Clerk is torn down and reinitialised", () => {
-    readyOn("sess_A");
+    fullyReady("sess_A");
 
     publishAuthState({ sessionId: null, phase: "loading" });
 
     expect(isAuthReady()).toBe(false);
   });
 
-  it("does not un-prove a session on a re-render that republishes acquiring", () => {
-    // The bridge republishes on renders that have nothing to do with the
-    // session. Letting that reset the phase would close the gate under a
-    // working app and restart the probe, over and over.
-    readyOn("sess_A");
+  it("does not un-prove a session on a re-render that republishes preparing", () => {
+    fullyReady("sess_A");
 
-    publishAuthState({ sessionId: "sess_A", phase: "acquiring" });
+    publishAuthState({ sessionId: "sess_A", phase: "preparing-session" });
 
     expect(isAuthReady()).toBe(true);
   });
 
   it("does not un-fail a session on a re-render either", () => {
-    publishAuthState({ sessionId: "sess_A", phase: "acquiring" });
+    publishAuthState({ sessionId: "sess_A", phase: "preparing-session" });
     resolveTokenProbe("sess_A", false);
 
-    publishAuthState({ sessionId: "sess_A", phase: "acquiring" });
+    publishAuthState({ sessionId: "sess_A", phase: "preparing-session" });
 
     expect(authPhase()).toBe("failed");
   });
 });
 
-describe("a probe that resolves late", () => {
-  it("cannot mark a session ready once another one is current", () => {
+describe("work that finishes after its session has been replaced", () => {
+  it("cannot let a stale token probe mark the new session ready", () => {
     /*
-     * The race, in three lines:
-     *
      *   session A: getToken() ─────────────────────► resolves
      *   session B:      becomes current ──────────────────►
      *
-     * Taking A's answer would open the app for B on A's credential. This is
-     * the assertion that stops it, and it is not reachable from a component
-     * test.
+     * Taking A's answer would open the app for B on A's credential.
      */
-    publishAuthState({ sessionId: "sess_A", phase: "acquiring" });
-    publishAuthState({ sessionId: "sess_B", phase: "acquiring" });
+    publishAuthState({ sessionId: "sess_A", phase: "preparing-session" });
+    publishAuthState({ sessionId: "sess_B", phase: "preparing-session" });
 
     resolveTokenProbe("sess_A", true);
 
@@ -193,12 +243,25 @@ describe("a probe that resolves late", () => {
     expect(currentSessionId()).toBe("sess_B");
   });
 
-  it("cannot fail a session that has already moved on", () => {
-    // The mirror. A's failure says nothing about B either, and letting it land
-    // would show a signed-in user an error about somebody else's session.
-    publishAuthState({ sessionId: "sess_A", phase: "acquiring" });
-    publishAuthState({ sessionId: "sess_B", phase: "acquiring" });
+  it("cannot let a stale cache claim mark the new session ready", () => {
+    // The same race on the other half. A guard effect that started clearing for
+    // A and finished after B arrived would otherwise announce that B owns a
+    // cache nobody emptied for B.
+    publishAuthState({ sessionId: "sess_A", phase: "preparing-session" });
+    publishAuthState({ sessionId: "sess_B", phase: "preparing-session" });
     resolveTokenProbe("sess_B", true);
+
+    claimApiCache("sess_A");
+
+    expect(cacheOwner()).toBeNull();
+    expect(isAuthReady()).toBe(false);
+  });
+
+  it("cannot fail a session that has already moved on", () => {
+    publishAuthState({ sessionId: "sess_A", phase: "preparing-session" });
+    publishAuthState({ sessionId: "sess_B", phase: "preparing-session" });
+    resolveTokenProbe("sess_B", true);
+    claimApiCache("sess_B");
 
     resolveTokenProbe("sess_A", false);
 
@@ -206,24 +269,26 @@ describe("a probe that resolves late", () => {
   });
 
   it("cannot mark anything ready after a sign-out", () => {
-    publishAuthState({ sessionId: "sess_A", phase: "acquiring" });
+    publishAuthState({ sessionId: "sess_A", phase: "preparing-session" });
     publishAuthState({ sessionId: null, phase: "signed-out" });
 
     resolveTokenProbe("sess_A", true);
+    claimApiCache("sess_A");
 
     expect(isAuthReady()).toBe(false);
   });
 });
 
 describe("subscribers", () => {
-  it("hear about every readiness change", () => {
+  it("hear about every readiness change, including the cache claim", () => {
     const heard = vi.fn();
     const stop = subscribeAuthReady(heard);
 
-    publishAuthState({ sessionId: "sess_A", phase: "acquiring" });
+    publishAuthState({ sessionId: "sess_A", phase: "preparing-session" });
     resolveTokenProbe("sess_A", true);
+    claimApiCache("sess_A");
 
-    expect(heard).toHaveBeenCalledTimes(2);
+    expect(heard).toHaveBeenCalledTimes(3);
     stop();
   });
 
@@ -231,28 +296,41 @@ describe("subscribers", () => {
     const heard = vi.fn();
     subscribeAuthReady(heard)();
 
-    publishAuthState({ sessionId: "sess_A", phase: "acquiring" });
+    publishAuthState({ sessionId: "sess_A", phase: "preparing-session" });
 
     expect(heard).not.toHaveBeenCalled();
   });
 
   it("are not woken by a publish that changes nothing", () => {
-    publishAuthState({ sessionId: "sess_A", phase: "acquiring" });
+    publishAuthState({ sessionId: "sess_A", phase: "preparing-session" });
     const heard = vi.fn();
     const stop = subscribeAuthReady(heard);
 
-    publishAuthState({ sessionId: "sess_A", phase: "acquiring" });
+    publishAuthState({ sessionId: "sess_A", phase: "preparing-session" });
 
     expect(heard).not.toHaveBeenCalled();
     stop();
   });
 
-  it("are not woken by an ignored late probe", () => {
-    publishAuthState({ sessionId: "sess_B", phase: "acquiring" });
+  it("are not woken by an ignored late probe or claim", () => {
+    publishAuthState({ sessionId: "sess_B", phase: "preparing-session" });
     const heard = vi.fn();
     const stop = subscribeAuthReady(heard);
 
     resolveTokenProbe("sess_A", true);
+    claimApiCache("sess_A");
+
+    expect(heard).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it("are not woken by a claim that changes nothing", () => {
+    // A guard effect re-running for the same session must not churn the gate.
+    fullyReady("sess_A");
+    const heard = vi.fn();
+    const stop = subscribeAuthReady(heard);
+
+    claimApiCache("sess_A");
 
     expect(heard).not.toHaveBeenCalled();
     stop();
@@ -260,26 +338,39 @@ describe("subscribers", () => {
 });
 
 describe("dev mode", () => {
-  it("is ready with nothing to wait for", () => {
-    // The header comes from a value hydrated at module load, so there is
-    // genuinely no asynchronous step -- and this is deliberately not a fallback
-    // for Clerk being slow, which would be an authentication bypass on a timer.
+  beforeEach(() => {
     authStore.mode = "dev";
     resetAuthReadiness();
+  });
 
+  it("is ready with nothing to wait for", () => {
+    expect(authPhase()).toBe("app-ready");
     expect(isAuthReady()).toBe(true);
   });
 
+  it("owns its own cache from the start, so nothing is cleared on a cold start", () => {
+    expect(cacheOwner()).toBe(currentSessionId());
+  });
+
   it("stays ready with no token getter at all", () => {
-    authStore.mode = "dev";
-    resetAuthReadiness();
     setTokenGetter(null);
 
     expect(isAuthReady()).toBe(true);
   });
 
+  it("closes the gate when the dev user is switched, until the cache is handed over", () => {
+    // A change of dev user is a change of tenant with no navigation to notice
+    // it, so it goes through the same generation machinery as a Clerk session.
+    publishAuthState({ sessionId: "dev:usr_b", phase: "proven" });
+
+    expect(isAuthReady()).toBe(false);
+    expect(authPhase()).toBe("token-ready");
+
+    claimApiCache("dev:usr_b");
+    expect(isAuthReady()).toBe(true);
+  });
+
   it("sends its dev header without asking anybody for a token", async () => {
-    authStore.mode = "dev";
     authStore.devUserId = "usr_test";
 
     await expect(buildAuthHeaders()).resolves.toEqual({ "X-Dev-User": "usr_test" });
@@ -296,10 +387,6 @@ describe("buildAuthHeaders", () => {
   });
 
   it("refuses rather than producing an anonymous request", async () => {
-    // It used to return `{}` here and let the call go out. An uncredentialed
-    // request is answered either with a 401 the UI has to guess at, or -- worse
-    // -- with an empty view of the world that is indistinguishable from an
-    // account with nothing in it.
     setTokenGetter(async () => null);
 
     await expect(buildAuthHeaders()).rejects.toBeInstanceOf(AuthUnavailableError);

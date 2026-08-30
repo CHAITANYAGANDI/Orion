@@ -7,6 +7,7 @@ import {
   DEFAULT_DEV_USER,
   DEV_USER_KEY,
   authStore,
+  publishAuthState,
 } from "@/lib/auth-store";
 import { clearPreferences } from "@/lib/preference-store";
 
@@ -68,6 +69,19 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
       /* ignore */
     }
     setUserId(next);
+    /*
+     * Switching dev user is a change of tenant, with no navigation and no
+     * sign-in to notice it -- so it is published as a new generation for the
+     * same reason a Clerk session change is. The gate closes, SessionCacheGuard
+     * empties the previous user's API cache and claims the new one, and the
+     * gate reopens. Without this the next request is answered from the
+     * previous dev user's entries.
+     *
+     * The token half stays `proven`: dev mode's header comes from
+     * `authStore.devUserId`, which was set on the line above, so there is
+     * nothing asynchronous to prove.
+     */
+    publishAuthState({ sessionId: `dev:${next}`, phase: "proven" });
   }, []);
 
   /**

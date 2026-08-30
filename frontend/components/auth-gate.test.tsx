@@ -38,10 +38,11 @@ import {
   setTokenGetter,
   publishAuthState,
   resolveTokenProbe,
+  claimApiCache,
   resetAuthReadiness,
   isAuthReady,
   buildAuthHeaders,
-  type AuthPhase,
+  type TokenStatus,
 } from "@/lib/auth-store";
 
 /** Counts renders, standing in for any component that queries on mount. */
@@ -60,12 +61,17 @@ function renderGate() {
   );
 }
 
-/** Clerk has produced a credential for this session. */
-function signedInWithToken(sessionId = "sess_1") {
+/**
+ * Everything the gate requires: a credential for this session, and an API cache
+ * this session owns. Both, because either alone is a state the app must not
+ * open in.
+ */
+function fullyReady(sessionId = "sess_1") {
   act(() => {
     setTokenGetter(async () => "tok_123");
-    publishAuthState({ sessionId, phase: "acquiring" });
+    publishAuthState({ sessionId, phase: "preparing-session" });
     resolveTokenProbe(sessionId, true);
+    claimApiCache(sessionId);
   });
 }
 
@@ -108,7 +114,7 @@ describe("AuthGate", () => {
     // the whole application in.
     act(() => {
       setTokenGetter(async () => "tok_123");
-      publishAuthState({ sessionId: "sess_1", phase: "acquiring" });
+      publishAuthState({ sessionId: "sess_1", phase: "preparing-session" });
     });
 
     renderGate();
@@ -119,7 +125,7 @@ describe("AuthGate", () => {
   it("does not mount when the token came back empty", () => {
     act(() => {
       setTokenGetter(async () => null);
-      publishAuthState({ sessionId: "sess_1", phase: "acquiring" });
+      publishAuthState({ sessionId: "sess_1", phase: "preparing-session" });
       resolveTokenProbe("sess_1", false);
     });
 
@@ -128,7 +134,7 @@ describe("AuthGate", () => {
     expect(screen.queryByText("workspace")).toBeNull();
   });
 
-  it.each<AuthPhase>(["loading", "signed-out", "acquiring", "failed"])(
+  it.each<TokenStatus>(["loading", "signed-out", "preparing-session", "failed"])(
     "refuses to mount in the %s phase",
     (phase) => {
       act(() => {
@@ -142,8 +148,38 @@ describe("AuthGate", () => {
     },
   );
 
-  it("mounts once a usable token for this session has been obtained", () => {
-    signedInWithToken();
+  it("does not mount on a proven token while the cache is another session's", () => {
+    /*
+     * THE remaining race. Clerk has a credential for this session and the store
+     * is still full of the previous one's meetings, folders and usage -- every
+     * cache key here is endpoint + argument with no user in it, so the first
+     * request is a hit on the old entry. This is the state the app used to
+     * mount in, and the state a manual refresh was curing.
+     */
+    act(() => {
+      setTokenGetter(async () => "tok_123");
+      publishAuthState({ sessionId: "sess_B", phase: "preparing-session" });
+      resolveTokenProbe("sess_B", true);
+    });
+
+    renderGate();
+
+    expect(screen.queryByText("workspace")).toBeNull();
+  });
+
+  it("does not mount on an owned cache while the token is still being fetched", () => {
+    act(() => {
+      publishAuthState({ sessionId: "sess_B", phase: "preparing-session" });
+      claimApiCache("sess_B");
+    });
+
+    renderGate();
+
+    expect(screen.queryByText("workspace")).toBeNull();
+  });
+
+  it("mounts once the token is proven and the cache is this session's", () => {
+    fullyReady();
 
     renderGate();
 
@@ -157,7 +193,7 @@ describe("AuthGate", () => {
     renderGate();
     expect(childRendered).not.toHaveBeenCalled();
 
-    signedInWithToken();
+    fullyReady();
 
     expect(screen.getByText("workspace")).toBeInTheDocument();
     expect(childRendered).toHaveBeenCalledTimes(1);
@@ -179,20 +215,30 @@ describe("AuthGate", () => {
 
     act(() => {
       setTokenGetter(async () => "tok_123");
-      publishAuthState({ sessionId: "sess_1", phase: "acquiring" });
+      publishAuthState({ sessionId: "sess_1", phase: "preparing-session" });
     });
-    seenAt["acquiring"] = childRendered.mock.calls.length;
+    seenAt["preparing-session"] = childRendered.mock.calls.length;
 
     act(() => {
       resolveTokenProbe("sess_1", true);
     });
-    seenAt["ready"] = childRendered.mock.calls.length;
+    seenAt["token-ready"] = childRendered.mock.calls.length;
 
-    expect(seenAt).toEqual({ "signed-out": 0, acquiring: 0, ready: 1 });
+    act(() => {
+      claimApiCache("sess_1");
+    });
+    seenAt["app-ready"] = childRendered.mock.calls.length;
+
+    expect(seenAt).toEqual({
+      "signed-out": 0,
+      "preparing-session": 0,
+      "token-ready": 0,
+      "app-ready": 1,
+    });
   });
 
   it("closes again when the session ends under an open page", () => {
-    signedInWithToken();
+    fullyReady();
     renderGate();
     expect(screen.getByText("workspace")).toBeInTheDocument();
 
@@ -204,16 +250,17 @@ describe("AuthGate", () => {
   });
 
   it("closes when the session changes, until the new one is proven", () => {
-    signedInWithToken("sess_A");
+    fullyReady("sess_A");
     renderGate();
 
     act(() => {
-      publishAuthState({ sessionId: "sess_B", phase: "acquiring" });
+      publishAuthState({ sessionId: "sess_B", phase: "preparing-session" });
     });
     expect(screen.queryByText("workspace")).toBeNull();
 
     act(() => {
       resolveTokenProbe("sess_B", true);
+      claimApiCache("sess_B");
     });
     expect(screen.getByText("workspace")).toBeInTheDocument();
   });
@@ -223,9 +270,10 @@ describe("AuthGate", () => {
     // B. Opening the app here would put B in front of A's credential.
     renderGate();
     act(() => {
-      publishAuthState({ sessionId: "sess_A", phase: "acquiring" });
-      publishAuthState({ sessionId: "sess_B", phase: "acquiring" });
+      publishAuthState({ sessionId: "sess_A", phase: "preparing-session" });
+      publishAuthState({ sessionId: "sess_B", phase: "preparing-session" });
       resolveTokenProbe("sess_A", true);
+      claimApiCache("sess_A");
     });
 
     expect(screen.queryByText("workspace")).toBeNull();
@@ -248,7 +296,7 @@ describe("AuthGate", () => {
   });
 
   it("sends the bearer token once a session is ready", async () => {
-    signedInWithToken();
+    fullyReady();
 
     await expect(buildAuthHeaders()).resolves.toEqual({
       Authorization: "Bearer tok_123",

@@ -35,47 +35,57 @@ export const DEFAULT_DEV_USER = "usr_dev";
 export const ACCOUNT_PORTAL_URL = (process.env.NEXT_PUBLIC_ACCOUNT_PORTAL_URL ?? "").trim();
 
 /**
- * Which of five things is true about the current Clerk session.
+ * How far along the app is in becoming usable for the session it is in.
  *
- * <h2>Why a phase and not a boolean</h2>
+ * <h2>Why "a token exists" was not enough either</h2>
  *
- * <p>Readiness used to be `tokenGetter !== null` -- "somebody has handed us a
- * function capable of asking for a token". That is not the same claim as "a
- * token for the session we are in right now has actually been obtained", and
- * the gap between the two is the first-login race:
+ * <p>The previous version of this file fixed a real bug -- readiness used to
+ * mean `tokenGetter !== null`, which a signed-out visitor on `/sign-in`
+ * satisfied -- and left a second one behind, one layer up.
  *
- * <ul>
- *   <li>`ClerkBridge` wraps the whole root layout, including `/` and
- *       `/sign-in`, and registered the getter unconditionally -- so the getter
- *       existed while the visitor was signed <em>out</em>.</li>
- *   <li>`isLoaded` was true the whole time as well; Clerk had loaded long
- *       before anybody typed a password.</li>
- *   <li>So at the instant sign-in completed and Clerk client-side redirected
- *       to `/home`, both halves of `tokenReady && isLoaded` were already true
- *       and the gate opened in the same commit -- ahead of Clerk finishing its
- *       adoption of the new session.</li>
- *   <li>Every hook in the app fired, `getToken()` answered `null`, and the
- *       requests went out unauthenticated.</li>
- * </ul>
+ * <p>Two separate things had to be true before the authenticated app could be
+ * shown, and only one of them was in this state machine. The other lived in a
+ * passive effect in `SessionCacheGuard`, which cleared the previous tenant's
+ * RTK Query cache. Two facts, two mechanisms, and no ordering between them
+ * beyond where the components happened to sit in the tree -- so "the cache is
+ * empty by the time children mount" was a property of sibling order rather
+ * than a guarantee, and sibling order is not something a reviewer checks.
  *
- * <p>Refreshing fixed it because by then the session was long since adopted.
- * That is the signature of the bug: broken exactly once, on the first
- * authenticated navigation after a sign-in, and never again.
+ * <p>Worse, the two moved on different clocks. `sessionId` reaches the React
+ * tree through context, which updates during <em>render</em>; readiness reaches
+ * `AuthGate` through this store, which is written from ClerkBridge's
+ * <em>effect</em> -- and a parent's effect runs after its children's. So there
+ * is a commit in which the tree has already rendered under session B while this
+ * store still reports session A as ready. In that commit the gate is open, the
+ * authenticated subtree is mounted, and everything inside it is reading a cache
+ * that belongs to somebody else.
  *
- * <p>Each of the first four phases is a distinct reason not to open the app,
- * and collapsing them is what produced a "ready" that meant almost nothing.
+ * <p>So cache ownership is a fact about the session, and it lives here, beside
+ * the token. `app-ready` is the single barrier, and it requires both.
+ *
+ * <ol>
+ *   <li><b>loading</b> -- the Clerk SDK has not finished booting.</li>
+ *   <li><b>signed-out</b> -- loaded, and there is no session.</li>
+ *   <li><b>preparing-session</b> -- signed in; a token for <em>this</em>
+ *       session is being fetched.</li>
+ *   <li><b>token-ready</b> -- a usable token has been held in a hand, and the
+ *       API cache still belongs to a previous session. Deliberately not enough
+ *       on its own: this is the state the app used to mount in.</li>
+ *   <li><b>app-ready</b> -- token proven <em>and</em> the cache owned by this
+ *       session. The only state the gate opens on.</li>
+ *   <li><b>failed</b> -- signed in, and no token could be obtained.</li>
+ * </ol>
  */
 export type AuthPhase =
-  /** The Clerk SDK has not finished booting. Nothing is known yet. */
   | "loading"
-  /** Clerk is loaded and there is no session. `/sign-in` is the answer. */
   | "signed-out"
-  /** Signed in, and a token for <em>this</em> session is being fetched. */
-  | "acquiring"
-  /** Signed in, and a usable token for this session has been held in a hand. */
-  | "ready"
-  /** Signed in, and the token could not be obtained. Not a reason to proceed. */
+  | "preparing-session"
+  | "token-ready"
+  | "app-ready"
   | "failed";
+
+/** What the token half of the answer can be. `app-ready` is derived, not set. */
+export type TokenStatus = "loading" | "signed-out" | "preparing-session" | "proven" | "failed";
 
 interface AuthStore {
   mode: AuthMode;
@@ -84,34 +94,47 @@ interface AuthStore {
    * How to ask Clerk for a token, registered by the bridge.
    *
    * <p><b>No longer evidence of anything.</b> It says a function exists, which
-   * was the whole mistake; readiness lives in `phase` below.
+   * was the original mistake.
    */
   tokenGetter: (() => Promise<string | null>) | null;
   /**
-   * The Clerk session `phase` is a statement about.
+   * The generation everything else here is a statement about.
    *
-   * <p>This is the identity of the readiness generation, and it is what makes
-   * the answer to "is this app ready" un-reusable across sign-ins. A proof
-   * obtained for session A is not a proof about session B, however recently it
-   * arrived.
+   * <p>Clerk's session id in clerk mode; the dev user id in dev mode, which has
+   * no sessions but does have a tenant that can be switched. One id, published
+   * by whichever provider is running, so the token half and the cache half
+   * cannot come to disagree about which sign-in they are talking about.
    */
   sessionId: string | null;
-  phase: AuthPhase;
+  status: TokenStatus;
+  /**
+   * The session the RTK Query cache belongs to.
+   *
+   * <p>`null` means nobody has claimed it -- a store that has never held an
+   * authenticated response, which is every ordinary page load. Claiming an
+   * unclaimed cache costs nothing and clears nothing; that is what stops a
+   * cold start from wiping the queries it just started.
+   */
+  cacheSession: string | null;
 }
+
+/**
+ * Dev mode's one tenant, known before anything renders.
+ *
+ * <p>The `X-Dev-User` header comes from a value hydrated at module load, so
+ * there is genuinely nothing asynchronous to wait for -- and this is
+ * deliberately not a fallback for Clerk being slow, which would be an
+ * authentication bypass on a timer.
+ */
+const DEV_SESSION = "dev";
 
 export const authStore: AuthStore = {
   mode: AUTH_MODE,
   devUserId: DEFAULT_DEV_USER,
   tokenGetter: null,
-  sessionId: null,
-  /*
-   * Dev mode is ready before anything renders, and that is not a shortcut: the
-   * `X-Dev-User` header comes from `devUserId`, hydrated at module load below,
-   * so there is genuinely no asynchronous step to wait for. Clerk mode starts
-   * knowing nothing, which is the honest starting point and the one that fails
-   * closed if the bridge never mounts.
-   */
-  phase: AUTH_MODE === "dev" ? "ready" : "loading",
+  sessionId: AUTH_MODE === "dev" ? DEV_SESSION : null,
+  status: AUTH_MODE === "dev" ? "proven" : "loading",
+  cacheSession: AUTH_MODE === "dev" ? DEV_SESSION : null,
 };
 
 /* -------------------------------------------------------------------------- */
@@ -122,9 +145,8 @@ export const authStore: AuthStore = {
  * Subscribers watching for readiness to change.
  *
  * <p>A module store plus `useSyncExternalStore` because the facts arrive from
- * an effect inside a provider and are read by a component outside that tree,
- * and neither should have to know about the other. Same idiom as
- * lib/processing-jobs.ts.
+ * an effect inside a provider and are read by components outside that tree, and
+ * neither should have to know about the other.
  */
 const readyListeners = new Set<() => void>();
 
@@ -132,24 +154,44 @@ function notify(): void {
   for (const listener of readyListeners) listener();
 }
 
+/** The whole answer, derived. See {@link AuthPhase}. */
+export function authPhase(): AuthPhase {
+  switch (authStore.status) {
+    case "loading":
+    case "signed-out":
+    case "failed":
+      return authStore.status;
+    case "preparing-session":
+      return "preparing-session";
+    case "proven":
+      /*
+       * The barrier. A proven token is half of it; the other half is that the
+       * cache in the store is this session's and not the last one's. Both, or
+       * the app does not open.
+       */
+      return authStore.cacheSession === authStore.sessionId ? "app-ready" : "token-ready";
+  }
+}
+
 /**
- * Whether an authenticated request can be built <em>right now</em>.
+ * Whether the authenticated application may be shown right now.
  *
- * <p>One phase, and only one, means yes. In particular `acquiring` does not:
- * a token being on its way is exactly the state the app used to mount in.
+ * <p>One phase, and only one. `token-ready` in particular does not: that is
+ * precisely the state in which the gate used to open over another session's
+ * cache.
  */
 export function isAuthReady(): boolean {
-  return authStore.phase === "ready";
+  return authPhase() === "app-ready";
 }
 
-/** The full phase, for anything that wants to say why rather than whether. */
-export function authPhase(): AuthPhase {
-  return authStore.phase;
-}
-
-/** The session the current phase is a statement about. */
+/** The generation everything above is a statement about. */
 export function currentSessionId(): string | null {
   return authStore.sessionId;
+}
+
+/** The session the API cache belongs to, or null if nobody has claimed it. */
+export function cacheOwner(): string | null {
+  return authStore.cacheSession;
 }
 
 /** For `useSyncExternalStore`. Returns an unsubscribe. */
@@ -163,9 +205,9 @@ export function subscribeAuthReady(listener: () => void): () => void {
 /**
  * Register (or clear) the Clerk token getter and wake anything waiting.
  *
- * <p>Kept as its own call, and deliberately no longer sufficient on its own.
- * It exists so `buildAuthHeaders` has something to call; whether that call will
- * succeed is what `phase` answers.
+ * <p>Kept as its own call, and deliberately not sufficient on its own. It
+ * exists so `buildAuthHeaders` has something to call; whether that call will
+ * succeed is what the phase answers.
  */
 export function setTokenGetter(getter: (() => Promise<string | null>) | null): void {
   if (authStore.tokenGetter === getter) return;
@@ -176,42 +218,44 @@ export function setTokenGetter(getter: (() => Promise<string | null>) | null): v
 /**
  * Whether `next` should replace `current` for the <em>same</em> session.
  *
- * <p>The one interesting case is `acquiring`. The bridge republishes it on
- * every render that changes Clerk's identities, and a proven session must not
- * be un-proven by a re-render — that would close the gate under a working app
- * and start the probe again, repeatedly, for as long as the page is open.
+ * <p>The one interesting case is `preparing-session`. The bridge republishes it
+ * on renders that have nothing to do with the session, and a proven session must
+ * not be un-proven by a re-render -- that would close the gate under a working
+ * app and start the probe again, repeatedly, for as long as the page is open.
  */
-function supersedes(current: AuthPhase, next: AuthPhase): boolean {
+function supersedes(current: TokenStatus, next: TokenStatus): boolean {
   if (current === next) return false;
-  if (next === "acquiring" && (current === "ready" || current === "failed")) return false;
+  if (next === "preparing-session" && (current === "proven" || current === "failed")) return false;
   return true;
 }
 
 /**
- * Publish what Clerk currently says, and reset readiness if the session moved.
+ * Publish what the active auth provider currently says.
  *
  * <p><b>A different session id is a different generation.</b> Signing out,
- * signing back in as the same person, another account signing in, and Clerk
- * being torn down and reinitialised all arrive here as a changed `sessionId`
- * (`null` for the first and last), and every one of them drops the phase
- * wholesale. There is no path by which a proof survives the session it was
- * about.
+ * signing back in as the same person, another account signing in, a dev user
+ * being switched, and Clerk being torn down and reinitialised all arrive here
+ * as a changed `sessionId` (`null` for sign-out and for an unloaded SDK), and
+ * every one of them drops the phase wholesale.
+ *
+ * <p>Cache ownership is deliberately <em>not</em> cleared here. It is a fact
+ * about the store's contents, not about the session, and the whole point is
+ * that it stays behind saying "this cache is still session A's" until somebody
+ * has actually emptied it. Clearing it here would make the gate open on an
+ * unclaimed cache the moment a token arrived.
  */
-export function publishAuthState(next: { sessionId: string | null; phase: AuthPhase }): void {
+export function publishAuthState(next: { sessionId: string | null; phase: TokenStatus }): void {
   const sessionChanged = next.sessionId !== authStore.sessionId;
-  if (!sessionChanged && !supersedes(authStore.phase, next.phase)) return;
+  if (!sessionChanged && !supersedes(authStore.status, next.phase)) return;
   authStore.sessionId = next.sessionId;
-  authStore.phase = next.phase;
+  authStore.status = next.phase;
   notify();
 }
 
 /**
- * Record what asking Clerk for a token actually produced.
+ * Record what asking for a token actually produced.
  *
  * <h2>The async race this closes</h2>
- *
- * <p>`getToken()` is a promise, and the session can change while it is in
- * flight:
  *
  * <pre>
  *   session A: getToken() ────────────────────────► resolves
@@ -219,32 +263,47 @@ export function publishAuthState(next: { sessionId: string | null; phase: AuthPh
  * </pre>
  *
  * <p>A's answer arrives after B is current, and it is an answer about A. Taking
- * it would open the app for B on the strength of A's credential — a
+ * it would open the app for B on the strength of A's credential -- a
  * tenant-isolation failure, not merely a stale flag. So the session id is
  * carried through the probe and checked on the way back, and a mismatch is
  * dropped without comment.
- *
- * @param sessionId the session the probe was started for
- * @param usable    whether a non-empty token came back
  */
 export function resolveTokenProbe(sessionId: string, usable: boolean): void {
   if (sessionId !== authStore.sessionId) return;
-  const next: AuthPhase = usable ? "ready" : "failed";
-  if (authStore.phase === next) return;
-  authStore.phase = next;
+  const next: TokenStatus = usable ? "proven" : "failed";
+  if (authStore.status === next) return;
+  authStore.status = next;
+  notify();
+}
+
+/**
+ * This session now owns the API cache.
+ *
+ * <p>Called by `SessionCacheGuard` once it has emptied whatever the previous
+ * session left behind — never before. The claim is the second half of the
+ * barrier, so publishing it early is exactly the bug this exists to prevent,
+ * and the same stale-generation check as the token probe applies: a claim for
+ * a session that is no longer current says nothing about the one that is.
+ */
+export function claimApiCache(sessionId: string): void {
+  if (sessionId !== authStore.sessionId) return;
+  if (authStore.cacheSession === sessionId) return;
+  authStore.cacheSession = sessionId;
   notify();
 }
 
 /**
  * Nothing is known about anybody. For sign-out, and for test isolation.
  *
- * <p>Dev mode returns to ready rather than to loading: there is nothing to
- * wait for there, and leaving it closed would hang a mode that has no way to
- * open itself.
+ * <p>Dev mode returns to fully ready rather than to loading: there is nothing
+ * to wait for there, and leaving it closed would hang a mode that has no way
+ * to open itself.
  */
 export function resetAuthReadiness(): void {
-  authStore.sessionId = null;
-  authStore.phase = authStore.mode === "dev" ? "ready" : "loading";
+  const dev = authStore.mode === "dev";
+  authStore.sessionId = dev ? DEV_SESSION : null;
+  authStore.status = dev ? "proven" : "loading";
+  authStore.cacheSession = dev ? DEV_SESSION : null;
   notify();
 }
 

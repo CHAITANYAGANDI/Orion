@@ -56,8 +56,34 @@ export function useStickyPreference<T>(
   codec: PreferenceCodec<T>,
 ): StickyPreference<T> {
   const { sessionKey, isLoaded } = useAuth();
-  const [value, setValue] = React.useState<T>(fallback);
-  const [ready, setReady] = React.useState(false);
+
+  /**
+   * What was restored, and <b>which sign-in it was restored under</b>.
+   *
+   * <h3>The bug</h3>
+   *
+   * <p>This used to be two pieces of state — a `value` and a `ready` boolean —
+   * both written by the effect below. Neither of them said which session they
+   * belonged to, so when `sessionKey` changed they went on describing the
+   * previous one until the effect got round to running.
+   *
+   * <p>React renders before it runs effects. So there is a render in which
+   * `sessionKey` is already the new session and `ready` is still `true`
+   * carrying the old session's value — and a caller that waits for `ready`
+   * before querying, which is the whole point of `ready`, queries with it.
+   *
+   * <p>On Home that is exactly the reported failure. The previous sign-in had
+   * chosen "Recent Conversations", which is `unfiled=true` on the wire, so the
+   * first request of the new session asked for meetings that were never filed
+   * into a folder — and an account that files everything has none, giving
+   * "Everything is in a folder" over a full archive. The default for a new
+   * session is All Conversations, and it was never consulted.
+   *
+   * <p>Storing the session alongside the value makes the answer derived rather
+   * than remembered: it stops being ready in the <em>same render</em> the
+   * session changes, with no window at all.
+   */
+  const [restored, setRestored] = React.useState<{ session: string; value: T } | null>(null);
 
   // `fallback` is deliberately not a dependency: callers pass object literals
   // (ANY_TIME is one), and depending on it would re-read storage on every
@@ -67,18 +93,25 @@ export function useStickyPreference<T>(
 
   React.useEffect(() => {
     // Until auth has loaded there is no sign-in to read under, and reading
-    // under the wrong one would restore the previous account's choices for a
-    // frame.
-    if (!isLoaded) return;
+    // under the wrong one would restore the previous account's choices.
+    if (!isLoaded || !sessionKey) return;
     const stored = readPreferences(sessionKey)[name];
-    const restored = stored === undefined ? null : codec.load(stored);
-    setValue(restored ?? initial.current);
-    setReady(true);
+    const loaded = stored === undefined ? null : codec.load(stored);
+    setRestored({ session: sessionKey, value: loaded ?? initial.current });
   }, [isLoaded, sessionKey, name, codec]);
+
+  /*
+   * Derived, every render. A value belonging to a different sign-in is not a
+   * value this sign-in has, and it is not "ready" — it is nothing, and the
+   * caller gets the default until storage has actually been read for the
+   * session it is now in.
+   */
+  const owned = isLoaded && Boolean(sessionKey) && restored?.session === sessionKey;
+  const value = owned ? (restored as { value: T }).value : initial.current;
 
   const set = React.useCallback(
     (next: T) => {
-      setValue(next);
+      setRestored({ session: sessionKey, value: next });
       // Including a return to the default. "Any time" chosen deliberately is a
       // choice, and coming back to find last week's filter reinstated because
       // the default was treated as "no opinion" is the same bug in reverse.
@@ -87,5 +120,5 @@ export function useStickyPreference<T>(
     [sessionKey, name, codec],
   );
 
-  return { value, set, ready };
+  return { value, set, ready: owned };
 }

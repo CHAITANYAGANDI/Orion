@@ -23,11 +23,14 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <ReduxProvider store={storeRef.current}>
       <AuthProvider>
-        {/* Inside both providers because it needs the store and the session,
-            and above `children` so a change of sign-in empties the API cache
-            before anything below can read from it. The store outlives a
-            sign-out -- it belongs to the React root, and neither half of a
-            session change reloads the document. See the component. */}
+        {/* Inside both providers because it needs the store and the session.
+            Its position among the siblings is NOT what makes it safe: it used
+            to be declared here on the theory that "before `children`" meant
+            "before children can read the cache", which is a property of one
+            commit's effect order and says nothing about the commit in which
+            the gate opens. What makes it safe is that it publishes cache
+            ownership into the same state machine `AuthGate` reads, and the
+            gate will not open without it. See the component. */}
         <SessionCacheGuard />
         {children}
         {/* Position and styling live in the component, so there is one place
