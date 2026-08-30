@@ -20,12 +20,18 @@ const {
   startEmailChange,
   resendEmailCode,
   cancelEmailChange,
+  startReverification,
+  sendReverificationCode,
+  reverifyWithCode,
   reverifyWithPassword,
 } = vi.hoisted(() => ({
   changePassword: vi.fn(),
   startEmailChange: vi.fn(),
   resendEmailCode: vi.fn(),
   cancelEmailChange: vi.fn(),
+  startReverification: vi.fn(),
+  sendReverificationCode: vi.fn(),
+  reverifyWithCode: vi.fn(),
   reverifyWithPassword: vi.fn(),
 }));
 
@@ -42,6 +48,9 @@ vi.mock("@/lib/account-actions", async (importOriginal) => {
     startEmailChange,
     resendEmailCode,
     cancelEmailChange,
+    startReverification,
+    sendReverificationCode,
+    reverifyWithCode,
     reverifyWithPassword,
   };
 });
@@ -64,6 +73,12 @@ const EMPTY: ProfileForm = {
   displayName: "Priya Raman",
   email: "priya@example.com",
   avatarUrl: "",
+};
+
+/** What Clerk offers when it asks for proof: a code to the current address. */
+const CHALLENGE = {
+  emailCode: { emailAddressId: "idn_1", address: "priya@example.com" },
+  password: true,
 };
 
 /**
@@ -100,6 +115,9 @@ beforeEach(() => {
   startEmailChange.mockResolvedValue({ id: "eml_1", address: "new@example.com" });
   resendEmailCode.mockResolvedValue(undefined);
   cancelEmailChange.mockResolvedValue(undefined);
+  startReverification.mockResolvedValue(CHALLENGE);
+  sendReverificationCode.mockResolvedValue(undefined);
+  reverifyWithCode.mockResolvedValue(undefined);
   reverifyWithPassword.mockResolvedValue(undefined);
 });
 
@@ -290,68 +308,116 @@ describe("the email", () => {
     expect(screen.getByRole("heading", { name: "Change email" })).toBeInTheDocument();
   });
 
-  it("asks for the password when Clerk wants the session proved again", async () => {
+  it("sends a proof code when Clerk wants the session proved again", async () => {
     /*
      * "You need to provide additional verification to perform this operation"
      * used to arrive as a red line in a dialog with no field to provide it in.
      * Clerk is right to guard this -- changing the address you sign in with is
      * what somebody at a borrowed, still-signed-in laptop would do -- so the
-     * answer is to ask, in Orion's words.
+     * answer is to send a code and ask for it, in Orion's words.
      */
     const { ReverificationRequiredError } = await import("@/lib/account-actions");
-    startEmailChange.mockRejectedValueOnce(new ReverificationRequiredError("Confirm your password."));
+    startEmailChange.mockRejectedValueOnce(new ReverificationRequiredError("Confirm it is you."));
     show(EMPTY, ORION);
     await userEvent.click(screen.getByRole("button", { name: "Change email" }));
 
     await userEvent.type(screen.getByLabelText("New email"), "new@example.com");
     await userEvent.click(screen.getByRole("button", { name: /Send code/ }));
 
-    expect(await screen.findByLabelText("Current password")).toBeInTheDocument();
+    await waitFor(() => expect(startReverification).toHaveBeenCalled());
+    expect(await screen.findByLabelText("Code")).toBeInTheDocument();
     // Not an error. It is the next step, and a red line beside it would read as
     // something having gone wrong.
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("picks the change back up by itself once the password lands", async () => {
+  it("picks the change back up by itself once the code lands", async () => {
     const { ReverificationRequiredError } = await import("@/lib/account-actions");
-    startEmailChange.mockRejectedValueOnce(new ReverificationRequiredError("Confirm your password."));
+    startEmailChange.mockRejectedValueOnce(new ReverificationRequiredError("Confirm it is you."));
     show(EMPTY, ORION);
     await userEvent.click(screen.getByRole("button", { name: "Change email" }));
     await userEvent.type(screen.getByLabelText("New email"), "new@example.com");
     await userEvent.click(screen.getByRole("button", { name: /Send code/ }));
 
-    await userEvent.type(await screen.findByLabelText("Current password"), "hunter2");
+    await userEvent.type(await screen.findByLabelText("Code"), "123456");
     await userEvent.click(screen.getByRole("button", { name: /^Confirm$/ }));
 
-    await waitFor(() => expect(reverifyWithPassword).toHaveBeenCalledWith("hunter2"));
+    await waitFor(() => expect(reverifyWithCode).toHaveBeenCalledWith("123456"));
     // The address is not asked for a second time: it was remembered.
     expect(startEmailChange).toHaveBeenLastCalledWith("new@example.com");
-    expect(await screen.findByLabelText("Code")).toBeInTheDocument();
   });
 
-  it("stays on the password step when the password is wrong", async () => {
+  it("carries straight on when the session turned out to be fresh enough", async () => {
+    // startReverification answers null for a session already inside the window,
+    // and a step nobody needs is a step that should not appear.
+    const { ReverificationRequiredError } = await import("@/lib/account-actions");
+    startEmailChange.mockRejectedValueOnce(new ReverificationRequiredError("Confirm it is you."));
+    startReverification.mockResolvedValue(null);
+    show(EMPTY, ORION);
+    await userEvent.click(screen.getByRole("button", { name: "Change email" }));
+
+    await userEvent.type(screen.getByLabelText("New email"), "new@example.com");
+    await userEvent.click(screen.getByRole("button", { name: /Send code/ }));
+
+    await waitFor(() => expect(startEmailChange).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText(/We sent a six-digit code to/)).toBeInTheDocument();
+  });
+
+  it("stays on the proof step when the code is wrong", async () => {
     const { AccountActionError, ReverificationRequiredError } = await import(
       "@/lib/account-actions"
     );
-    startEmailChange.mockRejectedValueOnce(new ReverificationRequiredError("Confirm your password."));
-    reverifyWithPassword.mockRejectedValue(new AccountActionError("That password is not right."));
+    startEmailChange.mockRejectedValueOnce(new ReverificationRequiredError("Confirm it is you."));
+    reverifyWithCode.mockRejectedValue(new AccountActionError("That code is not right."));
     show(EMPTY, ORION);
     await userEvent.click(screen.getByRole("button", { name: "Change email" }));
     await userEvent.type(screen.getByLabelText("New email"), "new@example.com");
     await userEvent.click(screen.getByRole("button", { name: /Send code/ }));
 
-    await userEvent.type(await screen.findByLabelText("Current password"), "wrong");
+    await userEvent.type(await screen.findByLabelText("Code"), "000000");
     await userEvent.click(screen.getByRole("button", { name: /^Confirm$/ }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("That password is not right.");
-    expect(screen.getByLabelText("Current password")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("That code is not right.");
+    expect(screen.getByLabelText("Code")).toBeInTheDocument();
   });
 
-  it("does not ask for a password when Clerk does not", async () => {
-    // Most of the time the session is already inside the window, and a password
-    // typed for nothing is a step nobody needed.
+  it("can send the proof code again", async () => {
+    const { ReverificationRequiredError } = await import("@/lib/account-actions");
+    startEmailChange.mockRejectedValueOnce(new ReverificationRequiredError("Confirm it is you."));
+    show(EMPTY, ORION);
+    await userEvent.click(screen.getByRole("button", { name: "Change email" }));
+    await userEvent.type(screen.getByLabelText("New email"), "new@example.com");
+    await userEvent.click(screen.getByRole("button", { name: /Send code/ }));
+    await screen.findByLabelText("Code");
+
+    await userEvent.click(screen.getByRole("button", { name: "Send another code" }));
+
+    await waitFor(() => expect(sendReverificationCode).toHaveBeenCalledWith("idn_1"));
+    expect(await screen.findByRole("status")).toHaveTextContent(/A new code is on its way/);
+  });
+
+  it("takes the password instead for anybody who would rather type it", async () => {
+    const { ReverificationRequiredError } = await import("@/lib/account-actions");
+    startEmailChange.mockRejectedValueOnce(new ReverificationRequiredError("Confirm it is you."));
+    show(EMPTY, ORION);
+    await userEvent.click(screen.getByRole("button", { name: "Change email" }));
+    await userEvent.type(screen.getByLabelText("New email"), "new@example.com");
+    await userEvent.click(screen.getByRole("button", { name: /Send code/ }));
+
+    await userEvent.click(await screen.findByRole("button", { name: "Use your password instead" }));
+    await userEvent.type(screen.getByLabelText("Current password"), "hunter2");
+    await userEvent.click(screen.getByRole("button", { name: /^Confirm$/ }));
+
+    await waitFor(() => expect(reverifyWithPassword).toHaveBeenCalledWith("hunter2"));
+    expect(reverifyWithCode).not.toHaveBeenCalled();
+  });
+
+  it("asks for no proof at all when Clerk does not want one", async () => {
+    // Most of the time the session is already inside the window, and a proof
+    // supplied for nothing is a step nobody needed.
     await reachTheCode();
 
+    expect(startReverification).not.toHaveBeenCalled();
     expect(screen.queryByLabelText("Current password")).not.toBeInTheDocument();
   });
 

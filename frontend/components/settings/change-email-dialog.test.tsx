@@ -22,7 +22,15 @@ const handlers = {
   onResend: vi.fn(),
   onRetype: vi.fn(),
   onConfirm: vi.fn(),
-  onConfirmIdentity: vi.fn(),
+  onIdentityCode: vi.fn(),
+  onIdentityPassword: vi.fn(),
+  onResendIdentityCode: vi.fn(),
+};
+
+/** What Clerk offered when it asked for proof. Both factors, code first. */
+const BOTH = {
+  emailCode: { emailAddressId: "idn_1", address: "ada@example.com" },
+  password: true,
 };
 
 function show(props: Partial<React.ComponentProps<typeof ChangeEmailDialog>> = {}) {
@@ -31,6 +39,7 @@ function show(props: Partial<React.ComponentProps<typeof ChangeEmailDialog>> = {
       open
       current="ada@example.com"
       sentTo={null}
+      challenge={null}
       {...handlers}
       {...props}
     />,
@@ -141,9 +150,17 @@ describe("waiting for a code that has not come", () => {
 
     // The code step, and then the way back out of it.
     rerender(
-      <ChangeEmailDialog open current="ada@example.com" sentTo="chaitanya2000@gmaill.com" {...handlers} />,
+      <ChangeEmailDialog
+        open
+        current="ada@example.com"
+        sentTo="chaitanya2000@gmaill.com"
+        challenge={null}
+        {...handlers}
+      />,
     );
-    rerender(<ChangeEmailDialog open current="ada@example.com" sentTo={null} {...handlers} />);
+    rerender(
+      <ChangeEmailDialog open current="ada@example.com" sentTo={null} challenge={null} {...handlers} />,
+    );
 
     // An empty field would mean retyping an address nobody can see to compare.
     expect(screen.getByLabelText("New email")).toHaveValue("chaitanya2000@gmaill.com");
@@ -187,30 +204,91 @@ describe("waiting for a code that has not come", () => {
  * field to provide it in.
  */
 describe("proving it is you first", () => {
-  it("asks for the password when Clerk does", () => {
-    show({ needsPassword: true });
+  it("sends a code rather than asking anybody to recall a password", () => {
+    // The proof that needs nothing remembered. It goes to the address already
+    // signing this person in, which they can by definition read.
+    show({ challenge: BOTH });
+
+    expect(screen.getByLabelText("Code")).toHaveAttribute("autocomplete", "one-time-code");
+    expect(screen.queryByLabelText("Current password")).not.toBeInTheDocument();
+  });
+
+  it("names the address the proof code went to", () => {
+    // Not the new one. Sending the check to an address nobody has proved yet
+    // would be handing it to whoever typed it.
+    show({ challenge: BOTH, sentTo: "new@example.com" });
+
+    expect(screen.getByText(/ada@example.com/)).toBeInTheDocument();
+    expect(screen.getByText(/the address you sign in with now/)).toBeInTheDocument();
+  });
+
+  it("hands the code over", async () => {
+    show({ challenge: BOTH });
+
+    await userEvent.type(screen.getByLabelText("Code"), " 123456 ");
+    await userEvent.click(screen.getByRole("button", { name: /Confirm$/ }));
+
+    expect(handlers.onIdentityCode).toHaveBeenCalledWith("123456");
+    expect(handlers.onSend).not.toHaveBeenCalled();
+  });
+
+  it("can send that code again", async () => {
+    show({ challenge: BOTH });
+
+    await userEvent.click(screen.getByRole("button", { name: "Send another code" }));
+
+    expect(handlers.onResendIdentityCode).toHaveBeenCalled();
+    // Not the other resend: that one belongs to the new address, which does not
+    // exist yet at this point in the flow.
+    expect(handlers.onResend).not.toHaveBeenCalled();
+  });
+
+  it("offers the password to anybody who would rather type it", async () => {
+    show({ challenge: BOTH });
+
+    await userEvent.click(screen.getByRole("button", { name: "Use your password instead" }));
 
     expect(screen.getByLabelText("Current password")).toHaveAttribute("type", "password");
+    expect(screen.queryByLabelText("Code")).not.toBeInTheDocument();
   });
 
-  it("says why it is asking, since nothing else on this screen wanted a password", () => {
-    show({ needsPassword: true });
+  it("empties the field on the swap, since a password is not a half-typed code", async () => {
+    show({ challenge: BOTH });
+    await userEvent.type(screen.getByLabelText("Code"), "1234");
 
-    expect(screen.getByText(/how an account is taken/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Use your password instead" }));
+
+    expect(screen.getByLabelText("Current password")).toHaveValue("");
   });
 
-  it("hands the password over and nothing else", async () => {
-    show({ needsPassword: true });
+  it("comes back to the code", async () => {
+    show({ challenge: BOTH });
+    await userEvent.click(screen.getByRole("button", { name: "Use your password instead" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "Email me a code instead" }));
+
+    expect(screen.getByLabelText("Code")).toBeInTheDocument();
+  });
+
+  it("hands the password over when that is what was used", async () => {
+    show({ challenge: BOTH });
+    await userEvent.click(screen.getByRole("button", { name: "Use your password instead" }));
 
     await userEvent.type(screen.getByLabelText("Current password"), "hunter2");
     await userEvent.click(screen.getByRole("button", { name: /Confirm$/ }));
 
-    expect(handlers.onConfirmIdentity).toHaveBeenCalledWith("hunter2");
-    expect(handlers.onSend).not.toHaveBeenCalled();
+    expect(handlers.onIdentityPassword).toHaveBeenCalledWith("hunter2");
+  });
+
+  it("asks for the password when Clerk offers no code, with no swap to offer", () => {
+    show({ challenge: { emailCode: null, password: true } });
+
+    expect(screen.getByLabelText("Current password")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /instead/ })).not.toBeInTheDocument();
   });
 
   it("is not in the way of anybody already inside the window", () => {
-    // Most people are. Asking everybody every time would be a password typed
+    // Most people are. Asking everybody every time would be a proof supplied
     // for nothing on the way to a screen that would have opened anyway.
     show();
 
@@ -221,15 +299,15 @@ describe("proving it is you first", () => {
   it("takes precedence over the step it interrupted", () => {
     // The refusal can arrive with an address already pending from an earlier
     // go. One field at a time, and it is the one Clerk is waiting for.
-    show({ needsPassword: true, sentTo: "new@example.com" });
+    show({ challenge: BOTH, sentTo: "new@example.com" });
 
-    expect(screen.getByLabelText("Current password")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Code")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Code")).toHaveAttribute("id", "reverify");
+    expect(screen.queryByRole("button", { name: "Use a different address" })).not.toBeInTheDocument();
   });
 
-  it("shows a wrong password where it can be seen", () => {
-    show({ needsPassword: true, error: "That password is not right." });
+  it("shows a refused proof where it can be seen", () => {
+    show({ challenge: BOTH, error: "That code is not right." });
 
-    expect(screen.getByRole("alert")).toHaveTextContent("That password is not right.");
+    expect(screen.getByRole("alert")).toHaveTextContent("That code is not right.");
   });
 });

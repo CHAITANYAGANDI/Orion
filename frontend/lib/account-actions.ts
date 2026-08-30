@@ -207,43 +207,111 @@ export async function cancelEmailChange(handle: PendingEmail): Promise<void> {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Satisfy Clerk's reverification with the account's own password.
+ * What Clerk will accept as proof, and which of it Orion can ask for.
  *
- * <p>The password is the only first factor offered here, and that is not a
- * shortcut: the Change email button exists only for accounts Orion's own
- * sign-up made, and those are exactly the accounts Clerk holds a password for.
- * An account under Google owns none of these fields and never reaches this
- * code — see {@link identityPermissions}.
+ * <p>A code beats a password here. Clerk offers both first factors, and the
+ * code is the one that needs nothing recalled: it goes to the address already
+ * signing this person in, which they are by definition able to read. So the
+ * code is prepared as soon as the challenge opens and the password is the
+ * alternative, not the other way round.
+ */
+export interface ReverificationChallenge {
+  /** The address a code can go to, when Clerk offers that factor. */
+  emailCode: { emailAddressId: string; address: string } | null;
+  /** Whether Clerk will take the account password instead. */
+  password: boolean;
+}
+
+/**
+ * Ask Clerk what it wants, and send the code if it will take one.
+ *
+ * <p>Returns null when the session is already inside the window — somebody who
+ * signed in a moment ago — so the caller can carry straight on rather than
+ * putting a step in front of them for nothing.
+ */
+export async function startReverification(): Promise<ReverificationChallenge | null> {
+  const session = await requireSession();
+  const start = requireReverification(session).start;
+
+  try {
+    const started = await start.call(session, { level: "firstFactor" });
+    if (started.status === "complete") return null;
+
+    const factors = Array.isArray(started.supportedFirstFactors)
+      ? started.supportedFirstFactors
+      : [];
+    const email = factors.find(
+      (factor) => factor.strategy === "email_code" && Boolean(factor.emailAddressId),
+    );
+
+    const challenge: ReverificationChallenge = {
+      emailCode: email
+        ? { emailAddressId: email.emailAddressId as string, address: email.safeIdentifier ?? "" }
+        : null,
+      password: factors.some((factor) => factor.strategy === "password"),
+    };
+
+    if (!challenge.emailCode && !challenge.password) {
+      // Clerk wants something this dialog cannot draw. Signing in does all of
+      // it, whatever it is.
+      throw new AccountActionError(
+        "Sign out and sign in again, then change the address within a few minutes.",
+      );
+    }
+
+    if (challenge.emailCode) await sendReverificationCode(challenge.emailCode.emailAddressId);
+    return challenge;
+  } catch (err) {
+    if (err instanceof AccountActionError) throw err;
+    throw new AccountActionError(clerkMessage(err, "That could not be confirmed. Try again."));
+  }
+}
+
+/**
+ * Send — or send again — the code that proves it is you.
+ *
+ * <p>It goes to the address that signs this person in <em>now</em>, not the new
+ * one. Sending it to an address nobody has proved yet would be handing the
+ * check to whoever typed it.
+ */
+export async function sendReverificationCode(emailAddressId: string): Promise<void> {
+  const session = await requireSession();
+  const prepare = requireReverification(session).prepare;
+  try {
+    await prepare.call(session, { strategy: "email_code", emailAddressId });
+  } catch (err) {
+    throw new AccountActionError(clerkMessage(err, "That code could not be sent."));
+  }
+}
+
+/** Prove it is you with the code that was sent. */
+export async function reverifyWithCode(code: string): Promise<void> {
+  await settleFirstFactor(
+    { strategy: "email_code", code },
+    "That code is not right. Check it and try again.",
+  );
+}
+
+/**
+ * Prove it is you with the account password, where Clerk offers that instead.
  *
  * <p>Nothing is stored. The password goes to Clerk, which is the only thing
  * that can check it, and this module keeps no copy — the same arrangement as
  * {@link changePassword}.
  */
 export async function reverifyWithPassword(password: string): Promise<void> {
+  await settleFirstFactor({ strategy: "password", password }, "That password is not right.");
+}
+
+async function settleFirstFactor(
+  attemptWith: { strategy: string; code?: string; password?: string },
+  wrong: string,
+): Promise<void> {
   const session = await requireSession();
-  const start = session.__experimental_startVerification;
-  const attempt = session.__experimental_attemptFirstFactorVerification;
-
-  /*
-   * Reverification is behind an experimental flag in this version of the SDK,
-   * so it can be absent from the script that actually loaded. Signing in is
-   * itself a first factor, so a fresh sign-in satisfies the check -- which
-   * makes for a fallback that is a real instruction rather than an apology.
-   */
-  if (typeof start !== "function" || typeof attempt !== "function") {
-    throw new AccountActionError(
-      "Sign out and sign in again, then change the address within a few minutes.",
-    );
-  }
-
+  const attempt = requireReverification(session).attempt;
   try {
-    const started = await start.call(session, { level: "firstFactor" });
-    // Already satisfied. Somebody who signed in a moment ago lands here.
-    if (started.status === "complete") return;
-
-    const done = await attempt.call(session, { strategy: "password", password });
+    const done = await attempt.call(session, attemptWith);
     if (done.status === "complete") return;
-
     if (done.status === "needs_second_factor") {
       // Orion draws no second-factor form, and pretending otherwise would be a
       // dialog that can only fail. Signing in again does the whole of it.
@@ -251,11 +319,31 @@ export async function reverifyWithPassword(password: string): Promise<void> {
         "This account needs its second factor. Sign out and sign in again, then try once more.",
       );
     }
-    throw new AccountActionError("That password is not right.");
+    throw new AccountActionError(wrong);
   } catch (err) {
     if (err instanceof AccountActionError) throw err;
-    throw new AccountActionError(clerkMessage(err, "That password is not right."));
+    throw new AccountActionError(clerkMessage(err, wrong));
   }
+}
+
+/**
+ * The three reverification calls, or an instruction that works without them.
+ *
+ * <p>They are `__experimental_` in the pinned SDK, so they can be absent from
+ * the script that actually loaded. Signing in is itself a first factor, so a
+ * fresh sign-in satisfies the check — which makes for a fallback that is a real
+ * instruction rather than an apology.
+ */
+function requireReverification(session: ClerkSession) {
+  const start = session.__experimental_startVerification;
+  const prepare = session.__experimental_prepareFirstFactorVerification;
+  const attempt = session.__experimental_attemptFirstFactorVerification;
+  if (typeof start !== "function" || typeof prepare !== "function" || typeof attempt !== "function") {
+    throw new AccountActionError(
+      "Sign out and sign in again, then change the address within a few minutes.",
+    );
+  }
+  return { start, prepare, attempt };
 }
 
 /**
@@ -319,14 +407,28 @@ interface ClerkEmailAddress {
  * <p>Both optional: they are `__experimental_` in the pinned SDK, so the script
  * that loads at runtime may not carry them. See {@link reverifyWithPassword}.
  */
+interface ClerkFirstFactor {
+  strategy?: string;
+  emailAddressId?: string;
+  safeIdentifier?: string;
+}
+
+interface ClerkVerification {
+  status: string;
+  supportedFirstFactors?: ClerkFirstFactor[] | null;
+}
+
 interface ClerkSession {
-  __experimental_startVerification?: (params: {
-    level: string;
-  }) => Promise<{ status: string }>;
+  __experimental_startVerification?: (params: { level: string }) => Promise<ClerkVerification>;
+  __experimental_prepareFirstFactorVerification?: (params: {
+    strategy: string;
+    emailAddressId: string;
+  }) => Promise<ClerkVerification>;
   __experimental_attemptFirstFactorVerification?: (params: {
     strategy: string;
-    password: string;
-  }) => Promise<{ status: string }>;
+    code?: string;
+    password?: string;
+  }) => Promise<ClerkVerification>;
 }
 
 interface ClerkLike {

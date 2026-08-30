@@ -16,40 +16,41 @@
  *
  * <h2>The code that never arrives</h2>
  *
- * <p>A code step with no way back is the same dead end as the sign-up screen
- * had, and it fails at the exact thing this dialog exists to protect against.
- * Mistype the domain and the send succeeds — `gmaill.com` is a real place as
- * far as the mail system is concerned — the screen says a code is on its way,
- * and nothing arrives. There is then nothing to do but Cancel and start over,
- * with no clue as to what went wrong, because the address that was typed is no
- * longer on screen to be read back.
+ * <p>A code step with no way back is a dead end, and it fails at the exact
+ * thing this dialog exists to protect against. Mistype the domain and the send
+ * succeeds — `gmaill.com` is a real place as far as the mail system is
+ * concerned — the screen says a code is on its way, and nothing arrives. There
+ * was then nothing to do but Cancel and start over, with no clue as to what
+ * went wrong, because the address that was typed was no longer on screen to be
+ * read back.
  *
- * <p>So the second step keeps both exits: another code, for mail that is slow
- * or filed as spam, and a way back to the address with what was typed still in
- * it. And the first step says "did you mean gmail.com?" before any of that is
+ * <p>So the code step keeps both exits: another code, for mail that is slow or
+ * filed as spam, and a way back to the address with what was typed still in it.
+ * And the first step says "did you mean gmail.com?" before any of that is
  * needed — a hint beside the field, never a refusal, because plenty of real
  * domains are one letter from a famous one.
  *
- * <h2>The password it asks for first</h2>
+ * <h2>The step in front of both of them</h2>
  *
  * <p>Clerk guards its sensitive user operations with reverification: a session
  * that has not proved a first factor in the last few minutes may read anything
  * but may not change the credential. Adding an address is one of the guarded
- * ones, and rightly - changing the address you sign in with is precisely what
+ * ones, and rightly — changing the address you sign in with is precisely what
  * somebody at a borrowed, still-signed-in laptop would do.
  *
- * <p>Clerk's own profile component answers that by opening a dialog of its own.
- * This one asks in Orion's words, and only when Clerk actually asks: the step
- * appears in response to the refusal rather than in front of everybody every
- * time, because most people are already inside the window and would be typing
- * their password for nothing.
+ * <p>Clerk answers that with a dialog of its own. This one asks in Orion's
+ * words, and it asks with <b>a code to the address that signs you in now</b>,
+ * because that is the proof which requires nothing to be recalled. The password
+ * is the alternative for anyone who would rather type it, not the default. And
+ * the step appears only when Clerk actually asks — most people are inside the
+ * window and would be proving themselves for nothing.
  *
  * <p>Offered only for accounts Orion's own sign-up made. Under Google the
  * address belongs to Google — see lib/identity-owner.
  */
 
 import * as React from "react";
-import { Loader2, Lock, Mail } from "lucide-react";
+import { Loader2, Mail, ShieldCheck } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -61,6 +62,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { suggestAddress } from "@/lib/email-domain";
+import type { ReverificationChallenge } from "@/lib/account-actions";
 
 export function ChangeEmailDialog({
   open,
@@ -69,16 +71,18 @@ export function ChangeEmailDialog({
   error,
   /** Set once the code has been sent, so this component knows which step it is on. */
   sentTo,
-  /** Set when a second code has just gone out, so the button is not silent. */
+  /** Set when a code has just gone out again, so the button is not silent. */
   resent,
-  /** Set when Clerk wants the password again before it will allow the change. */
-  needsPassword,
+  /** What Clerk will take as proof, when it has asked for some. Null when not. */
+  challenge,
   onClose,
   onSend,
   onResend,
   onRetype,
   onConfirm,
-  onConfirmIdentity,
+  onIdentityCode,
+  onIdentityPassword,
+  onResendIdentityCode,
 }: {
   open: boolean;
   /** The address being replaced, shown so nobody changes the wrong account. */
@@ -87,18 +91,22 @@ export function ChangeEmailDialog({
   error?: string | null;
   sentTo: string | null;
   resent?: boolean;
-  needsPassword?: boolean;
+  challenge: ReverificationChallenge | null;
   onClose: () => void;
   onSend: (address: string) => void;
   onResend: () => void;
   /** Back to the first step, taking the unverified address off the account. */
   onRetype: () => void;
   onConfirm: (code: string) => void;
-  onConfirmIdentity: (password: string) => void;
+  onIdentityCode: (code: string) => void;
+  onIdentityPassword: (password: string) => void;
+  onResendIdentityCode: () => void;
 }) {
   const [address, setAddress] = React.useState("");
   const [code, setCode] = React.useState("");
-  const [password, setPassword] = React.useState("");
+  const [proof, setProof] = React.useState("");
+  /** Only ever set by pressing the link. The code is what opens by default. */
+  const [byPassword, setByPassword] = React.useState(false);
 
   // Cleared on the way out, so a half-finished change is not sitting in state
   // behind a closed dialog waiting to be reopened into.
@@ -106,17 +114,37 @@ export function ChangeEmailDialog({
     if (!open) {
       setAddress("");
       setCode("");
-      setPassword("");
+      setProof("");
+      setByPassword(false);
     }
   }, [open]);
 
-  const step = needsPassword ? "identity" : sentTo ? "code" : "address";
+  const step = challenge ? "identity" : sentTo ? "code" : "address";
+  // Falls back to the password when Clerk offers no code, whatever was pressed.
+  const withCode = Boolean(challenge?.emailCode) && !byPassword;
   /*
-   * Deliberately not cleared when the code step opens. Coming back to fix one
+   * Deliberately not cleared when a later step opens. Coming back to fix one
    * character is the whole point of the way back, and an empty field would make
    * somebody retype an address they cannot see to compare.
    */
   const meant = step === "address" ? suggestAddress(address.trim()) : null;
+
+  function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (step === "identity") {
+      if (withCode) onIdentityCode(proof.trim());
+      else onIdentityPassword(proof);
+      return;
+    }
+    if (step === "address") onSend(address.trim());
+    else onConfirm(code.trim());
+  }
+
+  /** Swap the proof, clearing the field: a password is not a half-typed code. */
+  function swapProof() {
+    setByPassword((was) => !was);
+    setProof("");
+  }
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
@@ -125,10 +153,20 @@ export function ChangeEmailDialog({
           <DialogTitle>Change email</DialogTitle>
           <DialogDescription>
             {step === "identity" ? (
-              <>
-                Changing the address you sign in with is how an account is taken, so your password
-                is asked for first. It is not asked again for a few minutes.
-              </>
+              withCode ? (
+                <>
+                  Confirm it is you first. We sent a six-digit code to{" "}
+                  <span className="text-foreground">
+                    {challenge?.emailCode?.address || current}
+                  </span>
+                  , the address you sign in with now.
+                </>
+              ) : (
+                <>
+                  Confirm it is you first. Changing the address you sign in with is how an account
+                  is taken, so it is asked for before anything moves.
+                </>
+              )
             ) : step === "address" ? (
               <>
                 You sign in with <span className="text-foreground">{current}</span>. The new address
@@ -143,26 +181,52 @@ export function ChangeEmailDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form
-          className="space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (step === "identity") onConfirmIdentity(password);
-            else if (step === "address") onSend(address.trim());
-            else onConfirm(code.trim());
-          }}
-        >
+        <form className="space-y-4" onSubmit={submit}>
           {step === "identity" ? (
             <div className="space-y-1.5">
-              <Label htmlFor="reverify-password">Current password</Label>
+              <Label htmlFor="reverify">{withCode ? "Code" : "Current password"}</Label>
               <Input
-                id="reverify-password"
-                type="password"
-                autoComplete="current-password"
+                id="reverify"
+                // Remounted on the swap, so a password manager is not offered a
+                // field that was a code a moment ago.
+                key={withCode ? "code" : "password"}
+                type={withCode ? "text" : "password"}
+                inputMode={withCode ? "numeric" : undefined}
+                autoComplete={withCode ? "one-time-code" : "current-password"}
+                placeholder={withCode ? "123456" : undefined}
                 required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                value={proof}
+                onChange={(e) => setProof(e.target.value)}
               />
+              <div className="flex items-center justify-between pt-1 text-sm text-muted-foreground">
+                {withCode ? (
+                  <button
+                    type="button"
+                    onClick={onResendIdentityCode}
+                    disabled={busy}
+                    className="underline-offset-4 hover:text-foreground hover:underline disabled:opacity-60"
+                  >
+                    Send another code
+                  </button>
+                ) : (
+                  <span />
+                )}
+                {challenge?.password && challenge?.emailCode ? (
+                  <button
+                    type="button"
+                    onClick={swapProof}
+                    disabled={busy}
+                    className="underline-offset-4 hover:text-foreground hover:underline disabled:opacity-60"
+                  >
+                    {withCode ? "Use your password instead" : "Email me a code instead"}
+                  </button>
+                ) : null}
+              </div>
+              {resent ? (
+                <p role="status" className="text-sm text-muted-foreground">
+                  A new code is on its way. Check your spam folder too.
+                </p>
+              ) : null}
             </div>
           ) : step === "address" ? (
             <div className="space-y-1.5">
@@ -242,7 +306,7 @@ export function ChangeEmailDialog({
               {busy ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : step === "identity" ? (
-                <Lock className="h-4 w-4" />
+                <ShieldCheck className="h-4 w-4" />
               ) : (
                 <Mail className="h-4 w-4" />
               )}

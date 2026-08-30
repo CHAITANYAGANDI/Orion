@@ -40,8 +40,12 @@ import {
   confirmEmailChange,
   resendEmailCode,
   ReverificationRequiredError,
+  reverifyWithCode,
   reverifyWithPassword,
+  sendReverificationCode,
   startEmailChange,
+  startReverification,
+  type ReverificationChallenge,
   type PendingEmail,
 } from "@/lib/account-actions";
 import type { IdentityPermissions } from "@/lib/identity-owner";
@@ -116,7 +120,7 @@ export function ProfileDialog({
    * factor lately. Held here rather than asked for up front: most people are
    * inside the window and would be typing a password for nothing.
    */
-  const [emailNeedsPassword, setEmailNeedsPassword] = React.useState(false);
+  const [challenge, setChallenge] = React.useState<ReverificationChallenge | null>(null);
   const [emailWanted, setEmailWanted] = React.useState("");
   const fileRef = React.useRef<HTMLInputElement | null>(null);
 
@@ -177,13 +181,13 @@ export function ProfileDialog({
     setEmailResent(false);
     try {
       setEmailPending(await startEmailChange(address));
-      setEmailNeedsPassword(false);
+      setChallenge(null);
     } catch (err) {
       if (err instanceof ReverificationRequiredError) {
         // Not a failure to report -- it is the next step. Remember what was
         // being attempted so it can carry on by itself afterwards.
         setEmailWanted(address);
-        setEmailNeedsPassword(true);
+        await askWhoYouAre();
         return;
       }
       setEmailError(err instanceof AccountActionError ? err.message : "That address could not be added.");
@@ -192,19 +196,56 @@ export function ProfileDialog({
     }
   }
 
-  /** Prove it is you, then pick the change back up where it was refused. */
-  async function confirmIdentity(password: string) {
+  /**
+   * Ask Clerk what proof it wants, and send the code if it will take one.
+   *
+   * <p>A null answer means the session was already inside the window by the
+   * time it was asked, so there is nothing to put in front of anybody.
+   */
+  async function askWhoYouAre() {
+    try {
+      const wants = await startReverification();
+      if (!wants) {
+        await sendEmailCode(emailWanted);
+        return;
+      }
+      setChallenge(wants);
+    } catch (err) {
+      setEmailError(err instanceof AccountActionError ? err.message : "That could not be confirmed.");
+    }
+  }
+
+  /** Another proof code, to the address that signs this person in now. */
+  async function resendIdentityCode() {
+    const factor = challenge?.emailCode;
+    if (!factor) return;
     setEmailBusy(true);
     setEmailError(null);
+    setEmailResent(false);
     try {
-      await reverifyWithPassword(password);
+      await sendReverificationCode(factor.emailAddressId);
+      setEmailResent(true);
     } catch (err) {
-      setEmailError(err instanceof AccountActionError ? err.message : "That password is not right.");
+      setEmailError(err instanceof AccountActionError ? err.message : "That code could not be sent.");
+    } finally {
+      setEmailBusy(false);
+    }
+  }
+
+  /** Prove it is you, then pick the change back up where it was refused. */
+  async function confirmIdentity(prove: () => Promise<void>, wrong: string) {
+    setEmailBusy(true);
+    setEmailError(null);
+    setEmailResent(false);
+    try {
+      await prove();
+    } catch (err) {
+      setEmailError(err instanceof AccountActionError ? err.message : wrong);
       return;
     } finally {
       setEmailBusy(false);
     }
-    setEmailNeedsPassword(false);
+    setChallenge(null);
     await sendEmailCode(emailWanted);
   }
 
@@ -236,7 +277,7 @@ export function ProfileDialog({
     setEmailPending(null);
     setEmailError(null);
     setEmailResent(false);
-    setEmailNeedsPassword(false);
+    setChallenge(null);
   }
 
   async function confirmEmailCode(code: string) {
@@ -272,7 +313,7 @@ export function ProfileDialog({
     setEmailPending(null);
     setEmailError(null);
     setEmailResent(false);
-    setEmailNeedsPassword(false);
+    setChallenge(null);
     setEmailOpen(false);
   }
 
@@ -480,13 +521,19 @@ export function ProfileDialog({
         error={emailError}
         sentTo={emailPending?.address ?? null}
         resent={emailResent}
-        needsPassword={emailNeedsPassword}
+        challenge={challenge}
         onClose={abandonEmailChange}
         onSend={(address) => void sendEmailCode(address)}
         onResend={() => void resendCode()}
         onRetype={retypeEmail}
         onConfirm={(code) => void confirmEmailCode(code)}
-        onConfirmIdentity={(password) => void confirmIdentity(password)}
+        onIdentityCode={(code) =>
+          void confirmIdentity(() => reverifyWithCode(code), "That code is not right.")
+        }
+        onIdentityPassword={(password) =>
+          void confirmIdentity(() => reverifyWithPassword(password), "That password is not right.")
+        }
+        onResendIdentityCode={() => void resendIdentityCode()}
       />
 
       <ChangePasswordDialog
