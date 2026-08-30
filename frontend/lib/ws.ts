@@ -31,8 +31,26 @@ async function authenticated(client: Client): Promise<void> {
   try {
     client.connectHeaders = await buildAuthHeaders();
   } catch {
-    // Connect without it and be refused, rather than not connecting at all:
-    // the refusal is visible in the logs and every caller polls anyway.
+    /*
+     * `buildAuthHeaders` throws `AuthUnavailableError` rather than returning
+     * `{}` now, and everywhere else in the app that means "send nothing". This
+     * is the one deliberate exception, and the reason is what the two failures
+     * actually do:
+     *
+     *  - Connect anyway: `StompAuthInterceptor` refuses the CONNECT frame, the
+     *    caller hears `onStompError`, falls back to polling, and stompjs
+     *    reconnects on its own a few seconds later -- by which time a token
+     *    that was momentarily unavailable usually is not.
+     *  - Refuse to connect: the only supported abort is `client.deactivate()`,
+     *    which also ends the reconnect loop for the life of the page. A blip
+     *    would cost the socket permanently.
+     *
+     * The thing the rule exists to prevent is an uncredentialed request coming
+     * back with *data* -- an empty view of the world that reads as an empty
+     * account. This socket carries status pings and no data at all, and an
+     * unauthenticated one carries nothing whatsoever, so there is nothing here
+     * to be misled by.
+     */
     client.connectHeaders = {};
   }
 }

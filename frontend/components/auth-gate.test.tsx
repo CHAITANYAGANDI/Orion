@@ -3,38 +3,45 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 /**
  * Nothing authenticated renders before there is a token to authenticate with.
  *
- * <h2>The bug</h2>
+ * <h2>The first bug</h2>
  *
  * <p>A hard refresh brought the app up with empty panels and errors behind
  * them; refreshing again usually fixed it. Every request in that first pass had
- * gone out with no `Authorization` header and come back 401.
+ * gone out with no `Authorization` header and come back 401. The cause was
+ * ordering: `ClerkBridge` registers the token getter in an effect, effects run
+ * after the subtree below has mounted, and RTK Query hooks fire on mount.
  *
- * <p>The cause is ordering. `ClerkBridge` registers `authStore.tokenGetter` in
- * an effect, and React runs effects *after* the subtree below has mounted. RTK
- * Query hooks fire on mount. So the first request of every hook in the app was
- * built during the render pass before the getter existed, and
- * `buildAuthHeaders` found `null` and sent nothing.
+ * <h2>The second bug, which these tests are now about</h2>
  *
- * <p>It looked intermittent because it is a race — a warm session sometimes let
- * the effect win — and it reproduced every time on a hard refresh, which is
- * exactly when Clerk has the most to do before it can produce a token.
+ * <p>Holding the subtree back until the getter existed left a narrower version
+ * of the same race. `tokenGetter !== null && isLoaded` says nothing about
+ * anybody being signed in — this component's provider wraps `/` and `/sign-in`
+ * too, so both halves were already true while the visitor was signed out. The
+ * gate therefore opened in the same commit that a completed sign-in redirected
+ * into `/home`, ahead of Clerk adopting the session, and roughly a dozen hooks
+ * sent uncredentialed requests.
  *
- * <p>These tests run in clerk mode, which is the default when
- * `NEXT_PUBLIC_AUTH_MODE` is unset (it fails closed — see auth-store). Nothing
- * here is mocked except Clerk's own `isLoaded`, which is supplied through the
- * real `AuthContext` rather than by mocking the module.
+ * <p>So the gate now reads one thing: has a token for the session the browser
+ * is in <em>right now</em> actually been obtained. The machine behind that
+ * answer is asserted in lib/auth-store.test; this file asserts that the gate
+ * obeys it, and that nothing renders in the four states that are not ready.
+ *
+ * <p>These run in clerk mode, which is the default when `NEXT_PUBLIC_AUTH_MODE`
+ * is unset (it fails closed — see auth-store).
  */
 
 import * as React from "react";
 import { render, screen, act } from "@testing-library/react";
 import { AuthGate } from "@/components/auth-gate";
-import { AuthContext, type AuthContextValue } from "@/lib/auth";
 import {
   authStore,
   setTokenGetter,
+  publishAuthState,
+  resolveTokenProbe,
+  resetAuthReadiness,
   isAuthReady,
   buildAuthHeaders,
-  subscribeAuthReady as subscribeReady,
+  type AuthPhase,
 } from "@/lib/auth-store";
 
 /** Counts renders, standing in for any component that queries on mount. */
@@ -45,112 +52,203 @@ function QueryingChild() {
   return <div>workspace</div>;
 }
 
-function ctx(isLoaded: boolean): AuthContextValue {
-  return {
-    mode: "clerk",
-    userId: isLoaded ? "user_1" : "",
-    setDevUserId: () => {},
-    sessionKey: isLoaded ? "sess_1" : "",
-    isSignedIn: isLoaded,
-    isLoaded,
-    signOut: () => {},
-  };
+function renderGate() {
+  return render(
+    <AuthGate>
+      <QueryingChild />
+    </AuthGate>,
+  );
 }
 
-function renderGate(isLoaded: boolean) {
-  return render(
-    <AuthContext.Provider value={ctx(isLoaded)}>
-      <AuthGate>
-        <QueryingChild />
-      </AuthGate>
-    </AuthContext.Provider>,
-  );
+/** Clerk has produced a credential for this session. */
+function signedInWithToken(sessionId = "sess_1") {
+  act(() => {
+    setTokenGetter(async () => "tok_123");
+    publishAuthState({ sessionId, phase: "acquiring" });
+    resolveTokenProbe(sessionId, true);
+  });
 }
 
 describe("AuthGate", () => {
   beforeEach(() => {
     childRendered.mockClear();
+    authStore.mode = "clerk";
     setTokenGetter(null);
+    resetAuthReadiness();
   });
 
   it("is in clerk mode, so the race is real", () => {
-    // Guards the rest of the file. In dev mode there is no getter to wait for
-    // and every assertion below would pass for the wrong reason.
     expect(authStore.mode).toBe("clerk");
   });
 
-  it("does not render children before the token getter is registered", () => {
-    // The regression. A child that never mounts cannot fire a query, which is
-    // the only version of this guarantee that also holds for pages nobody has
-    // written yet.
-    renderGate(true);
+  it("does not mount the authenticated subtree before Clerk has loaded", () => {
+    renderGate();
 
+    expect(screen.queryByText("workspace")).toBeNull();
     expect(childRendered).not.toHaveBeenCalled();
+  });
+
+  it("does not mount the authenticated subtree while nobody is signed in", () => {
+    // The state the old gate could not see. `ClerkBridge` is mounted on
+    // `/sign-in` as well, so this is where a visitor sits while typing a
+    // password — and the old condition was fully satisfied here.
+    act(() => {
+      setTokenGetter(async () => "tok_123");
+      publishAuthState({ sessionId: null, phase: "signed-out" });
+    });
+
+    renderGate();
+
     expect(screen.queryByText("workspace")).toBeNull();
   });
 
-  it("does not render children while Clerk is still loading", () => {
-    // Both conditions are required. The getter can be registered while Clerk is
-    // still resolving the session, and calling it then returns null -- a
-    // request with no token, which is the failure being prevented.
+  it("does not mount while the token for this session is still being fetched", () => {
+    // Signed in, getter registered, request in flight. This is the exact
+    // instant the first authenticated navigation after a sign-in used to open
+    // the whole application in.
     act(() => {
       setTokenGetter(async () => "tok_123");
+      publishAuthState({ sessionId: "sess_1", phase: "acquiring" });
     });
 
-    renderGate(false);
+    renderGate();
 
-    expect(childRendered).not.toHaveBeenCalled();
+    expect(screen.queryByText("workspace")).toBeNull();
   });
 
-  it("renders children once Clerk is loaded and the getter exists", () => {
+  it("does not mount when the token came back empty", () => {
     act(() => {
-      setTokenGetter(async () => "tok_123");
+      setTokenGetter(async () => null);
+      publishAuthState({ sessionId: "sess_1", phase: "acquiring" });
+      resolveTokenProbe("sess_1", false);
     });
 
-    renderGate(true);
+    renderGate();
 
+    expect(screen.queryByText("workspace")).toBeNull();
+  });
+
+  it.each<AuthPhase>(["loading", "signed-out", "acquiring", "failed"])(
+    "refuses to mount in the %s phase",
+    (phase) => {
+      act(() => {
+        setTokenGetter(async () => "tok_123");
+        publishAuthState({ sessionId: "sess_1", phase });
+      });
+
+      renderGate();
+
+      expect(screen.queryByText("workspace")).toBeNull();
+    },
+  );
+
+  it("mounts once a usable token for this session has been obtained", () => {
+    signedInWithToken();
+
+    renderGate();
+
+    expect(screen.getByText("workspace")).toBeInTheDocument();
+    expect(childRendered).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets children in the moment readiness arrives, without a remount", () => {
+    // Not a remount: the subtree that appears is the same one that stays, so a
+    // hook does not fire, unmount and fire again.
+    renderGate();
+    expect(childRendered).not.toHaveBeenCalled();
+
+    signedInWithToken();
+
+    expect(screen.getByText("workspace")).toBeInTheDocument();
+    expect(childRendered).toHaveBeenCalledTimes(1);
+  });
+
+  it("follows the whole sign-in, and mounts only at the end of it", () => {
+    /*
+     * The production sequence, in order:
+     *   loaded + signed out  ->  signed in, session known  ->  token in hand.
+     * Nothing authenticated may exist for the first two.
+     */
+    renderGate();
+    const seenAt: Record<string, number> = {};
+
+    act(() => {
+      publishAuthState({ sessionId: null, phase: "signed-out" });
+    });
+    seenAt["signed-out"] = childRendered.mock.calls.length;
+
+    act(() => {
+      setTokenGetter(async () => "tok_123");
+      publishAuthState({ sessionId: "sess_1", phase: "acquiring" });
+    });
+    seenAt["acquiring"] = childRendered.mock.calls.length;
+
+    act(() => {
+      resolveTokenProbe("sess_1", true);
+    });
+    seenAt["ready"] = childRendered.mock.calls.length;
+
+    expect(seenAt).toEqual({ "signed-out": 0, acquiring: 0, ready: 1 });
+  });
+
+  it("closes again when the session ends under an open page", () => {
+    signedInWithToken();
+    renderGate();
+    expect(screen.getByText("workspace")).toBeInTheDocument();
+
+    act(() => {
+      publishAuthState({ sessionId: null, phase: "signed-out" });
+    });
+
+    expect(screen.queryByText("workspace")).toBeNull();
+  });
+
+  it("closes when the session changes, until the new one is proven", () => {
+    signedInWithToken("sess_A");
+    renderGate();
+
+    act(() => {
+      publishAuthState({ sessionId: "sess_B", phase: "acquiring" });
+    });
+    expect(screen.queryByText("workspace")).toBeNull();
+
+    act(() => {
+      resolveTokenProbe("sess_B", true);
+    });
     expect(screen.getByText("workspace")).toBeInTheDocument();
   });
 
-  it("lets children in as soon as the getter arrives, without a remount", async () => {
-    // The real sequence: the gate renders first, the provider's effect runs,
-    // and the subtree appears. Proves the store notification actually reaches
-    // React -- a `useSyncExternalStore` that never re-renders would leave the
-    // app stuck on the skeleton for ever, which is a worse bug than the one
-    // being fixed.
-    renderGate(true);
-    expect(childRendered).not.toHaveBeenCalled();
-
-    await act(async () => {
-      setTokenGetter(async () => "tok_123");
+  it("is not opened for one session by another session's late answer", () => {
+    // Session A's `getToken()` resolving after B is current says nothing about
+    // B. Opening the app here would put B in front of A's credential.
+    renderGate();
+    act(() => {
+      publishAuthState({ sessionId: "sess_A", phase: "acquiring" });
+      publishAuthState({ sessionId: "sess_B", phase: "acquiring" });
+      resolveTokenProbe("sess_A", true);
     });
 
-    expect(screen.getByText("workspace")).toBeInTheDocument();
-    expect(childRendered).toHaveBeenCalled();
+    expect(screen.queryByText("workspace")).toBeNull();
   });
 
   it("shows a busy state rather than an empty screen while it waits", () => {
-    renderGate(true);
+    renderGate();
 
     expect(screen.getByText(/loading your workspace/i)).toBeInTheDocument();
   });
 
   it("never falls back to dev auth when Clerk is slow", async () => {
-    // The dangerous shortcut: filling the gap with an `X-Dev-User` header would
-    // make the symptom disappear and turn a 401 into an authentication bypass
-    // reachable by anyone who can stall the network.
+    // A timer-based fallback to `X-Dev-User` would be an authentication bypass.
+    act(() => {
+      publishAuthState({ sessionId: null, phase: "loading" });
+    });
+
     expect(isAuthReady()).toBe(false);
-
-    const headers = await buildAuthHeaders();
-
-    expect(headers).not.toHaveProperty("X-Dev-User");
-    expect(headers).toEqual({});
+    await expect(buildAuthHeaders()).rejects.toThrow();
   });
 
-  it("sends the bearer token once the getter is registered", async () => {
-    act(() => {
-      setTokenGetter(async () => "tok_123");
-    });
+  it("sends the bearer token once a session is ready", async () => {
+    signedInWithToken();
 
     await expect(buildAuthHeaders()).resolves.toEqual({
       Authorization: "Bearer tok_123",
@@ -158,40 +256,22 @@ describe("AuthGate", () => {
   });
 });
 
-describe("auth readiness store", () => {
-  beforeEach(() => setTokenGetter(null));
-
-  it("reports not-ready until a getter arrives", () => {
-    expect(isAuthReady()).toBe(false);
-    setTokenGetter(async () => "t");
-    expect(isAuthReady()).toBe(true);
-    setTokenGetter(null);
-    expect(isAuthReady()).toBe(false);
+describe("AuthGate in dev mode", () => {
+  beforeEach(() => {
+    childRendered.mockClear();
+    authStore.mode = "dev";
+    resetAuthReadiness();
   });
 
-  it("notifies subscribers, and stops after unsubscribe", () => {
-    const listener = vi.fn();
-    const unsubscribe = subscribeReady(listener);
-
-    setTokenGetter(async () => "t");
-    expect(listener).toHaveBeenCalledTimes(1);
-
-    unsubscribe();
+  it("mounts immediately, with no getter and no session", () => {
+    // Dev mode has nothing to wait for: the `X-Dev-User` header comes from a
+    // value hydrated at module load. Gating it would make the "runs with no
+    // keys at all" story a lie.
     setTokenGetter(null);
-    expect(listener).toHaveBeenCalledTimes(1);
-  });
 
-  it("does not notify when the getter is unchanged", () => {
-    // Re-registering the same function on every render of the provider would
-    // otherwise wake every subscriber in the app for nothing.
-    const getter = async () => "t";
-    setTokenGetter(getter);
+    renderGate();
 
-    const listener = vi.fn();
-    const unsubscribe = subscribeReady(listener);
-    setTokenGetter(getter);
-
-    expect(listener).not.toHaveBeenCalled();
-    unsubscribe();
+    expect(screen.getByText("workspace")).toBeInTheDocument();
+    expect(childRendered).toHaveBeenCalledTimes(1);
   });
 });

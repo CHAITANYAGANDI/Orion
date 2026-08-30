@@ -5,7 +5,11 @@
 
 import * as React from "react";
 import { ClerkProvider, useAuth as useClerkAuth } from "@clerk/nextjs";
-import { setTokenGetter } from "@/lib/auth-store";
+import {
+  setTokenGetter,
+  publishAuthState,
+  resolveTokenProbe,
+} from "@/lib/auth-store";
 import { clearPreferences } from "@/lib/preference-store";
 import type { AuthContextValue } from "@/lib/auth";
 
@@ -23,20 +27,85 @@ function ClerkBridge({
   /*
    * Hand the token getter to the non-React store.
    *
-   * This still runs in an effect, which means it still happens after the tree
-   * below has mounted -- that is React, and moving the assignment into render
-   * would be a side effect during render for no gain. What changed is that the
-   * assignment now *announces itself* (`setTokenGetter` rather than a bare
-   * write), and <AuthGate> holds the authenticated part of the app back until
-   * it has. So the ordering is unchanged and the race is gone: nothing that
-   * needs a token is mounted before the getter exists.
+   * Only while somebody is signed in. It used to be registered unconditionally,
+   * which meant a signed-out visitor sitting on `/sign-in` had already made
+   * `isAuthReady()` true -- this component wraps the root layout, public pages
+   * included -- and the gate opened the instant a sign-in redirected into the
+   * app, before Clerk had adopted the session. See `AuthPhase` in
+   * lib/auth-store for the full timeline.
+   *
+   * The getter is no longer proof of anything on its own; it is simply what
+   * `buildAuthHeaders` calls. The proof is the probe below.
    */
   React.useEffect(() => {
+    if (!isLoaded || !isSignedIn) {
+      setTokenGetter(null);
+      return;
+    }
     setTokenGetter(() => getToken());
     return () => {
       setTokenGetter(null);
     };
-  }, [getToken]);
+  }, [getToken, isLoaded, isSignedIn]);
+
+  /*
+   * The latest getter, without making it a dependency of the probe below.
+   *
+   * Clerk hands back a fresh `getToken` identity on renders that have nothing
+   * to do with the session changing. Keying the probe on it would re-run a
+   * network call on those renders; keying it on the session is what the probe
+   * is actually about.
+   */
+  const tokenRef = React.useRef(getToken);
+  tokenRef.current = getToken;
+
+  /*
+   * Prove a token can actually be had for THIS session, and say so.
+   *
+   * <p>This is the half that was missing. `isLoaded && isSignedIn` is Clerk
+   * saying it believes there is a session; it is not Clerk having produced a
+   * credential for it, and on the first navigation after a sign-in those two
+   * are seconds apart. So the app waits for the second one.
+   *
+   * <p>Nothing here is timed. There is no delay, no retry loop and no reload:
+   * the probe is the ordinary `getToken()` call every request makes, and its
+   * resolution is the event being awaited.
+   *
+   * <p><b>Two independent guards against a stale answer.</b> The `cancelled`
+   * flag stops a superseded effect from publishing at all, and
+   * `resolveTokenProbe` re-checks the session id on the way in -- because the
+   * consequence of getting this wrong is opening the app for session B on the
+   * strength of session A's credential, and one flag in a closure is a thin
+   * thing to hang tenant isolation on.
+   */
+  React.useEffect(() => {
+    if (!isLoaded) {
+      publishAuthState({ sessionId: null, phase: "loading" });
+      return;
+    }
+    if (!isSignedIn || !sessionId) {
+      publishAuthState({ sessionId: null, phase: "signed-out" });
+      return;
+    }
+
+    publishAuthState({ sessionId, phase: "acquiring" });
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const token = await tokenRef.current();
+        if (!cancelled) resolveTokenProbe(sessionId, Boolean(token));
+      } catch {
+        // Not rethrown and not logged: what Clerk throws names the instance and
+        // the token template. `failed` is the whole of what this needs to say.
+        if (!cancelled) resolveTokenProbe(sessionId, false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoaded, isSignedIn, sessionId]);
 
   const value: AuthContextValue = {
     mode: "clerk",

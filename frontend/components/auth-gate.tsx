@@ -2,14 +2,13 @@
 
 import * as React from "react";
 import { useSyncExternalStore } from "react";
-import { useAuth } from "@/lib/auth";
 import { isAuthReady, subscribeAuthReady } from "@/lib/auth-store";
 import { Skeleton } from "@/components/ui/skeleton";
 
 /**
  * Nothing that needs a token renders before there is one.
  *
- * <h2>The bug</h2>
+ * <h2>The first bug</h2>
  *
  * <p>On a hard refresh the app came up with empty panels and errors behind
  * them, and a second refresh usually fixed it. Every authenticated request in
@@ -22,9 +21,32 @@ import { Skeleton } from "@/components/ui/skeleton";
  * request of every hook in the app was built during the render pass *before*
  * the getter existed, `buildAuthHeaders` found `null`, and it sent nothing.
  *
- * <p>It presented as flaky because it is a race — a warm session sometimes let
- * the effect win — and it reproduced every time on a hard refresh, which is
- * precisely when Clerk has the most to do before it can produce a token.
+ * <h2>The second bug, which this file is now about</h2>
+ *
+ * <p>Holding the subtree back until the getter existed fixed the refresh and
+ * left a narrower version of the same race behind, on the first authenticated
+ * navigation <em>after signing in</em>:
+ *
+ * <pre>
+ *   tokenReady  = authStore.tokenGetter !== null
+ *   isLoaded    = Clerk has booted
+ *   gate opens  = tokenReady && isLoaded
+ * </pre>
+ *
+ * <p>Neither half says anybody is signed in. `ClerkBridge` wraps the root
+ * layout, so it is mounted on `/` and `/sign-in` too and had already registered
+ * the getter while the visitor was signed out; Clerk had booted long before.
+ * Both halves were therefore true *before the sign-in happened*, and the gate
+ * opened in the same commit that Clerk redirected into `/home` — ahead of Clerk
+ * adopting the new session. `getToken()` answered null, and roughly a dozen
+ * hooks sent uncredentialed requests. Refreshing fixed it because by then the
+ * session was long since adopted.
+ *
+ * <p>The distinction that was missing: <b>having a function that can ask for a
+ * token is not having a token.</b> Readiness now means a token for the session
+ * the browser is in right now has actually been obtained — see `AuthPhase` in
+ * lib/auth-store, where the five states are spelled out and the session-change
+ * rules live.
  *
  * <h2>Why here and not in the query layer</h2>
  *
@@ -48,7 +70,7 @@ import { Skeleton } from "@/components/ui/skeleton";
  *
  * <h2>Dev mode is not gated</h2>
  *
- * <p>`isAuthReady()` is true immediately in dev mode: the `X-Dev-User` header
+ * <p>The store's phase starts at `ready` in dev mode: the `X-Dev-User` header
  * comes from `authStore.devUserId`, hydrated at module load, before any
  * component renders. There is no race to wait for, so dev behaviour is
  * unchanged — and this deliberately does not fall back to dev auth when Clerk
@@ -56,28 +78,26 @@ import { Skeleton } from "@/components/ui/skeleton";
  */
 export function AuthGate({ children }: { children: React.ReactNode }) {
   /*
-   * The store, not React state. The getter is registered from an effect in a
-   * different provider; `useSyncExternalStore` is how a component outside that
-   * tree learns about it without either of them knowing about the other.
+   * The store, and nothing else.
    *
-   * `getServerSnapshot` (the third argument) reports not-ready during SSR and
-   * the hydration pass. That is honest — there is no Clerk on the server — and
-   * it keeps the first client render identical to the server's, which is what
-   * stops a hydration mismatch.
+   * <p>It used to read Clerk's `isLoaded` from `useAuth()` as well, and that
+   * second source is exactly what made the condition look sufficient while
+   * proving nothing. Every fact this needs — has Clerk booted, is anybody
+   * signed in, has a token for *this* session been obtained — is now published
+   * to one place by `ClerkBridge`, so there is one thing to be wrong rather
+   * than two things to disagree.
+   *
+   * <p>`getServerSnapshot` (the third argument) reports not-ready during SSR
+   * and the hydration pass. That is honest — there is no Clerk on the server —
+   * and it keeps the first client render identical to the server's, which is
+   * what stops a hydration mismatch.
+   *
+   * <p>It also fails closed: if the bridge never mounts, the phase never leaves
+   * `loading` and the authenticated app never renders.
    */
-  const tokenReady = useSyncExternalStore(
-    subscribeAuthReady,
-    isAuthReady,
-    () => false,
-  );
+  const ready = useSyncExternalStore(subscribeAuthReady, isAuthReady, () => false);
 
-  // `isLoaded` is Clerk's own signal that it has finished booting. Both are
-  // required: the getter can be registered while Clerk is still resolving the
-  // session, and calling it then yields null -- a request with no token, which
-  // is the failure this exists to prevent.
-  const { isLoaded } = useAuth();
-
-  if (!tokenReady || !isLoaded) {
+  if (!ready) {
     return <AuthGateFallback />;
   }
   return <>{children}</>;
@@ -90,6 +110,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
  * flash of the full application with empty panels, so the honest thing to show
  * is the shape of what is coming — and on a fast connection it is gone before
  * it is read.
+ *
+ * <p>The same fallback for all four of the states that are not ready. A
+ * signed-out visitor does not linger here: the middleware answers `/home` with
+ * a redirect to `/sign-in` before any of this is sent, so the only way to be
+ * here signed out is a session ending under a page already open — and a
+ * skeleton for the moment before the next navigation is better than an
+ * explanation nobody will finish reading.
  */
 function AuthGateFallback() {
   return (

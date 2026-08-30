@@ -1,6 +1,10 @@
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
-import type { FetchBaseQueryError } from "@reduxjs/toolkit/query";
-import { buildAuthHeaders } from "@/lib/auth-store";
+import type {
+  BaseQueryFn,
+  FetchArgs,
+  FetchBaseQueryError,
+} from "@reduxjs/toolkit/query";
+import { buildAuthHeaders, AuthUnavailableError } from "@/lib/auth-store";
 import type {
   ActionItemComment,
   ActionItemCreateRequest,
@@ -57,14 +61,70 @@ import type {
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
-const baseQuery = fetchBaseQuery({
+const authenticatedFetch = fetchBaseQuery({
   baseUrl: `${API_BASE}/api/v1`,
   prepareHeaders: async (headers) => {
+    // Throws when there is no usable token. `fetchBaseQuery` awaits this before
+    // it touches the network, so the throw is what stops the request rather
+    // than merely marking it -- see the wrapper below for what becomes of it.
     const authHeaders = await buildAuthHeaders();
     Object.entries(authHeaders).forEach(([k, v]) => headers.set(k, v));
     return headers;
   },
 });
+
+/**
+ * A request with no credential is a failure, not a request.
+ *
+ * <h2>What this replaces</h2>
+ *
+ * <p>`buildAuthHeaders` used to answer "I could not get a token" with `{}` and
+ * let the call go out anonymously. Three things are wrong with that, in
+ * increasing order of seriousness: the API answers 401 and the UI has to guess
+ * what that meant; a retry sends a second uncredentialed request; and an
+ * endpoint that tolerated anonymity would answer with an empty view of the
+ * world, which is indistinguishable from an account that has nothing in it.
+ * The last one is how a signed-out moment becomes "No conversations".
+ *
+ * <p>So the token is obtained first and the request is only made if it exists.
+ * Nothing is sent otherwise, and what the caller gets is an ordinary
+ * `FetchBaseQueryError` — which every screen in the app already knows how to
+ * render, as an error with a retry rather than as an emptiness (see
+ * lib/resource-state).
+ *
+ * <p><b>Not a wait and not a retry.</b> It resolves immediately with a
+ * failure. Waiting for a token here would hang every hook on a page behind a
+ * session that may never arrive, and retrying would be the loop this codebase
+ * refuses elsewhere. Whether the app should be mounted at all is
+ * `<AuthGate>`'s question, and it is answered from the same store.
+ *
+ * <p>`status` is `CUSTOM_ERROR` rather than 401: no server said 401, and
+ * dressing a client-side condition up as a response the API never sent is how
+ * error handling comes to be written against fiction. `isNotFoundError` is
+ * false for it, so nothing reads it as a missing resource.
+ */
+const baseQuery: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQueryError> = async (
+  args,
+  api,
+  extraOptions,
+) => {
+  try {
+    return await authenticatedFetch(args, api, extraOptions);
+  } catch (error) {
+    if (error instanceof AuthUnavailableError) {
+      return {
+        error: {
+          status: "CUSTOM_ERROR",
+          error: "auth-unavailable",
+          // The one sentence a person can act on. No status, no token detail,
+          // no mention of the provider.
+          data: { message: "You are signed out. Sign in again to continue." },
+        },
+      };
+    }
+    throw error;
+  }
+};
 
 /**
  * Serialises a search, omitting anything unset.

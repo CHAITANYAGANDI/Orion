@@ -4,6 +4,7 @@ import * as React from "react";
 import { Provider as ReduxProvider } from "react-redux";
 import { makeStore, type AppStore } from "@/lib/store";
 import { AuthProvider } from "@/lib/auth";
+import { SessionCacheGuard } from "@/components/session-cache-guard";
 import { Toaster } from "@/components/ui/sonner";
 
 /**
@@ -22,6 +23,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <ReduxProvider store={storeRef.current}>
       <AuthProvider>
+        {/* Inside both providers because it needs the store and the session,
+            and above `children` so a change of sign-in empties the API cache
+            before anything below can read from it. The store outlives a
+            sign-out -- it belongs to the React root, and neither half of a
+            session change reloads the document. See the component. */}
+        <SessionCacheGuard />
         {children}
         {/* Position and styling live in the component, so there is one place
             a toast is described rather than a prop here and classes there. */}
