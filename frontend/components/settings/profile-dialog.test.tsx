@@ -15,7 +15,14 @@ import userEvent from "@testing-library/user-event";
  */
 const { avatarFromFile } = vi.hoisted(() => ({ avatarFromFile: vi.fn() }));
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
-const { changePassword } = vi.hoisted(() => ({ changePassword: vi.fn() }));
+const { changePassword, startEmailChange, resendEmailCode, cancelEmailChange } = vi.hoisted(
+  () => ({
+    changePassword: vi.fn(),
+    startEmailChange: vi.fn(),
+    resendEmailCode: vi.fn(),
+    cancelEmailChange: vi.fn(),
+  }),
+);
 
 vi.mock("@/lib/avatar", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/avatar")>();
@@ -24,7 +31,7 @@ vi.mock("@/lib/avatar", async (importOriginal) => {
 
 vi.mock("@/lib/account-actions", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/account-actions")>();
-  return { ...real, changePassword };
+  return { ...real, changePassword, startEmailChange, resendEmailCode, cancelEmailChange };
 });
 
 vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
@@ -78,6 +85,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   avatarFromFile.mockResolvedValue(PNG);
   changePassword.mockResolvedValue(undefined);
+  startEmailChange.mockResolvedValue({ id: "eml_1", address: "new@example.com" });
+  resendEmailCode.mockResolvedValue(undefined);
+  cancelEmailChange.mockResolvedValue(undefined);
 });
 
 describe("what it asks for", () => {
@@ -218,6 +228,63 @@ describe("the email", () => {
 
     expect(screen.getByRole("heading", { name: "Change email" })).toBeInTheDocument();
     expect(screen.getByLabelText("New email")).toBeInTheDocument();
+  });
+
+  /**
+   * The code that never comes.
+   *
+   * <p>The send succeeds and nothing arrives — the address was a letter out, or
+   * the mail is slow, or it is in spam. This step used to have one exit, Cancel,
+   * which threw the change away and explained nothing.
+   */
+  async function reachTheCode() {
+    show(EMPTY, ORION);
+    await userEvent.click(screen.getByRole("button", { name: "Change email" }));
+    await userEvent.type(screen.getByLabelText("New email"), "new@example.com");
+    await userEvent.click(screen.getByRole("button", { name: /Send code/ }));
+    await screen.findByLabelText("Code");
+  }
+
+  it("can send the code again", async () => {
+    await reachTheCode();
+
+    await userEvent.click(screen.getByRole("button", { name: "Send another code" }));
+
+    await waitFor(() =>
+      expect(resendEmailCode).toHaveBeenCalledWith({ id: "eml_1", address: "new@example.com" }),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent(/A new code is on its way/);
+  });
+
+  it("says so when a second code cannot be sent either", async () => {
+    const { AccountActionError } = await import("@/lib/account-actions");
+    resendEmailCode.mockRejectedValue(new AccountActionError("Too many attempts."));
+    await reachTheCode();
+
+    await userEvent.click(screen.getByRole("button", { name: "Send another code" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Too many attempts.");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("goes back to the address without abandoning the change", async () => {
+    await reachTheCode();
+
+    await userEvent.click(screen.getByRole("button", { name: "Use a different address" }));
+
+    expect(await screen.findByLabelText("New email")).toBeInTheDocument();
+    // Still inside the dialog: this is a correction, not a cancellation.
+    expect(screen.getByRole("heading", { name: "Change email" })).toBeInTheDocument();
+  });
+
+  it("takes the unverified address off the account on the way back", async () => {
+    // Leaving it there makes a second go at the corrected address fail as one
+    // that is already taken, which is the least helpful true sentence available.
+    await reachTheCode();
+
+    await userEvent.click(screen.getByRole("button", { name: "Use a different address" }));
+
+    expect(cancelEmailChange).toHaveBeenCalledWith({ id: "eml_1", address: "new@example.com" });
   });
 
   it("omits the address entirely rather than sending it back unchanged", async () => {

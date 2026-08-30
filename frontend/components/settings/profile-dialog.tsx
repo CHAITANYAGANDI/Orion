@@ -38,6 +38,7 @@ import {
   cancelEmailChange,
   changePassword,
   confirmEmailChange,
+  resendEmailCode,
   startEmailChange,
   type PendingEmail,
 } from "@/lib/account-actions";
@@ -107,6 +108,7 @@ export function ProfileDialog({
   const [emailBusy, setEmailBusy] = React.useState(false);
   const [emailError, setEmailError] = React.useState<string | null>(null);
   const [emailPending, setEmailPending] = React.useState<PendingEmail | null>(null);
+  const [emailResent, setEmailResent] = React.useState(false);
   const fileRef = React.useRef<HTMLInputElement | null>(null);
 
   // Reset from props each time it opens, so cancelling really discards. Keyed
@@ -163,6 +165,7 @@ export function ProfileDialog({
   async function sendEmailCode(address: string) {
     setEmailBusy(true);
     setEmailError(null);
+    setEmailResent(false);
     try {
       setEmailPending(await startEmailChange(address));
     } catch (err) {
@@ -170,6 +173,36 @@ export function ProfileDialog({
     } finally {
       setEmailBusy(false);
     }
+  }
+
+  /** Another code to the same address, for mail that is slow or filed as spam. */
+  async function resendCode() {
+    if (!emailPending) return;
+    setEmailBusy(true);
+    setEmailError(null);
+    setEmailResent(false);
+    try {
+      await resendEmailCode(emailPending);
+      setEmailResent(true);
+    } catch (err) {
+      setEmailError(err instanceof AccountActionError ? err.message : "That code could not be sent again.");
+    } finally {
+      setEmailBusy(false);
+    }
+  }
+
+  /**
+   * Back to the address step, with what was typed still in the field.
+   *
+   * <p>The unverified address comes off the account on the way — leaving it
+   * there would make a second go at the corrected address fail as one that is
+   * already taken, which is the least helpful true sentence available.
+   */
+  function retypeEmail() {
+    if (emailPending) void cancelEmailChange(emailPending);
+    setEmailPending(null);
+    setEmailError(null);
+    setEmailResent(false);
   }
 
   async function confirmEmailCode(code: string) {
@@ -204,6 +237,7 @@ export function ProfileDialog({
     if (emailPending) void cancelEmailChange(emailPending);
     setEmailPending(null);
     setEmailError(null);
+    setEmailResent(false);
     setEmailOpen(false);
   }
 
@@ -410,8 +444,11 @@ export function ProfileDialog({
         busy={emailBusy}
         error={emailError}
         sentTo={emailPending?.address ?? null}
+        resent={emailResent}
         onClose={abandonEmailChange}
         onSend={(address) => void sendEmailCode(address)}
+        onResend={() => void resendCode()}
+        onRetype={retypeEmail}
         onConfirm={(code) => void confirmEmailCode(code)}
       />
 

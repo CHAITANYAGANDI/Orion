@@ -14,6 +14,22 @@
  * <p>Which is also why Cancel is not merely a close: an unverified address left
  * on the account is a loose end, so backing out takes it off again.
  *
+ * <h2>The code that never arrives</h2>
+ *
+ * <p>A code step with no way back is the same dead end as the sign-up screen
+ * had, and it fails at the exact thing this dialog exists to protect against.
+ * Mistype the domain and the send succeeds — `gmaill.com` is a real place as
+ * far as the mail system is concerned — the screen says a code is on its way,
+ * and nothing arrives. There is then nothing to do but Cancel and start over,
+ * with no clue as to what went wrong, because the address that was typed is no
+ * longer on screen to be read back.
+ *
+ * <p>So the second step keeps both exits: another code, for mail that is slow
+ * or filed as spam, and a way back to the address with what was typed still in
+ * it. And the first step says "did you mean gmail.com?" before any of that is
+ * needed — a hint beside the field, never a refusal, because plenty of real
+ * domains are one letter from a famous one.
+ *
  * <p>Offered only for accounts Orion's own sign-up made. Under Google the
  * address belongs to Google — see lib/identity-owner.
  */
@@ -30,6 +46,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { suggestAddress } from "@/lib/email-domain";
 
 export function ChangeEmailDialog({
   open,
@@ -38,8 +55,12 @@ export function ChangeEmailDialog({
   error,
   /** Set once the code has been sent, so this component knows which step it is on. */
   sentTo,
+  /** Set when a second code has just gone out, so the button is not silent. */
+  resent,
   onClose,
   onSend,
+  onResend,
+  onRetype,
   onConfirm,
 }: {
   open: boolean;
@@ -48,8 +69,12 @@ export function ChangeEmailDialog({
   busy?: boolean;
   error?: string | null;
   sentTo: string | null;
+  resent?: boolean;
   onClose: () => void;
   onSend: (address: string) => void;
+  onResend: () => void;
+  /** Back to the first step, taking the unverified address off the account. */
+  onRetype: () => void;
   onConfirm: (code: string) => void;
 }) {
   const [address, setAddress] = React.useState("");
@@ -65,6 +90,12 @@ export function ChangeEmailDialog({
   }, [open]);
 
   const step = sentTo ? "code" : "address";
+  /*
+   * Deliberately not cleared when the code step opens. Coming back to fix one
+   * character is the whole point of the way back, and an empty field would make
+   * somebody retype an address they cannot see to compare.
+   */
+  const meant = step === "address" ? suggestAddress(address.trim()) : null;
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
@@ -106,6 +137,19 @@ export function ChangeEmailDialog({
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
               />
+              {meant ? (
+                <p className="text-sm text-muted-foreground">
+                  Did you mean{" "}
+                  <button
+                    type="button"
+                    onClick={() => setAddress(meant)}
+                    className="font-medium text-foreground underline underline-offset-4"
+                  >
+                    {meant}
+                  </button>
+                  ?
+                </p>
+              ) : null}
             </div>
           ) : (
             <div className="space-y-1.5">
@@ -119,6 +163,29 @@ export function ChangeEmailDialog({
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
               />
+              <div className="flex items-center justify-between pt-1 text-sm text-muted-foreground">
+                <button
+                  type="button"
+                  onClick={onResend}
+                  disabled={busy}
+                  className="underline-offset-4 hover:text-foreground hover:underline disabled:opacity-60"
+                >
+                  Send another code
+                </button>
+                <button
+                  type="button"
+                  onClick={onRetype}
+                  disabled={busy}
+                  className="underline-offset-4 hover:text-foreground hover:underline disabled:opacity-60"
+                >
+                  Use a different address
+                </button>
+              </div>
+              {resent ? (
+                <p role="status" className="text-sm text-muted-foreground">
+                  A new code is on its way. Check your spam folder too.
+                </p>
+              ) : null}
             </div>
           )}
 

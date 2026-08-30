@@ -138,6 +138,26 @@ export async function confirmEmailChange(handle: PendingEmail, code: string): Pr
   }
 }
 
+/**
+ * Send the code again, to the address already added.
+ *
+ * <p>The one thing a screen that says "we sent you a code" has to be able to do
+ * when nothing arrives. Mail is delayed, mail lands in spam, and — the case
+ * this was written for — mail goes to a domain a letter away from the one that
+ * was meant, where it is delivered perfectly and read by nobody.
+ */
+export async function resendEmailCode(handle: PendingEmail): Promise<void> {
+  const created = pending.get(handle.id);
+  if (!created) {
+    throw new AccountActionError("That change has expired. Start again.");
+  }
+  try {
+    await created.prepareVerification({ strategy: "email_code" });
+  } catch (err) {
+    throw new AccountActionError(clerkMessage(err, "That code could not be sent again."));
+  }
+}
+
 /** Abandon a change: take the unverified address back off the account. */
 export async function cancelEmailChange(handle: PendingEmail): Promise<void> {
   const created = pending.get(handle.id);
