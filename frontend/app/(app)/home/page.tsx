@@ -31,7 +31,7 @@ import {
   CalendarDays,
   RotateCw,
 } from "lucide-react";
-import { useGetMeetingsQuery } from "@/lib/api";
+import { useGetMeetingsQuery, useGetProjectsQuery } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -312,6 +312,7 @@ export default function HomePage() {
               when={when}
               onClearDate={() => setWhen(ANY_TIME)}
               onShowAll={() => setScope("all")}
+              onRetry={() => void meetings.refetch()}
             />
           ) : (
             groups.map((group) => (
@@ -595,11 +596,14 @@ function EmptyState({
   when,
   onClearDate,
   onShowAll,
+  onRetry,
 }: {
   scope: Scope;
   when: DateWindow;
   onClearDate: () => void;
   onShowAll: () => void;
+  /** Fetch the list again, for the one state below that cannot explain itself. */
+  onRetry: () => void;
 }) {
   const { userId } = useAuth();
   const filtered = when.from !== null || when.to !== null;
@@ -619,7 +623,43 @@ function EmptyState({
    * answered proves nothing, so `null` is kept distinct from `0` here too.
    */
   const total = workspace.isSuccess && workspace.data ? workspace.data.totalElements : null;
-  const filedElsewhere = total !== null && total > 0;
+
+  /*
+   * The folders, because "everything is in a folder" is a claim about them.
+   *
+   * <p>Already in the cache: the rail fetches this on every page, so reading it
+   * here costs nothing and adds no request. Three-state for the same reason
+   * everything else on this screen is -- a folder list that has not arrived is
+   * not a folder list with nothing in it.
+   */
+  const folders = useGetProjectsQuery();
+  const folderCount = folders.isSuccess && folders.data ? folders.data.length : null;
+
+  /*
+   * The message below says these meetings are in folders. It may only say so
+   * when there are folders for them to be in.
+   *
+   * <p>Production produced the screen this guards against: "Everything is in a
+   * folder" over a sidebar with no folders in it. Those two cannot both be
+   * true, and the app had every fact needed to know that and said it anyway --
+   * the same failure as an empty state over a failed request, one level up. An
+   * empty state explains itself, and an explanation that contradicts the rest
+   * of the screen is worse than no explanation at all.
+   */
+  const filedElsewhere = total !== null && total > 0 && folderCount !== null && folderCount > 0;
+
+  /**
+   * The workspace has meetings, this list has none, and there is no folder that
+   * could be holding them.
+   *
+   * <p>Nothing about that is a state the product has: with no folders, "outside
+   * your folders" and "everything" are the same list, so one of these two
+   * answers is wrong. Which one is not knowable from here, so this claims
+   * neither -- it says the list could not be shown and offers the two things
+   * that recover it.
+   */
+  const unexplained =
+    scope === "recent" && !filtered && total !== null && total > 0 && folderCount === 0;
   /**
    * The probe was asked and did not answer, so neither screen below is known.
    *
@@ -629,7 +669,8 @@ function EmptyState({
    * the drift would land on the screen that tells somebody their account is
    * empty.
    */
-  const probeUnresolved = scope === "recent" && !filtered && total === null;
+  const probeUnresolved =
+    scope === "recent" && !filtered && (total === null || folderCount === null);
 
   if (filtered) {
     return (
@@ -654,7 +695,12 @@ function EmptyState({
   // Nothing rather than a guess, for the moment between the two answers. It is
   // one row over a warm connection, and a sentence that turns out to be wrong
   // is worse than a blank half-second.
-  if (scope === "recent" && (workspace.isLoading || workspace.isFetching)) return null;
+  if (
+    scope === "recent" &&
+    (workspace.isLoading || workspace.isFetching || folders.isLoading || folders.isFetching)
+  ) {
+    return null;
+  }
 
   /*
    * The probe failed. Both screens below make a claim it was supposed to
@@ -687,6 +733,31 @@ function EmptyState({
    * it true by accident. Two lines apart, either could be relaxed without the
    * other being noticed.
    */
+  if (unexplained) {
+    return (
+      <div
+        role="alert"
+        className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center"
+      >
+        <RotateCw className="h-8 w-8 text-muted-foreground" />
+        <p className="mt-3 font-medium">Couldn&apos;t show your conversations</p>
+        <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+          This list is the conversations outside your folders, and there are no
+          folders — so it should be showing all of them. Your conversations are
+          still here.
+        </p>
+        <div className="mt-4 flex gap-2">
+          <Button variant="outline" onClick={onRetry}>
+            Try again
+          </Button>
+          <Button variant="outline" onClick={onShowAll}>
+            Show all conversations
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   if (scope === "recent" && filedElsewhere) {
     return (
       <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center">

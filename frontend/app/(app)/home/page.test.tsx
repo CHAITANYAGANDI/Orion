@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { MeetingResponse, MeetingListQuery, Page } from "@/lib/types";
+import type { MeetingResponse, MeetingListQuery, Page, Project } from "@/lib/types";
 
 /**
  * Home, and the picker above the list.
@@ -50,6 +50,17 @@ let noData: boolean;
 let probeErrored: boolean;
 /** The one-row probe has not answered yet. */
 let probeLoading: boolean;
+
+/*
+ * The folders, which the empty state reads as well.
+ *
+ * "Everything is in a folder" is a claim about these, and production showed it
+ * over a sidebar with none -- so the folder list is part of what decides that
+ * screen now, and part of what these tests can move.
+ */
+let folderRows: Project[];
+let foldersLoading: boolean;
+let foldersErrored: boolean;
 
 function aPage(content: MeetingResponse[], total = content.length): Page<MeetingResponse> {
   return { content, page: 0, size: 50, totalElements: total, totalPages: 1 };
@@ -112,6 +123,11 @@ vi.mock("@/lib/api", () => ({
     const data = noData ? undefined : aPage(rows);
     return result(data, { isFetching: fetching, isError: errored });
   },
+  useGetProjectsQuery: () => {
+    if (foldersLoading) return result<Project[]>(undefined, { isLoading: true });
+    if (foldersErrored) return result<Project[]>(undefined, { isError: true });
+    return result(folderRows);
+  },
 }));
 
 // `isLoaded` and `sessionKey` are not decoration: both filters are remembered
@@ -164,6 +180,11 @@ beforeEach(() => {
   noData = false;
   probeErrored = false;
   probeLoading = false;
+  // One folder by default, so "everything is filed" is an explanation the rest
+  // of the screen can support. The tests that remove it are the point.
+  folderRows = [{ id: "prj_1", name: "Client ABC" } as Project];
+  foldersLoading = false;
+  foldersErrored = false;
   rows = [aMeeting()];
   workspaceTotal = rows.length;
   // The filters outlive a page now, so without this they would outlive a test
@@ -563,6 +584,72 @@ describe("the scope Home opens on", () => {
 
     expect(screen.getByText("No conversations")).toBeInTheDocument();
     expect(screen.queryByText("Everything is in a folder")).not.toBeInTheDocument();
+  });
+
+  it("will not say the meetings are filed when there is no folder to file them in", () => {
+    /*
+     * THE production screen, as an assertion: "Everything is in a folder" over
+     * a sidebar with no folders in it.
+     *
+     * Those two cannot both be true -- with no folders, "outside your folders"
+     * and "everything" are the same list -- and Home had every fact needed to
+     * know that and said it anyway. Which one of the two answers is wrong is
+     * not knowable from here, so the screen claims neither.
+     */
+    rows = [];
+    workspaceTotal = 40;
+    folderRows = [];
+
+    render(<HomePage />);
+
+    expect(screen.queryByText("Everything is in a folder")).not.toBeInTheDocument();
+    expect(screen.getByText(/couldn't show your conversations/i)).toBeInTheDocument();
+  });
+
+  it("offers a retry and the whole list when it cannot explain itself", async () => {
+    rows = [];
+    workspaceTotal = 40;
+    folderRows = [];
+
+    render(<HomePage />);
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+
+    expect(refetch).toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Show all conversations" })).toBeInTheDocument();
+  });
+
+  it("says nothing at all while the folder list is still on its way", () => {
+    /*
+     * Every screen this component can draw for an empty Recent makes a claim
+     * about folders -- that the meetings are in one, that there is none to be
+     * in, or that some may be. All three need the folder list, so until it
+     * arrives the honest output is nothing: a sentence that turns out to be
+     * wrong is worse than a blank half-second.
+     */
+    rows = [];
+    workspaceTotal = 40;
+    foldersLoading = true;
+
+    render(<HomePage />);
+
+    expect(screen.queryByText("Everything is in a folder")).not.toBeInTheDocument();
+    expect(screen.queryByText(/couldn't show your conversations/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Nothing outside your folders")).not.toBeInTheDocument();
+    expect(screen.queryByText("No conversations")).not.toBeInTheDocument();
+  });
+
+  it("does not claim the meetings are filed when the folder list failed", () => {
+    // A failed folder request proves nothing about where the meetings are. The
+    // screen falls back to the one thing still certainly true: this list leaves
+    // filed conversations out, and the wider list is one click away.
+    rows = [];
+    workspaceTotal = 40;
+    foldersErrored = true;
+
+    render(<HomePage />);
+
+    expect(screen.queryByText("Everything is in a folder")).not.toBeInTheDocument();
+    expect(screen.getByText("Nothing outside your folders")).toBeInTheDocument();
   });
 
   it("says the meetings are filed rather than that there are none", () => {
