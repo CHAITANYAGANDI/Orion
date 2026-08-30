@@ -61,12 +61,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { settingsError } from "@/components/settings/shared";
-import { BUILD_LINE, LEGAL_LINKS } from "@/lib/build-info";
+import { LEGAL_LINKS } from "@/lib/build-info";
 import { cn } from "@/lib/utils";
 import {
   Avatar,
   ProfileDialog,
   type ProfileForm,
+  type ProfilePatch,
 } from "@/components/settings/profile-dialog";
 import {
   RETENTION_CHOICES,
@@ -131,9 +132,9 @@ function IdentityBlock() {
     avatarUrl: prefs.data?.avatarUrl ?? "",
   };
 
-  async function save(form: ProfileForm) {
+  async function save(patch: ProfilePatch) {
     try {
-      await update(form).unwrap();
+      await update(patch).unwrap();
       setEditing(false);
       toast.success("Saved.");
     } catch (err) {
@@ -184,7 +185,7 @@ function IdentityBlock() {
         permissions={permissions}
         saving={isLoading}
         onClose={() => setEditing(false)}
-        onSave={(form) => void save(form)}
+        onSave={(patch) => void save(patch)}
       />
     </div>
   );
@@ -767,42 +768,48 @@ function Row({
 }
 
 /**
- * What is running, and the documents that govern it.
+ * The documents that govern this, where there are any.
  *
- * <p>The build line is real or it is not there: the version comes from
- * package.json and the commit from a build argument, so a container built
- * without one says "dev" rather than inventing a hash. The legal links appear
- * only when somebody has supplied the URLs — Orion ships no terms of service
- * or privacy policy of its own, and a link to a page that does not exist is
- * worse than no link.
+ * <h2>What used to be here</h2>
+ *
+ * <p>A build line — "Version 0.0.0 — dev build" — and a link reading "How long
+ * Orion keeps what is yours". Both are gone.
+ *
+ * <p>The build line was written for a bug report that could be traced to a
+ * commit, and in a deployment built without one it says "0.0.0 — dev build",
+ * which traces to nothing and reads as unfinished software to anybody who is
+ * not the person who built it. A version that cannot identify a build is not
+ * worth the line it costs.
+ *
+ * <p>The link went to <code>#data</code>, which is the retention section on
+ * this same page, a few hundred pixels away and reachable by scrolling. A
+ * footer link to the middle of the page you are already on is furniture.
+ *
+ * <p>What is left appears only when somebody has supplied the URLs. Orion ships
+ * no terms of service or privacy policy of its own — those are documents
+ * somebody has to write and be bound by — and with neither set this renders
+ * nothing at all rather than an empty strip of padding.
  */
 function Footer() {
+  if (LEGAL_LINKS.length === 0) return null;
   return (
     <div className="space-y-1 pt-8 text-center text-xs text-muted-foreground">
-      <p>{BUILD_LINE}</p>
-      {LEGAL_LINKS.length > 0 && (
-        <p>
-          By using Orion you agree to the{" "}
-          {LEGAL_LINKS.map((link, i) => (
-            <React.Fragment key={link.href}>
-              {i > 0 && " and "}
-              <a
-                href={link.href}
-                target="_blank"
-                rel="noreferrer"
-                className="text-primary underline-offset-2 hover:underline"
-              >
-                {link.label}
-              </a>
-            </React.Fragment>
-          ))}
-          .
-        </p>
-      )}
       <p>
-        <a href="#data" className="underline-offset-2 hover:underline">
-          How long Orion keeps what is yours
-        </a>
+        By using Orion you agree to the{" "}
+        {LEGAL_LINKS.map((link, i) => (
+          <React.Fragment key={link.href}>
+            {i > 0 && " and "}
+            <a
+              href={link.href}
+              target="_blank"
+              rel="noreferrer"
+              className="text-primary underline-offset-2 hover:underline"
+            >
+              {link.label}
+            </a>
+          </React.Fragment>
+        ))}
+        .
       </p>
     </div>
   );

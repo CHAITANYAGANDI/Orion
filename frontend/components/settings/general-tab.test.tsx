@@ -19,10 +19,10 @@ import type { PreferencesResponse, PrivacyOverview, SpeakerSettings } from "@/li
  * password at all, and an Edit control over them would be a promise the product
  * cannot keep.
  *
- * <i>Nothing in the footer is invented.</i> No commit means "dev build" rather
- * than a hash that resolves to nothing, and the legal line does not appear at
- * all unless somebody has supplied real URLs — Orion ships no terms of
- * service of its own.
+ * <i>The footer says nothing rather than something useless.</i> The version
+ * line and the jump link to this page's own retention section are gone, and the
+ * legal line does not appear at all unless somebody has supplied real URLs —
+ * Orion ships no terms of service of its own.
  */
 const {
   update, setRetention, closeAccount, signOut, toastError,
@@ -349,10 +349,20 @@ describe("the rest of the page", () => {
     expect(screen.queryByRole("checkbox")).toBeNull();
   });
 
-  it("names the build rather than inventing one", () => {
+  it("does not show a version that identifies nothing", () => {
+    // "Version 0.0.0 — dev build" traces to no commit and reads as unfinished
+    // software to everybody except the person who built it.
     render(<GeneralTab />);
 
-    expect(screen.getByText(/^Version /)).toHaveTextContent("dev build");
+    expect(screen.queryByText(/^Version /)).not.toBeInTheDocument();
+    expect(screen.queryByText(/dev build/)).not.toBeInTheDocument();
+  });
+
+  it("does not link to the middle of the page it is already on", () => {
+    // It pointed at `#data`, the retention section a few hundred pixels away.
+    render(<GeneralTab />);
+
+    expect(screen.queryByText(/keeps what is yours/)).not.toBeInTheDocument();
   });
 
   it("shows no legal line when there are no documents to link to", () => {
@@ -361,6 +371,7 @@ describe("the rest of the page", () => {
     // Orion ships no terms of service of its own, and a link to a page that
     // does not exist is worse than no link.
     expect(screen.queryByText(/Terms of Service/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/By using Orion/)).not.toBeInTheDocument();
   });
 });
 

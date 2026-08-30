@@ -50,6 +50,34 @@ export interface ProfileForm {
   avatarUrl: string;
 }
 
+/**
+ * What actually goes to Orion's preferences endpoint — <b>only the fields this
+ * account is allowed to change</b>.
+ *
+ * <h2>Why a field has to be absent rather than unchanged</h2>
+ *
+ * <p>Sending the current value back looks harmless and is not. `users.email` is
+ * <em>null</em> for a Google account — Clerk's default session token carries no
+ * email claim, so `provision` never had one to store — while the dialog shows
+ * the address it read from Clerk. So "unchanged" on screen is a change to the
+ * server, and `UserService.cleanAccountEmail` refuses it.
+ *
+ * <p>Which is how changing a photo produced "Your email address is managed by
+ * your sign-in provider". The address rode along in a request that had nothing
+ * to do with it, and took the whole save down with it.
+ *
+ * <p>The endpoint treats a missing field as "leave it alone", so the fix is to
+ * send nothing rather than something.
+ */
+export interface ProfilePatch {
+  /** Orion's own column, and the only one every account owns. */
+  avatarUrl: string;
+  /** Present only where the name is this account's to set. */
+  displayName?: string;
+  /** Present only where Orion's own API owns the address. */
+  email?: string;
+}
+
 export function ProfileDialog({
   open,
   initial,
@@ -68,7 +96,7 @@ export function ProfileDialog({
   permissions: IdentityPermissions;
   saving?: boolean;
   onClose: () => void;
-  onSave: (form: ProfileForm) => void;
+  onSave: (patch: ProfilePatch) => void;
 }) {
   const [form, setForm] = React.useState<ProfileForm>(initial);
   const [camera, setCamera] = React.useState(false);
@@ -161,16 +189,14 @@ export function ProfileDialog({
     }
   }
 
-  /**
-   * What actually goes to Orion's preferences endpoint.
-   *
-   * <p>The address is stripped unless this deployment is the one that owns it.
-   * Under Clerk it has already been changed at the provider (or not at all),
-   * and `UserService.cleanAccountEmail` refuses it — so sending it would turn a
-   * successful save of the name into a rejected request.
-   */
-  function submitted(): ProfileForm {
-    return permissions.emailVia === "preferences" ? form : { ...form, email: initial.email };
+  /** See {@link ProfilePatch}: what may be sent, rather than what is on screen. */
+  function submitted(): ProfilePatch {
+    // The photo is Orion's own column and is nobody else's business, so it is
+    // always sent. The other two go only where this account owns them.
+    const patch: ProfilePatch = { avatarUrl: form.avatarUrl };
+    if (permissions.name) patch.displayName = form.displayName;
+    if (permissions.emailVia === "preferences") patch.email = form.email;
+    return patch;
   }
 
   /** Backing out takes the unverified address off the account again. */
@@ -239,6 +265,15 @@ export function ProfileDialog({
                 </div>
               </div>
             </div>
+
+            {/* Said out loud because all three fields below it say the
+                opposite: whatever Google supplies, the picture Orion shows is
+                one this account uploaded, in a column Orion owns. */}
+            {permissions.owner === "external" && (
+              <p className="text-xs text-muted-foreground">
+                Your photo is yours to set here, whatever {permissions.ownerLabel} uses.
+              </p>
+            )}
 
             {/* ---- name ---- */}
             <div className="space-y-1.5">

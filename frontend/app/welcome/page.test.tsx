@@ -13,7 +13,10 @@ import userEvent from "@testing-library/user-event";
 
 const save = vi.hoisted(() => vi.fn());
 const nav = vi.hoisted(() => ({ push: vi.fn() }));
-const identity = vi.hoisted(() => ({ profile: { name: "", email: "", imageUrl: "" } }));
+const identity = vi.hoisted(() => ({
+  mode: "clerk",
+  profile: { name: "", email: "", imageUrl: "", provider: "", hasPassword: true },
+}));
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: nav.push }) }));
 
@@ -39,7 +42,9 @@ import WelcomePage from "@/app/welcome/page";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  identity.profile = { name: "", email: "", imageUrl: "" };
+  identity.mode = "clerk";
+  // An account made here, which owns its name. The Google case is its own test.
+  identity.profile = { name: "", email: "", imageUrl: "", provider: "", hasPassword: true };
   save.mockReturnValue({ unwrap: () => Promise.resolve({}) });
 });
 
@@ -55,13 +60,51 @@ describe("what it asks", () => {
     expect(screen.getByRole("radio", { name: /Detect automatically/ })).toBeInTheDocument();
   });
 
-  it("fills the name in from Google rather than asking again", async () => {
-    // Signing up with Google already handed over a name. Asking for it again is
-    // the product admitting it was not listening.
-    identity.profile = { name: "Ada Lovelace", email: "ada@example.com", imageUrl: "" };
+  it("fills the name in rather than asking for it twice", async () => {
+    // An account made here can be given a name at sign-up time by other means;
+    // where one is known, this step is a confirmation.
+    identity.profile = { ...identity.profile, name: "Ada Lovelace" };
     render(<WelcomePage />);
 
     await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("Ada Lovelace"));
+  });
+
+  it("does not ask a Google account for a name Google already holds", async () => {
+    /*
+     * Settings tells this person their name comes from Google and disables the
+     * field. Asking for it here would be the product contradicting itself two
+     * screens apart -- and saving it would write a copy into Orion's column
+     * that then outranks Google's on every screen.
+     */
+    identity.profile = {
+      name: "Ada Lovelace",
+      email: "ada@example.com",
+      imageUrl: "",
+      provider: "google",
+      hasPassword: false,
+    };
+    render(<WelcomePage />);
+
+    expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
+    // Straight to the question it does not already know the answer to.
+    expect(screen.getByRole("radio", { name: /Detect automatically/ })).toBeInTheDocument();
+    expect(screen.getByText("Step 1 of 2")).toBeInTheDocument();
+  });
+
+  it("never saves a name for an account that does not own one", async () => {
+    identity.profile = {
+      name: "Ada Lovelace",
+      email: "ada@example.com",
+      imageUrl: "",
+      provider: "google",
+      hasPassword: false,
+    };
+    render(<WelcomePage />);
+    await userEvent.click(await screen.findByRole("radio", { name: /Japanese/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Continue/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /Just take me in/ }));
+
+    await waitFor(() => expect(save).toHaveBeenCalledWith({ defaultLanguage: "ja" }));
   });
 
   it("keeps auto-detect as the default language", () => {

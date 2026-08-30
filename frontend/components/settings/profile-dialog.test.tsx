@@ -88,6 +88,14 @@ describe("what it asks for", () => {
     expect(screen.queryByLabelText("Pronouns")).not.toBeInTheDocument();
   });
 
+  it("says the photo is theirs, since everything under it is not", () => {
+    show(EMPTY, GOOGLE);
+
+    expect(
+      screen.getByText(/Your photo is yours to set here, whatever Google uses/),
+    ).toBeInTheDocument();
+  });
+
   it("saves the name, email and photo together", async () => {
     const { onSave } = show();
 
@@ -212,19 +220,53 @@ describe("the email", () => {
     expect(screen.getByLabelText("New email")).toBeInTheDocument();
   });
 
-  it("never sends an address Orion's own API would refuse", async () => {
-    // `UserService.cleanAccountEmail` throws under an identity provider. The
-    // name has to save anyway, so the address is stripped rather than sent and
-    // rejected along with everything else in the same request.
+  it("omits the address entirely rather than sending it back unchanged", async () => {
+    /*
+     * THE bug behind "Your email address is managed by your sign-in provider"
+     * appearing when somebody changed their photo.
+     *
+     * Sending the current value looks harmless and is not: `users.email` is
+     * null for a Clerk account -- the session token carries no email claim, so
+     * `provision` never had one to store -- while this dialog shows the address
+     * it read from Clerk. "Unchanged" on screen is a change to the server, and
+     * `cleanAccountEmail` refuses it, taking the photo and the name down with
+     * it.
+     *
+     * A missing field means "leave it alone", so the field has to be missing.
+     */
     const { onSave } = show(EMPTY, ORION);
 
     await userEvent.clear(screen.getByLabelText("Full Name"));
     await userEvent.type(screen.getByLabelText("Full Name"), "Ada");
     await userEvent.click(screen.getByRole("button", { name: "Finish" }));
 
-    expect(onSave).toHaveBeenCalledWith(
-      expect.objectContaining({ displayName: "Ada", email: EMPTY.email }),
+    expect(onSave).toHaveBeenCalledWith({ avatarUrl: "", displayName: "Ada" });
+    expect(onSave.mock.calls[0][0]).not.toHaveProperty("email");
+  });
+
+  it("lets a Google account save a photo without mentioning the address", async () => {
+    // The reported bug, end to end: pick a picture, press Finish, and the
+    // request carries the picture and nothing that can be refused.
+    const { onSave } = show(EMPTY, GOOGLE);
+
+    await userEvent.upload(
+      screen.getByTestId("avatar-file"),
+      new File(["x"], "me.png", { type: "image/png" }),
     );
+    await waitFor(() => expect(avatarFromFile).toHaveBeenCalled());
+    await userEvent.click(screen.getByRole("button", { name: "Finish" }));
+
+    expect(onSave).toHaveBeenCalledWith({ avatarUrl: PNG });
+  });
+
+  it("does not write the provider's name into Orion's column behind their back", async () => {
+    // The name field is disabled and holds Google's value. Sending it would
+    // quietly make a copy that then outranks Google's on every screen.
+    const { onSave } = show(EMPTY, GOOGLE);
+
+    await userEvent.click(screen.getByRole("button", { name: "Finish" }));
+
+    expect(onSave.mock.calls[0][0]).not.toHaveProperty("displayName");
   });
 });
 

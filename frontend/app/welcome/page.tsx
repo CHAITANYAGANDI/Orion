@@ -48,6 +48,7 @@ import { AuthShell } from "@/components/auth/auth-shell";
 import { Field, SubmitButton } from "@/components/auth/auth-form";
 import { useAuth } from "@/lib/auth";
 import { useGetLanguagesQuery, useUpdatePreferencesMutation } from "@/lib/api";
+import { identityPermissions } from "@/lib/identity-owner";
 import { HOME } from "@/lib/routes";
 import { cn } from "@/lib/utils";
 
@@ -64,8 +65,22 @@ export default function WelcomePage() {
 
 function Welcome() {
   const router = useRouter();
-  const { profile } = useAuth();
+  const { mode, profile } = useAuth();
   const [save] = useUpdatePreferencesMutation();
+
+  /*
+   * The name step exists only where the name is this account's to set.
+   *
+   * <p>Signing up with Google means Google holds it -- Settings says exactly
+   * that and disables the field -- so asking for it here would be the product
+   * contradicting itself two screens apart, and saving it would write a copy
+   * into Orion's column that then outranks Google's everywhere.
+   */
+  const permissions = identityPermissions({
+    mode,
+    provider: profile.provider,
+    hasPassword: profile.hasPassword,
+  });
 
   const [step, setStep] = React.useState(0);
   const [name, setName] = React.useState("");
@@ -93,7 +108,7 @@ function Welcome() {
     setSaving(true);
     try {
       const patch: { displayName?: string; defaultLanguage?: string } = {};
-      if (name.trim()) patch.displayName = name.trim();
+      if (permissions.name && name.trim()) patch.displayName = name.trim();
       if (language) patch.defaultLanguage = language;
       if (Object.keys(patch).length > 0) await save(patch).unwrap();
     } catch {
@@ -107,22 +122,30 @@ function Welcome() {
     router.push(destination);
   }
 
-  const steps = ["Your name", "Language", "First recording"];
+  /**
+   * The steps this account actually has. Two for a Google sign-in, three for an
+   * account made here — and the marker below counts what is there rather than
+   * what was planned.
+   */
+  const steps = permissions.name
+    ? (["name", "language", "start"] as const)
+    : (["language", "start"] as const);
+  const current = steps[step];
 
   return (
     <AuthShell
       eyebrow={`Step ${step + 1} of ${steps.length}`}
       title={
-        step === 0
+        current === "name"
           ? "What should we call you?"
-          : step === 1
+          : current === "language"
             ? "What language are your meetings in?"
             : "You are set up."
       }
       subtitle={
-        step === 0 ? (
+        current === "name" ? (
           "It appears on your account and beside the tasks assigned to you."
-        ) : step === 1 ? (
+        ) : current === "language" ? (
           "Orion detects this from the audio. Fixing it helps when a meeting opens quietly."
         ) : (
           <>Bring in a recording you already have, or make one now.</>
@@ -133,9 +156,9 @@ function Welcome() {
           {/* A real sequence, so the markers carry real information: which of
               three, and which are done. */}
           <div className="flex items-center gap-1.5" aria-hidden>
-            {steps.map((label, i) => (
+            {steps.map((id, i) => (
               <span
-                key={label}
+                key={id}
                 className={cn(
                   "h-1 rounded-full transition-all duration-300",
                   i === step ? "w-6 bg-foreground" : "w-1.5 bg-border",
@@ -154,12 +177,12 @@ function Welcome() {
         </div>
       }
     >
-      {step === 0 ? (
+      {current === "name" ? (
         <form
           className="space-y-4"
           onSubmit={(e) => {
             e.preventDefault();
-            setStep(1);
+            setStep(step + 1);
           }}
         >
           <Field
@@ -176,7 +199,7 @@ function Welcome() {
         </form>
       ) : null}
 
-      {step === 1 ? (
+      {current === "language" ? (
         <div className="space-y-4">
           <div className="max-h-[280px] space-y-1 overflow-y-auto pr-1">
             <LanguageRow
@@ -198,13 +221,13 @@ function Welcome() {
               <p className="px-1 py-3 text-[13px] text-muted-foreground">Loading languages…</p>
             ) : null}
           </div>
-          <SubmitButton onClick={() => setStep(2)} type="button">
+          <SubmitButton onClick={() => setStep(step + 1)} type="button">
             Continue <ArrowRight className="h-4 w-4" />
           </SubmitButton>
         </div>
       ) : null}
 
-      {step === 2 ? (
+      {current === "start" ? (
         <div className="space-y-3">
           <StartRow
             icon={Mic}
