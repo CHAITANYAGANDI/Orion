@@ -69,22 +69,18 @@ import { recordHref } from "@/lib/routes";
  * imports file themselves into the folder they were started in — whether this
  * is the whole workspace, or only what was never filed into one.
  *
- * <p><strong>The second option was called "Recent Conversations", and it was
- * not about time.</strong> Both options are newest-first and both sit inside
- * the same date window; what separates them is `unfiled=true` on the wire —
- * whether a meeting was ever put in a folder. A label reading "Recent" over a
- * folder filter is not a shortening, it is the wrong word: it describes a
- * property the list does not have, and the property it does have is invisible.
+ * <p><strong>Recent Conversations is about folders, not about time.</strong>
+ * Both options are newest-first and both sit inside the same date window, so
+ * the label is doing no work that "All" is not; what separates them is
+ * `unfiled=true` on the wire — whether a meeting was ever put in a folder.
  *
- * <p>That wording is most of why the empty state read as a fault. Somebody who
- * had chosen "Recent" and been shown "Everything is in a folder" had been given
- * two unrelated sentences — a list named after recency, and an explanation
- * about filing — and no way to connect them. Named "Unfiled Conversations", the
- * empty state is simply the list saying what it is.
- *
- * <p>The hint stays, and it is not decoration: it is the sentence that explains
- * why a meeting recorded ten minutes ago inside a folder is missing. Do not
- * drop it.
+ * <p>Which makes <b>the hint load-bearing</b>, not decoration. It is the only
+ * thing on screen that explains why a meeting recorded ten minutes ago inside a
+ * folder is missing from a list called Recent, and it is what connects the
+ * label to the "Everything is in a folder" empty state behind it. Renaming the
+ * option to "Unfiled Conversations" would carry that in the label instead;
+ * that was tried and reverted, and "Recent" is the product's word for this
+ * list. So the hint is the whole of the explanation. Do not drop it.
  *
  * <p>The hints are written as a pair, and read as one: everything outside your
  * folders, or everything in this workspace. Said that way round they describe
@@ -96,15 +92,19 @@ import { recordHref } from "@/lib/routes";
  * be a filter that is permanently empty and reads as a fault.
  */
 const SCOPES = [
+  { value: "recent", label: "Recent Conversations", hint: "everything outside your folders" },
   { value: "all", label: "All Conversations", hint: "everything in this workspace" },
-  /*
-   * The stored value stays `"recent"`. It is internal -- `SCOPE_CODEC` reads
-   * and writes it, nothing renders it -- and renaming it would invalidate every
-   * remembered preference in every browser to change a string nobody sees,
-   * which is a version bump's worth of cost for no user-visible gain.
-   */
-  { value: "recent", label: "Unfiled Conversations", hint: "everything outside your folders" },
 ] as const;
+
+/*
+ * The order here is the order in the menu, and it is NOT the default.
+ *
+ * Recent is listed first and Home still opens on All -- see DEFAULT_SCOPE
+ * below, and SCOPE_PREF_KEY for why opening on Recent was a bug worth a
+ * version bump. The two are easy to conflate because a picker usually leads
+ * with the option it is on; anyone tempted to "tidy" this by making the first
+ * entry the default should read that note first.
+ */
 
 type Scope = (typeof SCOPES)[number]["value"];
 

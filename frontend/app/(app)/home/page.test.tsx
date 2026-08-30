@@ -174,20 +174,21 @@ beforeEach(() => {
 });
 
 describe("the scope picker", () => {
-  it("offers the whole workspace and what is outside a folder, in that order", async () => {
+  it("offers what is outside a folder and the whole workspace, in that order", async () => {
     render(<HomePage />);
 
     await userEvent.click(screen.getByRole("button", { name: /All Conversations/ }));
     const menu = screen.getByRole("menu");
     const options = within(menu).getAllByRole("menuitemradio");
 
-    // All first: it is where Home opens, and an option list that does not
-    // start with the one you are on reads as a list of somewhere else. The
-    // order followed the default when the default was Recent, and follows it
-    // still.
+    // Recent first, and Home still opens on All. The menu order and the
+    // default are separate decisions and this is the test that keeps them
+    // separate: a change that makes the first entry the default would
+    // reinstate the bug in SCOPE_PREF_KEY, and "starts on the whole workspace"
+    // below is what would catch it.
     expect(options).toHaveLength(2);
-    expect(options[0]).toHaveTextContent("All Conversations");
-    expect(options[1]).toHaveTextContent("Unfiled Conversations");
+    expect(options[0]).toHaveTextContent("Recent Conversations");
+    expect(options[1]).toHaveTextContent("All Conversations");
     // The label is about folders, not about time, and only the hint says so.
     expect(within(menu).getByText("everything outside your folders")).toBeInTheDocument();
     // It counted twenty rows and called them unread. Nothing tracks whether a
@@ -208,7 +209,7 @@ describe("the scope picker", () => {
   it("asks the server for what is outside a folder only when asked to", async () => {
     render(<HomePage />);
 
-    await choose("Unfiled Conversations");
+    await choose("Recent Conversations");
 
     // Recent still works and still reaches the server. It used to narrow the
     // page in the browser, and narrow it by nothing: both options ran through a
@@ -218,7 +219,7 @@ describe("the scope picker", () => {
 
   it("asks for the whole workspace again on the way back", async () => {
     render(<HomePage />);
-    await choose("Unfiled Conversations");
+    await choose("Recent Conversations");
 
     await choose("All Conversations");
 
@@ -228,7 +229,7 @@ describe("the scope picker", () => {
   it("keeps the date window while the scope changes", async () => {
     render(<HomePage />);
 
-    await choose("Unfiled Conversations");
+    await choose("Recent Conversations");
 
     // Two filters over one list. Losing one when the other moves is the bug
     // that follows from rebuilding the query object per control.
@@ -257,7 +258,7 @@ describe("when there is nothing to show", () => {
     render(<HomePage />);
     // Explicitly, because Home no longer starts here. This screen describes a
     // list that is hiding rows, which is only true of Recent.
-    await choose("Unfiled Conversations");
+    await choose("Recent Conversations");
 
     // Without this the page offers Record and Import to somebody with a
     // hundred meetings, which reads as an archive that lost them.
@@ -350,7 +351,7 @@ describe("filters that stay where you left them", () => {
 
   it("remembers going back to the default just as firmly", async () => {
     const first = render(<HomePage />);
-    await choose("Unfiled Conversations");
+    await choose("Recent Conversations");
     first.unmount();
 
     const second = render(<HomePage />);
@@ -382,7 +383,7 @@ describe("filters that stay where you left them", () => {
 
   it("asks the server once, with the filters it restored", async () => {
     const visit = render(<HomePage />);
-    await choose("Unfiled Conversations");
+    await choose("Recent Conversations");
     visit.unmount();
 
     query.last = null;
@@ -402,7 +403,7 @@ describe("filters that stay where you left them", () => {
  *
  * <h2>The bug</h2>
  *
- * <p>Home defaulted to Unfiled Conversations, and Recent is `unfiled=true` on the
+ * <p>Home defaulted to Recent Conversations, and Recent is `unfiled=true` on the
  * wire — conversations that were never put in a folder. So the default Home was
  * not "your meetings", it was "your meetings, minus the ones you organised". An
  * account that had filed everything opened Home to "Everything is in a folder"
@@ -485,7 +486,7 @@ describe("the scope Home opens on", () => {
     // has traded one broken list for a missing feature.
     render(<HomePage />);
 
-    await choose("Unfiled Conversations");
+    await choose("Recent Conversations");
 
     expect(lastQuery()?.unfiled).toBe(true);
   });
@@ -494,18 +495,18 @@ describe("the scope Home opens on", () => {
     // Stickiness survives the version bump for choices made under v2, where a
     // stored value is unambiguous because it differs from the default.
     const visit = render(<HomePage />);
-    await choose("Unfiled Conversations");
+    await choose("Recent Conversations");
     visit.unmount();
 
     render(<HomePage />);
 
-    expect(screen.getByRole("button", { name: /Unfiled Conversations/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Recent Conversations/ })).toBeInTheDocument();
     expect(lastQuery()?.unfiled).toBe(true);
   });
 
   it("keeps an explicit All across a return visit", async () => {
     const visit = render(<HomePage />);
-    await choose("Unfiled Conversations");
+    await choose("Recent Conversations");
     await choose("All Conversations");
     visit.unmount();
 
@@ -517,7 +518,7 @@ describe("the scope Home opens on", () => {
 
   it("returns to All for a new session, discarding an explicit Recent", async () => {
     const visit = render(<HomePage />);
-    await choose("Unfiled Conversations");
+    await choose("Recent Conversations");
     expect(lastQuery()?.unfiled).toBe(true);
     visit.unmount();
 
@@ -711,7 +712,7 @@ describe("what Home shows when the request does not simply succeed", () => {
     probeLoading = true;
 
     render(<HomePage />);
-    await choose("Unfiled Conversations");
+    await choose("Recent Conversations");
 
     expect(screen.queryByText("Everything is in a folder")).not.toBeInTheDocument();
     expect(screen.queryByText(EMPTY)).not.toBeInTheDocument();
@@ -727,7 +728,7 @@ describe("what Home shows when the request does not simply succeed", () => {
     probeErrored = true;
 
     render(<HomePage />);
-    await choose("Unfiled Conversations");
+    await choose("Recent Conversations");
 
     expect(screen.queryByText(EMPTY)).not.toBeInTheDocument();
     expect(screen.getByText("Nothing outside your folders")).toBeInTheDocument();
@@ -824,30 +825,42 @@ describe("a meeting that is still processing", () => {
  * "Everything is in a folder" under a list named after recency has been handed
  * two unrelated sentences and no way to connect them.
  */
-describe("the scope picker says what it filters on", () => {
-  it("does not call a folder filter a recency filter", async () => {
+/**
+ * The label says "Recent" and the filter is about folders, so the hint is the
+ * only thing that explains the list.
+ *
+ * <p>That is a deliberate choice rather than an oversight -- "Recent" is the
+ * product's word for this list -- and it puts the whole weight of the
+ * explanation on one line of small text. These hold that line in place. Without
+ * it, a meeting recorded ten minutes ago inside a folder is simply absent from
+ * a list called Recent, and the "Everything is in a folder" empty state behind
+ * it arrives with nothing to connect it to.
+ */
+describe("the scope picker explains what it filters on", () => {
+  it("carries the folder meaning in the hint, since the label does not", async () => {
     render(<HomePage />);
 
     await userEvent.click(screen.getByRole("button", { name: /All Conversations/ }));
-    const options = screen.getAllByRole("menuitemradio");
+    const recent = screen.getAllByRole("menuitemradio")[0];
 
-    expect(options[1]).toHaveTextContent(/Unfiled/i);
-    expect(options[1]).not.toHaveTextContent(/Recent/i);
+    expect(recent).toHaveTextContent(/Recent Conversations/i);
+    expect(recent).toHaveTextContent(/outside your folders/i);
   });
 
-  it("still names folders in the hint, which is the sentence that explains it", async () => {
-    // Not decoration: it is the only thing on screen that explains why a
-    // meeting recorded ten minutes ago inside a folder is missing from it.
+  it("pairs it with a hint for All, so the two read as two lists", async () => {
+    // "everything outside your folders" / "everything in this workspace".
+    // Said that way round they describe two lists, rather than one list and
+    // one property a meeting either has or does not.
     render(<HomePage />);
 
     await userEvent.click(screen.getByRole("button", { name: /All Conversations/ }));
 
-    expect(screen.getAllByRole("menuitemradio")[1]).toHaveTextContent(/outside your folders/i);
+    expect(screen.getAllByRole("menuitemradio")[1]).toHaveTextContent(/in this workspace/i);
   });
 
   it("sends unfiled=true under that name, so the label and the wire agree", async () => {
     render(<HomePage />);
-    await choose("Unfiled Conversations");
+    await choose("Recent Conversations");
 
     expect(query.last?.unfiled).toBe(true);
   });
