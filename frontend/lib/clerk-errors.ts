@@ -56,6 +56,13 @@ const SAID_BETTER: Record<string, string> = {
   form_password_length_too_short: "Use at least 8 characters.",
   form_code_incorrect: "That code is not right. Check it and try again.",
   verification_expired: "That code has expired. Send a new one.",
+  /*
+   * Reached only when the recovery in the sign-up form could not read where the
+   * sign-up got to. Clerk's own sentence -- "This verification has already been
+   * verified." -- reports a success as a failure, on a screen whose only two
+   * buttons both produce it.
+   */
+  verification_already_verified: "Your email is already confirmed. Sign in to continue.",
   session_exists: "You are already signed in.",
   captcha_invalid: "We could not confirm you are not a robot. Reload and try again.",
   too_many_requests: "Too many attempts. Wait a minute and try again.",
@@ -102,4 +109,21 @@ function firstError(error: unknown): ClerkErrorLike | null {
  */
 export function isAlreadySignedIn(error: unknown): boolean {
   return firstError(error)?.code === "session_exists";
+}
+
+/**
+ * Whether a failure is the one that means "that code already worked".
+ *
+ * <p>Clerk raises it for a second attempt at a verification it has already
+ * taken, and for a resend on one — which is where a lost response, a double
+ * submit, or a sign-up that verified without completing all end up. It is not a
+ * failure of anything: the address is confirmed, and the answer is to read
+ * where the sign-up actually got to rather than to report an error.
+ *
+ * <p>Matched on the substring rather than the exact code, because the same
+ * condition is spelled `verification_already_verified` in some responses and
+ * with a prefix in others, and nothing unrelated says "already verified".
+ */
+export function isAlreadyVerified(error: unknown): boolean {
+  return (firstError(error)?.code ?? "").includes("already_verified");
 }
