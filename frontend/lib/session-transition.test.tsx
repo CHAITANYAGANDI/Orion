@@ -17,11 +17,18 @@ import { configureStore, type Middleware } from "@reduxjs/toolkit";
  *
  * <p>So this renders the production nesting: the real store, the real `api`
  * with the real `fetchBaseQuery`, the real `AuthGate` and `SessionCacheGuard`,
- * and query hooks standing in for the ones that failed in production — the
- * sidebar folder tree, Home's meeting list, and the usage badge that kept
+ * and the components that failed in production — the real sidebar folder tree,
+ * plus hooks standing in for Home's meeting list and the usage badge that kept
  * working while the other two did not.
  *
- * <p>Only `fetch` and Clerk are stubbed.
+ * <p>The folder tree is the real one rather than a stand-in because it is the
+ * component the screenshot was of, and because it has since acquired opinions
+ * of its own about what an empty answer is: `undefined` is a skeleton, a
+ * failure is an error with a retry, and only a settled empty list draws the
+ * blank section. A stand-in doing `data ?? []` would assert the fix out of the
+ * test.
+ *
+ * <p>Only `fetch`, Clerk and the router are stubbed.
  */
 
 const auth = vi.hoisted(() => ({
@@ -33,7 +40,10 @@ vi.mock("@/lib/auth", () => ({
   AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
+vi.mock("next/navigation", () => ({ usePathname: () => "/home" }));
+
 import { api } from "@/lib/api";
+import { FolderTree } from "@/components/folder-tree";
 import { AuthGate } from "@/components/auth-gate";
 import { SessionCacheGuard } from "@/components/session-cache-guard";
 import {
@@ -103,15 +113,12 @@ const firstQueryAt = () => actions.findIndex((t) => t === "api/executeQuery/pend
 
 const mounts = { folders: 0, meetings: 0, usage: 0 };
 
+/** The real sidebar, with a counter around it so remounts stay visible. */
 function Folders() {
-  const { data } = api.useGetProjectsQuery();
   React.useEffect(() => {
     mounts.folders += 1;
   }, []);
-  // Exactly what components/folder-tree.tsx does, and the reason an empty tree
-  // is indistinguishable from a killed query on that screen.
-  const folders = data ?? [];
-  return <div data-testid="folders">{folders.length ? "folders-loaded" : "folders-empty"}</div>;
+  return <FolderTree onNavigate={() => {}} />;
 }
 
 function Meetings() {
@@ -168,6 +175,19 @@ async function loaded(id: string) {
   await waitFor(() => expect(screen.getByTestId(id)).toHaveTextContent(`${id}-loaded`), {
     timeout: 3000,
   });
+}
+
+/**
+ * The rail has the folder the server sent, and is not saying anything else
+ * about it — no skeleton left running, no "couldn't load folders", and above
+ * all not the blank section that a killed query used to produce here.
+ */
+async function foldersLoaded() {
+  await waitFor(() => expect(screen.getByRole("link", { name: "Design" })).toBeInTheDocument(), {
+    timeout: 3000,
+  });
+  expect(screen.queryByText("Couldn't load folders")).not.toBeInTheDocument();
+  expect(screen.queryByText("Loading folders")).not.toBeInTheDocument();
 }
 
 async function settled(expected = 3) {
@@ -289,7 +309,7 @@ describe("signing into a new session while the Redux root survives", () => {
   it("loads the folder tree on the first authenticated render", async () => {
     await transitionAtoB(makeStore());
 
-    await loaded("folders");
+    await foldersLoaded();
   });
 
   it("loads the meeting list on the first authenticated render", async () => {
@@ -305,15 +325,14 @@ describe("signing into a new session while the Redux root survives", () => {
     // broken load.
     await transitionAtoB(makeStore());
     await loaded("usage");
-    await loaded("folders");
+    await foldersLoaded();
     await loaded("meetings");
 
-    const text = [
+    expect([
       screen.getByTestId("usage").textContent,
-      screen.getByTestId("folders").textContent,
       screen.getByTestId("meetings").textContent,
-    ];
-    expect(text).toEqual(["usage-loaded", "folders-loaded", "meetings-loaded"]);
+    ]).toEqual(["usage-loaded", "meetings-loaded"]);
+    expect(screen.getByRole("link", { name: "Design" })).toBeInTheDocument();
   });
 
   it("mounts each query hook exactly once for the new session", async () => {
@@ -351,7 +370,7 @@ describe("an ordinary first start, with no previous session in this store", () =
   it("loads everything without a manual refresh", async () => {
     await coldStart(makeStore());
 
-    await loaded("folders");
+    await foldersLoaded();
     await loaded("meetings");
     await loaded("usage");
   });
