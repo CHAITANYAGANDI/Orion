@@ -1,5 +1,5 @@
 /**
- * Changing the two things Orion does not own.
+ * Changing the one thing Orion does not own.
  *
  * <p>Sign-in belongs to Clerk: there is no password column, no login form and
  * no session to establish here. So a password change is a call to the provider,
@@ -9,31 +9,29 @@
  * `lib/clerk-auth.tsx` is: a development build must run with no Clerk key, and
  * a static import would pull the provider into every bundle and fail at boot
  * without one.
+ *
+ * <h2>What is not here, and will not be</h2>
+ *
+ * <p>Changing the address. It used to live here — add the new address to the
+ * account, send it a code, promote it, drop the old one — and it is gone by
+ * decision rather than by neglect: <b>the address on an Orion account is fixed
+ * once it is made.</b>
+ *
+ * <p>It is the credential, so every route to changing it is a route to losing
+ * an account. Clerk agrees, which is why it guards the operation with
+ * reverification and refuses a session that has not proved a first factor in
+ * the last few minutes. The honest version of that flow needs a proof of
+ * identity, a code to the old address, a code to the new one, and a way back
+ * out of each — four screens standing between somebody and a field they will
+ * change once, if ever. Not having the field is a better answer than having all
+ * four.
+ *
+ * <p>So the profile shows the address and does not offer to change it, whatever
+ * kind of account it is. See {@link identityPermissions}, which no longer has
+ * an opinion about the address for the same reason.
  */
 
 export class AccountActionError extends Error {}
-
-/**
- * Clerk wants the account holder to prove, again, that it is them.
- *
- * <h2>Why an operation that was allowed a minute ago is refused now</h2>
- *
- * <p>Clerk guards its sensitive user operations with <em>reverification</em>: a
- * session that has not proved a first factor in the last few minutes may read
- * anything but may not change the credential. Adding an address to the account
- * is one of the guarded ones, which is the whole point of it — changing the
- * address you sign in with is precisely what somebody who sat down at a
- * borrowed, still-signed-in laptop would do, and it is how an account is taken
- * rather than merely read.
- *
- * <p>Clerk's own `<UserProfile />` answers this by opening a dialog of its own.
- * Orion's profile is Orion's, so it asks in Orion's words — but the check is
- * Clerk's, it is right, and it is not something to switch off.
- *
- * <p>An `AccountActionError` on purpose, so callers that only know about that
- * one still show something sensible instead of falling through to a generic.
- */
-export class ReverificationRequiredError extends AccountActionError {}
 
 /**
  * Whether this deployment can change a password at all.
@@ -83,299 +81,6 @@ export async function changePassword(
   }
 }
 
-/* -------------------------------------------------------------------------- */
-/* Changing the address                                                       */
-/* -------------------------------------------------------------------------- */
-
-/**
- * A new address, created and awaiting its code.
- *
- * <p>Opaque on purpose. The caller holds it between the two steps of the
- * dialog and hands it back; nothing outside this module needs to know it is a
- * Clerk resource.
- */
-export interface PendingEmail {
-  readonly id: string;
-  readonly address: string;
-}
-
-/** The resource, kept here so the handle above can stay opaque. */
-const pending = new Map<string, ClerkEmailAddress>();
-
-/**
- * Add the new address to the account and send it a code.
- *
- * <p><b>Why this does not go through Orion's API.</b> Under an identity
- * provider the address is not a profile field, it is the credential — the thing
- * sign-in matches on — so changing it is Clerk's operation, and Orion's column
- * is a copy that follows. `UserService.cleanAccountEmail` refuses an address
- * edit under Clerk for exactly this reason, and it is right to.
- *
- * <p>Nothing changes until the code comes back. The old address stays the
- * primary one throughout, so an address typed wrong here cannot lock somebody
- * out of their account.
- */
-export async function startEmailChange(address: string): Promise<PendingEmail> {
-  const user = await requireUser();
-  try {
-    const created = await user.createEmailAddress({ email: address });
-    try {
-      await created.prepareVerification({ strategy: "email_code" });
-    } catch (err) {
-      /*
-       * An address on the account with no code on the way is worse than no
-       * address: the obvious next move is to try the same one again, and Clerk
-       * answers that with "already taken" -- about an address nobody else has.
-       */
-      await created.destroy().catch(() => undefined);
-      throw err;
-    }
-    pending.set(created.id, created);
-    return { id: created.id, address };
-  } catch (err) {
-    if (isReverificationRequired(err)) {
-      throw new ReverificationRequiredError(
-        "Confirm your password before changing the address you sign in with.",
-      );
-    }
-    throw new AccountActionError(clerkMessage(err, "That address could not be added."));
-  }
-}
-
-/**
- * Prove the new address, make it the one that signs in, and drop the old one.
- *
- * <p>The order matters and is not interchangeable. Verify, then promote, then
- * remove: promoting an unverified address would be trusting a typo, and
- * removing the old one before the new is primary would leave the account with
- * no address at all for as long as the next call takes.
- */
-export async function confirmEmailChange(handle: PendingEmail, code: string): Promise<void> {
-  const user = await requireUser();
-  const created = pending.get(handle.id);
-  if (!created) {
-    throw new AccountActionError("That change has expired. Start again.");
-  }
-  try {
-    await created.attemptVerification({ code });
-    const previous = user.primaryEmailAddressId;
-    await user.update({ primaryEmailAddressId: created.id });
-    if (previous && previous !== created.id) {
-      // Best effort. The change has already happened; an address left behind is
-      // untidy rather than broken, and reporting it as a failure would be a lie
-      // about what just took effect.
-      await user.emailAddresses
-        ?.find((address) => address.id === previous)
-        ?.destroy()
-        .catch(() => undefined);
-    }
-    pending.delete(handle.id);
-  } catch (err) {
-    throw new AccountActionError(clerkMessage(err, "That code did not confirm the address."));
-  }
-}
-
-/**
- * Send the code again, to the address already added.
- *
- * <p>The one thing a screen that says "we sent you a code" has to be able to do
- * when nothing arrives. Mail is delayed, mail lands in spam, and — the case
- * this was written for — mail goes to a domain a letter away from the one that
- * was meant, where it is delivered perfectly and read by nobody.
- */
-export async function resendEmailCode(handle: PendingEmail): Promise<void> {
-  const created = pending.get(handle.id);
-  if (!created) {
-    throw new AccountActionError("That change has expired. Start again.");
-  }
-  try {
-    await created.prepareVerification({ strategy: "email_code" });
-  } catch (err) {
-    throw new AccountActionError(clerkMessage(err, "That code could not be sent again."));
-  }
-}
-
-/** Abandon a change: take the unverified address back off the account. */
-export async function cancelEmailChange(handle: PendingEmail): Promise<void> {
-  const created = pending.get(handle.id);
-  pending.delete(handle.id);
-  await created?.destroy().catch(() => undefined);
-}
-
-/* -------------------------------------------------------------------------- */
-/* Proving it is you, again                                                   */
-/* -------------------------------------------------------------------------- */
-
-/**
- * What Clerk will accept as proof, and which of it Orion can ask for.
- *
- * <p>A code beats a password here. Clerk offers both first factors, and the
- * code is the one that needs nothing recalled: it goes to the address already
- * signing this person in, which they are by definition able to read. So the
- * code is prepared as soon as the challenge opens and the password is the
- * alternative, not the other way round.
- */
-export interface ReverificationChallenge {
-  /** The address a code can go to, when Clerk offers that factor. */
-  emailCode: { emailAddressId: string; address: string } | null;
-  /** Whether Clerk will take the account password instead. */
-  password: boolean;
-}
-
-/**
- * Ask Clerk what it wants, and send the code if it will take one.
- *
- * <p>Returns null when the session is already inside the window — somebody who
- * signed in a moment ago — so the caller can carry straight on rather than
- * putting a step in front of them for nothing.
- */
-export async function startReverification(): Promise<ReverificationChallenge | null> {
-  const session = await requireSession();
-  const start = requireReverification(session).start;
-
-  try {
-    const started = await start.call(session, { level: "firstFactor" });
-    if (started.status === "complete") return null;
-
-    const factors = Array.isArray(started.supportedFirstFactors)
-      ? started.supportedFirstFactors
-      : [];
-    const email = factors.find(
-      (factor) => factor.strategy === "email_code" && Boolean(factor.emailAddressId),
-    );
-
-    const challenge: ReverificationChallenge = {
-      emailCode: email
-        ? { emailAddressId: email.emailAddressId as string, address: email.safeIdentifier ?? "" }
-        : null,
-      password: factors.some((factor) => factor.strategy === "password"),
-    };
-
-    if (!challenge.emailCode && !challenge.password) {
-      // Clerk wants something this dialog cannot draw. Signing in does all of
-      // it, whatever it is.
-      throw new AccountActionError(
-        "Sign out and sign in again, then change the address within a few minutes.",
-      );
-    }
-
-    if (challenge.emailCode) await sendReverificationCode(challenge.emailCode.emailAddressId);
-    return challenge;
-  } catch (err) {
-    if (err instanceof AccountActionError) throw err;
-    throw new AccountActionError(clerkMessage(err, "That could not be confirmed. Try again."));
-  }
-}
-
-/**
- * Send — or send again — the code that proves it is you.
- *
- * <p>It goes to the address that signs this person in <em>now</em>, not the new
- * one. Sending it to an address nobody has proved yet would be handing the
- * check to whoever typed it.
- */
-export async function sendReverificationCode(emailAddressId: string): Promise<void> {
-  const session = await requireSession();
-  const prepare = requireReverification(session).prepare;
-  try {
-    await prepare.call(session, { strategy: "email_code", emailAddressId });
-  } catch (err) {
-    throw new AccountActionError(clerkMessage(err, "That code could not be sent."));
-  }
-}
-
-/** Prove it is you with the code that was sent. */
-export async function reverifyWithCode(code: string): Promise<void> {
-  await settleFirstFactor(
-    { strategy: "email_code", code },
-    "That code is not right. Check it and try again.",
-  );
-}
-
-/**
- * Prove it is you with the account password, where Clerk offers that instead.
- *
- * <p>Nothing is stored. The password goes to Clerk, which is the only thing
- * that can check it, and this module keeps no copy — the same arrangement as
- * {@link changePassword}.
- */
-export async function reverifyWithPassword(password: string): Promise<void> {
-  await settleFirstFactor({ strategy: "password", password }, "That password is not right.");
-}
-
-async function settleFirstFactor(
-  attemptWith: { strategy: string; code?: string; password?: string },
-  wrong: string,
-): Promise<void> {
-  const session = await requireSession();
-  const attempt = requireReverification(session).attempt;
-  try {
-    const done = await attempt.call(session, attemptWith);
-    if (done.status === "complete") return;
-    if (done.status === "needs_second_factor") {
-      // Orion draws no second-factor form, and pretending otherwise would be a
-      // dialog that can only fail. Signing in again does the whole of it.
-      throw new AccountActionError(
-        "This account needs its second factor. Sign out and sign in again, then try once more.",
-      );
-    }
-    throw new AccountActionError(wrong);
-  } catch (err) {
-    if (err instanceof AccountActionError) throw err;
-    throw new AccountActionError(clerkMessage(err, wrong));
-  }
-}
-
-/**
- * The three reverification calls, or an instruction that works without them.
- *
- * <p>They are `__experimental_` in the pinned SDK, so they can be absent from
- * the script that actually loaded. Signing in is itself a first factor, so a
- * fresh sign-in satisfies the check — which makes for a fallback that is a real
- * instruction rather than an apology.
- */
-function requireReverification(session: ClerkSession) {
-  const start = session.__experimental_startVerification;
-  const prepare = session.__experimental_prepareFirstFactorVerification;
-  const attempt = session.__experimental_attemptFirstFactorVerification;
-  if (typeof start !== "function" || typeof prepare !== "function" || typeof attempt !== "function") {
-    throw new AccountActionError(
-      "Sign out and sign in again, then change the address within a few minutes.",
-    );
-  }
-  return { start, prepare, attempt };
-}
-
-/**
- * Whether a refusal is Clerk asking for a fresh proof of identity.
- *
- * <p>The code is matched loosely and the sentence is matched as well. This is
- * an experimental feature in the SDK this app is pinned to, its error code has
- * moved once already, and the cost of missing it is the raw provider string —
- * "You need to provide additional verification to perform this operation" —
- * arriving in a dialog with no field to provide it in.
- */
-function isReverificationRequired(err: unknown): boolean {
-  const first = (err as { errors?: { code?: string; message?: string }[] })?.errors?.[0];
-  if (!first) return false;
-  if ((first.code ?? "").includes("reverification")) return true;
-  return /additional verification/i.test(first.message ?? "");
-}
-
-async function requireUser() {
-  const clerk = await loadClerk();
-  const user = clerk.user;
-  if (!user) throw new AccountActionError("You are not signed in.");
-  return user;
-}
-
-async function requireSession() {
-  const clerk = await loadClerk();
-  const session = clerk.session;
-  if (!session) throw new AccountActionError("You are not signed in.");
-  return session;
-}
-
 /**
  * Clerk's own words, where it gave any.
  *
@@ -393,56 +98,13 @@ function clerkMessage(
   return said || fallback;
 }
 
-/** One address on the account, as much of it as this module touches. */
-interface ClerkEmailAddress {
-  id: string;
-  prepareVerification: (opts: { strategy: string }) => Promise<unknown>;
-  attemptVerification: (opts: { code: string }) => Promise<unknown>;
-  destroy: () => Promise<unknown>;
-}
-
-/**
- * The reverification calls, as much of them as this module drives.
- *
- * <p>Both optional: they are `__experimental_` in the pinned SDK, so the script
- * that loads at runtime may not carry them. See {@link reverifyWithPassword}.
- */
-interface ClerkFirstFactor {
-  strategy?: string;
-  emailAddressId?: string;
-  safeIdentifier?: string;
-}
-
-interface ClerkVerification {
-  status: string;
-  supportedFirstFactors?: ClerkFirstFactor[] | null;
-}
-
-interface ClerkSession {
-  __experimental_startVerification?: (params: { level: string }) => Promise<ClerkVerification>;
-  __experimental_prepareFirstFactorVerification?: (params: {
-    strategy: string;
-    emailAddressId: string;
-  }) => Promise<ClerkVerification>;
-  __experimental_attemptFirstFactorVerification?: (params: {
-    strategy: string;
-    code?: string;
-    password?: string;
-  }) => Promise<ClerkVerification>;
-}
-
 interface ClerkLike {
-  session?: ClerkSession | null;
   user?: {
     updatePassword: (opts: {
       currentPassword: string;
       newPassword: string;
       signOutOfOtherSessions?: boolean;
     }) => Promise<unknown>;
-    createEmailAddress: (opts: { email: string }) => Promise<ClerkEmailAddress>;
-    update: (opts: { primaryEmailAddressId: string }) => Promise<unknown>;
-    primaryEmailAddressId?: string | null;
-    emailAddresses?: ClerkEmailAddress[];
   } | null;
 }
 

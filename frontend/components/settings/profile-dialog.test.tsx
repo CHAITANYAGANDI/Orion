@@ -10,30 +10,13 @@ import userEvent from "@testing-library/user-event";
  * failure says so instead of silently keeping the old one, and that removing it
  * really removes it.
  *
- * The rest is about restraint. Neither credential belongs to Orion, and the
- * dialog has to be clear about which of them this deployment can change at all.
+ * The rest is about restraint. The address cannot be changed here by anybody,
+ * and the name and the password belong to whoever holds the credential -- so
+ * the dialog has to be clear about which of them this account can change.
  */
 const { avatarFromFile } = vi.hoisted(() => ({ avatarFromFile: vi.fn() }));
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
-const {
-  changePassword,
-  startEmailChange,
-  resendEmailCode,
-  cancelEmailChange,
-  startReverification,
-  sendReverificationCode,
-  reverifyWithCode,
-  reverifyWithPassword,
-} = vi.hoisted(() => ({
-  changePassword: vi.fn(),
-  startEmailChange: vi.fn(),
-  resendEmailCode: vi.fn(),
-  cancelEmailChange: vi.fn(),
-  startReverification: vi.fn(),
-  sendReverificationCode: vi.fn(),
-  reverifyWithCode: vi.fn(),
-  reverifyWithPassword: vi.fn(),
-}));
+const { changePassword } = vi.hoisted(() => ({ changePassword: vi.fn() }));
 
 vi.mock("@/lib/avatar", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/avatar")>();
@@ -42,17 +25,7 @@ vi.mock("@/lib/avatar", async (importOriginal) => {
 
 vi.mock("@/lib/account-actions", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/account-actions")>();
-  return {
-    ...real,
-    changePassword,
-    startEmailChange,
-    resendEmailCode,
-    cancelEmailChange,
-    startReverification,
-    sendReverificationCode,
-    reverifyWithCode,
-    reverifyWithPassword,
-  };
+  return { ...real, changePassword };
 });
 
 vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
@@ -75,19 +48,13 @@ const EMPTY: ProfileForm = {
   avatarUrl: "",
 };
 
-/** What Clerk offers when it asks for proof: a code to the current address. */
-const CHALLENGE = {
-  emailCode: { emailAddressId: "idn_1", address: "priya@example.com" },
-  password: true,
-};
-
 /**
  * The three kinds of account, which this dialog now tells apart.
  *
  * <p>It used to ask one question -- "is this deployment using Clerk?" -- and a
  * Google sign-in and an email-and-password sign-up answer that identically. So
- * the address was locked for both and both were offered a password dialog,
- * when in fact one owns all three fields and the other owns none of them.
+ * both were offered a password dialog, when in fact one of them owns its name
+ * and its password and the other owns neither.
  */
 const DEV = { mode: "dev", provider: "", hasPassword: false };
 const ORION = { mode: "clerk", provider: "", hasPassword: true };
@@ -112,13 +79,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   avatarFromFile.mockResolvedValue(PNG);
   changePassword.mockResolvedValue(undefined);
-  startEmailChange.mockResolvedValue({ id: "eml_1", address: "new@example.com" });
-  resendEmailCode.mockResolvedValue(undefined);
-  cancelEmailChange.mockResolvedValue(undefined);
-  startReverification.mockResolvedValue(CHALLENGE);
-  sendReverificationCode.mockResolvedValue(undefined);
-  reverifyWithCode.mockResolvedValue(undefined);
-  reverifyWithPassword.mockResolvedValue(undefined);
 });
 
 describe("what it asks for", () => {
@@ -137,18 +97,14 @@ describe("what it asks for", () => {
     ).toBeInTheDocument();
   });
 
-  it("saves the name, email and photo together", async () => {
+  it("saves the name and the photo together, and never the address", async () => {
     const { onSave } = show();
 
-    await userEvent.clear(screen.getByLabelText("Email"));
-    await userEvent.type(screen.getByLabelText("Email"), "new@example.com");
+    await userEvent.clear(screen.getByLabelText("Full Name"));
+    await userEvent.type(screen.getByLabelText("Full Name"), "Ada Lovelace");
     await userEvent.click(screen.getByRole("button", { name: "Finish" }));
 
-    expect(onSave).toHaveBeenCalledWith({
-      displayName: "Priya Raman",
-      email: "new@example.com",
-      avatarUrl: "",
-    });
+    expect(onSave).toHaveBeenCalledWith({ displayName: "Ada Lovelace", avatarUrl: "" });
   });
 });
 
@@ -229,206 +185,61 @@ describe("the photo", () => {
 });
 
 describe("the email", () => {
-  it("can be edited inline where Orion owns the column", async () => {
-    show(EMPTY, DEV);
-    expect(screen.getByLabelText("Email")).toBeEnabled();
+  /*
+   * It used to be editable in a dev build, and changeable at the provider under
+   * Clerk through a dialog of its own. Both are gone: the address is the
+   * credential, so every route to changing it is a route to losing an account,
+   * and it is fixed once the account is made.
+   */
+  it("cannot be edited by any kind of account", () => {
+    for (const credential of [DEV, ORION, GOOGLE]) {
+      const view = render(
+        <ProfileDialog
+          open
+          initial={EMPTY}
+          permissions={identityPermissions(credential)}
+          onClose={vi.fn()}
+          onSave={vi.fn()}
+        />,
+      );
+      expect(screen.getByLabelText("Email")).toBeDisabled();
+      view.unmount();
+    }
   });
 
-  it("cannot be touched at all when Google owns it", () => {
-    /*
-     * Not politeness: the server refuses it too, because the column is
-     * rewritten from the sign-in token on the next request, so an accepted edit
-     * would appear to work and silently revert. And there is no Change button
-     * either -- the address lives at Google, and a dialog here could only fail.
-     */
+  it("offers no way into a change, for any of them", () => {
+    for (const credential of [DEV, ORION, GOOGLE]) {
+      const view = render(
+        <ProfileDialog
+          open
+          initial={EMPTY}
+          permissions={identityPermissions(credential)}
+          onClose={vi.fn()}
+          onSave={vi.fn()}
+        />,
+      );
+      expect(screen.queryByRole("button", { name: /Change email/i })).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("New email")).not.toBeInTheDocument();
+      view.unmount();
+    }
+  });
+
+  it("still shows the address, which is the point of the row", () => {
+    show(EMPTY, ORION);
+
+    expect(screen.getByLabelText("Email")).toHaveValue("priya@example.com");
+  });
+
+  it("says where a Google address comes from, so the lock is not a mystery", () => {
     show(EMPTY, GOOGLE);
 
-    expect(screen.getByLabelText("Email")).toBeDisabled();
     expect(screen.getByText(/Your email comes from Google/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Change email" })).not.toBeInTheDocument();
   });
 
-  it("is changed at the provider, with a code, for an account made here", async () => {
-    // The address is the credential under Clerk -- it is what sign-in matches
-    // on -- so it cannot be a text field with a Save button beside it. A typo
-    // would lock somebody out of their own workspace.
+  it("says an account's own address is fixed rather than borrowed", () => {
     show(EMPTY, ORION);
 
-    expect(screen.getByLabelText("Email")).toBeDisabled();
-    await userEvent.click(screen.getByRole("button", { name: "Change email" }));
-
-    expect(screen.getByRole("heading", { name: "Change email" })).toBeInTheDocument();
-    expect(screen.getByLabelText("New email")).toBeInTheDocument();
-  });
-
-  /**
-   * The code that never comes.
-   *
-   * <p>The send succeeds and nothing arrives — the address was a letter out, or
-   * the mail is slow, or it is in spam. This step used to have one exit, Cancel,
-   * which threw the change away and explained nothing.
-   */
-  async function reachTheCode() {
-    show(EMPTY, ORION);
-    await userEvent.click(screen.getByRole("button", { name: "Change email" }));
-    await userEvent.type(screen.getByLabelText("New email"), "new@example.com");
-    await userEvent.click(screen.getByRole("button", { name: /Send code/ }));
-    await screen.findByLabelText("Code");
-  }
-
-  it("can send the code again", async () => {
-    await reachTheCode();
-
-    await userEvent.click(screen.getByRole("button", { name: "Send another code" }));
-
-    await waitFor(() =>
-      expect(resendEmailCode).toHaveBeenCalledWith({ id: "eml_1", address: "new@example.com" }),
-    );
-    expect(await screen.findByRole("status")).toHaveTextContent(/A new code is on its way/);
-  });
-
-  it("says so when a second code cannot be sent either", async () => {
-    const { AccountActionError } = await import("@/lib/account-actions");
-    resendEmailCode.mockRejectedValue(new AccountActionError("Too many attempts."));
-    await reachTheCode();
-
-    await userEvent.click(screen.getByRole("button", { name: "Send another code" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("Too many attempts.");
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-  });
-
-  it("goes back to the address without abandoning the change", async () => {
-    await reachTheCode();
-
-    await userEvent.click(screen.getByRole("button", { name: "Use a different address" }));
-
-    expect(await screen.findByLabelText("New email")).toBeInTheDocument();
-    // Still inside the dialog: this is a correction, not a cancellation.
-    expect(screen.getByRole("heading", { name: "Change email" })).toBeInTheDocument();
-  });
-
-  it("sends a proof code when Clerk wants the session proved again", async () => {
-    /*
-     * "You need to provide additional verification to perform this operation"
-     * used to arrive as a red line in a dialog with no field to provide it in.
-     * Clerk is right to guard this -- changing the address you sign in with is
-     * what somebody at a borrowed, still-signed-in laptop would do -- so the
-     * answer is to send a code and ask for it, in Orion's words.
-     */
-    const { ReverificationRequiredError } = await import("@/lib/account-actions");
-    startEmailChange.mockRejectedValueOnce(new ReverificationRequiredError("Confirm it is you."));
-    show(EMPTY, ORION);
-    await userEvent.click(screen.getByRole("button", { name: "Change email" }));
-
-    await userEvent.type(screen.getByLabelText("New email"), "new@example.com");
-    await userEvent.click(screen.getByRole("button", { name: /Send code/ }));
-
-    await waitFor(() => expect(startReverification).toHaveBeenCalled());
-    expect(await screen.findByLabelText("Code")).toBeInTheDocument();
-    // Not an error. It is the next step, and a red line beside it would read as
-    // something having gone wrong.
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
-  it("picks the change back up by itself once the code lands", async () => {
-    const { ReverificationRequiredError } = await import("@/lib/account-actions");
-    startEmailChange.mockRejectedValueOnce(new ReverificationRequiredError("Confirm it is you."));
-    show(EMPTY, ORION);
-    await userEvent.click(screen.getByRole("button", { name: "Change email" }));
-    await userEvent.type(screen.getByLabelText("New email"), "new@example.com");
-    await userEvent.click(screen.getByRole("button", { name: /Send code/ }));
-
-    await userEvent.type(await screen.findByLabelText("Code"), "123456");
-    await userEvent.click(screen.getByRole("button", { name: /^Confirm$/ }));
-
-    await waitFor(() => expect(reverifyWithCode).toHaveBeenCalledWith("123456"));
-    // The address is not asked for a second time: it was remembered.
-    expect(startEmailChange).toHaveBeenLastCalledWith("new@example.com");
-  });
-
-  it("carries straight on when the session turned out to be fresh enough", async () => {
-    // startReverification answers null for a session already inside the window,
-    // and a step nobody needs is a step that should not appear.
-    const { ReverificationRequiredError } = await import("@/lib/account-actions");
-    startEmailChange.mockRejectedValueOnce(new ReverificationRequiredError("Confirm it is you."));
-    startReverification.mockResolvedValue(null);
-    show(EMPTY, ORION);
-    await userEvent.click(screen.getByRole("button", { name: "Change email" }));
-
-    await userEvent.type(screen.getByLabelText("New email"), "new@example.com");
-    await userEvent.click(screen.getByRole("button", { name: /Send code/ }));
-
-    await waitFor(() => expect(startEmailChange).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText(/We sent a six-digit code to/)).toBeInTheDocument();
-  });
-
-  it("stays on the proof step when the code is wrong", async () => {
-    const { AccountActionError, ReverificationRequiredError } = await import(
-      "@/lib/account-actions"
-    );
-    startEmailChange.mockRejectedValueOnce(new ReverificationRequiredError("Confirm it is you."));
-    reverifyWithCode.mockRejectedValue(new AccountActionError("That code is not right."));
-    show(EMPTY, ORION);
-    await userEvent.click(screen.getByRole("button", { name: "Change email" }));
-    await userEvent.type(screen.getByLabelText("New email"), "new@example.com");
-    await userEvent.click(screen.getByRole("button", { name: /Send code/ }));
-
-    await userEvent.type(await screen.findByLabelText("Code"), "000000");
-    await userEvent.click(screen.getByRole("button", { name: /^Confirm$/ }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("That code is not right.");
-    expect(screen.getByLabelText("Code")).toBeInTheDocument();
-  });
-
-  it("can send the proof code again", async () => {
-    const { ReverificationRequiredError } = await import("@/lib/account-actions");
-    startEmailChange.mockRejectedValueOnce(new ReverificationRequiredError("Confirm it is you."));
-    show(EMPTY, ORION);
-    await userEvent.click(screen.getByRole("button", { name: "Change email" }));
-    await userEvent.type(screen.getByLabelText("New email"), "new@example.com");
-    await userEvent.click(screen.getByRole("button", { name: /Send code/ }));
-    await screen.findByLabelText("Code");
-
-    await userEvent.click(screen.getByRole("button", { name: "Send another code" }));
-
-    await waitFor(() => expect(sendReverificationCode).toHaveBeenCalledWith("idn_1"));
-    expect(await screen.findByRole("status")).toHaveTextContent(/A new code is on its way/);
-  });
-
-  it("takes the password instead for anybody who would rather type it", async () => {
-    const { ReverificationRequiredError } = await import("@/lib/account-actions");
-    startEmailChange.mockRejectedValueOnce(new ReverificationRequiredError("Confirm it is you."));
-    show(EMPTY, ORION);
-    await userEvent.click(screen.getByRole("button", { name: "Change email" }));
-    await userEvent.type(screen.getByLabelText("New email"), "new@example.com");
-    await userEvent.click(screen.getByRole("button", { name: /Send code/ }));
-
-    await userEvent.click(await screen.findByRole("button", { name: "Use your password instead" }));
-    await userEvent.type(screen.getByLabelText("Current password"), "hunter2");
-    await userEvent.click(screen.getByRole("button", { name: /^Confirm$/ }));
-
-    await waitFor(() => expect(reverifyWithPassword).toHaveBeenCalledWith("hunter2"));
-    expect(reverifyWithCode).not.toHaveBeenCalled();
-  });
-
-  it("asks for no proof at all when Clerk does not want one", async () => {
-    // Most of the time the session is already inside the window, and a proof
-    // supplied for nothing is a step nobody needed.
-    await reachTheCode();
-
-    expect(startReverification).not.toHaveBeenCalled();
-    expect(screen.queryByLabelText("Current password")).not.toBeInTheDocument();
-  });
-
-  it("takes the unverified address off the account on the way back", async () => {
-    // Leaving it there makes a second go at the corrected address fail as one
-    // that is already taken, which is the least helpful true sentence available.
-    await reachTheCode();
-
-    await userEvent.click(screen.getByRole("button", { name: "Use a different address" }));
-
-    expect(cancelEmailChange).toHaveBeenCalledWith({ id: "eml_1", address: "new@example.com" });
+    expect(screen.getByText(/fixed once the account is made/)).toBeInTheDocument();
   });
 
   it("omits the address entirely rather than sending it back unchanged", async () => {
@@ -468,30 +279,6 @@ describe("the email", () => {
     await userEvent.click(screen.getByRole("button", { name: "Finish" }));
 
     expect(onSave).toHaveBeenCalledWith({ avatarUrl: PNG });
-  });
-
-  it("does not write the provider's name into Orion's column behind their back", async () => {
-    // The name field is disabled and holds Google's value. Sending it would
-    // quietly make a copy that then outranks Google's on every screen.
-    const { onSave } = show(EMPTY, GOOGLE);
-
-    await userEvent.click(screen.getByRole("button", { name: "Finish" }));
-
-    expect(onSave.mock.calls[0][0]).not.toHaveProperty("displayName");
-  });
-});
-
-describe("the name", () => {
-  it("is editable for an account made here", () => {
-    show(EMPTY, ORION);
-    expect(screen.getByLabelText("Full Name")).toBeEnabled();
-  });
-
-  it("is Google's when the account is Google's", () => {
-    show(EMPTY, GOOGLE);
-
-    expect(screen.getByLabelText("Full Name")).toBeDisabled();
-    expect(screen.getByText(/Your name comes from Google/)).toBeInTheDocument();
   });
 });
 

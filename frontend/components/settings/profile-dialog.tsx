@@ -31,23 +31,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CameraCapture } from "@/components/settings/camera-capture";
 import { ChangePasswordDialog } from "@/components/settings/change-password-dialog";
-import { ChangeEmailDialog } from "@/components/settings/change-email-dialog";
 import { AvatarError, avatarFromFile, initialsOf } from "@/lib/avatar";
-import {
-  AccountActionError,
-  cancelEmailChange,
-  changePassword,
-  confirmEmailChange,
-  resendEmailCode,
-  ReverificationRequiredError,
-  reverifyWithCode,
-  reverifyWithPassword,
-  sendReverificationCode,
-  startEmailChange,
-  startReverification,
-  type ReverificationChallenge,
-  type PendingEmail,
-} from "@/lib/account-actions";
+import { AccountActionError, changePassword } from "@/lib/account-actions";
 import type { IdentityPermissions } from "@/lib/identity-owner";
 import { cn } from "@/lib/utils";
 
@@ -74,24 +59,24 @@ export interface ProfileForm {
  * to do with it, and took the whole save down with it.
  *
  * <p>The endpoint treats a missing field as "leave it alone", so the fix is to
- * send nothing rather than something.
+ * send nothing rather than something. The address is now never sent by anybody
+ * — it is a display on every screen that shows it — but the rule stands for the
+ * name, which a Google account does not own either.
  */
 export interface ProfilePatch {
   /** Orion's own column, and the only one every account owns. */
   avatarUrl: string;
   /** Present only where the name is this account's to set. */
   displayName?: string;
-  /** Present only where Orion's own API owns the address. */
-  email?: string;
 }
 
 export function ProfileDialog({
   open,
   initial,
   /**
-   * Which of these three fields this account is allowed to change, and where a
-   * changed address has to go. See lib/identity-owner: an account made with
-   * Google owns none of them here, and one made with an email owns all three.
+   * Which of the name and the password this account may change. See
+   * lib/identity-owner: an account made with Google owns neither here, and one
+   * made with an email owns both. The address is nobody's to change.
    */
   permissions,
   saving,
@@ -110,18 +95,6 @@ export function ProfileDialog({
   const [password, setPassword] = React.useState(false);
   const [changing, setChanging] = React.useState(false);
   const [passwordError, setPasswordError] = React.useState<string | null>(null);
-  const [emailOpen, setEmailOpen] = React.useState(false);
-  const [emailBusy, setEmailBusy] = React.useState(false);
-  const [emailError, setEmailError] = React.useState<string | null>(null);
-  const [emailPending, setEmailPending] = React.useState<PendingEmail | null>(null);
-  const [emailResent, setEmailResent] = React.useState(false);
-  /*
-   * Clerk refuses to add an address to a session that has not proved a first
-   * factor lately. Held here rather than asked for up front: most people are
-   * inside the window and would be typing a password for nothing.
-   */
-  const [challenge, setChallenge] = React.useState<ReverificationChallenge | null>(null);
-  const [emailWanted, setEmailWanted] = React.useState("");
   const fileRef = React.useRef<HTMLInputElement | null>(null);
 
   // Reset from props each time it opens, so cancelling really discards. Keyed
@@ -131,14 +104,6 @@ export function ProfileDialog({
     if (open) setForm(initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
-
-  /**
-   * The address a signed-out edit would be aimed at.
-   *
-   * <p>Under Clerk this is not a form field at all: it changes at the provider,
-   * with a code, in its own dialog. The input below is a display of it.
-   */
-  const emailAtProvider = permissions.emailVia === "provider";
 
   function set<K extends keyof ProfileForm>(key: K, value: ProfileForm[K]) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -175,146 +140,14 @@ export function ProfileDialog({
     }
   }
 
-  async function sendEmailCode(address: string) {
-    setEmailBusy(true);
-    setEmailError(null);
-    setEmailResent(false);
-    try {
-      setEmailPending(await startEmailChange(address));
-      setChallenge(null);
-    } catch (err) {
-      if (err instanceof ReverificationRequiredError) {
-        // Not a failure to report -- it is the next step. Remember what was
-        // being attempted so it can carry on by itself afterwards.
-        setEmailWanted(address);
-        await askWhoYouAre();
-        return;
-      }
-      setEmailError(err instanceof AccountActionError ? err.message : "That address could not be added.");
-    } finally {
-      setEmailBusy(false);
-    }
-  }
-
-  /**
-   * Ask Clerk what proof it wants, and send the code if it will take one.
-   *
-   * <p>A null answer means the session was already inside the window by the
-   * time it was asked, so there is nothing to put in front of anybody.
-   */
-  async function askWhoYouAre() {
-    try {
-      const wants = await startReverification();
-      if (!wants) {
-        await sendEmailCode(emailWanted);
-        return;
-      }
-      setChallenge(wants);
-    } catch (err) {
-      setEmailError(err instanceof AccountActionError ? err.message : "That could not be confirmed.");
-    }
-  }
-
-  /** Another proof code, to the address that signs this person in now. */
-  async function resendIdentityCode() {
-    const factor = challenge?.emailCode;
-    if (!factor) return;
-    setEmailBusy(true);
-    setEmailError(null);
-    setEmailResent(false);
-    try {
-      await sendReverificationCode(factor.emailAddressId);
-      setEmailResent(true);
-    } catch (err) {
-      setEmailError(err instanceof AccountActionError ? err.message : "That code could not be sent.");
-    } finally {
-      setEmailBusy(false);
-    }
-  }
-
-  /** Prove it is you, then pick the change back up where it was refused. */
-  async function confirmIdentity(prove: () => Promise<void>, wrong: string) {
-    setEmailBusy(true);
-    setEmailError(null);
-    setEmailResent(false);
-    try {
-      await prove();
-    } catch (err) {
-      setEmailError(err instanceof AccountActionError ? err.message : wrong);
-      return;
-    } finally {
-      setEmailBusy(false);
-    }
-    setChallenge(null);
-    await sendEmailCode(emailWanted);
-  }
-
-  /** Another code to the same address, for mail that is slow or filed as spam. */
-  async function resendCode() {
-    if (!emailPending) return;
-    setEmailBusy(true);
-    setEmailError(null);
-    setEmailResent(false);
-    try {
-      await resendEmailCode(emailPending);
-      setEmailResent(true);
-    } catch (err) {
-      setEmailError(err instanceof AccountActionError ? err.message : "That code could not be sent again.");
-    } finally {
-      setEmailBusy(false);
-    }
-  }
-
-  /**
-   * Back to the address step, with what was typed still in the field.
-   *
-   * <p>The unverified address comes off the account on the way — leaving it
-   * there would make a second go at the corrected address fail as one that is
-   * already taken, which is the least helpful true sentence available.
-   */
-  function retypeEmail() {
-    if (emailPending) void cancelEmailChange(emailPending);
-    setEmailPending(null);
-    setEmailError(null);
-    setEmailResent(false);
-    setChallenge(null);
-  }
-
-  async function confirmEmailCode(code: string) {
-    if (!emailPending) return;
-    setEmailBusy(true);
-    setEmailError(null);
-    try {
-      await confirmEmailChange(emailPending, code);
-      set("email", emailPending.address);
-      setEmailPending(null);
-      setEmailOpen(false);
-      toast.success("Email changed. Sign in with it from now on.");
-    } catch (err) {
-      setEmailError(err instanceof AccountActionError ? err.message : "That code did not confirm the address.");
-    } finally {
-      setEmailBusy(false);
-    }
-  }
-
   /** See {@link ProfilePatch}: what may be sent, rather than what is on screen. */
   function submitted(): ProfilePatch {
     // The photo is Orion's own column and is nobody else's business, so it is
-    // always sent. The other two go only where this account owns them.
+    // always sent. The name goes only where this account owns it, and the
+    // address goes nowhere at all -- it is not editable on any screen.
     const patch: ProfilePatch = { avatarUrl: form.avatarUrl };
     if (permissions.name) patch.displayName = form.displayName;
-    if (permissions.emailVia === "preferences") patch.email = form.email;
     return patch;
-  }
-
-  /** Backing out takes the unverified address off the account again. */
-  function abandonEmailChange() {
-    if (emailPending) void cancelEmailChange(emailPending);
-    setEmailPending(null);
-    setEmailError(null);
-    setEmailResent(false);
-    setChallenge(null);
-    setEmailOpen(false);
   }
 
   return (
@@ -410,44 +243,22 @@ export function ProfileDialog({
             {/* ---- email ---- */}
             <div className="space-y-1.5">
               <Label htmlFor="profile-email">Email</Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="profile-email"
-                  type="email"
-                  value={form.email}
-                  // Under Clerk this input is a display, never an edit: the
-                  // address is the credential, so it changes at the provider
-                  // with a code to prove the new one. The button opens that.
-                  disabled={!permissions.email || emailAtProvider}
-                  placeholder="you@example.com"
-                  className="flex-1"
-                  onChange={(e) => set("email", e.target.value)}
-                />
-                {emailAtProvider && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    aria-label="Change email"
-                    onClick={() => {
-                      setEmailError(null);
-                      setEmailPending(null);
-                      setEmailOpen(true);
-                    }}
-                  >
-                    Change
-                  </Button>
-                )}
-              </div>
+              <Input
+                id="profile-email"
+                type="email"
+                value={form.email}
+                // A display on every account, and never an edit. The address is
+                // the credential, so every route to changing it is a route to
+                // losing an account -- see lib/account-actions.
+                disabled
+                readOnly
+                placeholder="you@example.com"
+              />
               <p className="text-xs text-muted-foreground">
-                {!permissions.email ? (
-                  // Not merely disabled: the server refuses it too, because the
-                  // column is rewritten from the sign-in token on the next
-                  // request and an accepted edit would silently revert.
+                {permissions.ownerLabel ? (
                   <>Your email comes from {permissions.ownerLabel}. Change it there and it changes here.</>
-                ) : emailAtProvider ? (
-                  <>This is what you sign in with. The new address has to be confirmed first.</>
                 ) : (
-                  <>Where anything Orion sends you would go.</>
+                  <>The address on your account. It is fixed once the account is made.</>
                 )}
               </p>
             </div>
@@ -512,28 +323,6 @@ export function ProfileDialog({
           set("avatarUrl", dataUrl);
           setCamera(false);
         }}
-      />
-
-      <ChangeEmailDialog
-        open={emailOpen}
-        current={initial.email}
-        busy={emailBusy}
-        error={emailError}
-        sentTo={emailPending?.address ?? null}
-        resent={emailResent}
-        challenge={challenge}
-        onClose={abandonEmailChange}
-        onSend={(address) => void sendEmailCode(address)}
-        onResend={() => void resendCode()}
-        onRetype={retypeEmail}
-        onConfirm={(code) => void confirmEmailCode(code)}
-        onIdentityCode={(code) =>
-          void confirmIdentity(() => reverifyWithCode(code), "That code is not right.")
-        }
-        onIdentityPassword={(password) =>
-          void confirmIdentity(() => reverifyWithPassword(password), "That password is not right.")
-        }
-        onResendIdentityCode={() => void resendIdentityCode()}
       />
 
       <ChangePasswordDialog

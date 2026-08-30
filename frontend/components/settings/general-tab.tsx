@@ -15,13 +15,12 @@
  * too and were read by nothing at all — a form that asks for facts it never uses
  * is one people fill in for nothing, so they are gone.
  *
- * Email and password are the two Orion may not own. The address is editable
- * only where there is no identity provider, because `provision` rewrites that
- * column from the sign-in token on the very next request and an edit under Clerk
- * would appear to save and revert a second later. The password is never
- * Orion's: there is no password column, so the change is handed to the
- * provider, and a development session has no provider and therefore nothing to
- * rotate.
+ * Email and password are the two Orion may not own. The address is shown and
+ * never editable, by any kind of account: it is the credential, so every route
+ * to changing it is a route to losing an account, and it is fixed once the
+ * account is made. The password is never Orion's either — there is no password
+ * column, so the change is handed to the provider, and a development session
+ * has no provider and therefore nothing to rotate.
  *
  * The last two sections are the ones that delete things, and they are on this
  * page rather than behind a tab of their own because there is no longer a tab of
@@ -106,9 +105,9 @@ function IdentityBlock() {
   /*
    * Two kinds of account, and until now this block could not tell them apart.
    * It asked whether the deployment used Clerk, which is true for a Google
-   * sign-in and for an email-and-password sign-up alike -- so it locked the
-   * address for both and offered a password dialog to both, when the truth is
-   * the exact opposite in each case. See lib/identity-owner.
+   * sign-in and for an email-and-password sign-up alike -- so it offered a
+   * password dialog to both, when only one of them has a password to rotate.
+   * See lib/identity-owner.
    */
   const permissions = identityPermissions({
     mode,

@@ -1,34 +1,38 @@
 /**
- * Who owns your name, your address and your password — and therefore where
- * they can be changed.
+ * Who owns your name and your password — and therefore where they can be
+ * changed.
  *
  * <h2>The question this answers</h2>
  *
  * <p>Orion has two kinds of account and they are not the same underneath:
  *
  * <ul>
- *   <li><b>Signed up with Google.</b> The name, the address and the picture are
- *       Google's, arriving through Clerk. There is no password — Google
- *       authenticates, and Clerk holds no credential of its own for this
- *       person.</li>
+ *   <li><b>Signed up with Google.</b> The name and the picture are Google's,
+ *       arriving through Clerk. There is no password — Google authenticates,
+ *       and Clerk holds no credential of its own for this person.</li>
  *   <li><b>Signed up with an email and a password.</b> Clerk holds the
- *       credential, the address was verified by a code Orion's own form sent,
- *       and all three are the account holder's to change from here.</li>
+ *       credential, and the name and the password are the account holder's to
+ *       change from here.</li>
  * </ul>
  *
  * <p>The old rule could not tell them apart. It asked one question — "is this
- * deployment using Clerk?" — and answered both cases the same way: the address
- * was locked for everyone, and everyone was offered a Change password button.
- * So somebody who signed up with an email could not correct a typo in it, and
- * somebody who signed in with Google got a password dialog that could only
- * fail, because there is no current password to give it.
+ * deployment using Clerk?" — and answered both cases the same way, so somebody
+ * who signed in with Google got a Change password button that could only fail,
+ * because there is no current password to give it.
+ *
+ * <h2>The address is not in here</h2>
+ *
+ * <p>It used to be, with a whole vocabulary about where a changed one had to go.
+ * It is gone because nobody changes their address in Orion any more, whatever
+ * kind of account they have — see lib/account-actions. The address is a display
+ * on every screen that shows it, so there is nothing left to decide.
  *
  * <h2>Why an editable field that cannot save is worse than no field</h2>
  *
  * <p>A disabled input with a sentence beside it is understood in a second. A
- * form that accepts an edit and reverts it — which is what a Google address
- * does, because the next sign-in rewrites it — is the kind of bug people
- * report as data loss.
+ * form that accepts an edit and reverts it — which is what a Google name does,
+ * because the next sign-in rewrites it — is the kind of bug people report as
+ * data loss.
  *
  * <p>So this fails closed: an account whose credential cannot be identified is
  * treated as somebody else's, and the fields are locked rather than offered.
@@ -59,18 +63,11 @@ export interface IdentityPermissions {
   owner: IdentityOwner;
   /** Orion's own `display_name` column. */
   name: boolean;
-  /** Whether the address may be changed from inside Orion. */
-  email: boolean;
-  /**
-   * Where a changed address has to go.
-   *
-   * <p>Two different systems. In a dev build the address is a column Orion owns
-   * and the preferences endpoint takes it. Under Clerk the address is the
-   * credential — the thing sign-in matches on — so it changes at Clerk, with a
-   * code to the new address, and Orion's column follows. Sending it to the
-   * preferences endpoint instead is what the server refuses, and rightly.
+  /*
+   * There is no `email` here, and its absence is the answer rather than an
+   * omission: the address on an Orion account is fixed once it is made, for
+   * every kind of account. See lib/account-actions for why.
    */
-  emailVia: "preferences" | "provider" | null;
   password: boolean;
   /**
    * What to call whoever owns it, in a sentence: "Google", "your sign-in
@@ -113,21 +110,14 @@ export function identityPermissions(credential: Credential): IdentityPermissions
     case "orion":
       // Clerk holds the credential on Orion's behalf, and this is the account
       // holder. All three are theirs.
-      return { owner, name: true, email: true, emailVia: "provider", password: true, ownerLabel: "" };
+      return { owner, name: true, password: true, ownerLabel: "" };
     case "dev":
       // No provider and no credential: the name and address are ordinary
       // columns, and there is no password in existence to rotate.
-      return {
-        owner,
-        name: true,
-        email: true,
-        emailVia: "preferences",
-        password: false,
-        ownerLabel: "",
-      };
+      return { owner, name: true, password: false, ownerLabel: "" };
     case "external":
     default:
-      return { owner, name: false, email: false, emailVia: null, password: false, ownerLabel: label };
+      return { owner, name: false, password: false, ownerLabel: label };
   }
 }
 

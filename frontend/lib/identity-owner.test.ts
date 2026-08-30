@@ -26,16 +26,17 @@ const ORION: Credential = { mode: "clerk", provider: "", hasPassword: true };
 const DEV: Credential = { mode: "dev", provider: "", hasPassword: false };
 
 describe("an account that signs in with Google", () => {
-  it("owns none of the three here", () => {
+  it("owns neither of them here", () => {
     const can = identityPermissions(GOOGLE);
 
-    expect(can).toMatchObject({ owner: "external", name: false, email: false, password: false });
+    expect(can).toMatchObject({ owner: "external", name: false, password: false });
   });
 
-  it("has nowhere to send an address change", () => {
-    // Not "send it to the preferences endpoint and hope": there is no route
-    // that would take it. The field is a display.
-    expect(identityPermissions(GOOGLE).emailVia).toBeNull();
+  it("says nothing at all about the address", () => {
+    // Nobody changes their address in Orion, so there is no question left for
+    // this module to answer about it. See lib/account-actions.
+    expect(identityPermissions(GOOGLE)).not.toHaveProperty("email");
+    expect(identityPermissions(GOOGLE)).not.toHaveProperty("emailVia");
   });
 
   it("names Google, so the sentence on screen can too", () => {
@@ -58,36 +59,24 @@ describe("an account that signs in with Google", () => {
 
   it("stays Google's even after a password is added", () => {
     /*
-     * Clerk lets an OAuth account set a password later. The name and the
-     * address still come from Google, so editing them here would be editing a
-     * copy that the next sign-in overwrites.
+     * Clerk lets an OAuth account set a password later. The name still comes
+     * from Google, so editing it here would be editing a copy that the next
+     * sign-in overwrites.
      */
     const can = identityPermissions({ ...GOOGLE, hasPassword: true });
 
     expect(can.owner).toBe("external");
     expect(can.name).toBe(false);
-    expect(can.email).toBe(false);
   });
 });
 
 describe("an account made with an email and a password", () => {
-  it("owns all three", () => {
+  it("owns both", () => {
     expect(identityPermissions(ORION)).toMatchObject({
       owner: "orion",
       name: true,
-      email: true,
       password: true,
     });
-  });
-
-  it("changes its address at the provider rather than through Orion's API", () => {
-    /*
-     * The address is the credential -- it is what sign-in matches on. So it
-     * changes at Clerk, with a code to the new address, and Orion's column
-     * follows. `UserService.cleanAccountEmail` refuses it on the API, and
-     * rightly: an accepted edit there would revert on the next sign-in.
-     */
-    expect(identityPermissions(ORION).emailVia).toBe("provider");
   });
 
   it("has nobody else to name", () => {
@@ -96,12 +85,10 @@ describe("an account made with an email and a password", () => {
 });
 
 describe("a development session", () => {
-  it("owns its name and address, and has no password in existence", () => {
+  it("owns its name, and has no password in existence", () => {
     expect(identityPermissions(DEV)).toMatchObject({
       owner: "dev",
       name: true,
-      email: true,
-      emailVia: "preferences",
       password: false,
     });
   });
@@ -117,7 +104,7 @@ describe("failing closed", () => {
 
     expect(can.owner).toBe("external");
     expect(can.password).toBe(false);
-    expect(can.email).toBe(false);
+    expect(can.name).toBe(false);
   });
 
   it("treats an unknown mode as having no provider rather than guessing", () => {

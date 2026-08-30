@@ -239,11 +239,13 @@ describe("editing", () => {
     expect(screen.queryByLabelText("Pronouns")).not.toBeInTheDocument();
   });
 
-  it("lets the address be edited in a session Orion owns", async () => {
+  it("shows the address without offering to change it", async () => {
     await openEditor();
 
-    // Dev has no provider, so the column is Orion's own and an edit sticks.
-    expect(screen.getByLabelText("Email")).toBeEnabled();
+    // No kind of account changes its address in Orion. It is the credential,
+    // so every route to changing it is a route to losing an account.
+    expect(screen.getByLabelText("Email")).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /Change email/i })).not.toBeInTheDocument();
   });
 
   it("never puts a real password in the DOM", async () => {
@@ -255,19 +257,17 @@ describe("editing", () => {
     expect(screen.getByLabelText("Password")).toHaveValue("••••••••••");
   });
 
-  it("saves every field together, so changing one cannot clear another", async () => {
+  it("saves every field it owns together, so changing one cannot clear another", async () => {
     await openEditor();
 
-    await userEvent.clear(screen.getByLabelText("Email"));
-    await userEvent.type(screen.getByLabelText("Email"), "new@example.com");
+    await userEvent.clear(screen.getByLabelText("Full Name"));
+    await userEvent.type(screen.getByLabelText("Full Name"), "Ada Lovelace");
     await userEvent.click(screen.getByRole("button", { name: "Finish" }));
 
+    // No address in it. A field nobody can edit is a field with nothing to
+    // send, and sending it back unchanged is what the server refuses.
     await waitFor(() =>
-      expect(update).toHaveBeenCalledWith({
-        displayName: "Priya Raman",
-        email: "new@example.com",
-        avatarUrl: "",
-      }),
+      expect(update).toHaveBeenCalledWith({ displayName: "Ada Lovelace", avatarUrl: "" }),
     );
   });
 
