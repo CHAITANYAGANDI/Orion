@@ -51,8 +51,8 @@ class UserPreferencesTest {
      *
      * <p>Positional nulls at every call site is how a transposition gets written
      * and never noticed — the record exists to be named, and these helpers are
-     * where the naming happens for tests. There were six: `sharing` went with
-     * the share links it configured, and `email` with the mail itself (V56).
+     * where the naming happens for tests. `sharing` went with the share links
+     * it configured; the mail switches came back in V64 with their own helper.
      */
     private static UserService.PreferencesPatch profile(String displayName, String department,
                                                         String jobRole, String language) {
@@ -60,31 +60,45 @@ class UserPreferencesTest {
                 displayName, department, jobRole,
                 null, null, null,  // pronouns, email, avatarUrl -- their own helpers
                 language,
-                null, null, null);
+                null, null, null,
+                null, null, null, null, null);
     }
 
     /** Pronouns and the profile picture, which nothing else here touches. */
     private static UserService.PreferencesPatch person(String pronouns, String avatarUrl) {
         return new UserService.PreferencesPatch(
                 null, null, null, pronouns, null, avatarUrl, null,
-                null, null, null);
+                null, null, null,
+                null, null, null, null, null);
     }
 
     /** Just the account address. */
     private static UserService.PreferencesPatch address(String email) {
         return new UserService.PreferencesPatch(
                 null, null, null, null, email, null, null,
-                null, null, null);
+                null, null, null,
+                null, null, null, null, null);
     }
 
     private static UserService.PreferencesPatch chatWindow(Integer days, Boolean everything) {
         return new UserService.PreferencesPatch(
-                null, null, null, null, null, null, null, days, everything, null);
+                null, null, null, null, null, null, null, days, everything, null,
+                null, null, null, null, null);
     }
 
     private static UserService.PreferencesPatch muting(List<String> kinds) {
         return new UserService.PreferencesPatch(
-                null, null, null, null, null, null, null, null, null, kinds);
+                null, null, null, null, null, null, null, null, null, kinds,
+                null, null, null, null, null);
+    }
+
+    /** Just the email switches, which nothing else here touches. */
+    private static UserService.PreferencesPatch mailSwitches(Boolean warning, Boolean applied,
+                                                             Boolean reminders, Boolean notes,
+                                                             Boolean allowance) {
+        return new UserService.PreferencesPatch(
+                null, null, null, null, null, null, null, null, null, null,
+                warning, applied, reminders, notes, allowance);
     }
 
     @BeforeEach

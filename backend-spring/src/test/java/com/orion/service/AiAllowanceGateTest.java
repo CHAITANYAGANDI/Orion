@@ -80,6 +80,7 @@ class AiAllowanceGateTest {
     @Mock private UsageLimitRepository usageRows;
     @Mock private UserRepository users;
     @Mock private com.orion.repository.MeetingUsageChargeRepository charges;
+    @Mock private AccountMail mail;
     private UsageLimitService usage;
     private UsageLimit row;
 
@@ -90,7 +91,7 @@ class AiAllowanceGateTest {
         row.setUserId(USER);
         when(usageRows.findByUserId(USER)).thenReturn(Optional.of(row));
         when(usageRows.save(any(UsageLimit.class))).thenAnswer(i -> i.getArgument(0));
-        usage = new UsageLimitService(usageRows, users, charges);
+        usage = new UsageLimitService(usageRows, users, charges, mail);
     }
 
     /** Spend the whole allowance. */

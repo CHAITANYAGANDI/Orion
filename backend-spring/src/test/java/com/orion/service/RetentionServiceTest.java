@@ -53,13 +53,14 @@ class RetentionServiceTest {
     @Mock private ErasureService erasure;
     @Mock private NotificationService notifications;
     @Mock private AuditService audit;
+    @Mock private AccountMail mail;
 
     private RetentionService service;
     private UserEntity user;
 
     @BeforeEach
     void setUp() {
-        service = new RetentionService(users, meetings, erasure, notifications, audit);
+        service = new RetentionService(users, meetings, erasure, notifications, audit, mail);
         user = new UserEntity();
         user.setId(USER);
         when(users.findById(USER)).thenReturn(Optional.of(user));

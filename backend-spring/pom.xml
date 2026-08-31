@@ -59,7 +59,13 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-websocket</artifactId>
         </dependency>
-        <!-- Recap email. Points at Mailpit in dev, so no SMTP account is needed. -->
+        <!--
+            Mail goes out over Resend's HTTP API, not SMTP, so there is no mail
+            starter here. One POST with a timeout beats a socket held open on a
+            request thread, and a refusal comes back as a status and a body
+            saying which address was rejected rather than as a stack trace.
+            See service/Mailer.java.
+        -->
         <!-- Persistence -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

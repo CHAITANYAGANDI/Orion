@@ -182,9 +182,28 @@ export interface PreferencesResponse {
   /**
    * Bell kinds switched off. Everything absent from this is on.
    *
-   * The bell is the only channel there is — Orion sends no email (V56).
+   * Independent of the five email switches below: the two are separate
+   * channels, so muting a bell must not silence a message somebody asked for.
    */
   mutedNotifications: string[];
+  /**
+   * The five messages Recallix sends by mail. See `V64__account_email.sql`.
+   *
+   * Booleans rather than a muted-list like the bell above, and the difference
+   * is deliberate: a bell kind added later should ship on and visible, while a
+   * new *email* must ship off. A list of what is enabled is the shape that gets
+   * that right.
+   *
+   * Two messages are absent and cannot be switched off — the allowance being
+   * fully spent, and the account being closed. Neither reports on the contents
+   * of an account; they are facts about the account itself, and the second is
+   * sent after the row holding these switches has been deleted.
+   */
+  retentionWarningEmail: boolean;
+  retentionAppliedEmail: boolean;
+  taskReminderEmail: boolean;
+  notesReadyEmail: boolean;
+  allowanceEmail: boolean;
 }
 
 export interface PreferencesUpdateRequest {
@@ -195,9 +214,8 @@ export interface PreferencesUpdateRequest {
   /** Blank clears it. */
   pronouns?: string;
   /**
-   * Accepted only where Orion owns it; under an identity provider the
-   * server refuses it, because the column is rewritten from the sign-in token
-   * on the next request.
+   * Never sent. Changing the address was removed everywhere — it is the
+   * credential — and the field stays only because the endpoint still binds it.
    */
   email?: string;
   /** A `data:image/...;base64,...` URL; blank removes the picture. */
@@ -209,6 +227,12 @@ export interface PreferencesUpdateRequest {
   chatReadsEverything?: boolean;
   /** The whole set, not a delta — the settings page holds every switch at once. */
   mutedNotifications?: string[];
+  /** One at a time; an omitted switch is left where it was. */
+  retentionWarningEmail?: boolean;
+  retentionAppliedEmail?: boolean;
+  taskReminderEmail?: boolean;
+  notesReadyEmail?: boolean;
+  allowanceEmail?: boolean;
 }
 
 /** One spoken word with its own timing, in seconds. */

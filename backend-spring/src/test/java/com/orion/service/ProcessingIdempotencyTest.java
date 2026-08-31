@@ -53,6 +53,7 @@ class ProcessingIdempotencyTest {
     @Mock private UsageLimitRepository usageRepo;
     @Mock private UserRepository users;
     @Mock private MeetingUsageChargeRepository charges;
+    @Mock private AccountMail mail;
 
     private UsageLimitService service;
     private UsageLimit limit;
@@ -71,7 +72,7 @@ class ProcessingIdempotencyTest {
     @BeforeEach
     void setUp() {
         claimed = java.util.Collections.synchronizedSet(new HashSet<>());
-        service = new UsageLimitService(usageRepo, users, charges);
+        service = new UsageLimitService(usageRepo, users, charges, mail);
 
         limit = new UsageLimit();
         limit.setId("usg_1");

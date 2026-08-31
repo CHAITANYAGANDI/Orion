@@ -68,6 +68,7 @@ class MeetingAnnouncementsTest {
     @Mock private ApplicationEventPublisher events;
     @Mock private NotificationService notifications;
     @Mock private UserRepository users;
+    @Mock private AccountMail mail;
 
     private CallbackService service;
     private Meeting meeting;
@@ -76,7 +77,7 @@ class MeetingAnnouncementsTest {
     @BeforeEach
     void setUp() {
         service = new CallbackService(meetings, transcripts, segments, summaries, actionItems,
-                insights, statusPublisher, usage, events, notifications, users);
+                insights, statusPublisher, usage, events, notifications, users, mail);
 
         meeting = new Meeting();
         meeting.setId(MEETING);

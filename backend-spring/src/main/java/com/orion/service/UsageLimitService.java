@@ -58,6 +58,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class UsageLimitService {
 
+    private final AccountMail mail;
+
     /** Transcribed minutes an account gets, ever. */
     public static final int MINUTES_ALLOWANCE = 100;
 
@@ -71,10 +73,30 @@ public class UsageLimitService {
     private final MeetingUsageChargeRepository charges;
 
     public UsageLimitService(UsageLimitRepository usage, UserRepository users,
-                             MeetingUsageChargeRepository charges) {
+                             MeetingUsageChargeRepository charges,
+                             AccountMail mail) {
         this.usage = usage;
         this.users = users;
         this.charges = charges;
+        this.mail = mail;
+    }
+
+    /**
+     * Say something about the balance, once, at each of two points.
+     *
+     * <p>Here rather than at the call sites because this is the only method
+     * that knows the number changed, and a threshold checked in some of the
+     * places minutes are spent and not others is a warning that arrives for
+     * some accounts and not others.
+     *
+     * <p>Inside the transaction that spent the minutes. That is not the same as
+     * sending inside it: what is written here is the intent, in the same commit
+     * as the balance it describes. A rollback takes both, so the message can
+     * never claim a balance that was never spent, and a provider outage delays
+     * it rather than losing it.
+     */
+    private void announceBalance(String userId, int used) {
+        mail.allowance(userId, used, MINUTES_ALLOWANCE);
     }
 
     private Plan planOf(String userId) {
@@ -241,6 +263,7 @@ public class UsageLimitService {
     public void addAiMinutes(String userId, int minutes) {
         UsageLimit u = forUser(userId);
         u.setAiMinutesUsed(u.getAiMinutesUsed() + Math.max(0, minutes));
+        announceBalance(userId, u.getAiMinutesUsed());
     }
 
     /**
@@ -270,6 +293,7 @@ public class UsageLimitService {
         }
         UsageLimit u = forUser(userId);
         u.setAiMinutesUsed(u.getAiMinutesUsed() + billed);
+        announceBalance(userId, u.getAiMinutesUsed());
         return true;
     }
 }

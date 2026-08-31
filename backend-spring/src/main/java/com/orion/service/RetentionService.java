@@ -15,6 +15,8 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.NavigableMap;
+import java.util.TreeMap;
 
 /**
  * Throwing things away on a schedule, because somebody asked us to.
@@ -51,17 +53,20 @@ public class RetentionService {
     private final ErasureService erasure;
     private final NotificationService notifications;
     private final AuditService audit;
+    private final AccountMail mail;
 
     public RetentionService(UserRepository users,
                             MeetingRepository meetings,
                             ErasureService erasure,
                             NotificationService notifications,
-                            AuditService audit) {
+                            AuditService audit,
+                            AccountMail mail) {
         this.users = users;
         this.meetings = meetings;
         this.erasure = erasure;
         this.notifications = notifications;
         this.audit = audit;
+        this.mail = mail;
     }
 
     /* ------------------------------ the policy ----------------------------- */
@@ -128,6 +133,84 @@ public class RetentionService {
         return new Due(recordings, whole);
     }
 
+    /**
+     * What each of the next few days will delete, day by day.
+     *
+     * <h2>Why the warning needs this and {@link #preview} will not do</h2>
+     *
+     * <p>{@code preview} answers "what would a pass on date D delete", which is
+     * cumulative — everything already overdue plus everything newly due. Asked
+     * with the clock a week forward it gives one lump with no way to tell which
+     * day any of it belongs to, and a warning keyed off that lump can only be
+     * deduplicated by <em>when it was sent</em>. That is the rule this replaces,
+     * and it is wrong in exactly the case the warning exists for: warn on Monday
+     * about next Monday's batch, and the batch that crosses the horizon on
+     * Tuesday is suppressed for six days and then deleted, unwarned.
+     *
+     * <p>This splits the window by the day the deletion actually lands, so each
+     * batch is a thing with an identity — {@code (user, date)} — that a message
+     * can be keyed to. Two batches a day apart get two warnings; the same batch
+     * gets one however often the job runs.
+     *
+     * <h2>The arithmetic, stated once</h2>
+     *
+     * <p>{@link #olderThan} erases a meeting on the first day D where
+     * {@code createdAt < (D - days) at midnight UTC}, which is
+     * {@code created + days + 1}. That is the whole of the date rule and it is
+     * derived here rather than approximated, so a warning cannot name a day the
+     * pass disagrees with.
+     *
+     * <p>A meeting can appear twice, on two different days, and that is correct:
+     * with a short audio window and a long meeting window the recording goes
+     * first and the meeting goes later. Both are irreversible and both deserve
+     * their own notice. It appears once when the whole meeting goes first or on
+     * the same day — the pass counts it once there too, because the audio goes
+     * with it.
+     *
+     * @return deletion date to what that date takes, ascending, empty days absent
+     */
+    @Transactional(readOnly = true)
+    public NavigableMap<LocalDate, Due> upcoming(UserEntity user, LocalDate from, LocalDate through) {
+        NavigableMap<LocalDate, int[]> tally = new TreeMap<>();
+        Integer audioDays = user.getAudioRetentionDays();
+        Integer meetingDays = user.getMeetingRetentionDays();
+        if (audioDays == null && meetingDays == null) {
+            return new TreeMap<>();
+        }
+
+        for (Meeting meeting : meetings.findByUserIdOrderByCreatedAtDesc(user.getId())) {
+            if (meeting.getCreatedAt() == null) {
+                continue;
+            }
+            LocalDate created = meeting.getCreatedAt().atZone(ZoneOffset.UTC).toLocalDate();
+            LocalDate meetingOn = meetingDays == null ? null : created.plusDays(meetingDays + 1L);
+            LocalDate audioOn = (audioDays == null || !hasAudio(meeting))
+                    ? null : created.plusDays(audioDays + 1L);
+
+            // The recording is its own event only when it goes strictly first.
+            // On the same day the pass takes the meeting branch and the audio is
+            // counted with it, so counting it here as well would overstate.
+            if (audioOn != null && (meetingOn == null || audioOn.isBefore(meetingOn))) {
+                add(tally, audioOn, from, through, 0);
+            }
+            if (meetingOn != null) {
+                add(tally, meetingOn, from, through, 1);
+            }
+        }
+
+        NavigableMap<LocalDate, Due> out = new TreeMap<>();
+        tally.forEach((day, counts) -> out.put(day, new Due(counts[0], counts[1])));
+        return out;
+    }
+
+    private static void add(NavigableMap<LocalDate, int[]> tally, LocalDate day,
+                            LocalDate from, LocalDate through, int slot) {
+        if (day.isBefore(from) || day.isAfter(through)) {
+            return;
+        }
+        tally.computeIfAbsent(day, d -> new int[2])[slot]++;
+    }
+
     /* ------------------------------- the pass ------------------------------ */
 
     /**
@@ -152,6 +235,19 @@ public class RetentionService {
                 if (done.any()) {
                     touched++;
                     notifications.retentionApplied(user.getId(), done.recordings(), done.meetings(), today);
+                    /*
+                     * Inside this transaction, on purpose. The bell only reaches
+                     * somebody who opens the app; this ran unattended at three in
+                     * the morning and cannot be undone. Queueing the message here
+                     * means the deletion and the record of it commit together --
+                     * if the pass rolls back there is no message, and if Resend is
+                     * unreachable the message waits rather than being lost.
+                     *
+                     * The previous version sent inline, in a REQUIRES_NEW
+                     * transaction, and a ninety-second provider outage silently
+                     * cost the account holder any notice that their data had gone.
+                     */
+                    mail.retentionApplied(user.getId(), done.recordings(), done.meetings(), today);
                     audit.record(user.getId(), "RETENTION_APPLIED", "user", user.getId());
                     log.info("Retention deleted {} recording(s) and {} meeting(s) for {}",
                             done.recordings(), done.meetings(), user.getId());

@@ -151,6 +151,28 @@ services:
       - key: APP_FRONTEND_URL
         sync: false        # https://<your-project>.vercel.app
 
+      # Email. Off until both of the first two are set, and deliberately so:
+      # a service that sends from a domain it does not own gets the domain
+      # classified as spam, which fixing the setting afterwards does not undo.
+      #
+      # ORION_MAIL_FROM has to be on a domain verified in Resend. Seven
+      # messages use these, five of them off per account until somebody turns
+      # them on in Settings. See backend-spring/.../service/AccountMail.java.
+      - key: RESEND_API_KEY
+        sync: false
+      - key: ORION_MAIL_FROM
+        sync: false        # Recallix <notifications@yourdomain.com>
+
+      # No domain yet? Resend will only send from onboarding@resend.dev, which
+      # delivers to the Resend account owner and nobody else -- so there is no
+      # honest way to pass the production check. Set this to declare that this
+      # deployment has no users but you, and the check becomes a warning on
+      # every boot instead of a refusal.
+      #
+      # Unset it the moment somebody else can sign up.
+      - key: ORION_MAIL_SELF_ONLY
+        sync: false        # true, only while you are the only account
+
       # Where this API is reachable from the public internet. Only used for the
       # calendar feed -- which is fetched by Google's and Apple's servers, not
       # by the user's browser, so this is the one URL where a private address

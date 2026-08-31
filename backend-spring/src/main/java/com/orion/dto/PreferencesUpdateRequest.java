@@ -65,6 +65,27 @@ public record PreferencesUpdateRequest(
         Boolean chatReadsEverything,
 
         /**
+         * The five messages Recallix will send by mail. Null leaves one alone.
+         *
+         * <p>Booleans rather than a list of what is on, unlike
+         * {@code mutedNotifications}, and the difference is deliberate: a bell
+         * kind added later should ship switched on and visible, while a new
+         * <em>email</em> added later must ship off. A list of what is enabled is
+         * the shape that gets that right.
+         *
+         * <p>Two messages have no switch here and cannot be turned off: the
+         * allowance being fully spent, and the account being closed. Neither is
+         * a notification about the contents of an account -- they are terminal
+         * facts about the account itself, and the second is sent after the row
+         * holding these very columns has been deleted.
+         */
+        Boolean retentionWarningEmail,
+        Boolean retentionAppliedEmail,
+        Boolean taskReminderEmail,
+        Boolean notesReadyEmail,
+        Boolean allowanceEmail,
+
+        /**
          * Notification kinds to switch off, replacing whatever was muted before.
          *
          * <p>The whole set rather than a delta, because the settings page holds
@@ -72,8 +93,9 @@ public record PreferencesUpdateRequest(
          * a page that also shows the other nine invites the two to disagree.
          * Null leaves them alone; an empty list turns everything back on.
          *
-         * <p>The bell is the only channel these govern. Orion sends no
-         * email — see V56.
+         * <p>The bell is the only channel these govern; the five booleans
+         * above are the other one, and the two are independent on purpose.
+         * Muting a bell must not silence an email somebody switched on.
          */
         List<String> mutedNotifications
 ) {

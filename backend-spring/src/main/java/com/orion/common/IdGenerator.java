@@ -34,6 +34,7 @@ public final class IdGenerator {
     public static String subscription(){ return generate("sub_"); }
     public static String audit()       { return generate("aud_"); }
     public static String outbox()      { return generate("obx_"); }
+    public static String mail()        { return generate("mal_"); }
     public static String connection()  { return generate("con_"); }
     public static String agentAction() { return generate("aar_"); }
     public static String syncLog()     { return generate("syn_"); }

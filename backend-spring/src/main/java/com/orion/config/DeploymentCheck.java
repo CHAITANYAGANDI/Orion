@@ -71,6 +71,20 @@ public class DeploymentCheck {
      */
     private static final List<String> POOLER_MARKERS = List.of("-pooler", "pgbouncer=true");
 
+    /**
+     * Sender domains that are never right in production.
+     *
+     * <p>Two kinds, and they fail differently. {@code resend.dev} is Resend's
+     * own onboarding sender: it works, which is what makes it dangerous, and it
+     * delivers only to the account owner's address -- so a production
+     * deployment using it sends every account-closure notice to the developer.
+     * The rest are unroutable and are simply rejected, turning every message
+     * into twelve attempts and an abandoned row.
+     */
+    private static final List<String> DEVELOPMENT_SENDER_DOMAINS = List.of(
+            "resend.dev", "example.com", "example.org", "example.net",
+            "localhost", "localdomain", "test", "invalid", "yourdomain.com");
+
     private final String authMode;
     private final String issuer;
     private final String jwksUrl;
@@ -79,6 +93,9 @@ public class DeploymentCheck {
     private final String publicUrl;
     private final String aiServiceUrl;
     private final String datasourceUrl;
+    private final String mailApiKey;
+    private final String mailFrom;
+    private final boolean mailSelfOnly;
 
     public DeploymentCheck(
             @Value("${orion.auth-mode:clerk}") String authMode,
@@ -88,7 +105,10 @@ public class DeploymentCheck {
             @Value("${app.frontend-url:}") String frontendUrl,
             @Value("${app.public-url:}") String publicUrl,
             @Value("${app.ai-service-url:}") String aiServiceUrl,
-            @Value("${spring.datasource.url:}") String datasourceUrl) {
+            @Value("${spring.datasource.url:}") String datasourceUrl,
+            @Value("${orion.mail.api-key:}") String mailApiKey,
+            @Value("${orion.mail.from:}") String mailFrom,
+            @Value("${orion.mail.self-only:false}") boolean mailSelfOnly) {
         this.authMode = authMode;
         this.issuer = issuer;
         this.jwksUrl = jwksUrl;
@@ -97,6 +117,11 @@ public class DeploymentCheck {
         this.publicUrl = publicUrl;
         this.aiServiceUrl = aiServiceUrl;
         this.datasourceUrl = datasourceUrl;
+        // Held only to answer "is it set" and "does it look like a real sender".
+        // Never logged and never included in a problem message -- see mailProblem().
+        this.mailApiKey = mailApiKey;
+        this.mailFrom = mailFrom;
+        this.mailSelfOnly = mailSelfOnly;
     }
 
     @PostConstruct
@@ -163,6 +188,7 @@ public class DeploymentCheck {
             problems.add("AI_SERVICE_URL is not set. Nothing can be transcribed or summarised.");
         }
 
+        problems.addAll(mailProblem());
         problems.addAll(poolerProblem());
         // Deliberately not checked for a scheme, unlike the two above. It names
         // a private service on the internal network, so there is exactly one
@@ -171,6 +197,118 @@ public class DeploymentCheck {
         // because http and https are both plausible and guessing wrong on those
         // is worse than stopping.
 
+        return problems;
+    }
+
+    /**
+     * Production must be able to send the three messages nobody can opt out of.
+     *
+     * <h2>Why this is a refusal and not a warning</h2>
+     *
+     * <p>Five of the seven messages are switchable and off by default, so a
+     * deployment with no provider simply never queues them. Two are not, and one
+     * of those is the only record of an irreversible act:
+     *
+     * <ul>
+     *   <li><b>the account closed and its data deleted</b> — sent after the user
+     *       row, the address and the counts are gone, so there is nothing left
+     *       anywhere to rebuild it from and no bell to fall back to;</li>
+     *   <li><b>the transcription allowance is spent</b> — the message that stops
+     *       "you're out" being read as "your account is closed";</li>
+     *   <li><b>retention deleted something</b> — for accounts that asked, the
+     *       only notice that data went, from a job that runs unattended.</li>
+     * </ul>
+     *
+     * <p>Unconfigured, the outbox does exactly what it was designed to do: it
+     * keeps the rows, because a queue that expired its own contents during an
+     * outage would be the at-most-once behaviour this whole design replaced. The
+     * consequence is that a production deployment that never sets a key
+     * accumulates account-closure notices for months and then, the day somebody
+     * finally configures Resend, delivers all of them at once. That is a worse
+     * outcome than either sending or not sending, and it is invisible until it
+     * happens — which is the same shape as every other check in this class.
+     *
+     * <h2>Development is untouched</h2>
+     *
+     * <p>This whole class is {@code @Profile("production")}. A laptop runs with
+     * no key, queues nothing it cannot deliver — the five switchable messages
+     * are off — and the relay claims nothing at all while
+     * {@link com.orion.service.Mailer#enabled()} is false.
+     *
+     * <h2>What is deliberately not in the message</h2>
+     *
+     * <p>The key. Not its value, not its length, not a prefix, not a masked
+     * form. These problems are thrown as an exception message and logged at
+     * startup, which is exactly the sort of place a credential ends up shipped
+     * to a log aggregator and kept for a year. The only fact worth reporting is
+     * whether it is set, and this reports that.
+     */
+    List<String> mailProblem() {
+        if (mailSelfOnly) {
+            // Declared, not defaulted. See mailWarnings() for what it costs.
+            return List.of();
+        }
+        List<String> problems = new ArrayList<>();
+
+        if (trim(mailApiKey).isEmpty()) {
+            problems.add("RESEND_API_KEY is not set. Orion cannot send the messages that have "
+                    + "no switch -- an account closed and its data deleted, and an allowance "
+                    + "spent -- and the account-closure notice is the only record of it that "
+                    + "exists once the account is gone. They are queued rather than dropped, "
+                    + "and expire ninety days later unsent -- so nobody is told, and there is a "
+                    + "backlog waiting for whenever a key does appear. "
+                    + "Set ORION_MAIL_SELF_ONLY=true if this deployment has no users but you.");
+        }
+
+        String from = trim(mailFrom);
+        if (from.isEmpty()) {
+            problems.add("ORION_MAIL_FROM is not set. Resend refuses a send with no sender, so "
+                    + "every queued message would be retried and then abandoned.");
+            return problems;
+        }
+
+        /*
+         * The address inside "Name <a@b>", or the whole string when it is bare.
+         * Resend accepts both forms.
+         */
+        String address = from;
+        int open = from.lastIndexOf('<');
+        int close = from.lastIndexOf('>');
+        if (open >= 0 && close > open) {
+            address = from.substring(open + 1, close).trim();
+        }
+
+        int at = address.indexOf('@');
+        if (at <= 0 || at == address.length() - 1 || address.contains(" ")) {
+            problems.add("ORION_MAIL_FROM is not an email address. Use `Recallix "
+                    + "<notifications@yourdomain.com>` or a bare address on a domain verified "
+                    + "in Resend.");
+            return problems;
+        }
+
+        String domain = address.substring(at + 1).toLowerCase(Locale.ROOT);
+        if (DEVELOPMENT_SENDER_DOMAINS.stream().anyMatch(
+                d -> domain.equals(d) || domain.endsWith("." + d))) {
+            /*
+             * A refusal rather than a warning, because these fail in the one
+             * direction this check exists to prevent: the send is accepted here
+             * and rejected at Resend, so every message is queued, retried
+             * twelve times over five hours and abandoned. Nobody is told
+             * anything and nothing looks broken until somebody reads the table.
+             *
+             * resend.dev is the sharpest case: onboarding@resend.dev is the
+             * address in Resend's own quickstart, it works, and it delivers
+             * ONLY to the account owner's own address. In production that is a
+             * deployment where every account-closure notice silently goes to
+             * the developer instead of to the account holder.
+             */
+            problems.add("ORION_MAIL_FROM is on '" + domain + "', which is a development or "
+                    + "unroutable sender domain. Resend's shared onboarding sender only "
+                    + "delivers to your own address, and localhost-style domains are rejected "
+                    + "outright -- either way the account holder is never told. Use a domain "
+                    + "verified in Resend, or set ORION_MAIL_SELF_ONLY=true if this deployment "
+                    + "has no users but you.");
+        }
         return problems;
     }
 
@@ -236,6 +374,47 @@ public class DeploymentCheck {
     }
 
     /**
+     * What {@code ORION_MAIL_SELF_ONLY} costs, said every time the app starts.
+     *
+     * <h2>Why there is an escape hatch at all</h2>
+     *
+     * <p>Because the alternative is worse. A check that cannot be satisfied is a
+     * check somebody deletes — and the person deleting it is doing so at the end
+     * of a bad afternoon, in the file, permanently, for every future deployment.
+     * A flag that has to be typed out, that says what is being given up, and that
+     * announces itself in the log on every boot is a decision. Editing the check
+     * out is a decision nobody can see afterwards.
+     *
+     * <h2>What it actually declares</h2>
+     *
+     * <p>Not "I do not want mail". <b>"This deployment has no users other than
+     * me."</b> That is a claim about the world, and it is the only claim under
+     * which the two switchless messages are safe to lose: if the only account
+     * that will ever be closed is the operator's own, a closure notice that
+     * reaches only the operator is correct rather than misdirected.
+     *
+     * <p>It stops being true the moment somebody else signs up. Nothing here can
+     * detect that, which is exactly why this is stated rather than inferred, and
+     * why the warning is unconditional rather than once.
+     */
+    private List<String> mailWarnings() {
+        if (!mailSelfOnly) {
+            return List.of();
+        }
+        boolean configured = !trim(mailApiKey).isEmpty() && !trim(mailFrom).isEmpty();
+        String what = configured
+                ? "Mail is configured but ORION_MAIL_SELF_ONLY is set, so the sender is assumed "
+                        + "to reach only you -- which is what Resend's shared onboarding sender "
+                        + "does."
+                : "Mail is not configured and ORION_MAIL_SELF_ONLY is set, so nothing will be "
+                        + "sent at all. Queued messages expire unsent after ninety days.";
+        return List.of(what + " Nobody but you will be told that an account was closed and its "
+                + "data deleted, or that an allowance ran out. That is correct only while this "
+                + "deployment has no users but you -- verify a domain in Resend and unset this "
+                + "before anybody else signs up.");
+    }
+
+    /**
      * Things worth saying out loud that are not worth refusing to start over.
      *
      * <p>The line between the two is whether a reasonable deployment could
@@ -244,7 +423,7 @@ public class DeploymentCheck {
      * tell them apart, so it says so and steps aside.
      */
     List<String> warnings() {
-        List<String> warnings = new ArrayList<>();
+        List<String> warnings = new ArrayList<>(mailWarnings());
         String where = trim(issuer) + " " + trim(jwksUrl);
         if (where.contains(".accounts.dev")) {
             warnings.add("Clerk is configured against a DEVELOPMENT instance (.accounts.dev). "

@@ -130,6 +130,78 @@ spring:
 # JwtDecoder itself, lazily, from orion.clerk.jwks-url below.
 
 orion:
+  # Email, off unless a provider is configured.
+  #
+  # Both `api-key` and `from` have to be set before anything is sent. A blank
+  # default rather than a working one is the point: a deployment that sends
+  # from a domain it does not own has its domain classified as spam, and that
+  # is not undone by correcting the setting afterwards.
+  #
+  # Seven messages use this. Five are additionally off per account until
+  # somebody switches them on -- see V64__account_email.sql for which two are
+  # not, and why.
+  mail:
+    api-key: ${RESEND_API_KEY:}
+    from: ${ORION_MAIL_FROM:}
+    # "This deployment has no users other than me."
+    #
+    # A claim about the world, not a preference, and the only claim under which
+    # the two switchless messages are safe to lose: if the only account that
+    # will ever be closed is your own, a closure notice that reaches only you is
+    # correct rather than misdirected.
+    #
+    # It exists because a check that cannot be satisfied is a check somebody
+    # deletes. Without a verified domain, Resend will only send from
+    # onboarding@resend.dev, which delivers to the Resend account owner and
+    # nobody else -- so a solo deployment has no way to pass the production
+    # check honestly. This is that way, and it announces itself on every boot.
+    #
+    # Unset it before anybody else signs up.
+    self-only: ${ORION_MAIL_SELF_ONLY:false}
+    reply-to: ${ORION_MAIL_REPLY_TO:}
+    # Below this, a finished recording is not worth a message: it was done
+    # before the reader left the page, and mailing it is the V56 recap again.
+    notes-min-seconds: ${ORION_MAIL_NOTES_MIN_SECONDS:900}
+    # 08:00 UTC is the slot the old deadline digest had, and which the
+    # retention pass was deliberately timed away from.
+    task-reminder-cron: ${ORION_MAIL_TASK_REMINDER_CRON:0 0 8 * * *}
+    # An hour before the pass that does the deleting. The two look a week apart
+    # so the order does not matter, but a job that warns about deletions has no
+    # business running after them.
+    retention-warning-cron: ${ORION_MAIL_RETENTION_WARNING_CRON:0 0 2 * * *}
+
+    # ----- the relay that drains mail_outbox -----
+    #
+    # Ten seconds rather than the Kafka relay's one. Nothing here is watched:
+    # the fastest of these messages reports a recording that took minutes to
+    # process, and the slowest is a digest with a day's tolerance.
+    poll-ms: ${ORION_MAIL_POLL_MS:10000}
+    batch: ${ORION_MAIL_BATCH:25}
+    # Roughly a day of retrying at the capped interval. Past that the address is
+    # not going to start working, and a queue that retires nothing eventually has
+    # a head nobody can send.
+    max-attempts: ${ORION_MAIL_MAX_ATTEMPTS:12}
+    first-backoff-seconds: ${ORION_MAIL_FIRST_BACKOFF_SECONDS:30}
+    # An hour is late for a retention warning and still useful. A day is neither,
+    # so the doubling stops here.
+    max-backoff-seconds: ${ORION_MAIL_MAX_BACKOFF_SECONDS:3600}
+    # ----- lifecycle -----
+    #
+    # mail_outbox has no foreign key to users and must not have one: the
+    # account-closure notice is delivered after the row it would reference is
+    # gone. The cost is that an address and a body outlive closeAccount, so the
+    # lifetime is written down and it is short.
+    #
+    # A delivered row is a receipt -- a week is enough to answer "did that go
+    # out on Tuesday".
+    keep-sent-days: ${ORION_MAIL_KEEP_SENT_DAYS:7}
+    # An abandoned row is the record that somebody was NOT told something, and
+    # for the closure notice it is the only trace the notice failed. Longer than
+    # a delivered row on purpose: a week is not long enough for anybody to
+    # notice, ask and look.
+    keep-abandoned-days: ${ORION_MAIL_KEEP_ABANDONED_DAYS:30}
+    purge-cron: ${ORION_MAIL_PURGE_CRON:0 40 3 * * *}
+
   # Defaults to clerk, and that single word is the whole of the access control
   # story for a deployment whose environment did not arrive intact.
   #

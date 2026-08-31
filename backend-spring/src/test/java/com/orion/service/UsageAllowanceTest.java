@@ -51,6 +51,7 @@ class UsageAllowanceTest {
     @Mock private UsageLimitRepository usage;
     @Mock private UserRepository users;
     @Mock private com.orion.repository.MeetingUsageChargeRepository charges;
+    @Mock private AccountMail mail;
 
     private UsageLimitService service;
     private UsageLimit row;
@@ -62,7 +63,7 @@ class UsageAllowanceTest {
         row.setUserId(USER);
         when(usage.findByUserId(USER)).thenReturn(Optional.of(row));
         when(usage.save(any(UsageLimit.class))).thenAnswer(i -> i.getArgument(0));
-        service = new UsageLimitService(usage, users, charges);
+        service = new UsageLimitService(usage, users, charges, mail);
     }
 
     @Test

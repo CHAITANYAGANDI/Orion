@@ -65,6 +65,7 @@ class ReprocessActionItemsTest {
     @Mock private ApplicationEventPublisher events;
     @Mock private NotificationService notifications;
     @Mock private UserRepository users;
+    @Mock private AccountMail mail;
 
     private CallbackService service;
 
@@ -74,7 +75,7 @@ class ReprocessActionItemsTest {
     @BeforeEach
     void setUp() {
         service = new CallbackService(meetings, transcripts, segments, summaries, actionItems,
-                insights, statusPublisher, usage, events, notifications, users);
+                insights, statusPublisher, usage, events, notifications, users, mail);
         stored.clear();
 
         Meeting meeting = new Meeting();

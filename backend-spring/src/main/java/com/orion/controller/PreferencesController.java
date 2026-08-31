@@ -35,6 +35,9 @@ public class PreferencesController {
                         req.displayName(), req.department(), req.jobRole(),
                         req.pronouns(), req.email(), req.avatarUrl(), req.defaultLanguage(),
                         req.chatHistoryDays(), req.chatReadsEverything(),
-                        req.mutedNotifications())));
+                        req.mutedNotifications(),
+                        req.retentionWarningEmail(), req.retentionAppliedEmail(),
+                        req.taskReminderEmail(), req.notesReadyEmail(),
+                        req.allowanceEmail())));
     }
 }

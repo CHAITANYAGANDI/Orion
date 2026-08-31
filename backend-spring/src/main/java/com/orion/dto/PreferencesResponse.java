@@ -32,10 +32,20 @@ public record PreferencesResponse(
         /** How far back workspace chat reads transcripts; null is everything. */
         Integer chatHistoryDays,
         /**
-         * Notification kinds switched off — the bell, which is the only channel
-         * left. Orion sends no email; see V56.
+         * Notification kinds switched off — the bell. Independent of the five
+         * email switches below: muting one channel leaves the other alone.
          */
-        List<String> mutedNotifications
+        List<String> mutedNotifications,
+        /**
+         * The five messages Recallix sends by mail. See V64 for why these are
+         * booleans rather than a muted-list like the bell above, and for the
+         * two messages that deliberately have no switch.
+         */
+        boolean retentionWarningEmail,
+        boolean retentionAppliedEmail,
+        boolean taskReminderEmail,
+        boolean notesReadyEmail,
+        boolean allowanceEmail
 ) {
     public static PreferencesResponse from(UserEntity user) {
         return new PreferencesResponse(
@@ -47,6 +57,11 @@ public record PreferencesResponse(
                 user.getAvatarUrl(),
                 user.getDefaultLanguage(),
                 user.getChatHistoryDays(),
-                user.getMutedNotifications());
+                user.getMutedNotifications(),
+                user.isRetentionWarningEmail(),
+                user.isRetentionAppliedEmail(),
+                user.isTaskReminderEmail(),
+                user.isNotesReadyEmail(),
+                user.isAllowanceEmail());
     }
 }

@@ -143,6 +143,35 @@ public class UserEntity {
     @Column(name = "speaker_learning_enabled", nullable = false)
     private boolean speakerLearningEnabled = false;
 
+    /**
+     * The five switchable messages Orion sends by mail.
+     *
+     * <p>All false, for every existing account and every new one. Mail that
+     * arrives because a migration ran is how a sender gets filtered, and a
+     * filtered sender loses the one message that mattered along with the six
+     * that did not. See {@code V64__account_email.sql}.
+     *
+     * <p>Two messages are deliberately absent from this list and cannot be
+     * switched off: the allowance being fully spent, and the account being
+     * closed. Both are terminal facts about the account rather than reports on
+     * its contents, and the second has no switch left to read by the time it is
+     * sent -- closing an account deletes this row.
+     */
+    @Column(name = "retention_warning_email", nullable = false)
+    private boolean retentionWarningEmail = false;
+
+    @Column(name = "retention_applied_email", nullable = false)
+    private boolean retentionAppliedEmail = false;
+
+    @Column(name = "task_reminder_email", nullable = false)
+    private boolean taskReminderEmail = false;
+
+    @Column(name = "notes_ready_email", nullable = false)
+    private boolean notesReadyEmail = false;
+
+    @Column(name = "allowance_email", nullable = false)
+    private boolean allowanceEmail = false;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -211,6 +240,21 @@ public class UserEntity {
     public boolean hasRetentionPolicy() {
         return audioRetentionDays != null || meetingRetentionDays != null;
     }
+
+    public boolean isRetentionWarningEmail() { return retentionWarningEmail; }
+    public void setRetentionWarningEmail(boolean v) { this.retentionWarningEmail = v; }
+
+    public boolean isRetentionAppliedEmail() { return retentionAppliedEmail; }
+    public void setRetentionAppliedEmail(boolean v) { this.retentionAppliedEmail = v; }
+
+    public boolean isTaskReminderEmail() { return taskReminderEmail; }
+    public void setTaskReminderEmail(boolean v) { this.taskReminderEmail = v; }
+
+    public boolean isNotesReadyEmail() { return notesReadyEmail; }
+    public void setNotesReadyEmail(boolean v) { this.notesReadyEmail = v; }
+
+    public boolean isAllowanceEmail() { return allowanceEmail; }
+    public void setAllowanceEmail(boolean v) { this.allowanceEmail = v; }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }

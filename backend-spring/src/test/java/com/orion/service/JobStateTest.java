@@ -66,13 +66,14 @@ class JobStateTest {
     @Mock private ApplicationEventPublisher events;
     @Mock private NotificationService notifications;
     @Mock private UserRepository users;
+    @Mock private AccountMail mail;
 
     private CallbackService service;
 
     @BeforeEach
     void setUp() {
         service = new CallbackService(meetings, transcripts, segments, summaries, actionItems,
-                insights, statusPublisher, usage, events, notifications, users);
+                insights, statusPublisher, usage, events, notifications, users, mail);
     }
 
     private Meeting meeting(MeetingStatus status, int attempt) {

@@ -155,6 +155,11 @@ beforeEach(() => {
     defaultLanguage: null,
     chatHistoryDays: null,
     mutedNotifications: [],
+    retentionWarningEmail: false,
+    retentionAppliedEmail: false,
+    taskReminderEmail: false,
+    notesReadyEmail: false,
+    allowanceEmail: false,
   };
 });
 
@@ -346,7 +351,10 @@ describe("the rest of the page", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/does not train on your meetings/)).toBeInTheDocument();
     // The absence is the point: a toggle would imply a use to opt out of.
-    expect(screen.queryByRole("checkbox")).toBeNull();
+    // Scoped to this section -- the email switches below are checkboxes too,
+    // and the claim here was only ever about this one.
+    const training = screen.getByRole("heading", { name: /Feedback and training/ });
+    expect(training.closest("section")!.querySelector("input[type=checkbox]")).toBeNull();
   });
 
   it("does not show a version that identifies nothing", () => {
@@ -651,5 +659,73 @@ describe("voice recognition", () => {
     // probability. "94% match" would be a precision it never computed, and it
     // would invite somebody to accept a 68% one.
     expect(container.textContent).not.toMatch(/\d+% (match|confiden|accura)/i);
+  });
+});
+
+/**
+ * The email switches.
+ *
+ * <p>V56 deleted every message Recallix sent, and its stated reason was not
+ * that the messages were wrong — it was that the switches had no UI to reach
+ * them, so nothing went out and nobody could have asked for it. This section is
+ * the half that was missing, and these tests are what stop it going missing
+ * again.
+ */
+describe("email", () => {
+  it("shows every message it will send, and none it will not", async () => {
+    render(<GeneralTab />);
+
+    expect(await screen.findByRole("heading", { name: /Email notifications/ })).toBeInTheDocument();
+    expect(screen.getByText(/Before retention deletes something/)).toBeInTheDocument();
+    expect(screen.getByText(/After retention deletes something/)).toBeInTheDocument();
+    expect(screen.getByText(/Action items due tomorrow/)).toBeInTheDocument();
+    expect(screen.getByText(/Notes ready for a long recording/)).toBeInTheDocument();
+    expect(screen.getByText(/transcription minutes are nearly gone/)).toBeInTheDocument();
+  });
+
+  it("starts every one of them off", async () => {
+    // Mail that arrives because a migration ran is how a sender gets filtered,
+    // and a filtered sender loses the retention warning with the rest.
+    render(<GeneralTab />);
+
+    const heading = await screen.findByRole("heading", { name: /Email notifications/ });
+    const section = heading.closest("section")!;
+    for (const box of Array.from(section.querySelectorAll("input[type=checkbox]"))) {
+      expect(box).not.toBeChecked();
+    }
+  });
+
+  it("saves one switch on its own", async () => {
+    // Six toggles behind a single Save is a section where flipping one thing
+    // and walking away loses it.
+    render(<GeneralTab />);
+    await screen.findByRole("heading", { name: /Email notifications/ });
+
+    await userEvent.click(screen.getByText(/Action items due tomorrow/));
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith({ taskReminderEmail: true }));
+  });
+
+  it("names the two messages nobody can switch off", async () => {
+    /*
+     * Said rather than hidden. A message with no switch that the page does not
+     * mention reads as a message you cannot stop -- and one of the two is sent
+     * after the row holding these settings has been deleted, so there is
+     * nowhere else it could ever be explained.
+     */
+    render(<GeneralTab />);
+    await screen.findByRole("heading", { name: /Email notifications/ });
+
+    expect(screen.getByText(/Two messages have no switch/)).toBeInTheDocument();
+    expect(screen.getByText(/running out of transcription minutes/)).toBeInTheDocument();
+    expect(screen.getByText(/account being closed/)).toBeInTheDocument();
+  });
+
+  it("says so rather than showing five switches that do nothing", async () => {
+    failure = { data: { message: "nope" } };
+    prefs = null as never;
+    render(<GeneralTab />);
+
+    expect(await screen.findByRole("heading", { name: /Email notifications/ })).toBeInTheDocument();
   });
 });

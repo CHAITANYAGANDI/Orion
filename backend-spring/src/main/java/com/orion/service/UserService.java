@@ -101,6 +101,28 @@ public class UserService {
         } else if (patch.chatHistoryDays() != null) {
             user.setChatHistoryDays(patch.chatHistoryDays());
         }
+        /*
+         * Plain writes, with no stamp reset beside them. Turning a message back
+         * on deliberately does NOT clear the "already sent" column: the two
+         * once-ever allowance messages would otherwise be re-sendable by
+         * anybody who toggled a switch, which is how a once-ever message
+         * becomes a series.
+         */
+        if (patch.retentionWarningEmail() != null) {
+            user.setRetentionWarningEmail(patch.retentionWarningEmail());
+        }
+        if (patch.retentionAppliedEmail() != null) {
+            user.setRetentionAppliedEmail(patch.retentionAppliedEmail());
+        }
+        if (patch.taskReminderEmail() != null) {
+            user.setTaskReminderEmail(patch.taskReminderEmail());
+        }
+        if (patch.notesReadyEmail() != null) {
+            user.setNotesReadyEmail(patch.notesReadyEmail());
+        }
+        if (patch.allowanceEmail() != null) {
+            user.setAllowanceEmail(patch.allowanceEmail());
+        }
         if (patch.mutedNotifications() != null) {
             // Stored as the enum's own spelling and nothing else. An unknown
             // string here would be a mute nobody could ever undo from the
@@ -215,7 +237,13 @@ public class UserService {
             Integer chatHistoryDays,
             Boolean chatReadsEverything,
             /** Bell kinds to switch off. Null leaves them; empty turns all on. */
-            List<String> mutedNotifications
+            List<String> mutedNotifications,
+            /** The five email switches. Null leaves one where it was. */
+            Boolean retentionWarningEmail,
+            Boolean retentionAppliedEmail,
+            Boolean taskReminderEmail,
+            Boolean notesReadyEmail,
+            Boolean allowanceEmail
     ) {
     }
 }

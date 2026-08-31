@@ -73,6 +73,7 @@ public class PrivacyService {
     private final ErasureService erasure;
     private final StorageService storage;
     private final AuditService audit;
+    private final AccountMail mail;
     private final String frontendUrl;
 
     public PrivacyService(MeetingRepository meetings,
@@ -85,6 +86,7 @@ public class PrivacyService {
                           ErasureService erasure,
                           StorageService storage,
                           AuditService audit,
+                          AccountMail mail,
                           @Value("${app.frontend-url:http://localhost:3000}") String frontendUrl) {
         this.meetings = meetings;
         this.actionItems = actionItems;
@@ -96,6 +98,7 @@ public class PrivacyService {
         this.erasure = erasure;
         this.storage = storage;
         this.audit = audit;
+        this.mail = mail;
         this.frontendUrl = frontendUrl.endsWith("/")
                 ? frontendUrl.substring(0, frontendUrl.length() - 1)
                 : frontendUrl;
@@ -207,8 +210,28 @@ public class PrivacyService {
             throw ApiException.badRequest("Type \"" + DELETE_PHRASE + "\" to confirm.");
         }
         long meetingCount = meetings.countByUserId(userId);
+        /*
+         * Read before the deletion, because eraseAccount destroys the row it
+         * lives on. After this call there is no address to look up, no switch
+         * to consult and no bell to ring -- mail is the only channel left, and
+         * the only record the account holder keeps of what was destroyed.
+         */
+        String address = users.findById(userId).map(UserEntity::getEmail).orElse(null);
         int objects = erasure.eraseAccount(userId);
         log.info("Account {} closed: {} meeting(s), {} stored object(s).", userId, meetingCount, objects);
+        /*
+         * Queued inside this transaction, after the erasure and before the
+         * commit, and that ordering is the whole guarantee. Sent after the
+         * commit -- which is what this used to do -- a crash or a provider
+         * outage in the intervening millisecond destroyed an account silently,
+         * with nothing left anywhere to reconstruct the message from: the row,
+         * the address and the counts are all gone by then.
+         *
+         * Queued here, the deletion and the record of it are one commit. If this
+         * throws, the deletion does not happen -- which is the right way round
+         * for an operation nobody can undo.
+         */
+        mail.accountClosed(userId, address, meetingCount, objects);
         return new Closed(meetingCount, objects);
     }
 

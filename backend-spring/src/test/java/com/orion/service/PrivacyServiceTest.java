@@ -60,6 +60,7 @@ class PrivacyServiceTest {
     @Mock private ErasureService erasure;
     @Mock private StorageService storage;
     @Mock private AuditService audit;
+    @Mock private AccountMail mail;
 
     private PrivacyService service;
     private UserEntity user;
@@ -67,7 +68,7 @@ class PrivacyServiceTest {
     @BeforeEach
     void setUp() {
         service = new PrivacyService(meetings, actionItems, moments, projects, conversations,
-                users, retention, erasure, storage, audit, "https://orion.test/");
+                users, retention, erasure, storage, audit, mail, "https://orion.test/");
         user = new UserEntity();
         user.setId(USER);
         when(users.findById(USER)).thenReturn(Optional.of(user));

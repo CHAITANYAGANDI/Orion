@@ -75,6 +75,7 @@ public class CallbackService {
     private final UsageLimitService usage;
     private final ApplicationEventPublisher events;
     private final NotificationService notifications;
+    private final AccountMail mail;
     private final UserRepository users;
 
     public CallbackService(MeetingRepository meetings,
@@ -87,8 +88,10 @@ public class CallbackService {
                            UsageLimitService usage,
                            ApplicationEventPublisher events,
                            NotificationService notifications,
-                           UserRepository users) {
+                           UserRepository users,
+                           AccountMail mail) {
         this.notifications = notifications;
+        this.mail = mail;
         this.users = users;
         this.meetings = meetings;
         this.transcripts = transcripts;
@@ -363,6 +366,15 @@ public class CallbackService {
         boolean hasSummary = result.shortSummary() != null && !result.shortSummary().isBlank();
         if (hasSummary) {
             notifications.summaryReady(meeting, attempt);
+            /*
+             * And by mail, but only for a recording long enough that nobody is
+             * still watching. A thirty-second memo finishes before the reader
+             * has left the page, and mailing that is the V56 recap again -- a
+             * message about something already on screen. AccountMail owns the
+             * threshold; the per-meeting dedupe key owns the "only once", so a
+             * redelivered callback re-queues nothing.
+             */
+            mail.notesReady(meeting.getId());
         } else if (!result.segmentsOrEmpty().isEmpty()) {
             notifications.transcriptReady(meeting, attempt);
         }
