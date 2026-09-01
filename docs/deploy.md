@@ -493,6 +493,35 @@ is queued, retried for five hours, abandoned, and nobody is told anything.
 Resend account owner, so in production every closure notice reaches the
 developer instead of the account holder.
 
+### Verifying a domain
+
+Resend will not send from a domain you have not proved you control, and there is
+no free tier around that — the shared sender below is the only alternative it
+offers. A `.xyz` or `.com` is roughly $1–15/year at Porkbun, Namecheap or
+Cloudflare Registrar; that is the whole cost.
+
+1. Buy the domain. Any registrar whose DNS you can edit.
+2. Resend → **Domains** → **Add Domain**. Give it a **subdomain**, e.g.
+   `send.yourdomain.xyz`, not the root. Sending reputation then accrues to the
+   subdomain and leaves the root free for ordinary mail later.
+3. Resend generates the DNS records — an `MX` for bounce feedback, a `TXT` SPF,
+   and a `TXT` DKIM key at `resend._domainkey.…`. The exact values are per
+   domain and per region, so copy them from the dashboard rather than from any
+   example. Add them at the registrar.
+4. Click **Verify**. Usually minutes; DNS can take longer.
+5. Resend → **API Keys** → create one with **Sending access**. That is the
+   `re_…` value.
+
+**The from-address must be on the domain you actually verified.** Verifying
+`send.yourdomain.xyz` does not verify the root — `notifications@yourdomain.xyz`
+is then an unverified sender and Resend rejects it, which shows up here as
+messages queued, retried and abandoned rather than as a startup failure. Match
+them exactly:
+
+```
+ORION_MAIL_FROM = Recallix <notifications@send.yourdomain.xyz>
+```
+
 ### No domain? Then say so, and mean it
 
 There is a second valid mode, for a deployment whose only account is yours. It
@@ -547,7 +576,14 @@ backend, so it works while the service is down:
 4. Save. Render redeploys, and your first request provisions the account.
 
 Unset `ORION_MAIL_SELF_ONLY`, and verify a domain, before anybody else is meant
-to sign up. Until you do, they cannot.
+to sign up. Until you do, they cannot — self-only 403s every other account at
+provisioning, which is the whole point of it and exactly wrong for a deployment
+you want strangers to try.
+
+**Unset means delete the variable, not blank it.** Spring's `${VAR:false}`
+default applies only when the variable is *absent*; a row that exists with an
+empty value resolves to `""` and is bound in place of the default. In the Render
+dashboard, remove the row.
 
 ---
 
