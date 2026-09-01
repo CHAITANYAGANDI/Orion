@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * The half-second between Google and Orion.
+ * The half-second between Google and Reverie.
  *
  * <p>`authenticateWithRedirect` sends somebody out to Google and Google sends
  * them back here with a token in the URL. Clerk's

@@ -1,4 +1,4 @@
-# Orion ai-service — FastAPI AI worker
+# Reverie ai-service — FastAPI AI worker
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -30,7 +30,7 @@ RUN apt-get update -qq \
 # requirements.txt, is also what stops pip pulling a PyPI torchaudio in as a
 # transitive dependency of speechbrain.
 #
-# Nothing in Orion calls torchaudio. It is here only because speechbrain
+# Nothing in Reverie calls torchaudio. It is here only because speechbrain
 # imports it at module load; decoding audio is ffmpeg's job.
 #
 # Its own layer so that editing requirements.txt does not re-download either.

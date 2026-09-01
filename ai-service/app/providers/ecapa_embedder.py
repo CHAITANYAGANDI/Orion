@@ -1,12 +1,12 @@
 """Turning a speaker's turns into a vector that can be compared to another day.
 
-Neither transcription provider Orion uses can do this. AssemblyAI's own
+Neither transcription provider Reverie uses can do this. AssemblyAI's own
 documentation is explicit that it offers no cross-file speaker identification
 and that the way to get it is to "use a model like Nvidia Titanet to generate
 speaker embeddings from the audio, then match these embeddings against a vector
 database of known speakers". Every other provider evaluated was the same: their
 labels are cluster ids for one request and carry no meaning into the next one.
-So this is the piece Orion has to own, and this file is it.
+So this is the piece Reverie has to own, and this file is it.
 
 ## The model
 
@@ -94,7 +94,7 @@ class _Spans:
 
 
 def decode_to_pcm(audio: bytes, *, timeout: float = 120.0) -> "object":
-    """Decode any container Orion accepts into 16 kHz mono float32.
+    """Decode any container Reverie accepts into 16 kHz mono float32.
 
     Through ffmpeg rather than a Python decoder because the input is whatever a
     browser produced — webm/opus from MediaRecorder, m4a from a phone, mp3 from

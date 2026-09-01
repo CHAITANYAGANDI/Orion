@@ -1,6 +1,6 @@
 """The name a recording is given, read off its own transcript.
 
-A browser recording reaches Orion called ``Recording — 20/08/2026, 05:03:43``,
+A browser recording reaches Reverie called ``Recording — 20/08/2026, 05:03:43``,
 because at the moment it is saved the date is all anybody knows. That is a fine
 placeholder and a poor name: a dozen of them in a list cannot be scanned or told
 apart without opening each one.

@@ -298,7 +298,7 @@ describe("AudioPlayer keyboard", () => {
 /**
  * How long the recording is.
  *
- * Every recording Orion makes itself is WebM out of the browser's
+ * Every recording Reverie makes itself is WebM out of the browser's
  * MediaRecorder, which writes no duration into the file, so the element
  * reports Infinity for it. That put a scrubber at zero and an end time of
  * 00:00 on every recorded meeting in the app — the position counted up

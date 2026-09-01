@@ -8,7 +8,7 @@ recording of them linkable to every other, and under GDPR Article 9 a template
 used to identify a natural person is biometric data whether or not it can be
 turned back into audio.
 
-Orion held a `known_speakers` table for a year that stored a name, a use
+Reverie held a `known_speakers` table for a year that stored a name, a use
 count and a date. That table could not have identified anybody, and its removal
 in V51 is why this feature needed new storage rather than a new query. The
 storage exists now, so these are the properties it has to have.

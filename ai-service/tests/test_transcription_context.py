@@ -1,4 +1,4 @@
-"""What Orion tells the transcriber before it hears anything.
+"""What Reverie tells the transcriber before it hears anything.
 
 The failure this guards against is not a crash. It is a prompt that looks
 configured and biases nothing — or worse, one built from a date-stamped default
@@ -43,7 +43,7 @@ from app.transcription_context import (
     "ab",
 ])
 def test_a_name_nobody_chose_is_not_context(title):
-    """The default Orion gives an unnamed recording says nothing about it.
+    """The default Reverie gives an unnamed recording says nothing about it.
 
     An empty prompt is ignored by the model. A misleading one is obeyed.
     """
@@ -71,13 +71,13 @@ def test_the_prompt_names_the_meeting_its_project_and_its_subject():
     prompt = build_prompt(
         MeetingContext(
             title="Sprint review",
-            project="Orion",
+            project="Reverie",
             meeting_type="Engineering sprint review",
             organisations=["AssemblyAI"],
         )
     )
     assert prompt is not None
-    for expected in ("Engineering sprint review", "Orion", "AssemblyAI"):
+    for expected in ("Engineering sprint review", "Reverie", "AssemblyAI"):
         assert expected in prompt
 
 
@@ -128,7 +128,7 @@ def test_the_prompt_is_deterministic():
     """
     def make():
         return MeetingContext(
-            title="Sprint review", project="Orion",
+            title="Sprint review", project="Reverie",
             organisations=["Acme", "acme", "Beta"],
         )
 
@@ -147,7 +147,7 @@ def test_keyterms_are_empty_when_nothing_names_anything():
     removed. An adapter that received `[]` here and sent a boosting field
     anyway would be biasing a model toward nothing at all.
     """
-    assert build_keyterms(MeetingContext(title="Sprint review", project="Orion")) == []
+    assert build_keyterms(MeetingContext(title="Sprint review", project="Reverie")) == []
     assert build_keyterms(MeetingContext()) == []
 
 

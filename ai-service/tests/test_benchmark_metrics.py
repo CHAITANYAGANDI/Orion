@@ -244,7 +244,7 @@ def test_hours_are_handled():
     assert turns[0].start == 3731.0
 
 
-def test_orion_own_speaker_prefixed_output_is_read():
+def test_reverie_own_speaker_prefixed_output_is_read():
     turns = parse_speaker_prefixed("Speaker 1: Morning all.\nSpeaker 2: Morning.")
     assert [t.text for t in turns] == ["Morning all.", "Morning."]
 

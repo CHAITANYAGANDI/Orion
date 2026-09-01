@@ -1,6 +1,6 @@
 """Converting a recording to MP3, and refusing to do it twice.
 
-The claim under test is narrow and absolute: a file Orion calls ``.mp3``
+The claim under test is narrow and absolute: a file Reverie calls ``.mp3``
 contains MP3. Everything else here defends the two ways that claim gets broken
 in practice — a rename dressed up as a conversion, and a conversion that ran
 four times because somebody clicked four times.
@@ -37,7 +37,7 @@ TARGET = "meetings/usr_1/mtg_1/recording.webm.mp3"
 
 
 def settings() -> Settings:
-    return Settings(s3_bucket="orion", s3_endpoint="http://minio:9000")
+    return Settings(s3_bucket="reverie", s3_endpoint="http://minio:9000")
 
 
 # --------------------------------------------------------------------------- #
@@ -360,7 +360,7 @@ async def test_missing_keys_are_refused_rather_than_converted():
 async def test_a_too_large_recording_is_refused_before_it_is_downloaded():
     """The size guard runs off a HEAD, not off the file on disk."""
     service = Mp3Transcoder(
-        Settings(s3_bucket="orion", transcode_max_bytes=1_000),
+        Settings(s3_bucket="reverie", transcode_max_bytes=1_000),
         exists=lambda key: False,
     )
 
@@ -386,7 +386,7 @@ async def test_an_unknown_size_is_not_treated_as_too_large():
         def head_object(self, **_kw):
             raise RuntimeError("no such method on this store")
 
-    assert Mp3Transcoder._source_size(_Client(), "orion", SOURCE) is None  # noqa: SLF001
+    assert Mp3Transcoder._source_size(_Client(), "reverie", SOURCE) is None  # noqa: SLF001
 
 
 def test_the_working_directory_is_cleaned_up_even_when_the_encode_fails(monkeypatch):

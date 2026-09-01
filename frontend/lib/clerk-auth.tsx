@@ -135,7 +135,7 @@ function ClerkBridge({
     () => ({
       // `fullName` is null when somebody signed up with an address and never
       // gave a name, which is every email sign-up -- the form deliberately does
-      // not ask. `username` is not consulted at all: Orion never collects one.
+      // not ask. `username` is not consulted at all: Reverie never collects one.
       name: user?.fullName?.trim() || user?.firstName?.trim() || "",
       email: user?.primaryEmailAddress?.emailAddress ?? "",
       imageUrl: user?.hasImage ? user.imageUrl : "",
@@ -186,7 +186,7 @@ export function ClerkAuthProvider({
   return (
     /*
      * The four URLs are given rather than left to Clerk's defaults, which point
-     * at its own hosted pages. Orion hosts the two screens itself — see
+     * at its own hosted pages. Reverie hosts the two screens itself — see
      * app/sign-in and app/sign-up — so a default that sent people to
      * accounts.clerk.dev would take them out of the product to come back into
      * it, and `afterSignOutUrl` is what stops signing out landing on a

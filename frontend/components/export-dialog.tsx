@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Taking a meeting out of Orion.
+ * Taking a meeting out of Reverie.
  *
  * <p>Two panes: what to take on the left, what it will look like on the right.
  * The preview is the reason the rest of it is worth building. Export used to be
@@ -43,7 +43,7 @@
  *
  * <h2>Audio means MP3</h2>
  *
- * <p>There is no format choice for the recording. Orion stores whatever was
+ * <p>There is no format choice for the recording. Reverie stores whatever was
  * uploaded — webm from a browser, m4a from a phone — and handing that back was
  * offering somebody a file their music player may refuse. What it exports is an
  * MP3, converted once and kept; a recording that is already an MP3 skips the

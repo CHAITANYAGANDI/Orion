@@ -1,6 +1,6 @@
 """Write a reconciliation back onto the transcript's segments.
 
-The reconciler answers a question about words. The rest of Orion reads
+The reconciler answers a question about words. The rest of Reverie reads
 segments. This is the one place that turns the first into the second, and it is
 separate from ``app.reconcile`` so that the decision *who spoke* stays a pure
 function of times and can be tested without constructing a transcript.

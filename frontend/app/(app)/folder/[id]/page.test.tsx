@@ -160,10 +160,10 @@ describe("ProjectPage", () => {
   it("carries no chat any more", () => {
     render(<ProjectPage />);
 
-    // "Ask Orion about this folder" was removed on request. The server side
+    // "Ask Reverie about this folder" was removed on request. The server side
     // of it is untouched, so this asserts the removal was a decision rather
     // than something that fell out of a refactor.
-    expect(screen.queryByText(/Ask Orion/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Ask Reverie/)).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText(/Ask about Client ABC/)).not.toBeInTheDocument();
   });
 

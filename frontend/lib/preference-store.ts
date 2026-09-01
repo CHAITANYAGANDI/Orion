@@ -34,7 +34,7 @@
  * falls back to the default.
  */
 
-const KEY = "orion.prefs";
+const KEY = "reverie.prefs";
 
 interface Stored {
   /** Identifies the sign-in these were chosen under. */

@@ -1,9 +1,9 @@
 /**
- * One sentence, in Orion's voice, for anything the credential provider refuses.
+ * One sentence, in Reverie's voice, for anything the credential provider refuses.
  *
  * <h2>Why this exists</h2>
  *
- * <p>Orion builds its own sign-in and sign-up forms, which means it owns the
+ * <p>Reverie builds its own sign-in and sign-up forms, which means it owns the
  * part of a sign-in that goes wrong. Clerk answers a failure with an array of
  * error objects carrying a `code`, a `message`, a `longMessage` and sometimes
  * the name of the parameter at fault — good material for a developer and the

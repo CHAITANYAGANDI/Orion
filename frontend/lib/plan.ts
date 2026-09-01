@@ -1,7 +1,7 @@
 /**
  * The one plan, and what is actually in it.
  *
- * Orion has a single tier. That is not a limitation being apologised for —
+ * Reverie has a single tier. That is not a limitation being apologised for —
  * it is why this page can be written honestly, because with nothing to sell
  * there is no reason to describe a feature generously or to leave an absence
  * out. Every line below is something the code does, at the limit the code
@@ -41,7 +41,7 @@ export const INCLUDED: FeatureGroup[] = [
       {
         label: "Speakers separated, and yours to name",
         detail:
-          "Diarization tells the voices apart and numbers them by who spoke first. Naming them is a rename you make, not a voice Orion recognises.",
+          "Diarization tells the voices apart and numbers them by who spoke first. Naming them is a rename you make, not a voice Reverie recognises.",
       },
       {
         label: "A summary with decisions, risks and action items",

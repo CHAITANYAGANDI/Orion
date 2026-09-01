@@ -1,4 +1,4 @@
-# Orion AI — Architecture
+# Reverie AI — Architecture
 
 ## Services & responsibilities
 

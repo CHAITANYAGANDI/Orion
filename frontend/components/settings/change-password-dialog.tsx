@@ -3,7 +3,7 @@
 /**
  * Change Password.
  *
- * <p>Orion has never held a password — there is no password column and no
+ * <p>Reverie has never held a password — there is no password column and no
  * login form; the identity provider owns sign-in. So this dialog collects and
  * checks, and the provider decides. That division is why the current password
  * is asked for: it is not verified here, it is passed through so the provider

@@ -66,9 +66,9 @@ describe("the retention windows", () => {
 });
 
 describe("the announcement", () => {
-  it("names Orion, says what it does, and leaves room to object", () => {
+  it("names Reverie, says what it does, and leaves room to object", () => {
     expect(RECORDING_ANNOUNCEMENT).toContain("recording this meeting");
-    expect(RECORDING_ANNOUNCEMENT).toContain("Orion");
+    expect(RECORDING_ANNOUNCEMENT).toContain("Reverie");
     expect(RECORDING_ANNOUNCEMENT).toContain("rather I didn't");
   });
 });

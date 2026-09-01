@@ -87,7 +87,7 @@ import { recordHref } from "@/lib/routes";
  * two lists, rather than one list and one property a meeting either has or does
  * not.
  *
- * <p>Otter offers "Shared with me" as well, and Orion cannot: nobody can
+ * <p>Otter offers "Shared with me" as well, and Reverie cannot: nobody can
  * share anything *into* a one-account workspace. Offering the row anyway would
  * be a filter that is permanently empty and reads as a fault.
  */

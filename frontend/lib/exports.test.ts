@@ -186,7 +186,7 @@ describe("describeExportFailure", () => {
   });
 
   it("refuses a server 'message' that is really a stack trace", () => {
-    const stack = "NullPointerException\n\tat com.orion.Export.render(Export.java:41)";
+    const stack = "NullPointerException\n\tat com.reverie.Export.render(Export.java:41)";
 
     expect(describeExportFailure("summary", { status: 400, data: { message: stack } })).toBe(
       "Couldn't export the summary.",
@@ -326,7 +326,7 @@ describe("fetchExportFile", () => {
 /* -------------------------------------------------------------------------- */
 
 describe("save", () => {
-  const createObjectURL = vi.fn(() => "blob:orion/1");
+  const createObjectURL = vi.fn(() => "blob:reverie/1");
   const revokeObjectURL = vi.fn();
   let click: ReturnType<typeof vi.spyOn>;
 
@@ -366,7 +366,7 @@ describe("save", () => {
 
     vi.advanceTimersByTime(REVOKE_DELAY_MS);
 
-    expect(revokeObjectURL).toHaveBeenCalledWith("blob:orion/1");
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:reverie/1");
   });
 
   it("gives the browser long enough to be sure", () => {

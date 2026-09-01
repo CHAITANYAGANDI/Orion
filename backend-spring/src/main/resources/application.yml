@@ -18,15 +18,15 @@ spring.lifecycle.timeout-per-shutdown-phase: 20s
 
 spring:
   application:
-    name: orion-backend-spring
+    name: reverie-backend-spring
 
   # Runtime connections use the UNPRIVILEGED role. Row-level security is
   # ignored by superusers and by anything holding BYPASSRLS, so connecting as
   # the schema owner would leave every V9 policy enabled and enforcing nothing.
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/orion}
-    username: ${SPRING_DATASOURCE_USERNAME:orion_app}
-    password: ${SPRING_DATASOURCE_PASSWORD:orion_app}
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/reverie}
+    username: ${SPRING_DATASOURCE_USERNAME:reverie_app}
+    password: ${SPRING_DATASOURCE_PASSWORD:reverie_app}
     driver-class-name: org.postgresql.Driver
 
   # How much scheduled work can happen at once.
@@ -50,7 +50,7 @@ spring:
   task:
     scheduling:
       pool:
-        size: ${ORION_SCHEDULER_THREADS:3}
+        size: ${REVERIE_SCHEDULER_THREADS:3}
 
   jpa:
     hibernate:
@@ -76,9 +76,9 @@ spring:
     # because row-level security is armed with a session-level setting on each
     # connection, which such a pooler separates from the query it was set for.
     # They still differ in one respect — Flyway connects as the schema owner.
-    url: ${FLYWAY_URL:${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/orion}}
-    user: ${FLYWAY_USER:orion}
-    password: ${FLYWAY_PASSWORD:orion}
+    url: ${FLYWAY_URL:${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/reverie}}
+    user: ${FLYWAY_USER:reverie}
+    password: ${FLYWAY_PASSWORD:reverie}
 
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
@@ -92,7 +92,7 @@ spring:
       sasl.mechanism: ${KAFKA_SASL_MECHANISM:PLAIN}
       sasl.jaas.config: ${KAFKA_SASL_JAAS_CONFIG:}
     consumer:
-      group-id: orion-backend
+      group-id: reverie-backend
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
@@ -127,9 +127,9 @@ spring:
 # Boot's OAuth2 resource-server autoconfiguration activates as soon as
 # jwk-set-uri is *present* — an empty value (dev mode) makes it fail startup
 # with "jwkSetUri cannot be empty". AuthenticationFilter builds the Clerk
-# JwtDecoder itself, lazily, from orion.clerk.jwks-url below.
+# JwtDecoder itself, lazily, from reverie.clerk.jwks-url below.
 
-orion:
+reverie:
   # Email, off unless a provider is configured.
   #
   # Both `api-key` and `from` have to be set before anything is sent. A blank
@@ -142,7 +142,7 @@ orion:
   # not, and why.
   mail:
     api-key: ${RESEND_API_KEY:}
-    from: ${ORION_MAIL_FROM:}
+    from: ${REVERIE_MAIL_FROM:}
     # "This deployment has no users other than me."
     #
     # A claim about the world, not a preference, and the only claim under which
@@ -163,7 +163,7 @@ orion:
     # token and was provisioned an account, and the deployment check was then
     # resting on a fact that had quietly stopped holding. So it now requires the
     # id below, and SelfOnlyAccess refuses every other subject at provisioning.
-    self-only: ${ORION_MAIL_SELF_ONLY:false}
+    self-only: ${REVERIE_MAIL_SELF_ONLY:false}
 
     # The single account allowed when self-only is on. Required with it, and
     # production refuses to start without it.
@@ -172,34 +172,34 @@ orion:
     # on. Starts with `user_`; it is on your user in the Clerk dashboard. NOT
     # the email address: that can be changed at the provider, is not unique
     # across providers, and is the thing an attacker would try to control.
-    self-user-id: ${ORION_MAIL_SELF_USER_ID:}
-    reply-to: ${ORION_MAIL_REPLY_TO:}
+    self-user-id: ${REVERIE_MAIL_SELF_USER_ID:}
+    reply-to: ${REVERIE_MAIL_REPLY_TO:}
     # Below this, a finished recording is not worth a message: it was done
     # before the reader left the page, and mailing it is the V56 recap again.
-    notes-min-seconds: ${ORION_MAIL_NOTES_MIN_SECONDS:900}
+    notes-min-seconds: ${REVERIE_MAIL_NOTES_MIN_SECONDS:900}
     # 08:00 UTC is the slot the old deadline digest had, and which the
     # retention pass was deliberately timed away from.
-    task-reminder-cron: ${ORION_MAIL_TASK_REMINDER_CRON:0 0 8 * * *}
+    task-reminder-cron: ${REVERIE_MAIL_TASK_REMINDER_CRON:0 0 8 * * *}
     # An hour before the pass that does the deleting. The two look a week apart
     # so the order does not matter, but a job that warns about deletions has no
     # business running after them.
-    retention-warning-cron: ${ORION_MAIL_RETENTION_WARNING_CRON:0 0 2 * * *}
+    retention-warning-cron: ${REVERIE_MAIL_RETENTION_WARNING_CRON:0 0 2 * * *}
 
     # ----- the relay that drains mail_outbox -----
     #
     # Ten seconds rather than the Kafka relay's one. Nothing here is watched:
     # the fastest of these messages reports a recording that took minutes to
     # process, and the slowest is a digest with a day's tolerance.
-    poll-ms: ${ORION_MAIL_POLL_MS:10000}
-    batch: ${ORION_MAIL_BATCH:25}
+    poll-ms: ${REVERIE_MAIL_POLL_MS:10000}
+    batch: ${REVERIE_MAIL_BATCH:25}
     # Roughly a day of retrying at the capped interval. Past that the address is
     # not going to start working, and a queue that retires nothing eventually has
     # a head nobody can send.
-    max-attempts: ${ORION_MAIL_MAX_ATTEMPTS:12}
-    first-backoff-seconds: ${ORION_MAIL_FIRST_BACKOFF_SECONDS:30}
+    max-attempts: ${REVERIE_MAIL_MAX_ATTEMPTS:12}
+    first-backoff-seconds: ${REVERIE_MAIL_FIRST_BACKOFF_SECONDS:30}
     # An hour is late for a retention warning and still useful. A day is neither,
     # so the doubling stops here.
-    max-backoff-seconds: ${ORION_MAIL_MAX_BACKOFF_SECONDS:3600}
+    max-backoff-seconds: ${REVERIE_MAIL_MAX_BACKOFF_SECONDS:3600}
     # ----- lifecycle -----
     #
     # mail_outbox has no foreign key to users and must not have one: the
@@ -209,13 +209,13 @@ orion:
     #
     # A delivered row is a receipt -- a week is enough to answer "did that go
     # out on Tuesday".
-    keep-sent-days: ${ORION_MAIL_KEEP_SENT_DAYS:7}
+    keep-sent-days: ${REVERIE_MAIL_KEEP_SENT_DAYS:7}
     # An abandoned row is the record that somebody was NOT told something, and
     # for the closure notice it is the only trace the notice failed. Longer than
     # a delivered row on purpose: a week is not long enough for anybody to
     # notice, ask and look.
-    keep-abandoned-days: ${ORION_MAIL_KEEP_ABANDONED_DAYS:30}
-    purge-cron: ${ORION_MAIL_PURGE_CRON:0 40 3 * * *}
+    keep-abandoned-days: ${REVERIE_MAIL_KEEP_ABANDONED_DAYS:30}
+    purge-cron: ${REVERIE_MAIL_PURGE_CRON:0 40 3 * * *}
 
   # Defaults to clerk, and that single word is the whole of the access control
   # story for a deployment whose environment did not arrive intact.
@@ -223,7 +223,7 @@ orion:
   # This used to read `:dev`, which quietly cancelled the fail-closed default
   # written on the @Value in AuthenticationFilter and ClerkTokens. A @Value
   # default only applies when the property is ABSENT, and this file made it
-  # present in every profile -- so an unset ORION_AUTH_MODE resolved here, to
+  # present in every profile -- so an unset REVERIE_AUTH_MODE resolved here, to
   # dev, and the guard three layers down never got a say. Two defaults for one
   # decision, and the weaker one won.
   #
@@ -233,13 +233,13 @@ orion:
   #
   # The opposite mistake costs a wall of 401s: obvious in seconds, and nobody's
   # data is exposed while it lasts. See AuthModeDefaultTest.
-  auth-mode: ${ORION_AUTH_MODE:clerk}
+  auth-mode: ${REVERIE_AUTH_MODE:clerk}
   # No default, deliberately. This is the shared secret on /internal/**, which
   # is where the ai-service writes transcripts and marks meetings READY -- so a
   # well-known default value is an unauthenticated write endpoint dressed as a
   # configured one. Blank means InternalTokenFilter refuses every internal
   # request rather than accepting a token published in this repository.
-  internal-token: ${ORION_INTERNAL_TOKEN:}
+  internal-token: ${REVERIE_INTERNAL_TOKEN:}
   clerk:
     issuer: ${CLERK_ISSUER:}
     jwks-url: ${CLERK_JWKS_URL:}
@@ -248,8 +248,8 @@ orion:
   # job that deletes data: an environment restored from a backup should be able
   # to find the switch before it wakes up and re-runs last month's deletions.
   retention:
-    enabled: ${ORION_RETENTION_ENABLED:true}
-    cron: ${ORION_RETENTION_CRON:0 0 3 * * *}
+    enabled: ${REVERIE_RETENTION_ENABLED:true}
+    cron: ${REVERIE_RETENTION_CRON:0 0 3 * * *}
 
 app:
   frontend-url: ${APP_FRONTEND_URL:http://localhost:3000}
@@ -266,6 +266,8 @@ s3:
   public-endpoint: ${S3_PUBLIC_ENDPOINT:http://localhost:9000}
   access-key: ${S3_ACCESS_KEY:minioadmin}
   secret-key: ${S3_SECRET_KEY:minioadmin}
+  # Still `orion`: R2 cannot rename a bucket in place and this one holds every
+  # recording, so moving it is a data migration rather than a rename.
   bucket: ${S3_BUCKET:orion}
   region: ${S3_REGION:us-east-1}
   presign-expiry-seconds: 900
@@ -307,4 +309,4 @@ resilience4j:
 
 logging:
   level:
-    com.orion: INFO
+    com.reverie: INFO

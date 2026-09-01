@@ -215,7 +215,7 @@ export default function MeetingDetailPage() {
 
   /**
    * Controlled so the transcript can hand a selection to the chat.
-   * "Ask Orion" about a highlighted sentence has to leave the tab it was
+   * "Ask Reverie" about a highlighted sentence has to leave the tab it was
    * invoked from, which an uncontrolled Tabs cannot do.
    */
   const [tab, setTab] = React.useState("summary");
@@ -551,7 +551,7 @@ export default function MeetingDetailPage() {
    *
    * The summary is prose you paste into a reply; the minutes are a document you
    * paste into a doc or an email. Speakers come from the transcript because
-   * "Present:" is the line every set of minutes opens with, and Orion knows
+   * "Present:" is the line every set of minutes opens with, and Reverie knows
    * who spoke without anyone having typed an attendee list.
    */
   function minutesInput() {
@@ -866,7 +866,7 @@ export default function MeetingDetailPage() {
                   other operation, so a control named Export now does exactly
                   what it says. */}
               <Button variant="outline" size="sm" className="gap-2" onClick={() => setExporting(true)}>
-                {/* Up: out of Orion. See the Import button in
+                {/* Up: out of Reverie. See the Import button in
                     components/app-shell.tsx for the pairing. */}
                 <Upload className="h-4 w-4" /> Export
               </Button>

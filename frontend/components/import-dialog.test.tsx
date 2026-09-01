@@ -7,11 +7,11 @@ import userEvent from "@testing-library/user-event";
  *
  * <p>Two things are being defended. The first is the absence of the upsell:
  * every product puts "3 of 3 imports left — upgrade for unlimited" under this
- * dropzone, Orion has one free plan, and that line would advertise a product
+ * dropzone, Reverie has one free plan, and that line would advertise a product
  * that does not exist. It is the easiest thing in the world to add back by
  * copying a competitor's dialog.
  *
- * <p>The second is the language picker not lying. Orion resolves the
+ * <p>The second is the language picker not lying. Reverie resolves the
  * transcription language when a meeting is enqueued, from the account — there
  * is no per-file language in the pipeline. A control here that read as "this
  * file's language" would silently do nothing to the file sitting above it, so
@@ -175,7 +175,7 @@ describe("ImportDialog", () => {
     expect(createMeeting).toHaveBeenCalledWith(
       expect.objectContaining({ objectKey: "k1", contentType: "audio/mp4" }),
     );
-    // Not flagged as recorded: this file was captured somewhere Orion was
+    // Not flagged as recorded: this file was captured somewhere Reverie was
     // not, which is what the imported-conversation email switch keys on.
     expect(createMeeting).not.toHaveBeenCalledWith(expect.objectContaining({ recorded: true }));
     await waitFor(() => expect(push).toHaveBeenCalledWith("/meetings/mtg_9"));

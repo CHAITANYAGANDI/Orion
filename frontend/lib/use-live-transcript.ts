@@ -3,7 +3,7 @@
 /**
  * Words on screen while somebody is still saying them.
  *
- * This is **not** the transcript. Orion's canonical transcript is made after
+ * This is **not** the transcript. Reverie's canonical transcript is made after
  * Stop, from the uploaded file, with the whole recording in view — see
  * `ai-service/app/providers/assemblyai_adapter.py`. What this produces is
  * provisional and is replaced wholesale when that finishes. The two optimise
@@ -17,11 +17,11 @@
  *  - **It opened its own microphone.** A separate `getUserMedia` call, honouring
  *    the browser's default input and not the device chosen in the control bar.
  *    So the live text could be listening to the laptop lid while the recording
- *    was on the headset — and the resulting comparison ("Orion heard this,
+ *    was on the headset — and the resulting comparison ("Reverie heard this,
  *    Otter heard that") was between two different audio signals.
  *  - **It had no speaker concept at all.** Every line under one avatar, where a
  *    mature product shows the speaker change.
- *  - **Its timestamps were invented here.** Orion's own `elapsed` counter,
+ *  - **Its timestamps were invented here.** Reverie's own `elapsed` counter,
  *    sampled when recognition happened to return. A line spoken at 0:04 and
  *    recognised six seconds later was labelled 0:10.
  *  - **Firefox has none of it**, and the audio went to Google or Apple.
@@ -350,7 +350,7 @@ export interface LiveAudioSource {
 }
 
 /**
- * Ask Orion for a streaming credential.
+ * Ask Reverie for a streaming credential.
  *
  * <p>Absolute, and authenticated. A relative `/api/v1/...` was wrong twice
  * over: the API is on a different origin from the app — port 8080 against the

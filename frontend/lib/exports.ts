@@ -190,7 +190,7 @@ export function isTransientFailure(error: unknown): boolean {
 /**
  * The server's own sentence, when it wrote one meant for a person.
  *
- * <p>Only from a 4xx. Those are Orion refusing something and explaining why —
+ * <p>Only from a 4xx. Those are Reverie refusing something and explaining why —
  * "this meeting has not been translated into German", "you have reached this
  * month's limit" — and repeating them is the whole value. A 5xx body is either
  * the generic "An unexpected error occurred" or, when a proxy answered instead
@@ -328,7 +328,7 @@ export async function fetchExportFile(
  * transcript, sometimes does not. Nothing throws when it loses.
  *
  * <p>A minute is far longer than any browser needs and costs one blob held in
- * memory until then. Orion's documents are measured in megabytes; the audio
+ * memory until then. Reverie's documents are measured in megabytes; the audio
  * never comes through here at all.
  */
 export const REVOKE_DELAY_MS = 60_000;

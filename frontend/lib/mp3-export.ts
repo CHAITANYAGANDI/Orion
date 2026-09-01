@@ -3,7 +3,7 @@
  *
  * <h2>Why there is a wait at all</h2>
  *
- * <p>Orion stores what was uploaded: webm from a browser, m4a from a phone, wav
+ * <p>Reverie stores what was uploaded: webm from a browser, m4a from a phone, wav
  * from a desk recorder. "Export as MP3" therefore means encoding one, and
  * encoding an hour of audio takes tens of seconds. A request that waited for it
  * would be cut off by a proxy long before it finished — after doing all of the
@@ -51,7 +51,7 @@ export const POLL_INTERVAL_MS = 2_000;
 /**
  * How long to keep asking.
  *
- * <p>Five minutes covers every recording Orion realistically holds — LAME runs
+ * <p>Five minutes covers every recording Reverie realistically holds — LAME runs
  * at tens of times real time, so even a three-hour meeting is a couple of
  * minutes. Past that, giving up is the honest thing: nobody watches a dialog for
  * ten minutes, and the conversion does not stop when this does. The next attempt

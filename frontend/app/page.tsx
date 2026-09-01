@@ -19,7 +19,7 @@ import {
  *
  * <p>The hero is a transcript. Not a screenshot of one and not an illustration
  * of one — a real one, typeset in the same two faces the product uses, with the
- * timecodes in the margin where the meeting page puts them. Orion turns speech
+ * timecodes in the margin where the meeting page puts them. Reverie turns speech
  * into a record you can act on, so the page opens by doing that: three lines of
  * a meeting, one of them marked, and the commitment that was pulled out of it
  * sitting underneath with an owner and a date on it.
@@ -140,7 +140,7 @@ function Header() {
           <span className="flex h-7 w-7 items-center justify-center rounded-[7px] bg-primary text-primary-foreground">
             <Mic className="h-3.5 w-3.5" />
           </span>
-          <span className="text-[15px] font-semibold tracking-tight">Orion</span>
+          <span className="text-[15px] font-semibold tracking-tight">Reverie</span>
         </div>
         <nav className="flex items-center gap-1">
           <Link
@@ -179,7 +179,7 @@ function Hero() {
           Everything said. Everything decided.
         </h1>
         <p className="mx-auto mt-6 max-w-xl text-[17px] leading-relaxed text-muted-foreground">
-          Orion records or imports a meeting, writes it down with the speakers
+          Reverie records or imports a meeting, writes it down with the speakers
           separated, and turns it into a brief you can search, question and act
           on.
         </p>
@@ -213,7 +213,7 @@ function Hero() {
  * <p>A meeting, three lines of it, in the product's own typography: JetBrains
  * Mono holds the timecodes so they do not jitter, IBM Plex Sans carries the
  * speech. One line is marked the way the transcript page marks a passage, and
- * what Orion pulled out of it is underneath with the owner and the date on it.
+ * what Reverie pulled out of it is underneath with the owner and the date on it.
  *
  * <p>The lines settle in sequence on load — the pace of something being
  * transcribed rather than a decoration. `motion-reduce` stops all of it: the
@@ -305,7 +305,7 @@ function HowItWorks() {
         How it works
       </p>
       <h2 className="mt-4 max-w-[18ch] text-[clamp(1.75rem,4vw,2.5rem)] font-light leading-tight tracking-[-0.025em]">
-        Three steps, and two of them are Orion&apos;s.
+        Three steps, and two of them are Reverie&apos;s.
       </h2>
 
       <ol className="mt-14 grid gap-10 sm:grid-cols-3">
@@ -384,7 +384,7 @@ function Footer() {
           <span className="flex h-5 w-5 items-center justify-center rounded-[5px] bg-muted text-muted-foreground">
             <Mic className="h-2.5 w-2.5" />
           </span>
-          <span className="text-[13px] text-muted-foreground">Orion</span>
+          <span className="text-[13px] text-muted-foreground">Reverie</span>
         </div>
         <div className="flex items-center gap-6 text-[13px] text-muted-foreground">
           <Link href="/privacy" className="transition-colors hover:text-foreground">

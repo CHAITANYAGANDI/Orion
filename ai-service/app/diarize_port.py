@@ -6,7 +6,7 @@ AssemblyAI is the canonical source of *words*: their text, their timings, their
 confidence. It is not a reliable source of *who said them*. We have verified
 recordings where the provider returns one utterance labelled ``B`` and every
 word inside it labelled ``B`` too, across an audible change of voice — so there
-is no correct provider label anywhere in the response for Orion to recover.
+is no correct provider label anywhere in the response for Reverie to recover.
 See docs/diarization.md.
 
 The previous repair (``app/rediarize.py``) worked the other way round: it took
@@ -79,7 +79,7 @@ class Timeline:
     """A whole recording's diarization, plus what the model wants to admit.
 
     ``turns`` is expected sorted by start and non-overlapping: the reconciler
-    below wants an *exclusive* timeline, because Orion stores one speaker per
+    below wants an *exclusive* timeline, because Reverie stores one speaker per
     word and cannot represent two people saying the same word. Where a model can
     report overlap it is kept in ``overlap_seconds`` for diagnostics rather than
     forced into a schema with nowhere to put it. See §7 of the brief and the

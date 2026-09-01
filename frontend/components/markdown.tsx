@@ -36,7 +36,7 @@
  *   mailto and relative links and drops everything else, so `javascript:` in a
  *   link never reaches an anchor.
  * - **Links leave with `noopener noreferrer`**, and `nofollow` because the
- *   destination is model output rather than anything Orion vouches for.
+ *   destination is model output rather than anything Reverie vouches for.
  * - **No images.** An answer has no business fetching a remote resource, and an
  *   image tag with a tracking URL in it is the cheapest way to find out that
  *   somebody read their meeting notes.
@@ -132,7 +132,7 @@ const COMPONENTS = {
       href={href}
       target="_blank"
       // noopener/noreferrer for the tab, nofollow because this destination came
-      // out of a language model and Orion is not vouching for it.
+      // out of a language model and Reverie is not vouching for it.
       rel="noopener noreferrer nofollow"
       className="underline underline-offset-2 hover:text-primary"
     >

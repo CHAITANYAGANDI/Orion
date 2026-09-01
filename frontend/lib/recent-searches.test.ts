@@ -102,14 +102,14 @@ describe("forgetting", () => {
 
 describe("storage that will not cooperate", () => {
   it("reads nothing rather than throwing on a hand-edited value", () => {
-    window.localStorage.setItem("orion.recent-searches.usr_1", "{not json");
+    window.localStorage.setItem("reverie.recent-searches.usr_1", "{not json");
 
     expect(readRecentSearches(USER)).toEqual([]);
   });
 
   it("drops entries that are not strings", () => {
     window.localStorage.setItem(
-      "orion.recent-searches.usr_1",
+      "reverie.recent-searches.usr_1",
       JSON.stringify(["stripe", 42, null, "billing"]),
     );
 

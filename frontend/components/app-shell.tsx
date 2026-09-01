@@ -224,7 +224,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
               <Mic className="h-4 w-4" />
             </div>
-            <span className="font-semibold">Orion</span>
+            <span className="font-semibold">Reverie</span>
             {/* Beside the name, at the far end of the row rather than touching
                 it: a bell abutting the wordmark reads as part of the logo, and
                 the first thing anybody would try to click on a logo is the
@@ -368,7 +368,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
                     className="gap-2"
                     onClick={() => setImporting(true)}
                   >
-                    {/* Down: into Orion. The pair with Export's up arrow —
+                    {/* Down: into Reverie. The pair with Export's up arrow —
                         read from the app's side, not the device's, so the two
                         point at each other rather than both meaning "file
                         transfer". */}

@@ -178,7 +178,7 @@ describe("the request the signed download makes", () => {
     // The credential is in the URL. An Authorization header would fall outside
     // the signature and turn a simple cross-origin GET into a preflighted one,
     // which the bucket would then have to be configured to answer.
-    await fetchSignedFile("https://account.r2.cloudflarestorage.com/orion/x.mp3?sig=1", "a.mp3", 0);
+    await fetchSignedFile("https://account.r2.cloudflarestorage.com/reverie/x.mp3?sig=1", "a.mp3", 0);
 
     expect(seen[0].url).toContain("r2.cloudflarestorage.com");
     expect(seen[0].headers).toEqual({});
@@ -188,7 +188,7 @@ describe("the request the signed download makes", () => {
     // Worth asserting on its own: this is the one request in the app that goes
     // somewhere other than the API, and the session token has no business
     // being on it.
-    await fetchSignedFile("https://account.r2.cloudflarestorage.com/orion/x.mp3", "a.mp3", 0);
+    await fetchSignedFile("https://account.r2.cloudflarestorage.com/reverie/x.mp3", "a.mp3", 0);
 
     expect(Object.keys(seen[0].headers)).not.toContain("x-dev-user");
     expect(Object.keys(seen[0].headers)).not.toContain("authorization");

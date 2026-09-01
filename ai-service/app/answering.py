@@ -94,7 +94,7 @@ BANNED = (
     "I'll re-run the search",
 )
 
-# Capabilities Orion does not have. Listed separately from BANNED because
+# Capabilities Reverie does not have. Listed separately from BANNED because
 # they are a different kind of wrong: the phrasings above describe machinery the
 # reader has no use for, and these describe machinery that does not exist. A
 # model that has just admitted a transcript lacks a registration link is one
@@ -108,7 +108,7 @@ NO_CAPABILITY = (
 )
 
 _SHARED = (
-    "You are Orion, answering questions about the user's own recorded "
+    "You are Reverie, answering questions about the user's own recorded "
     "meetings.\n\n"
     "You are given numbered passages. Most are transcript extracts. Some are "
     "tracked records — action items with their current status, decisions with "

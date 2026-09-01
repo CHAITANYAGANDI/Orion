@@ -168,7 +168,7 @@ describe("a query with no usable token", () => {
   it("carries one sentence a person can act on, and no detail", async () => {
     stubFetch();
     setTokenGetter(async () => {
-      throw new Error("clerk: token template 'orion' missing on foo.clerk.accounts.dev");
+      throw new Error("clerk: token template 'reverie' missing on foo.clerk.accounts.dev");
     });
 
     const result = await store().dispatch(api.endpoints.getMeeting.initiate("mtg_1"));

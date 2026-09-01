@@ -53,7 +53,7 @@ describe("what it asks", () => {
     render(<WelcomePage />);
 
     expect(screen.getByLabelText("Name")).toBeInTheDocument();
-    // Nothing that Orion has nowhere to put.
+    // Nothing that Reverie has nowhere to put.
     expect(screen.queryByLabelText(/company|team|role|how did you hear/i)).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: /Continue/ }));
@@ -73,7 +73,7 @@ describe("what it asks", () => {
     /*
      * Settings tells this person their name comes from Google and disables the
      * field. Asking for it here would be the product contradicting itself two
-     * screens apart -- and saving it would write a copy into Orion's column
+     * screens apart -- and saving it would write a copy into Reverie's column
      * that then outranks Google's on every screen.
      */
     identity.profile = {

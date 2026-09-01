@@ -16,9 +16,9 @@
  * has no way out of itself. Everything here exists to tell those two events
  * apart and to say something true about the difference.
  *
- * <h2>Which fields Orion will answer on somebody's behalf</h2>
+ * <h2>Which fields Reverie will answer on somebody's behalf</h2>
  *
- * <p>A username, and nothing else. Orion has nowhere to put one — no profile,
+ * <p>A username, and nothing else. Reverie has nowhere to put one — no profile,
  * no @mention, no sharing — so where an instance requires it, it is a value
  * nobody reads and asking for it would be a required field invented at the
  * exact moment somebody is deciding whether this product is worth the trouble.
@@ -57,7 +57,7 @@ export function completedSession(state: SignUpState | null | undefined): string 
 }
 
 /**
- * What Orion can fill in so the sign-up can finish, or null if nothing.
+ * What Reverie can fill in so the sign-up can finish, or null if nothing.
  *
  * <p>Called before the code is sent as well as after it comes back. Before,
  * because finding out that an account cannot be created is worth knowing
@@ -79,11 +79,11 @@ export function fillableFields(
  * the world is the same six letters — and a collision here surfaces as "there
  * is already an account with that email", which would be a lie about a field
  * nobody was shown. Three random bytes make that not happen, and the value is
- * never displayed anywhere in Orion.
+ * never displayed anywhere in Reverie.
  */
 export function usernameFrom(email: string): string {
   const local = email.split("@")[0] ?? "";
-  const base = local.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 20) || "orion";
+  const base = local.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 20) || "reverie";
   return `${base}-${noise()}`;
 }
 

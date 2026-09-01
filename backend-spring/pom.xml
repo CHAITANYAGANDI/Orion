@@ -11,11 +11,11 @@
         <relativePath/>
     </parent>
 
-    <groupId>com.orion</groupId>
+    <groupId>com.reverie</groupId>
     <artifactId>backend-spring</artifactId>
     <version>0.1.0</version>
-    <name>orion-backend-spring</name>
-    <description>Orion AI — business API + orchestrator</description>
+    <name>reverie-backend-spring</name>
+    <description>Reverie AI — business API + orchestrator</description>
 
     <properties>
         <java.version>21</java.version>

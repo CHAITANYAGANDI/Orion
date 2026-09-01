@@ -495,7 +495,7 @@ describe("the scope Home opens on", () => {
      * from two defaults ago decide where this one opens.
      */
     window.localStorage.setItem(
-      "orion.prefs",
+      "reverie.prefs",
       JSON.stringify({ session: "sess_1", values: { "home.scope": "all" } }),
     );
 

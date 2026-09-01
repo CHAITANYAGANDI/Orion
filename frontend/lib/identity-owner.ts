@@ -4,7 +4,7 @@
  *
  * <h2>The question this answers</h2>
  *
- * <p>Orion has two kinds of account and they are not the same underneath:
+ * <p>Reverie has two kinds of account and they are not the same underneath:
  *
  * <ul>
  *   <li><b>Signed up with Google.</b> The name and the picture are Google's,
@@ -23,7 +23,7 @@
  * <h2>The address is not in here</h2>
  *
  * <p>It used to be, with a whole vocabulary about where a changed one had to go.
- * It is gone because nobody changes their address in Orion any more, whatever
+ * It is gone because nobody changes their address in Reverie any more, whatever
  * kind of account they have — see lib/account-actions. The address is a display
  * on every screen that shows it, so there is nothing left to decide.
  *
@@ -40,8 +40,8 @@
 
 /** Where the identity lives. */
 export type IdentityOwner =
-  /** Clerk, on Orion's behalf: an email and password account made here. */
-  | "orion"
+  /** Clerk, on Reverie's behalf: an email and password account made here. */
+  | "reverie"
   /** An identity provider — Google today. */
   | "external"
   /** No provider at all: a dev build, identified by a header. */
@@ -61,17 +61,17 @@ export interface Credential {
 
 export interface IdentityPermissions {
   owner: IdentityOwner;
-  /** Orion's own `display_name` column. */
+  /** Reverie's own `display_name` column. */
   name: boolean;
   /*
    * There is no `email` here, and its absence is the answer rather than an
-   * omission: the address on an Orion account is fixed once it is made, for
+   * omission: the address on an Reverie account is fixed once it is made, for
    * every kind of account. See lib/account-actions for why.
    */
   password: boolean;
   /**
    * What to call whoever owns it, in a sentence: "Google", "your sign-in
-   * provider". Empty when Orion owns it and there is nothing to name.
+   * provider". Empty when Reverie owns it and there is nothing to name.
    */
   ownerLabel: string;
 }
@@ -93,7 +93,7 @@ export function identityOwner({ mode, provider, hasPassword }: Credential): Iden
    * here would be offering to edit a copy.
    */
   if (provider) return "external";
-  if (hasPassword) return "orion";
+  if (hasPassword) return "reverie";
   /*
    * Signed in under Clerk with neither a password nor a connection. Nothing
    * here knows what to do with that, so nothing here offers to change it —
@@ -107,8 +107,8 @@ export function identityPermissions(credential: Credential): IdentityPermissions
   const label = NAMES[credential.provider] || "your sign-in provider";
 
   switch (owner) {
-    case "orion":
-      // Clerk holds the credential on Orion's behalf, and this is the account
+    case "reverie":
+      // Clerk holds the credential on Reverie's behalf, and this is the account
       // holder. All three are theirs.
       return { owner, name: true, password: true, ownerLabel: "" };
     case "dev":

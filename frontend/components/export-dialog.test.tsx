@@ -529,7 +529,7 @@ describe("ExportDialog preview", () => {
 
 describe("ExportDialog the recording", () => {
   it("offers no choice of format, because there is only one", async () => {
-    // Original is gone. Orion stores whatever was uploaded, and handing that
+    // Original is gone. Reverie stores whatever was uploaded, and handing that
     // back was offering somebody a webm their music player may refuse.
     open({ hasAudio: true, audioContentType: "audio/webm;codecs=opus" });
 

@@ -5,7 +5,7 @@ Both were reported from real meetings:
 1. A short interjection — "Exactly." — was absorbed into the turn around it,
    so one person appeared to have said something another person said.
 2. The second person to speak displayed as **Speaker 4**, because the provider
-   had clustered them as "D" and Orion decoded the letter by its position in
+   had clustered them as "D" and Reverie decoded the letter by its position in
    the alphabet.
 
 The cases below are lettered to match the specification they were written from.
@@ -19,13 +19,13 @@ speaker boundaries known exactly because the file was assembled from separate
 takes. AssemblyAI's async diarization got that recording completely right: five
 utterances, the one-word "Exactly." on its own with its own label, both with and
 without `speakers_expected`. So the batch bug was never the provider mislabelling
-words — it was Orion discarding the word-level labels on the way past, which
+words — it was Reverie discarding the word-level labels on the way past, which
 left no way to express a speaker change inside an utterance and no way to notice
 one had happened.
 
 That distinction decides who can fix what, so the tests keep it visible: a
 mid-utterance switch is *constructed* here rather than taken from a recording,
-because the provider does not often produce one. It is the shape Orion has to
+because the provider does not often produce one. It is the shape Reverie has to
 survive, not the shape it usually meets.
 """
 
@@ -88,7 +88,7 @@ def test_a_one_word_interjection_survives_as_its_own_turn():
     """A A A A B A A A must become three turns, not one.
 
     The reported bug exactly. The provider put the whole thing in one utterance
-    and labelled that utterance A, but attributed the fifth word to B. Orion
+    and labelled that utterance A, but attributed the fifth word to B. Reverie
     read only the utterance's label, so "exactly" was published under A's name —
     a quotation beside somebody who did not say it.
     """
@@ -421,7 +421,7 @@ def test_split_by_speaker_draws_boundaries_only_where_the_provider_did():
 def test_the_trace_shows_raw_beside_canonical():
     """Section 30. The view that settles whose bug a mislabel is.
 
-    If the provider said B and this says Speaker 1, the fault is Orion's. If
+    If the provider said B and this says Speaker 1, the fault is Reverie's. If
     the provider itself said A, no remapping here will fix it and the answer is
     expected-speaker constraints or better audio.
     """

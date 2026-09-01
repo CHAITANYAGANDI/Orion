@@ -1,21 +1,21 @@
 """Who said it: provider clustering in, meeting-local speaker numbering out.
 
-Two bugs live here, and they are the same bug seen from two ends — Orion
-treated the provider's speaker label as if it were a Orion speaker number.
+Two bugs live here, and they are the same bug seen from two ends — Reverie
+treated the provider's speaker label as if it were a Reverie speaker number.
 
 ## Bug one: a short interjection got swallowed
 
     Speaker 1: We need to finish authentication ... exactly ... then deploy.
 
 instead of the three turns that were actually spoken. The provider's *word*
-records carry a speaker each; Orion read only the label on the parent
+records carry a speaker each; Reverie read only the label on the parent
 utterance and threw the word-level ones away, so a speaker change inside an
 utterance had nowhere to be expressed. `segments_from_utterances` now splits on
 the word-level attribution and keeps the utterance whole when the words agree.
 
 ## Bug two: the second person to speak was "Speaker 4"
 
-AssemblyAI names voices "A", "B", "C"… and Orion rendered them by alphabet
+AssemblyAI names voices "A", "B", "C"… and Reverie rendered them by alphabet
 position — `ord(label) - ord("A") + 1`. A meeting whose two voices clustered as
 A and D displayed **Speaker 1 and Speaker 4**, with no Speaker 2 or 3 anywhere,
 which reads as two people missing from the room.
@@ -46,7 +46,7 @@ Diarization is acoustic, and a heuristic that reads well in a demo invents
 speakers in a real meeting — which is worse than the provider's own mistake,
 because it is confident and it is ours. Every boundary drawn here traces back to
 an explicit provider attribution, and where the provider declines to attribute,
-so does Orion.
+so does Reverie.
 """
 
 from __future__ import annotations
@@ -73,7 +73,7 @@ _NOT_A_SPEAKER = {"", "UNKNOWN", "UNK", "?", "NONE", "NULL", "PENDING", "SPEAKER
 class SpeakerIdentity:
     """One voice, in all three of the vocabularies that have to coexist.
 
-    `raw` is the provider's, `key` is Orion's stable internal handle, and
+    `raw` is the provider's, `key` is Reverie's stable internal handle, and
     `label` is the one a person reads. They are separate because they change on
     different schedules: a rename replaces the label and must not disturb the
     key (which is what a colour is picked from), and a provider correction
@@ -100,7 +100,7 @@ def is_generic_cluster(token: str) -> bool:
     The distinction decides what gets displayed. A cluster id ("A", "0",
     "channel:1") carries no meaning and is replaced by a meeting-local number;
     anything else came from speaker identification and is a name, which beats
-    any number Orion could invent. Users renaming a speaker themselves sit
+    any number Reverie could invent. Users renaming a speaker themselves sit
     above both, and that happens later and elsewhere -- this only chooses
     between the provider's two kinds of answer.
     """

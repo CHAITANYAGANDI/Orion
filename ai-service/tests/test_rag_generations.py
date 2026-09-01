@@ -457,7 +457,7 @@ def test_a_stale_run_cannot_delete_a_newer_generation():
 # Legitimate reprocessing still works
 # --------------------------------------------------------------------------- #
 def test_the_previous_run_stays_answerable_while_the_next_one_runs():
-    # Orion does not blank a meeting during a reprocess: the transcript, the
+    # Reverie does not blank a meeting during a reprocess: the transcript, the
     # summary and the action items all stay on screen until the new run
     # replaces them. Chat matching "the meeting's current attempt" would have
     # gone silent for the length of a transcription instead — a regression

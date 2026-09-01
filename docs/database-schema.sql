@@ -1,4 +1,4 @@
--- Orion AI — the ORIGINAL schema, as of V1__init.sql.
+-- Reverie AI — the ORIGINAL schema, as of V1__init.sql.
 --
 -- NOT the current one, and not a source of truth. Flyway owns the schema; the
 -- migrations under backend-spring/src/main/resources/db/migration are what runs,
@@ -7,7 +7,7 @@
 -- migrations, or `\d` a live database, before trusting anything below.
 --
 -- Where this file is now WRONG:
---   * meetings.participants — dropped (V23). Orion never joins a meeting, so
+--   * meetings.participants — dropped (V23). Reverie never joins a meeting, so
 --     it never learns who attended; the column only held what an uploader typed.
 --   * meeting_decisions, meeting_risks — dropped (V14), along with decision
 --     drift. Replaced in V24 by meeting_insights, which reads decisions and

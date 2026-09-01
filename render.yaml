@@ -1,4 +1,4 @@
-# Orion on Render — two Docker services against managed backing stores.
+# Reverie on Render — two Docker services against managed backing stores.
 #
 #   Postgres  Neon          (already provisioned)
 #   Kafka     Confluent Cloud
@@ -28,7 +28,7 @@ services:
   # one that runs migrations.
   # ---------------------------------------------------------------------------
   - type: web
-    name: orion-backend
+    name: reverie-backend
     runtime: docker
     plan: starter          # 512 MB is not enough; the JVM heap below assumes 2 GB
     dockerfilePath: ./backend-spring/Dockerfile
@@ -66,12 +66,12 @@ services:
       - key: SPRING_DATASOURCE_URL
         sync: false        # jdbc:postgresql://<DIRECT-host>/neondb?sslmode=require
       - key: SPRING_DATASOURCE_USERNAME
-        value: orion_app
+        value: reverie_app
       - key: SPRING_DATASOURCE_PASSWORD
         sync: false
-      - key: ORION_DATASOURCE_SYSTEM_USERNAME
-        value: orion_sys
-      - key: ORION_DATASOURCE_SYSTEM_PASSWORD
+      - key: REVERIE_DATASOURCE_SYSTEM_USERNAME
+        value: reverie_sys
+      - key: REVERIE_DATASOURCE_SYSTEM_PASSWORD
         sync: false
       - key: FLYWAY_URL
         sync: false        # jdbc:postgresql://<DIRECT-host>/neondb?sslmode=require
@@ -93,13 +93,13 @@ services:
       # --- Auth -------------------------------------------------------------
       # clerk, never dev. In dev mode an `X-Dev-User` header impersonates any
       # user, and nothing about a running deployment reveals the mistake.
-      - key: ORION_AUTH_MODE
+      - key: REVERIE_AUTH_MODE
         value: clerk
       - key: CLERK_ISSUER
         sync: false
       - key: CLERK_JWKS_URL
         sync: false
-      - key: ORION_INTERNAL_TOKEN
+      - key: REVERIE_INTERNAL_TOKEN
         generateValue: true   # must match the ai-service value; see docs/deploy.md
 
       # --- Storage (Cloudflare R2) ------------------------------------------
@@ -115,13 +115,13 @@ services:
       - key: S3_SECRET_KEY
         sync: false
       - key: S3_BUCKET
-        value: orion
+        value: orion   # NOT renamed: R2 cannot rename a bucket in place
       - key: S3_REGION
         value: auto
 
       # --- Wiring -----------------------------------------------------------
       # Left auto-wired, unlike the two public URLs. `hostport` yields
-      # `orion-ai:10000` -- the right host and the right port, no scheme --
+      # `reverie-ai:10000` -- the right host and the right port, no scheme --
       # and AiClient prefixes `http://` because a private service on Render's
       # internal network can only mean that. Worth repairing rather than
       # refusing: the alternative is writing the private port out by hand and
@@ -129,9 +129,9 @@ services:
       - key: AI_SERVICE_URL
         fromService:
           type: pserv
-          name: orion-ai
+          name: reverie-ai
           property: hostport
-      # THE PUBLIC VERCEL FRONTEND ORIGIN -- e.g. https://orion.vercel.app, or
+      # THE PUBLIC VERCEL FRONTEND ORIGIN -- e.g. https://reverie.vercel.app, or
       # your custom domain once one is attached.
       #
       # This is the single allowed CORS origin AND the single allowed STOMP
@@ -155,13 +155,13 @@ services:
       # a service that sends from a domain it does not own gets the domain
       # classified as spam, which fixing the setting afterwards does not undo.
       #
-      # ORION_MAIL_FROM has to be on a domain verified in Resend. Seven
+      # REVERIE_MAIL_FROM has to be on a domain verified in Resend. Seven
       # messages use these, five of them off per account until somebody turns
       # them on in Settings. See backend-spring/.../service/AccountMail.java.
       - key: RESEND_API_KEY
         sync: false
-      - key: ORION_MAIL_FROM
-        sync: false        # Recallix <notifications@yourdomain.com>
+      - key: REVERIE_MAIL_FROM
+        sync: false        # Reverie <notifications@send.reverieai.in>
 
       # No domain yet? Resend will only send from onboarding@resend.dev, which
       # delivers to the Resend account owner and nobody else -- so there is no
@@ -170,14 +170,14 @@ services:
       # every boot instead of a refusal.
       #
       # Unset it the moment somebody else can sign up.
-      - key: ORION_MAIL_SELF_ONLY
+      - key: REVERIE_MAIL_SELF_ONLY
         sync: false        # true, only while you are the only account
 
       # Required whenever the above is true, and the reason it is enforceable
       # rather than a promise: every other Clerk subject is refused at
       # provisioning, so no account is created for it. Your Clerk user id --
       # it starts with `user_` and is on your user in the Clerk dashboard.
-      - key: ORION_MAIL_SELF_USER_ID
+      - key: REVERIE_MAIL_SELF_USER_ID
         sync: false        # user_xxxxxxxxxxxxxxxxxxxxxxxxxx
 
       # Where this API is reachable from the public internet. Only used for the
@@ -189,30 +189,30 @@ services:
       # http://localhost:8080 and every subscribed calendar silently stopped
       # updating.
       - key: APP_PUBLIC_URL
-        sync: false        # https://orion-backend.onrender.com
+        sync: false        # https://reverie-backend.onrender.com
 
   # ---------------------------------------------------------------------------
   # AI service — private. It is reached only by the backend and by Kafka, and
   # exposing it publicly would expose /internal-shaped surface for no reason.
   # ---------------------------------------------------------------------------
   - type: pserv
-    name: orion-ai
+    name: reverie-ai
     runtime: docker
     plan: starter
     dockerfilePath: ./ai-service/Dockerfile
     dockerContext: ./ai-service
     envVars:
       # Same missing-scheme problem as APP_FRONTEND_URL above: `property: host`
-      # gives `orion-backend.onrender.com`, and httpx rejects a request URL
+      # gives `reverie-backend.onrender.com`, and httpx rejects a request URL
       # with no scheme -- so every transcript callback would fail after the work
       # was already done and paid for.
       - key: SPRING_CALLBACK_URL
-        sync: false        # https://orion-backend.onrender.com
-      - key: ORION_INTERNAL_TOKEN
+        sync: false        # https://reverie-backend.onrender.com
+      - key: REVERIE_INTERNAL_TOKEN
         fromService:
           type: web
-          name: orion-backend
-          envVarKey: ORION_INTERNAL_TOKEN
+          name: reverie-backend
+          envVarKey: REVERIE_INTERNAL_TOKEN
 
       # --- Kafka ------------------------------------------------------------
       - key: KAFKA_BOOTSTRAP_SERVERS
@@ -263,13 +263,13 @@ services:
       # from the bucket, so a token scoped to "Object Read only" worked; MP3
       # export writes the converted copy back, and a read-only token turns that
       # into a conversion that runs, succeeds, and fails on the last step every
-      # single time. Use the same token as orion-backend.
+      # single time. Use the same token as reverie-backend.
       - key: S3_ACCESS_KEY
         sync: false
       - key: S3_SECRET_KEY
         sync: false
       - key: S3_BUCKET
-        value: orion
+        value: orion   # NOT renamed: R2 cannot rename a bucket in place
       - key: S3_REGION
         value: auto
 
@@ -299,7 +299,7 @@ services:
       - key: PG_DATABASE
         value: neondb
       - key: PG_USER
-        value: orion_app
+        value: reverie_app
       - key: PG_PASSWORD
         sync: false
       - key: PG_SSLMODE

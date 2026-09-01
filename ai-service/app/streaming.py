@@ -1,7 +1,7 @@
 """Short-lived credentials for the browser's live transcription session.
 
 The browser streams microphone audio straight to AssemblyAI during a meeting.
-That is the right shape — relaying every 50 ms frame through Orion would add
+That is the right shape — relaying every 50 ms frame through Reverie would add
 a hop to the one part of the product where latency is the whole feature — but it
 means a credential has to reach JavaScript, and `ASSEMBLYAI_API_KEY` must never
 be it. A key in a bundle is a key in every user's devtools, valid for every

@@ -57,7 +57,7 @@ const EMPTY: ProfileForm = {
  * and its password and the other owns neither.
  */
 const DEV = { mode: "dev", provider: "", hasPassword: false };
-const ORION = { mode: "clerk", provider: "", hasPassword: true };
+const REVERIE = { mode: "clerk", provider: "", hasPassword: true };
 const GOOGLE = { mode: "clerk", provider: "google", hasPassword: false };
 
 function show(initial: ProfileForm = EMPTY, credential = DEV) {
@@ -192,7 +192,7 @@ describe("the email", () => {
    * and it is fixed once the account is made.
    */
   it("cannot be edited by any kind of account", () => {
-    for (const credential of [DEV, ORION, GOOGLE]) {
+    for (const credential of [DEV, REVERIE, GOOGLE]) {
       const view = render(
         <ProfileDialog
           open
@@ -208,7 +208,7 @@ describe("the email", () => {
   });
 
   it("offers no way into a change, for any of them", () => {
-    for (const credential of [DEV, ORION, GOOGLE]) {
+    for (const credential of [DEV, REVERIE, GOOGLE]) {
       const view = render(
         <ProfileDialog
           open
@@ -225,7 +225,7 @@ describe("the email", () => {
   });
 
   it("still shows the address, which is the point of the row", () => {
-    show(EMPTY, ORION);
+    show(EMPTY, REVERIE);
 
     expect(screen.getByLabelText("Email")).toHaveValue("priya@example.com");
   });
@@ -237,7 +237,7 @@ describe("the email", () => {
   });
 
   it("says an account's own address is fixed rather than borrowed", () => {
-    show(EMPTY, ORION);
+    show(EMPTY, REVERIE);
 
     expect(screen.getByText(/fixed once the account is made/)).toBeInTheDocument();
   });
@@ -256,7 +256,7 @@ describe("the email", () => {
      *
      * A missing field means "leave it alone", so the field has to be missing.
      */
-    const { onSave } = show(EMPTY, ORION);
+    const { onSave } = show(EMPTY, REVERIE);
 
     await userEvent.clear(screen.getByLabelText("Full Name"));
     await userEvent.type(screen.getByLabelText("Full Name"), "Ada");
@@ -284,7 +284,7 @@ describe("the email", () => {
 
 describe("the password", () => {
   it("is never a typed field on this form", () => {
-    show(EMPTY, ORION);
+    show(EMPTY, REVERIE);
     expect(screen.getByLabelText("Password")).toBeDisabled();
   });
 
@@ -308,7 +308,7 @@ describe("the password", () => {
   });
 
   it("opens the change dialog under a provider", async () => {
-    show(EMPTY, ORION);
+    show(EMPTY, REVERIE);
 
     await userEvent.click(screen.getByRole("button", { name: "Change password" }));
 
@@ -316,7 +316,7 @@ describe("the password", () => {
   });
 
   it("hands the current and new password to the provider", async () => {
-    show(EMPTY, ORION);
+    show(EMPTY, REVERIE);
     await userEvent.click(screen.getByRole("button", { name: "Change password" }));
 
     await userEvent.type(screen.getByLabelText("Current password"), "OldPass1");
@@ -334,7 +334,7 @@ describe("the password", () => {
     changePassword.mockRejectedValue(
       new AccountActionError("That password has appeared in a data breach."),
     );
-    show(EMPTY, ORION);
+    show(EMPTY, REVERIE);
     await userEvent.click(screen.getByRole("button", { name: "Change password" }));
 
     await userEvent.type(screen.getByLabelText("Current password"), "OldPass1");

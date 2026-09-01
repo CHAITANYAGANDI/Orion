@@ -64,7 +64,7 @@ describe("signing out", () => {
     // the same id, so the stamp alone would not notice, and one account's
     // choices are not left on disk for whoever signs in next.
     expect(readPreferences("sess_1")).toEqual({});
-    expect(window.localStorage.getItem("orion.prefs")).toBeNull();
+    expect(window.localStorage.getItem("reverie.prefs")).toBeNull();
   });
 
   it("starts a fresh record rather than merging into the old one", () => {
@@ -106,12 +106,12 @@ describe("when storage misbehaves", () => {
   });
 
   it("treats an unreadable record as nothing remembered", () => {
-    window.localStorage.setItem("orion.prefs", "{ not json");
+    window.localStorage.setItem("reverie.prefs", "{ not json");
     expect(readPreferences("sess_1")).toEqual({});
   });
 
   it("ignores a record of the wrong shape", () => {
-    window.localStorage.setItem("orion.prefs", JSON.stringify({ session: 7 }));
+    window.localStorage.setItem("reverie.prefs", JSON.stringify({ session: 7 }));
     expect(readPreferences("sess_1")).toEqual({});
   });
 

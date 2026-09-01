@@ -3,7 +3,7 @@
 /**
  * Signing in.
  *
- * <h2>Orion's form, Clerk's credential</h2>
+ * <h2>Reverie's form, Clerk's credential</h2>
  *
  * <p>This was Clerk's `<SignIn />` component. What that bought was every edge
  * of a sign-in handled for free; what it cost was the first screen anybody sees
@@ -11,7 +11,7 @@
  * foot of it. So the form is ours and the credential is still theirs: nothing
  * here stores a password or decides whether one is right. `useSignIn` is a
  * headless hook — it renders nothing — and every failure below comes back from
- * Clerk and is put into Orion's words by `authErrorMessage`.
+ * Clerk and is put into Reverie's words by `authErrorMessage`.
  *
  * <h2>Three states, one screen</h2>
  *
@@ -93,7 +93,7 @@ function SignInForm() {
    * <p>The middleware puts the page you actually asked for on the URL, so a
    * bookmarked meeting opens the meeting rather than the top of the app. That
    * value arrives from the address bar, though, and handing an unchecked one to
-   * `router.push` is an open redirect — a link to Orion's own sign-in that
+   * `router.push` is an open redirect — a link to Reverie's own sign-in that
    * lands somebody on a copy of it. Only a path, and never `//`, which the
    * browser reads as a host.
    */

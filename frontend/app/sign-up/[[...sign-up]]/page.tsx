@@ -7,7 +7,7 @@
  *
  * <p>An address and a password. That is the whole form.
  *
- * <p><b>No username.</b> Orion has nowhere to put one: there is no profile to
+ * <p><b>No username.</b> Reverie has nowhere to put one: there is no profile to
  * visit, no @mention, no sharing, and one account per workspace — so a username
  * would be a required field that nothing ever reads back, invented at the exact
  * moment somebody is deciding whether this product is worth the trouble. Where
@@ -19,7 +19,7 @@
  *
  * <p><b>No card, no company, no team size.</b> The allowance is fixed and the
  * account is free; asking anything to qualify a lead would be asking for
- * something Orion does not use.
+ * something Reverie does not use.
  *
  * <h2>The two roads</h2>
  *
@@ -217,7 +217,7 @@ export default function SignUpPage() {
   return (
     <AuthShell
       eyebrow={stage === "details" ? "Create account" : "Check your email"}
-      title={stage === "details" ? "Start with Orion." : "Confirm it is you."}
+      title={stage === "details" ? "Start with Reverie." : "Confirm it is you."}
       subtitle={
         stage === "details" ? (
           <>100 transcription minutes and 3 imports, for the life of the account. No card.</>

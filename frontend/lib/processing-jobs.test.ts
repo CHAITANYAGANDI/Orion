@@ -137,4 +137,4 @@ describe("processing jobs", () => {
   });
 });
 
-const KEY = "orion:processing";
+const KEY = "reverie:processing";

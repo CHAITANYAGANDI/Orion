@@ -66,7 +66,7 @@ against this:
 source file ──▶ uploaded directly ──▶ another product's async transcription
 ```
 
-That was the shape of the original complaint about Orion's quality, and it
+That was the shape of the original complaint about Reverie's quality, and it
 measures mostly the microphone. Two different signals, two different processing
 modes; the gap between them is not the thing anybody wanted to know about.
 
@@ -111,10 +111,10 @@ into two; telling it there were two people fixed the count and took cpWER down
 with it. This is the feature working exactly as intended, measured rather than
 asserted.
 
-**The cpWER is not a measurement of Orion.** It is high because *this
+**The cpWER is not a measurement of Reverie.** It is high because *this
 particular reference does not match this particular audio*: the Otter export
 begins mid-sentence — it missed the opening words "This award tonight would
-have humbly", which Orion captured — and it contains a turn stamped 0:59 in
+have humbly", which Reverie captured — and it contains a turn stamped 0:59 in
 a file that is 36.9 seconds long. The median timestamp drift of 6.6s is the
 same misalignment showing up a second way.
 

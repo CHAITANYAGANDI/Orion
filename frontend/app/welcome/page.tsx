@@ -21,7 +21,7 @@
  * </ul>
  *
  * <p>Nothing else. No company, no team size, no role, no "how did you hear
- * about us" — Orion has nowhere to put any of it, and a form that collects what
+ * about us" — Reverie has nowhere to put any of it, and a form that collects what
  * it never reads is asking somebody to work for you before you have done
  * anything for them.
  *
@@ -74,7 +74,7 @@ function Welcome() {
    * <p>Signing up with Google means Google holds it -- Settings says exactly
    * that and disables the field -- so asking for it here would be the product
    * contradicting itself two screens apart, and saving it would write a copy
-   * into Orion's column that then outranks Google's everywhere.
+   * into Reverie's column that then outranks Google's everywhere.
    */
   const permissions = identityPermissions({
     mode,
@@ -146,7 +146,7 @@ function Welcome() {
         current === "name" ? (
           "It appears on your account and beside the tasks assigned to you."
         ) : current === "language" ? (
-          "Orion detects this from the audio. Fixing it helps when a meeting opens quietly."
+          "Reverie detects this from the audio. Fixing it helps when a meeting opens quietly."
         ) : (
           <>Bring in a recording you already have, or make one now.</>
         )

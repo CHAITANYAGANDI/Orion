@@ -17,7 +17,7 @@ import type { TranscriptMoment, TranscriptSegment } from "@/lib/types";
 /**
  * The transcript-driven half of playback.
  *
- * Every one of these looks like an audio feature and none of them are. Orion
+ * Every one of these looks like an audio feature and none of them are. Reverie
  * already knows, to the word, who spoke and when — so the gaps between
  * utterances *are* the silence and a change of speaker *is* the boundary.
  * Testing them against times rather than against a media element is what makes

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * The shape every Orion chat has, with none of the data.
+ * The shape every Reverie chat has, with none of the data.
  *
  * Three surfaces ask questions — the rail beside the home list, the rail beside
  * a meeting, and the full-width AI Chat page — and until now each drew its own

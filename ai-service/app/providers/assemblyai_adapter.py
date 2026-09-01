@@ -103,7 +103,7 @@ class AudioUnreachableError(RuntimeError):
 
 
 class TranscriptionConfigurationError(RuntimeError):
-    """The request Orion built was refused. Retrying it will not help.
+    """The request Reverie built was refused. Retrying it will not help.
 
     Separate from every other failure because the handling is opposite: a
     transport error is worth another attempt and a bad parameter is worth a
@@ -339,7 +339,7 @@ class AssemblyAiTranscriptionAdapter(TranscriptionPort):
         self, client: httpx.AsyncClient, audio: bytes, job: TranscriptionRequest
     ) -> TranscriptResponse:
         started = time.perf_counter()
-        # The provider fetches it itself when Orion can hand over a URL,
+        # The provider fetches it itself when Reverie can hand over a URL,
         # which is one whole-file transfer instead of two. See app/storage.py
         # for why the URL is short-lived and why the bucket stays private.
         source = job.audio_url or await self._upload(client, audio)
@@ -492,9 +492,9 @@ def _log_job(
                 if "speakers_expected" in body
                 else body.get("speaker_options") or "auto"
             ),
-            # Provider cluster id -> what Orion displayed. Letters and
+            # Provider cluster id -> what Reverie displayed. Letters and
             # numbers only, no transcript content, and the one thing that
-            # distinguishes "the provider merged two people" from "Orion
+            # distinguishes "the provider merged two people" from "Reverie
             # mislabelled one" once the job is over.
             "diarization_map": {
                 s.speaker_raw: s.speaker for s in result.segments if s.speaker_raw
@@ -522,7 +522,7 @@ def language_choice(requested: str | None, configured: str | None) -> str | None
     """Which language to transcribe in, or None to let the provider detect.
 
     The account setting wins over the deployment-wide env var: the env var is
-    what this Orion defaults to, and the account setting is somebody saying
+    what this Reverie defaults to, and the account setting is somebody saying
     they know better about their own meetings. Neither means detect, which is
     right for a multilingual user and wrong for exactly the recordings detection
     gets wrong — short ones, noisy first minutes, and meetings held in two
@@ -602,7 +602,7 @@ def _segments_from_utterances(
     label — so an utterance whose words all agree is emitted intact, keeping the
     provider's punctuation and casing exactly as given.
 
-    The word-level pass is for the case where they *don't* agree. Orion used
+    The word-level pass is for the case where they *don't* agree. Reverie used
     to read only `utterance["speaker"]`, which meant a speaker change inside an
     utterance was unrepresentable: the interjection was absorbed into whichever
     turn surrounded it, and the words that proved otherwise were discarded on

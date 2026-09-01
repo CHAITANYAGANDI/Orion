@@ -7,10 +7,10 @@ import { Mic } from "lucide-react";
  * <h2>What changed, and why it is ours now</h2>
  *
  * <p>These pages used to be a thin wrapper around Clerk's drop-in components,
- * on the reasoning that Orion does not authenticate anybody so it should not
+ * on the reasoning that Reverie does not authenticate anybody so it should not
  * own the form. That reasoning held for the credential and not for the
  * product: the first screen anyone sees was a third party's, in a third party's
- * type, carrying a third party's name — and it was the one screen where Orion
+ * type, carrying a third party's name — and it was the one screen where Reverie
  * had to look like something. The credential is still Clerk's. The screen is
  * ours, built on its headless hooks, and nothing on it says Clerk.
  *
@@ -63,7 +63,7 @@ export function AuthShell({
           <span className="flex h-7 w-7 items-center justify-center rounded-[7px] bg-primary text-primary-foreground">
             <Mic className="h-3.5 w-3.5" />
           </span>
-          <span className="text-[15px] font-semibold tracking-tight">Orion</span>
+          <span className="text-[15px] font-semibold tracking-tight">Reverie</span>
         </Link>
 
         <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">

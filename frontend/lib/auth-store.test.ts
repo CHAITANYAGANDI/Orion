@@ -425,7 +425,7 @@ describe("buildAuthHeaders", () => {
 
   it("says nothing about the provider, the instance or the token", async () => {
     setTokenGetter(async () => {
-      throw new Error("clerk: template 'orion' missing on instance foo.clerk.accounts.dev");
+      throw new Error("clerk: template 'reverie' missing on instance foo.clerk.accounts.dev");
     });
 
     const error = await buildAuthHeaders().catch((e: Error) => e);

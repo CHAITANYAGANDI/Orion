@@ -3,9 +3,9 @@
 <h2>What is being compared</h2>
 
 * **A. AssemblyAI raw** — the provider's own per-word labels.
-* **B. Orion parsing** — what ships today before any repair. Identical to A
+* **B. Reverie parsing** — what ships today before any repair. Identical to A
   by construction, and that is the finding rather than a gap in the test: the
-  parser is faithful, so where the provider is wrong Orion is wrong.
+  parser is faithful, so where the provider is wrong Reverie is wrong.
 * **C. SpeakerRefiner** — the ECAPA repair, modelled by its own stated rules.
 * **D. Reconciliation** — the new path, given the diarizer's timeline.
 
@@ -37,7 +37,7 @@ REFINER_MIN_SIDE = 2.0
 
 
 def _provider_answers(fixture: Fixture) -> list[str | None]:
-    """System A and B: the provider's labels, which Orion passes through."""
+    """System A and B: the provider's labels, which Reverie passes through."""
     return list(fixture.provider)
 
 
@@ -91,7 +91,7 @@ def _reconciled_answers(fixture: Fixture) -> list[str | None]:
 
 SYSTEMS = {
     "A. AAI raw": _provider_answers,
-    "B. Orion today": _provider_answers,
+    "B. Reverie today": _provider_answers,
     "C. SpeakerRefiner": _refiner_answers,
     "D. Reconciliation": _reconciled_answers,
 }
@@ -113,11 +113,11 @@ def test_the_new_path_beats_every_other_system_overall():
         return sum(r.correct for r in mine) / sum(r.words for r in mine)
 
     new = attribution("D. Reconciliation")
-    for other in ("A. AAI raw", "B. Orion today", "C. SpeakerRefiner"):
+    for other in ("A. AAI raw", "B. Reverie today", "C. SpeakerRefiner"):
         assert new > attribution(other), f"{other} scored {attribution(other):.3f} vs {new:.3f}"
 
 
-def test_orion_today_is_exactly_the_provider():
+def test_reverie_today_is_exactly_the_provider():
     """The parser is faithful, and that is the root cause rather than a bug in it.
 
     Asserted rather than assumed: it is the finding the whole rewrite rests on.
@@ -126,7 +126,7 @@ def test_orion_today_is_exactly_the_provider():
     rows = {(r.system, r.fixture): r for r in _all_scores()}
     for fixture in ALL:
         a = rows[("A. AAI raw", fixture.name)]
-        b = rows[("B. Orion today", fixture.name)]
+        b = rows[("B. Reverie today", fixture.name)]
         assert a.correct == b.correct
         assert a.missed_boundaries == b.missed_boundaries
 

@@ -15,7 +15,7 @@ import { ExportError } from "@/lib/exports";
 /**
  * Waiting for an MP3 that has to be made first.
  *
- * <p>Orion stores what was uploaded — webm from a browser, m4a from a phone —
+ * <p>Reverie stores what was uploaded — webm from a browser, m4a from a phone —
  * so "export as MP3" means encoding one, and encoding an hour of audio takes
  * tens of seconds. The endpoint therefore answers `preparing` and the client
  * asks again, which introduces exactly two things that can go wrong: a wait that

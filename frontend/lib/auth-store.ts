@@ -22,13 +22,13 @@ export type AuthMode = "dev" | "clerk";
 export const AUTH_MODE: AuthMode =
   process.env.NEXT_PUBLIC_AUTH_MODE === "dev" ? "dev" : "clerk";
 
-export const DEV_USER_KEY = "orion.devUserId";
+export const DEV_USER_KEY = "reverie.devUserId";
 export const DEFAULT_DEV_USER = "usr_dev";
 
 /**
  * Where a second factor is actually switched on.
  *
- * Orion never sees a sign-in — it verifies a token Clerk issued — so it
+ * Reverie never sees a sign-in — it verifies a token Clerk issued — so it
  * cannot enrol a factor it will never be asked to check. This is the address of
  * the provider's own account page, and it is absent rather than guessed when
  * nobody set it: a "Set up" button pointing at a URL invented by a UI is a

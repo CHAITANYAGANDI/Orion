@@ -9,7 +9,7 @@
  * meeting when it is queued.
  *
  * What is deliberately absent is the quota upsell. Every product puts "3 of 3
- * imports left — upgrade for unlimited" under this dropzone, and Orion has
+ * imports left — upgrade for unlimited" under this dropzone, and Reverie has
  * one plan with nothing to upgrade to, so that line would be an advertisement
  * for a product that does not exist. Nothing is shown to somebody with room
  * left.
@@ -150,7 +150,7 @@ export function ImportDialog({
       await putWithProgress(presign.uploadUrl, file, (pct) => setProgress(Math.max(5, pct)));
 
       setPhase("creating");
-      // No `recorded` flag: this file was captured somewhere Orion was not,
+      // No `recorded` flag: this file was captured somewhere Reverie was not,
       // which is what the imported-conversation email switch is about (V40).
       const meeting = await createMeeting({
         objectKey: presign.objectKey,

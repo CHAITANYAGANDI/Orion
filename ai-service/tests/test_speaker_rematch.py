@@ -112,7 +112,7 @@ def test_a_real_name_is_not_a_placeholder(label):
     The last two are the interesting ones. "Interviewer 2" ends in a digit and
     "Speaker of the House" starts with the word Speaker, and a cleverer test for
     "does this look like a name" gets both wrong. The rule is narrow on purpose:
-    only labels Orion itself generates are up for grabs.
+    only labels Reverie itself generates are up for grabs.
     """
     assert is_unresolved(label) is False
 

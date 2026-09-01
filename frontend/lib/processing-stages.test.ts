@@ -11,7 +11,7 @@ import {
 /**
  * What a meeting in flight is allowed to claim about itself.
  *
- * <p>The rule under every test here: a stage is ticked only when Orion has
+ * <p>The rule under every test here: a stage is ticked only when Reverie has
  * actually reported that result. The bar on screen is an estimate that eases
  * forward on a timer, and the failure this file exists to prevent is a stage
  * going green because a clock moved rather than because anything happened.
@@ -71,7 +71,7 @@ describe("processing stages", () => {
   });
 
   it("does not tick the summary while it is only being extracted", () => {
-    // EXTRACTING means the worker has a summary, not that Orion does --
+    // EXTRACTING means the worker has a summary, not that Reverie does --
     // applyResult persists the brief and READY in one transaction. Ticking here
     // would show a fully-ticked strip on a meeting still being processed, and
     // would claim a result nobody can read yet.

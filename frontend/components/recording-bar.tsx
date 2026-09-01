@@ -172,7 +172,7 @@ export function RecordingBar() {
             sat over the transcript with nothing behind it, so the newest thing
             somebody said was crossed out by a standing instruction.
 
-            Orion has no bot to announce itself in a participant list, so the
+            Reverie has no bot to announce itself in a participant list, so the
             only thing that tells the room is the person holding this.
 
             Unconditional again, and safely so. It was gated on there being a

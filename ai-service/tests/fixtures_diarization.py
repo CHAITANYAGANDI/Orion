@@ -215,7 +215,7 @@ OVERLAP = Fixture(
     ]),
     provider=["A", "A", "A", "A", "A", "B", "B"],
     timeline=_timeline([(0.00, 1.55, "D0"), (1.55, 2.30, "D1")]),
-    note="Exclusive timeline. Orion cannot render two speakers on one word.",
+    note="Exclusive timeline. Reverie cannot render two speakers on one word.",
 )
 
 # --------------------------------------------------------------------------- #

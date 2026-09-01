@@ -8,7 +8,7 @@
  * every field is an input invites somebody to change one by accident while
  * scanning it. Editing is a thing you decide to start.
  *
- * <p>The password is not typed into this form. It is not Orion's to hold —
+ * <p>The password is not typed into this form. It is not Reverie's to hold —
  * there is no password column and no login form; the identity provider owns
  * sign-in — so the row shows dots and opens a dialog that hands the change to
  * the provider. Putting an editable box here instead would mean either storing
@@ -43,7 +43,7 @@ export interface ProfileForm {
 }
 
 /**
- * What actually goes to Orion's preferences endpoint — <b>only the fields this
+ * What actually goes to Reverie's preferences endpoint — <b>only the fields this
  * account is allowed to change</b>.
  *
  * <h2>Why a field has to be absent rather than unchanged</h2>
@@ -64,7 +64,7 @@ export interface ProfileForm {
  * name, which a Google account does not own either.
  */
 export interface ProfilePatch {
-  /** Orion's own column, and the only one every account owns. */
+  /** Reverie's own column, and the only one every account owns. */
   avatarUrl: string;
   /** Present only where the name is this account's to set. */
   displayName?: string;
@@ -142,7 +142,7 @@ export function ProfileDialog({
 
   /** See {@link ProfilePatch}: what may be sent, rather than what is on screen. */
   function submitted(): ProfilePatch {
-    // The photo is Orion's own column and is nobody else's business, so it is
+    // The photo is Reverie's own column and is nobody else's business, so it is
     // always sent. The name goes only where this account owns it, and the
     // address goes nowhere at all -- it is not editable on any screen.
     const patch: ProfilePatch = { avatarUrl: form.avatarUrl };
@@ -210,8 +210,8 @@ export function ProfileDialog({
             </div>
 
             {/* Said out loud because all three fields below it say the
-                opposite: whatever Google supplies, the picture Orion shows is
-                one this account uploaded, in a column Orion owns. */}
+                opposite: whatever Google supplies, the picture Reverie shows is
+                one this account uploaded, in a column Reverie owns. */}
             {permissions.owner === "external" && (
               <p className="text-xs text-muted-foreground">
                 Your photo is yours to set here, whatever {permissions.ownerLabel} uses.

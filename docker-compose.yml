@@ -1,6 +1,6 @@
 # Project name drives container/volume/image prefixes. Set explicitly so they
-# read `orion-*` regardless of the folder the repo is checked out into.
-name: orion
+# read `reverie-*` regardless of the folder the repo is checked out into.
+name: reverie
 
 services:
   backend-spring:
@@ -19,20 +19,20 @@ services:
       # error. DeploymentCheck refuses to start on a `-pooler` URL.
       SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL:?set it in .env}
       # Runtime: unprivileged, so row-level security binds.
-      SPRING_DATASOURCE_USERNAME: ${APP_DB_USER:-orion_app}
-      SPRING_DATASOURCE_PASSWORD: ${APP_DB_PASSWORD:-orion_app}
+      SPRING_DATASOURCE_USERNAME: ${APP_DB_USER:-reverie_app}
+      SPRING_DATASOURCE_PASSWORD: ${APP_DB_PASSWORD:-reverie_app}
       # System pool: BYPASSRLS, used only for worker callbacks, the outbox
       # relay, worker callbacks, share links and provisioning. Routed to by
       # connection, so no statement can grant itself this privilege.
-      ORION_DATASOURCE_SYSTEM_USERNAME: ${SYS_DB_USER:-orion_sys}
-      ORION_DATASOURCE_SYSTEM_PASSWORD: ${SYS_DB_PASSWORD:-orion_sys}
+      REVERIE_DATASOURCE_SYSTEM_USERNAME: ${SYS_DB_USER:-reverie_sys}
+      REVERIE_DATASOURCE_SYSTEM_PASSWORD: ${SYS_DB_PASSWORD:-reverie_sys}
       # Migrations: schema owner, and the DIRECT endpoint rather than the
       # pooled one. Flyway holds an advisory lock across several transactions
       # and a transaction-mode pooler does not keep it, so migrating through
       # the pooler can deadlock or half-apply.
       FLYWAY_URL: ${FLYWAY_URL:?set it in .env}
-      FLYWAY_USER: ${FLYWAY_USER:-orion}
-      FLYWAY_PASSWORD: ${FLYWAY_PASSWORD:-orion}
+      FLYWAY_USER: ${FLYWAY_USER:-reverie}
+      FLYWAY_PASSWORD: ${FLYWAY_PASSWORD:-reverie}
       # Defaults to the compose broker. Set KAFKA_BOOTSTRAP_SERVERS plus the
       # SASL vars in .env to point local dev at a managed broker instead —
       # worth doing once before a deploy, because credentials that are wrong
@@ -42,23 +42,23 @@ services:
       KAFKA_SECURITY_PROTOCOL: ${KAFKA_SECURITY_PROTOCOL:-PLAINTEXT}
       KAFKA_SASL_MECHANISM: ${KAFKA_SASL_MECHANISM:-PLAIN}
       KAFKA_SASL_JAAS_CONFIG: ${KAFKA_SASL_JAAS_CONFIG:-}
-      ORION_AUTH_MODE: ${ORION_AUTH_MODE:-clerk}
+      REVERIE_AUTH_MODE: ${REVERIE_AUTH_MODE:-clerk}
       # The development value now lives HERE and only here. application.yml has
-      # no default for it any more: an unset ORION_INTERNAL_TOKEN used to
+      # no default for it any more: an unset REVERIE_INTERNAL_TOKEN used to
       # resolve to this same published string, which made a deployment that
       # never configured it indistinguishable from one that did. Blank means
       # InternalTokenFilter refuses every /internal/** callback.
       #
       # Which is why compose still passes it explicitly -- the local stack is
       # meant to work out of the box, and this token is public anyway.
-      ORION_INTERNAL_TOKEN: ${ORION_INTERNAL_TOKEN:-dev-internal-token}
+      REVERIE_INTERNAL_TOKEN: ${REVERIE_INTERNAL_TOKEN:-dev-internal-token}
       # The nightly retention pass (V35). Exposed for the same reason and one
       # more: it is the only scheduled job that deletes data, so an environment
       # restored from a backup needs to be able to switch it off before it wakes
       # up and re-runs last month's deletions against data somebody is trying to
       # recover.
-      ORION_RETENTION_CRON: "${ORION_RETENTION_CRON:-0 0 3 * * *}"
-      ORION_RETENTION_ENABLED: "${ORION_RETENTION_ENABLED:-true}"
+      REVERIE_RETENTION_CRON: "${REVERIE_RETENTION_CRON:-0 0 3 * * *}"
+      REVERIE_RETENTION_ENABLED: "${REVERIE_RETENTION_ENABLED:-true}"
       CLERK_ISSUER: ${CLERK_ISSUER:-}
       CLERK_JWKS_URL: ${CLERK_JWKS_URL:-}
       AI_SERVICE_URL: http://ai-service:8000
@@ -95,7 +95,7 @@ services:
       KAFKA_SASL_USERNAME: ${KAFKA_SASL_USERNAME:-}
       KAFKA_SASL_PASSWORD: ${KAFKA_SASL_PASSWORD:-}
       SPRING_CALLBACK_URL: http://backend-spring:8080
-      ORION_INTERNAL_TOKEN: ${ORION_INTERNAL_TOKEN:-dev-internal-token}
+      REVERIE_INTERNAL_TOKEN: ${REVERIE_INTERNAL_TOKEN:-dev-internal-token}
       AI_PROVIDER: ${AI_PROVIDER:-mock}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_TRANSCRIBE_MODEL: ${OPENAI_TRANSCRIBE_MODEL:-whisper-1}
@@ -129,14 +129,14 @@ services:
       # RAG: direct Postgres access for transcript chunk storage/retrieval.
       PG_HOST: ${PG_HOST:?set it in .env}
       PG_PORT: "${PG_PORT:-5432}"
-      # Neon names its database `neondb`, not `orion`. Parameterised rather
+      # Neon names its database `neondb`, not `reverie`. Parameterised rather
       # than hardcoded because the failure is a connection error naming a
       # database that was never meant to exist here.
-      PG_DATABASE: ${PG_DATABASE:-orion}
+      PG_DATABASE: ${PG_DATABASE:-reverie}
       # Unprivileged, same reason as the backend: a superuser connection would
       # silently ignore every row-level security policy.
-      PG_USER: ${APP_DB_USER:-orion_app}
-      PG_PASSWORD: ${APP_DB_PASSWORD:-orion_app}
+      PG_USER: ${APP_DB_USER:-reverie_app}
+      PG_PASSWORD: ${APP_DB_PASSWORD:-reverie_app}
       # "prefer" downgrades to plaintext when the server allows it, which the
       # local container does. Neon refuses unencrypted connections outright.
       PG_SSLMODE: ${PG_SSLMODE:-prefer}
@@ -164,7 +164,7 @@ services:
         NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-http://localhost:8080/ws}
         NEXT_PUBLIC_AUTH_MODE: ${NEXT_PUBLIC_AUTH_MODE:-clerk}
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
-        # Orion hosts both screens itself (app/sign-in, app/sign-up). Without
+        # Reverie hosts both screens itself (app/sign-in, app/sign-up). Without
         # these Clerk's components link to its hosted pages on accounts.dev,
         # which is a different domain and a route out of the product.
         NEXT_PUBLIC_CLERK_SIGN_IN_URL: /sign-in

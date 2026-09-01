@@ -17,7 +17,7 @@ import type { ChatPrompt } from "@/lib/chat-prompts";
 /**
  * The chat panel, without knowing which chat it is.
  *
- * <p>Orion now asks questions at three scopes — the workspace, one meeting,
+ * <p>Reverie now asks questions at three scopes — the workspace, one meeting,
  * one project — and all three are the same conversation: a history picker, a
  * transcript of turns with their sources, suggestions when it is empty, and a
  * box. Only what is being read differs, and that is the server's business.

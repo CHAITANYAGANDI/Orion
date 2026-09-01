@@ -22,7 +22,7 @@ import {
  */
 
 const GOOGLE: Credential = { mode: "clerk", provider: "google", hasPassword: false };
-const ORION: Credential = { mode: "clerk", provider: "", hasPassword: true };
+const REVERIE: Credential = { mode: "clerk", provider: "", hasPassword: true };
 const DEV: Credential = { mode: "dev", provider: "", hasPassword: false };
 
 describe("an account that signs in with Google", () => {
@@ -33,7 +33,7 @@ describe("an account that signs in with Google", () => {
   });
 
   it("says nothing at all about the address", () => {
-    // Nobody changes their address in Orion, so there is no question left for
+    // Nobody changes their address in Reverie, so there is no question left for
     // this module to answer about it. See lib/account-actions.
     expect(identityPermissions(GOOGLE)).not.toHaveProperty("email");
     expect(identityPermissions(GOOGLE)).not.toHaveProperty("emailVia");
@@ -72,15 +72,15 @@ describe("an account that signs in with Google", () => {
 
 describe("an account made with an email and a password", () => {
   it("owns both", () => {
-    expect(identityPermissions(ORION)).toMatchObject({
-      owner: "orion",
+    expect(identityPermissions(REVERIE)).toMatchObject({
+      owner: "reverie",
       name: true,
       password: true,
     });
   });
 
   it("has nobody else to name", () => {
-    expect(identityPermissions(ORION).ownerLabel).toBe("");
+    expect(identityPermissions(REVERIE).ownerLabel).toBe("");
   });
 });
 

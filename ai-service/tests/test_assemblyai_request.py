@@ -1,4 +1,4 @@
-"""The exact JSON Orion asks AssemblyAI for.
+"""The exact JSON Reverie asks AssemblyAI for.
 
 Split from tests/test_assemblyai.py, which is about reading the response. This
 is about writing the request, and it is worth its own file because the failure
@@ -234,7 +234,7 @@ def test_the_event_shape_maps_onto_the_request():
     request = TranscriptionRequest.from_event(
         language="en",
         context=MeetingContextSchema(
-            title="Sprint review", project="Orion",
+            title="Sprint review", project="Reverie",
             meeting_type="Engineering sprint review",
             organisations=["Acme"],
         ),
@@ -245,7 +245,7 @@ def test_the_event_shape_maps_onto_the_request():
     body = build_request(request.audio_url or "", U3, request)
     assert body["language_code"] == "en"
     assert body["keyterms_prompt"] == ["Acme"]
-    assert "Orion" in body["prompt"]
+    assert "Reverie" in body["prompt"]
     assert body["speaker_options"]["max_speakers_expected"] == 3
 
 
@@ -378,7 +378,7 @@ async def test_an_unreachable_url_is_named_rather_than_retried_into_silence():
         return httpx.Response(200, json={
             "status": "error",
             "error": "Download error, unable to download "
-                     "http://minio:9000/orion/x.webm: could not connect to the host.",
+                     "http://minio:9000/reverie/x.webm: could not connect to the host.",
         })
 
     with pytest.raises(AudioUnreachableError):

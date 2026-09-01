@@ -1,6 +1,6 @@
 """Turning a recording into an MP3, once.
 
-Orion stores whatever the uploader produced: webm/opus from a browser's
+Reverie stores whatever the uploader produced: webm/opus from a browser's
 MediaRecorder, m4a from a phone, wav from a desk recorder, occasionally mp4
 with a video track nobody wants. "Export as MP3" has exactly one honest
 implementation, which is to decode that and encode MP3 — renaming the file
@@ -10,7 +10,7 @@ under a name that promises otherwise.
 <h2>Why the conversion lives in this service</h2>
 
 ffmpeg is already installed here, for speaker embedding, and it is the only
-thing in the stack that reads every container Orion accepts. Spring has neither,
+thing in the stack that reads every container Reverie accepts. Spring has neither,
 and giving it either would mean a second codec dependency in a second image to
 patch. More importantly the bytes must not go through Spring's heap: an hour of
 audio is tens to hundreds of megabytes, and reading one into a request thread
@@ -27,7 +27,7 @@ right for it: it decodes short spans and never sees a container that needs
 seeking. This cannot. An m4a or mp4 written by an iPhone puts its moov atom at
 the end of the file, and ffmpeg reading such a file from a pipe fails outright
 with "moov atom not found" — for the single most common non-browser upload
-Orion receives. A temporary file is seekable, so every format works.
+Reverie receives. A temporary file is seekable, so every format works.
 
 <h2>State</h2>
 
@@ -256,7 +256,7 @@ class Mp3Transcoder:
                 "Export it in its original format instead."
             )
 
-        with tempfile.TemporaryDirectory(prefix="orion-mp3-") as work:
+        with tempfile.TemporaryDirectory(prefix="reverie-mp3-") as work:
             source = os.path.join(work, "source" + _extension(object_key))
             target = os.path.join(work, "converted.mp3")
             try:
@@ -320,7 +320,7 @@ def run_ffmpeg(source: str, target: str, *, timeout: float) -> None:
         )
         raise TranscodeError(
             "This recording could not be converted. It may be damaged or "
-            "in a format Orion cannot read."
+            "in a format Reverie cannot read."
         )
     if not os.path.exists(target) or os.path.getsize(target) == 0:
         # Reachable: ffmpeg exits 0 having written a zero-byte file when the

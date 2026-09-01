@@ -53,7 +53,7 @@ const ITEMS: Item[] = [
   { action: "highlight", label: "Highlight", icon: Highlighter },
   { action: "copy", label: "Copy", icon: Copy },
   { action: "note", label: "Add note", icon: MessageSquarePlus },
-  { action: "ask", label: "Ask Orion", icon: Sparkles },
+  { action: "ask", label: "Ask Reverie", icon: Sparkles },
   { action: "summarize", label: "Summarize", icon: FileText },
   { action: "action-item", label: "Create action item", icon: ListPlus },
   { action: "share", label: "Copy link to moment", icon: Link2 },

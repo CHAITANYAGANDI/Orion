@@ -17,7 +17,7 @@
  *
  * <h2>Why it is written here rather than installed</h2>
  *
- * <p>Everything Orion exports arrives already compressed. A PDF has Flate
+ * <p>Everything Reverie exports arrives already compressed. A PDF has Flate
  * streams inside it, a .docx <em>is</em> a zip, and an MP3 is a lossy codec's
  * output; deflating any of them buys single-digit percentages for a
  * general-purpose compressor and costs a pass over the whole file. So this
@@ -49,7 +49,7 @@
  * that a megabyte at a time, so peak cost is {@link CRC_CHUNK_BYTES} rather than
  * the size of the file.
  *
- * <p>No Zip64. A single entry or a total above 4 GiB would need it; Orion's
+ * <p>No Zip64. A single entry or a total above 4 GiB would need it; Reverie's
  * longest recordings are two orders of magnitude below that, and an archive
  * approaching it would be a bug worth failing on rather than one worth writing.
  */

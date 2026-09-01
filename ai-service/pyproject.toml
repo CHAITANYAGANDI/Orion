@@ -1,7 +1,7 @@
 [project]
-name = "orion-ai-service"
+name = "reverie-ai-service"
 version = "0.1.0"
-description = "Orion AI — FastAPI AI worker (transcription, summarization, extraction)."
+description = "Reverie AI — FastAPI AI worker (transcription, summarization, extraction)."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

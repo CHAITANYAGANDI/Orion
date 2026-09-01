@@ -3,7 +3,7 @@
 /**
  * The last few things somebody searched for.
  *
- * <p>Kept in this browser, not on the server. Orion has no search-history
+ * <p>Kept in this browser, not on the server. Reverie has no search-history
  * endpoint, and inventing one to hold a handful of strings would put every
  * query anybody types into the database — a record of what people went looking
  * for, which is a more sensitive thing to keep than it first sounds and which
@@ -18,7 +18,7 @@
  * each other's searches back out of a shared list.
  */
 
-const PREFIX = "orion.recent-searches";
+const PREFIX = "reverie.recent-searches";
 
 /** Enough to be useful, few enough that the newest is never pushed off screen. */
 export const MAX_RECENT = 5;

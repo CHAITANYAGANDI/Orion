@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 /**
- * Signing in, on Orion's own form.
+ * Signing in, on Reverie's own form.
  *
  * <p>The form is ours and the credential is Clerk's, so what is asserted here
  * is the half we now own: that nothing on screen belongs to anybody else, that
@@ -104,7 +104,7 @@ describe("signing in", () => {
     });
   });
 
-  it("says what went wrong in Orion's words", async () => {
+  it("says what went wrong in Reverie's words", async () => {
     clerk.create.mockRejectedValue({ errors: [{ code: "form_password_incorrect" }] });
     render(<SignInPage />);
     await screen.findByRole("button", { name: "Sign in" });
@@ -149,7 +149,7 @@ describe("where it sends you afterwards", () => {
   ])("refuses %s and goes home instead", async (_label, target) => {
     /*
      * An open redirect on a sign-in page is worth more to somebody than a
-     * broken one: a link to Orion's real sign-in that lands on a copy of it is
+     * broken one: a link to Reverie's real sign-in that lands on a copy of it is
      * a credible way to collect passwords. Only a path, and never `//`, which
      * the browser reads as a host.
      */

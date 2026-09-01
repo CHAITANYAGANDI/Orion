@@ -39,7 +39,7 @@ import * as React from "react";
 import { createPortal } from "react-dom";
 
 /** The id of the element in the shell that receives the pane's content. */
-export const SIDE_PANE_ID = "orion-side-pane";
+export const SIDE_PANE_ID = "reverie-side-pane";
 
 /** What the shell needs to know to draw the pane. */
 export interface SidePaneState {

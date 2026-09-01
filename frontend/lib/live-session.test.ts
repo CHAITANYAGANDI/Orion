@@ -18,7 +18,7 @@
  *
  *  - The provider does **not** name the interjections in the Turn message. It
  *    sends `speaker_label: "PENDING"` and names them later, in a separate
- *    `SpeakerRevision`. Orion read `message.turns` from that message; the
+ *    `SpeakerRevision`. Reverie read `message.turns` from that message; the
  *    field is `message.revisions`, so every correction was dropped and both
  *    interjections stayed unattributed for the rest of the meeting — while
  *    displaying as a speaker literally named "PENDING".
@@ -178,7 +178,7 @@ describe("a captured streaming session", () => {
   it("keeps the raw labels so the mapping can be checked afterwards", () => {
     const turns = replay([...CAPTURED, REVISION]);
 
-    // The diagnosis this enables: the provider said B and Orion drew
+    // The diagnosis this enables: the provider said B and Reverie drew
     // Speaker 2 because B was the second voice heard -- not because B is the
     // second letter.
     expect(turns[3]).toMatchObject({ speakerRaw: "B", speakerKey: "spk_2" });

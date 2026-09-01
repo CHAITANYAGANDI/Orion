@@ -15,7 +15,7 @@ first asks the reader's actual question — *what is this thing* — and answeri
 with a paraphrase of forty-seven seconds of promotional speech is a search
 engine's answer, not an assistant's.
 
-Orion classified both as `fact`, so both got the meeting-only policy, so the
+Reverie classified both as `fact`, so both got the meeting-only policy, so the
 first came back as a one-paragraph restatement of the transcript. It was
 accurate, grounded, and not what was asked.
 

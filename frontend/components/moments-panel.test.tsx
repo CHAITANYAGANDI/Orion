@@ -31,7 +31,7 @@ import { MomentsPanel } from "@/components/moments-panel";
 /**
  * The index of what has been marked on a transcript.
  *
- * The case worth protecting is the orphan. Orion lets people correct
+ * The case worth protecting is the orphan. Reverie lets people correct
  * transcript lines, so a highlight can end up attached to words that no longer
  * exist — and the tempting behaviour, hiding it, is the wrong one: to the user
  * that is indistinguishable from the app having thrown their annotation away.

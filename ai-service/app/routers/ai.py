@@ -281,7 +281,7 @@ async def transcode(
     again. A synchronous version would do all the work and still time out.
 
     Safe to call repeatedly and safe to call twice at once: at most one
-    conversion runs per target key. Two Orion instances polling the same
+    conversion runs per target key. Two Reverie instances polling the same
     meeting is the exception, and it is harmless rather than prevented -- both
     would write identical bytes to the same key, which costs CPU and cannot
     corrupt anything.

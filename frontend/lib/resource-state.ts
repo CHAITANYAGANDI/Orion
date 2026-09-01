@@ -91,7 +91,7 @@ export interface ResourceInput {
    *
    * <h3>Why an empty state can arrive as an error</h3>
    *
-   * <p>Two of Orion's endpoints answer absence with a status rather than with a
+   * <p>Two of Reverie's endpoints answer absence with a status rather than with a
    * body. `MeetingService.getTranscript` throws `notFound("Transcript not
    * ready")` and `getSummary` throws `notFound("Summary not ready")` when the
    * row is not there — so for those two, "the server proved there is nothing"

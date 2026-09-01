@@ -100,7 +100,7 @@ class Settings(BaseSettings):
 
     # --- Spring internal callback ---
     spring_callback_url: str = "http://localhost:8080"
-    orion_internal_token: str = "dev-internal-token"
+    reverie_internal_token: str = "dev-internal-token"
 
     # --- AI provider selection ---
     ai_provider: AiProvider = "mock"
@@ -243,9 +243,9 @@ class Settings(BaseSettings):
     memory_evidence_k: int = 4
     pg_host: str | None = None
     pg_port: int = 5432
-    pg_database: str = "orion"
-    pg_user: str = "orion"
-    pg_password: str = "orion"
+    pg_database: str = "reverie"
+    pg_user: str = "reverie"
+    pg_password: str = "reverie"
     # "prefer" encrypts when the server offers it and falls back when it does
     # not, which is what the local container needs. A managed Postgres (Neon)
     # refuses unencrypted connections outright and wants "require".
@@ -274,7 +274,7 @@ class Settings(BaseSettings):
     # that took the most work to reach. The caller is polling, so a slow
     # conversion costs nobody a held connection.
     transcode_timeout_seconds: float = 900.0
-    # A ceiling on what will be pulled onto local disk to convert. Nothing Orion
+    # A ceiling on what will be pulled onto local disk to convert. Nothing Reverie
     # records approaches it; it exists so that a pathological upload is refused
     # with a sentence rather than by filling the container's filesystem and
     # taking transcription down with it.

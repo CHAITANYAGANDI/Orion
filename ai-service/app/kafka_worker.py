@@ -51,7 +51,7 @@ obsolete, which are the same HTTP request and opposite instructions.
 there are two separate ways it used not to.
 
 `max_poll_interval_ms` is configured rather than defaulted, because aiokafka's
-default is five minutes and Orion supports meetings that take longer than
+default is five minutes and Reverie supports meetings that take longer than
 that. Its heartbeat task measures `fetcher_idle_time` — time since the last
 message was handed to this loop — and leaves the group once that passes the
 interval, so a long transcription used to be evicted mid-run, fail its commit,
@@ -126,7 +126,7 @@ def is_retryable(exc: BaseException) -> bool:
     that is never committed blocks every meeting behind it.
     """
     if isinstance(exc, TranscriptionConfigurationError):
-        # Its own docstring: "The request Orion built was refused. Retrying
+        # Its own docstring: "The request Reverie built was refused. Retrying
         # it will not help."
         return False
     if isinstance(exc, AudioUnreachableError):
@@ -376,7 +376,7 @@ class KafkaWorker:
 
         One source. YouTube links and PDFs used to converge here too — the first
         downloaded to audio and transcribed, the second skipped transcription
-        because it was already text — and both are gone: Orion transcribes
+        because it was already text — and both are gone: Reverie transcribes
         recordings, and a document was never a meeting anybody attended.
         """
         # None means "no preference", which is what the adapters read as
@@ -391,7 +391,7 @@ class KafkaWorker:
         if event.source_type not in ("", None, "AUDIO"):
             raise ValueError(
                 f"{event.source_type} meetings can no longer be processed. "
-                "Orion transcribes audio and video recordings only; this "
+                "Reverie transcribes audio and video recordings only; this "
                 "meeting was imported before that changed and can still be read."
             )
 

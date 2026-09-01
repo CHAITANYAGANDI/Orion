@@ -36,7 +36,7 @@
  *
  * <p>So the state of the query is decided first, by {@link resourceState}, and
  * only then is anything turned into a list. The four outcomes are the same four
- * as everywhere else in Orion: cached folders beat a refetch and beat a refetch
+ * as everywhere else in Reverie: cached folders beat a refetch and beat a refetch
  * that failed; a failure with nothing behind it says so and offers a retry;
  * anything unresolved is a skeleton; and only a settled, successful, genuinely
  * empty answer draws the empty section.

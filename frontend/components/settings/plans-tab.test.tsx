@@ -52,7 +52,7 @@ describe("PlansTab, the plan", () => {
 
     // The catch, where the catch usually is — before the feature list rather
     // than after it.
-    expect(screen.getByText(/Orion has one plan/i)).toBeInTheDocument();
+    expect(screen.getByText(/Reverie has one plan/i)).toBeInTheDocument();
   });
 
   it("offers nothing to buy", () => {
@@ -147,12 +147,12 @@ describe("PlansTab, what it includes", () => {
     expect(screen.queryByText(/Up to 500 names/i)).toBeNull();
   });
 
-  it("no longer carries the list of what Orion does not do", () => {
+  it("no longer carries the list of what Reverie does not do", () => {
     render(<PlansTab />);
 
     // Removed deliberately. Asserted rather than just deleted, so the section
     // cannot drift back in unnoticed.
-    expect(screen.queryByText("What Orion does not do")).toBeNull();
+    expect(screen.queryByText("What Reverie does not do")).toBeNull();
     expect(screen.queryByText("No meeting bot")).toBeNull();
     expect(screen.queryByText("Nothing to upgrade to")).toBeNull();
   });

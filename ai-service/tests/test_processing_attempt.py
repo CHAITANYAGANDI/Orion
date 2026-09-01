@@ -267,7 +267,7 @@ def _stub_aiokafka(monkeypatch) -> dict:
 
 def test_the_consumer_is_given_a_poll_interval_long_enough_to_transcribe(monkeypatch):
     # aiokafka's default is five minutes, measured from the moment a message is
-    # handed to the loop. Orion supports meetings that take longer than that,
+    # handed to the loop. Reverie supports meetings that take longer than that,
     # and the consequence of leaving it alone was not a warning: the consumer
     # left the group mid-transcription, its commit was refused, and the meeting
     # was redelivered to be transcribed and paid for all over again.

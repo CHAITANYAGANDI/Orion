@@ -36,7 +36,7 @@ def test_the_deployment_default_applies_when_the_account_says_nothing():
 
 
 def test_the_account_setting_beats_the_deployment_default():
-    # The env var is what this Orion defaults to; the account setting is
+    # The env var is what this Reverie defaults to; the account setting is
     # somebody saying they know better about their own meetings.
     assert language_choice("ja", "es") == "ja"
 

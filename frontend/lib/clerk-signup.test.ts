@@ -53,7 +53,7 @@ describe("whether there is a session to switch to", () => {
   });
 });
 
-describe("what Orion will fill in for somebody", () => {
+describe("what Reverie will fill in for somebody", () => {
   it("supplies a username, because it is the field nothing reads back", () => {
     const fill = fillableFields(MISSING, "ada@example.com");
 
@@ -66,7 +66,7 @@ describe("what Orion will fill in for somebody", () => {
 
   it("will not invent a name", () => {
     /*
-     * A username is a value Orion has nowhere to display. A first name is a
+     * A username is a value Reverie has nowhere to display. A first name is a
      * real answer about a real person, asked for on the first screen inside --
      * filling it with something plausible would be putting words in a mouth.
      */
@@ -84,7 +84,7 @@ describe("what Orion will fill in for somebody", () => {
 
 describe("the username it derives", () => {
   it("keeps the local part and drops the rest of the address", () => {
-    expect(usernameFrom("ada.lovelace+orion@example.com")).toMatch(/^adalovelaceorion-[0-9a-f]{6}$/);
+    expect(usernameFrom("ada.lovelace+reverie@example.com")).toMatch(/^adalovelacereverie-[0-9a-f]{6}$/);
   });
 
   it("is different every time, so two of the same address do not collide", () => {
@@ -97,8 +97,8 @@ describe("the username it derives", () => {
   });
 
   it("still produces a usable name from an address with nothing usable in it", () => {
-    expect(usernameFrom("+++@example.com")).toMatch(/^orion-[0-9a-f]{6}$/);
-    expect(usernameFrom("")).toMatch(/^orion-[0-9a-f]{6}$/);
+    expect(usernameFrom("+++@example.com")).toMatch(/^reverie-[0-9a-f]{6}$/);
+    expect(usernameFrom("")).toMatch(/^reverie-[0-9a-f]{6}$/);
   });
 
   it("stays short enough for a username field", () => {

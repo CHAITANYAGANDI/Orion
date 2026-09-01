@@ -4,7 +4,7 @@
  * General — who you are, what is done with it, and the way out.
  *
  * Five things, in the order somebody needs them: the identity block, the
- * language your meetings are held in, what Orion does and does not do with a
+ * language your meetings are held in, what Reverie does and does not do with a
  * recording, how long it keeps one, and the button that ends the account.
  *
  * Every field here is read by something. Your name is matched against the owner
@@ -15,10 +15,10 @@
  * too and were read by nothing at all — a form that asks for facts it never uses
  * is one people fill in for nothing, so they are gone.
  *
- * Email and password are the two Orion may not own. The address is shown and
+ * Email and password are the two Reverie may not own. The address is shown and
  * never editable, by any kind of account: it is the credential, so every route
  * to changing it is a route to losing an account, and it is fixed once the
- * account is made. The password is never Orion's either — there is no password
+ * account is made. The password is never Reverie's either — there is no password
  * column, so the change is handed to the provider, and a development session
  * has no provider and therefore nothing to rotate.
  *
@@ -117,7 +117,7 @@ function IdentityBlock() {
     hasPassword: profile.hasPassword,
   });
 
-  // The provider's address is the real one under Clerk; Orion's column is a
+  // The provider's address is the real one under Clerk; Reverie's column is a
   // copy that can lag until the next sign-in.
   const name = prefs.data?.displayName || profile.name || "";
   const email = prefs.data?.email || profile.email || null;
@@ -161,7 +161,7 @@ function IdentityBlock() {
               <span className="text-muted-foreground">No email address yet</span>
             )}
           </p>
-          {/* Dots, and a sentence saying whose password they are. Orion
+          {/* Dots, and a sentence saying whose password they are. Reverie
               never sees it: Clerk holds it, and a development session is
               identified by a header and has none at all. */}
           <p className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
@@ -273,7 +273,7 @@ function LanguageRow() {
  * The section with nothing to switch.
  *
  * <p>Every competitor puts a toggle here, because they have something to ask
- * permission for. Orion does not train models, so the honest version of this
+ * permission for. Reverie does not train models, so the honest version of this
  * section is a statement of who sees the data on the way to producing your
  * notes — and no switch, because a switch would imply there is a use to opt out
  * of.
@@ -291,7 +291,7 @@ function TrainingSection() {
       <div className="space-y-2 border-b py-4 text-sm text-muted-foreground">
         <p>
           <strong className="text-foreground">
-            Orion does not train on your meetings.
+            Reverie does not train on your meetings.
           </strong>{" "}
           Your recordings, transcripts and notes are not used to improve any
           model, are not reviewed by people here, and are not pooled with anybody
@@ -332,7 +332,7 @@ function TrainingSection() {
  *
  * <p>This is the only section on this page that asks for consent rather than
  * stating a fact, and the reason is worth being blunt about on screen as well as
- * here. Matching a voice across meetings cannot be done with names — Orion
+ * here. Matching a voice across meetings cannot be done with names — Reverie
  * held a list of names for a year and it could never have identified anybody.
  * It needs a numerical description of how each person sounds, and that is a
  * stable identifier derived from someone's body. Under GDPR Article 9 a template
@@ -366,7 +366,7 @@ function VoiceRecognitionSection() {
       const ok = window.confirm(
         `Turning this off deletes ${profiles.length} saved ${
           profiles.length === 1 ? "voice" : "voices"
-        }. Orion will stop recognising them in new meetings. Continue?`,
+        }. Reverie will stop recognising them in new meetings. Continue?`,
       );
       if (!ok) return;
     }
@@ -401,7 +401,7 @@ function VoiceRecognitionSection() {
               Recognise people you have named before
             </p>
             <p>
-              When you put a name to a speaker, Orion can save a numerical
+              When you put a name to a speaker, Reverie can save a numerical
               description of how that voice sounds. In a later meeting,
               <strong className="text-foreground"> Rematch speakers</strong> uses
               it to work out who an unidentified speaker is.
@@ -473,7 +473,7 @@ function VoiceRecognitionSection() {
 }
 
 /**
- * What Recallix will write to you about.
+ * What Reverie will write to you about.
  *
  * <h2>Why this exists at all, given V56 deleted the tab it used to be</h2>
  *
@@ -483,7 +483,7 @@ function VoiceRecognitionSection() {
  * reported things the reader could see by opening the app.
  *
  * <p>Five messages came back that pass a different test: they reach somebody
- * who is <em>not</em> in Recallix, about something they cannot see from outside
+ * who is <em>not</em> in Reverie, about something they cannot see from outside
  * it, while there is still something to do about it. Every one of them is off
  * until it is switched on here, which is the half V56 was missing.
  *
@@ -518,7 +518,7 @@ function EmailSection() {
       </h2>
       <div className="space-y-3 border-b py-4">
         <p className="text-sm text-muted-foreground">
-          All off unless you turn them on. Recallix does not email you about
+          All off unless you turn them on. Reverie does not email you about
           things you can see by opening it.
         </p>
 
@@ -698,7 +698,7 @@ function RetentionSection() {
               Age is counted from when a meeting was created, not from when you
               last opened it — otherwise the recording of a sensitive
               conversation survives longest precisely because people keep going
-              back to it. Orion checks once a day and tells you what it took.
+              back to it. Reverie checks once a day and tells you what it took.
               Deletion is immediate and cannot be undone.
             </p>
           </>
@@ -911,7 +911,7 @@ function Row({
  * <h2>What used to be here</h2>
  *
  * <p>A build line — "Version 0.0.0 — dev build" — and a link reading "How long
- * Orion keeps what is yours". Both are gone.
+ * Reverie keeps what is yours". Both are gone.
  *
  * <p>The build line was written for a bug report that could be traced to a
  * commit, and in a deployment built without one it says "0.0.0 — dev build",
@@ -923,7 +923,7 @@ function Row({
  * this same page, a few hundred pixels away and reachable by scrolling. A
  * footer link to the middle of the page you are already on is furniture.
  *
- * <p>What is left appears only when somebody has supplied the URLs. Orion ships
+ * <p>What is left appears only when somebody has supplied the URLs. Reverie ships
  * no terms of service or privacy policy of its own — those are documents
  * somebody has to write and be bound by — and with neither set this renders
  * nothing at all rather than an empty strip of padding.
@@ -933,7 +933,7 @@ function Footer() {
   return (
     <div className="space-y-1 pt-8 text-center text-xs text-muted-foreground">
       <p>
-        By using Orion you agree to the{" "}
+        By using Reverie you agree to the{" "}
         {LEGAL_LINKS.map((link, i) => (
           <React.Fragment key={link.href}>
             {i > 0 && " and "}

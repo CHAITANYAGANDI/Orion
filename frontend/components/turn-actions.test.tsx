@@ -81,7 +81,7 @@ describe("TurnActions", () => {
     const user = userEvent.setup();
     toolbar();
     await user.click(screen.getByLabelText("More reactions"));
-    // Orion has one account per workspace. Somebody reaching for a thumbs-up
+    // Reverie has one account per workspace. Somebody reaching for a thumbs-up
     // to answer a colleague is entitled to find out before they rely on it.
     expect(screen.getByText(/never appear in a shared link/)).toBeInTheDocument();
   });

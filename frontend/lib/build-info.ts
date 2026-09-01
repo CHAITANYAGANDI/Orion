@@ -1,7 +1,7 @@
 /**
  * The documents that govern this deployment, where somebody has written any.
  *
- * <p>Orion ships no terms of service and no privacy policy of its own: those
+ * <p>Reverie ships no terms of service and no privacy policy of its own: those
  * are documents somebody has to write and be bound by, not strings a UI can
  * supply. Set `NEXT_PUBLIC_TERMS_URL` and `NEXT_PUBLIC_PRIVACY_URL` and the
  * settings footer links to them; leave them unset and the footer does not

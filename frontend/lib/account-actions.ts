@@ -1,5 +1,5 @@
 /**
- * Changing the one thing Orion does not own.
+ * Changing the one thing Reverie does not own.
  *
  * <p>Sign-in belongs to Clerk: there is no password column, no login form and
  * no session to establish here. So a password change is a call to the provider,
@@ -14,7 +14,7 @@
  *
  * <p>Changing the address. It used to live here — add the new address to the
  * account, send it a code, promote it, drop the old one — and it is gone by
- * decision rather than by neglect: <b>the address on an Orion account is fixed
+ * decision rather than by neglect: <b>the address on an Reverie account is fixed
  * once it is made.</b>
  *
  * <p>It is the credential, so every route to changing it is a route to losing

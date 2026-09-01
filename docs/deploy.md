@@ -1,10 +1,10 @@
-# Deploying Orion
+# Deploying Reverie
 
 Two hosts, not one.
 
 - **Vercel** runs the Next.js frontend.
-- **Render** runs the Spring backend (`orion-backend`) and the FastAPI AI worker
-  (`orion-ai`).
+- **Render** runs the Spring backend (`reverie-backend`) and the FastAPI AI worker
+  (`reverie-ai`).
 
 Backing it: **Neon** (Postgres), **Confluent Cloud** (Kafka), **Cloudflare R2**
 (object storage), **Clerk** (identity), **AssemblyAI** (speech-to-text) and
@@ -14,25 +14,25 @@ Backing it: **Neon** (Postgres), **Confluent Cloud** (Kafka), **Cloudflare R2**
                     Internet
                        |
                        v
-          Vercel  --  Orion frontend (Next.js)
+          Vercel  --  Reverie frontend (Next.js)
                        |
                   HTTPS / WSS
                        |
                        v
-          Render  --  orion-backend (Spring, public web service)
+          Render  --  reverie-backend (Spring, public web service)
                        |
                        +--> Neon              Postgres + RLS
                        +--> Cloudflare R2     recordings, exports
                        +--> Confluent Cloud   meeting_uploaded
                        |
                        v
-          Render  --  orion-ai (FastAPI, PRIVATE service)
+          Render  --  reverie-ai (FastAPI, PRIVATE service)
                        |
                        +--> AssemblyAI        transcription + diarization
                        +--> OpenAI            summary, chat, embeddings
 ```
 
-`orion-ai` is a Render **private service**: it has no public URL, and is reached
+`reverie-ai` is a Render **private service**: it has no public URL, and is reached
 only by the backend and by Kafka. The browser never talks to it.
 
 [`render.yaml`](../render.yaml) declares the two Render services and nothing
@@ -56,7 +56,7 @@ names all of them at once rather than one per restart. Nothing else sets that
 profile — `docker-compose` deliberately does not, because the local stack *is*
 the development configuration.
 
-**Auth mode.** `ORION_AUTH_MODE` defaults to `clerk`, in `application.yml`
+**Auth mode.** `REVERIE_AUTH_MODE` defaults to `clerk`, in `application.yml`
 and on every `@Value` that reads it. In dev mode `AuthenticationFilter` and
 `StompAuthInterceptor` trust an `X-Dev-User` header, so *any* request — and any
 websocket — can impersonate *any* user. The blueprint hardcodes `clerk`; do not
@@ -68,7 +68,7 @@ override it.
 > one decision, and the weaker one won silently. `ApplicationDefaultsTest` now
 > resolves the real YAML with an empty environment and pins the answer.
 
-**The internal callback token.** `ORION_INTERNAL_TOKEN` has **no default**.
+**The internal callback token.** `REVERIE_INTERNAL_TOKEN` has **no default**.
 It used to fall back to `dev-internal-token`, which is committed to this
 repository and printed further down this page, so a deployment that never set it
 looked exactly like one that did — while accepting result callbacks from anybody
@@ -78,7 +78,7 @@ request: meetings pile up in PROCESSING and the ai-service logs 401s, which is
 loud and traceable in a way that silent acceptance is not.
 
 **URLs that have no scheme.** Render's blueprint cannot produce a URL.
-`fromService` with `property: host` yields a bare `orion-backend.onrender.com`,
+`fromService` with `property: host` yields a bare `reverie-backend.onrender.com`,
 and a bare host is not an origin — CORS compares it against the browser's
 `https://…` and never matches, so every request fails and it reads as "the API
 is down". `APP_FRONTEND_URL`, `APP_PUBLIC_URL` and `SPRING_CALLBACK_URL` are
@@ -203,12 +203,12 @@ FLYWAY_URL=jdbc:postgresql://ep-xxx.region.aws.neon.tech/neondb?sslmode=require
 
 `infra/postgres-init/01-app-role.sql` runs automatically only on a fresh Docker
 volume. On Neon, run it **once by hand as `neondb_owner`**, against the direct
-endpoint. It creates `orion_app` (no bypass — every user request) and
-`orion_sys` (`BYPASSRLS` — outbox relay, worker callbacks,
+endpoint. It creates `reverie_app` (no bypass — every user request) and
+`reverie_sys` (`BYPASSRLS` — outbox relay, worker callbacks,
 share links, provisioning).
 
 Change the two passwords from the development defaults first; they are what
-`SPRING_DATASOURCE_PASSWORD` and `ORION_DATASOURCE_SYSTEM_PASSWORD` must be
+`SPRING_DATASOURCE_PASSWORD` and `REVERIE_DATASOURCE_SYSTEM_PASSWORD` must be
 set to.
 
 ### 1.4 Migrate
@@ -223,7 +223,7 @@ place to look if one behaves differently than it did locally.
 
 ### 1.5 Verify isolation actually survived the move
 
-Do not skip this. Connect as `orion_app` and confirm the tenant boundary
+Do not skip this. Connect as `reverie_app` and confirm the tenant boundary
 holds on the real database:
 
 ```sql
@@ -232,7 +232,7 @@ SELECT count(*) FROM meetings;          -- only that user's rows
 SELECT set_config('app.bypass','on',false);
 SELECT count(*) FROM meetings;          -- MUST be unchanged
 SELECT count(*) FROM outbox_events;     -- MUST be 0
-ALTER ROLE orion_app BYPASSRLS;      -- MUST be denied
+ALTER ROLE reverie_app BYPASSRLS;      -- MUST be denied
 ```
 
 ---
@@ -277,7 +277,7 @@ never reach the worker.
 
 One key scoped to the cluster (**Global access** is fine for a single-tenant
 deployment; granular access needs ACLs for both service accounts on all eight
-topics plus the `orion-backend` and `ai-service` consumer groups). **The
+topics plus the `reverie-backend` and `ai-service` consumer groups). **The
 secret is shown once** — copy both halves before closing the dialog.
 
 Confluent's own docs note it can take ~90 seconds for a new key to propagate; an
@@ -334,19 +334,19 @@ credentials are right.
 
 ## 3. Cloudflare R2
 
-Create a bucket named `orion` and an API token with object read/write.
+Create a bucket named `reverie` and an API token with object read/write.
 
-- `S3_BUCKET` — **`orion`**, on **both** `orion-backend` and `orion-ai`. They
+- `S3_BUCKET` — **`reverie`**, on **both** `reverie-backend` and `reverie-ai`. They
   read and write the same objects; a mismatch is not an error, it is one service
   quietly writing somewhere the other never looks.
 - `S3_ENDPOINT` — `https://<account-id>.r2.cloudflarestorage.com`
 - `S3_REGION` — `auto` (R2 accepts nothing else)
 - `S3_PUBLIC_ENDPOINT` — the same, unless a custom domain fronts the bucket.
-  Needed on **both** services. Blank on `orion-ai` does not fail; it silently
+  Needed on **both** services. Blank on `reverie-ai` does not fail; it silently
   disables AssemblyAI fetching the recording from R2 itself, so every file is
   pulled into the container and pushed out again.
 - `S3_ACCESS_KEY` / `S3_SECRET_KEY` — the same token on both, and it must have
-  **write**. `orion-ai` used to only read, so a token scoped to "Object Read
+  **write**. `reverie-ai` used to only read, so a token scoped to "Object Read
   only" worked there; MP3 export writes the converted copy back to the bucket,
   and a read-only token turns that into a conversion that runs, succeeds, and
   fails on the very last step, every time.
@@ -363,7 +363,7 @@ nothing, and the only evidence is a console message.
 It is deliberately not proxied through Spring: an hour of audio through a
 request thread is a denial-of-service tool with a login.
 
-In the Cloudflare dashboard, **R2 → `orion` → Settings → CORS policy**:
+In the Cloudflare dashboard, **R2 → `reverie` → Settings → CORS policy**:
 
 ```json
 [
@@ -378,7 +378,7 @@ In the Cloudflare dashboard, **R2 → `orion` → Settings → CORS policy**:
 ```
 
 - **`AllowedOrigins`** is the frontend's origin — the same value as
-  `APP_FRONTEND_URL` on `orion-backend`. Add the preview origin too if MP3
+  `APP_FRONTEND_URL` on `reverie-backend`. Add the preview origin too if MP3
   export is tested from one.
 - **`AllowedHeaders` is empty on purpose.** The request carries no headers at
   all: the credential is the signature in the URL, and adding `Authorization`
@@ -387,15 +387,15 @@ In the Cloudflare dashboard, **R2 → `orion` → Settings → CORS policy**:
 - **`GET` only.** Uploads are presigned PUTs performed by the browser too, and
   if that ever needs a rule it is a separate one; nothing here needs write.
 
-Nothing else in Orion depends on this. Document exports come from the API, and
+Nothing else in Reverie depends on this. Document exports come from the API, and
 the audio player uses a presigned URL as an element `src`, which is not a
 `fetch` and is not subject to CORS.
 
-> **Historical only.** The bucket was called `recallix` before the rename and
+> **Historical only.** The bucket was called `reverie` before the rename and
 > its API token was scoped to that name. It is not the deployment bucket and
-> nothing reads it. Buckets cannot be renamed in place, so `orion` was created
+> nothing reads it. Buckets cannot be renamed in place, so `reverie` was created
 > fresh — if you still have objects in the old one, copy them across and then
-> retire it. Do not point any service at `recallix`.
+> retire it. Do not point any service at `reverie`.
 
 No code change is needed: `S3Config` already overrides the endpoint and uses
 path-style addressing.
@@ -458,8 +458,8 @@ Where each value goes:
 |---|---|---|
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | **Vercel** | build-time — inlined into the bundle |
 | `CLERK_SECRET_KEY` | **Vercel** | runtime only, server-side; never `NEXT_PUBLIC_` |
-| `CLERK_ISSUER` | **Render** (`orion-backend`) | |
-| `CLERK_JWKS_URL` | **Render** (`orion-backend`) | |
+| `CLERK_ISSUER` | **Render** (`reverie-backend`) | |
+| `CLERK_JWKS_URL` | **Render** (`reverie-backend`) | |
 
 Add the production domain to the Clerk instance once Vercel has issued it.
 
@@ -478,14 +478,14 @@ them and delivered later by a relay. Two have no user switch: an account closed
 and its data deleted, and an allowance spent. The closure notice is the only
 record of the deletion that exists once the account is gone.
 
-Two variables, both on **Render** (`orion-backend`), both `sync: false`:
+Two variables, both on **Render** (`reverie-backend`), both `sync: false`:
 
 | Variable | Value |
 |---|---|
 | `RESEND_API_KEY` | `re_…` from the Resend dashboard |
-| `ORION_MAIL_FROM` | `Recallix <notifications@yourdomain.com>` |
+| `REVERIE_MAIL_FROM` | `Reverie <notifications@send.reverieai.in>` |
 
-`ORION_MAIL_FROM` must be on a **domain verified in Resend**. `DeploymentCheck`
+`REVERIE_MAIL_FROM` must be on a **domain verified in Resend**. `DeploymentCheck`
 refuses to start on `resend.dev`, `example.*`, `localhost`, `test` and
 `invalid`, because those fail at the provider rather than here — every message
 is queued, retried for five hours, abandoned, and nobody is told anything.
@@ -502,7 +502,7 @@ Cloudflare Registrar; that is the whole cost.
 
 1. Buy the domain. Any registrar whose DNS you can edit.
 2. Resend → **Domains** → **Add Domain**. Give it a **subdomain**, e.g.
-   `send.yourdomain.xyz`, not the root. Sending reputation then accrues to the
+   `send.reverieai.in`, not the root. Sending reputation then accrues to the
    subdomain and leaves the root free for ordinary mail later.
 3. Resend generates the DNS records — an `MX` for bounce feedback, a `TXT` SPF,
    and a `TXT` DKIM key at `resend._domainkey.…`. The exact values are per
@@ -513,13 +513,13 @@ Cloudflare Registrar; that is the whole cost.
    `re_…` value.
 
 **The from-address must be on the domain you actually verified.** Verifying
-`send.yourdomain.xyz` does not verify the root — `notifications@yourdomain.xyz`
+`send.reverieai.in` does not verify the root — `notifications@reverieai.in`
 is then an unverified sender and Resend rejects it, which shows up here as
 messages queued, retried and abandoned rather than as a startup failure. Match
 them exactly:
 
 ```
-ORION_MAIL_FROM = Recallix <notifications@send.yourdomain.xyz>
+REVERIE_MAIL_FROM = Reverie <notifications@send.reverieai.in>
 ```
 
 ### No domain? Then say so, and mean it
@@ -529,17 +529,17 @@ is not a bypass — it is enforced.
 
 | Variable | Value |
 |---|---|
-| `ORION_MAIL_SELF_ONLY` | `true` |
-| `ORION_MAIL_SELF_USER_ID` | your Clerk user id, `user_…` |
+| `REVERIE_MAIL_SELF_ONLY` | `true` |
+| `REVERIE_MAIL_SELF_USER_ID` | your Clerk user id, `user_…` |
 
-**Both, or the service will not start.** `ORION_MAIL_SELF_ONLY=true` with a
+**Both, or the service will not start.** `REVERIE_MAIL_SELF_ONLY=true` with a
 blank id once meant "enforce nothing", which made the one setting whose job is
 to restrict access silently do the opposite of what it said. `SelfOnlyAccess`
 now refuses to construct in that state, so the bean fails and the container
 exits 1 with the reason in the log:
 
 ```
-IllegalStateException: ORION_MAIL_SELF_ONLY is true but ORION_MAIL_SELF_USER_ID is blank
+IllegalStateException: REVERIE_MAIL_SELF_ONLY is true but REVERIE_MAIL_SELF_USER_ID is blank
 ```
 
 That is this, and it is one dashboard variable away from fixed.
@@ -547,11 +547,11 @@ That is this, and it is one dashboard variable away from fixed.
 What it enforces: every Clerk subject other than the named one is refused at
 `UserService.provision` with a 403, **before the lookup**, so no row is written
 and a rejected stranger leaves nothing behind. Hiding the sign-up button would
-not do — Clerk creates the account whatever Orion's UI shows, and the token it
+not do — Clerk creates the account whatever Reverie's UI shows, and the token it
 mints is real.
 
 With the id set, `onboarding@resend.dev` is accepted: the Resend account owner
-and the only Orion account holder are the same person, so a sender that reaches
+and the only Reverie account holder are the same person, so a sender that reaches
 only them is correct rather than misdirected. Leaving both mail variables blank
 is accepted too — nothing is delivered, messages expire unsent after ninety
 days, and every boot says so in as many words.
@@ -572,10 +572,10 @@ backend, so it works while the service is down:
    instance. The dashboard will fail to load its data — that is the backend
    being down, and it does not matter here.
 2. Clerk dashboard → **Users** → your user → copy the id (`user_…`).
-3. Render → `orion-backend` → **Environment** → set `ORION_MAIL_SELF_USER_ID`.
+3. Render → `reverie-backend` → **Environment** → set `REVERIE_MAIL_SELF_USER_ID`.
 4. Save. Render redeploys, and your first request provisions the account.
 
-Unset `ORION_MAIL_SELF_ONLY`, and verify a domain, before anybody else is meant
+Unset `REVERIE_MAIL_SELF_ONLY`, and verify a domain, before anybody else is meant
 to sign up. Until you do, they cannot — self-only 403s every other account at
 provisioning, which is the whole point of it and exactly wrong for a deployment
 you want strangers to try.
@@ -630,8 +630,8 @@ Environment Variables, per environment.
 
 | Variable | Value | Notes |
 |---|---|---|
-| `NEXT_PUBLIC_API_URL` | public **HTTPS** Render backend URL | e.g. `https://orion-backend.onrender.com` |
-| `NEXT_PUBLIC_WS_URL` | public **WSS** backend socket URL | e.g. `wss://orion-backend.onrender.com/ws` |
+| `NEXT_PUBLIC_API_URL` | public **HTTPS** Render backend URL | e.g. `https://reverie-backend.onrender.com` |
+| `NEXT_PUBLIC_WS_URL` | public **WSS** backend socket URL | e.g. `wss://reverie-backend.onrender.com/ws` |
 | `NEXT_PUBLIC_AUTH_MODE` | `clerk` | never `dev` — that mode trusts an `X-Dev-User` header |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | `pk_test_…` staging / `pk_live_…` production | |
 | `CLERK_SECRET_KEY` | `sk_test_…` staging / `sk_live_…` production | **server-side only**, never `NEXT_PUBLIC_` |
@@ -645,7 +645,7 @@ relative path, so the app calls *itself* instead of the API and every request
 
 Without the two `SIGN_IN`/`SIGN_UP` URLs, Clerk's components link to its hosted
 pages on `accounts.dev` — a different domain, a different look, and a route out
-of the product to get back into it. Orion serves both screens itself.
+of the product to get back into it. Reverie serves both screens itself.
 
 ### Optional
 
@@ -690,8 +690,8 @@ up a `sk_live_` key.
 
 | Service | Type | Public? | Runs |
 |---|---|---|---|
-| `orion-backend` | `web` | yes | Spring Boot, Flyway migrations, `production` profile |
-| `orion-ai` | `pserv` | **no** | FastAPI worker, Kafka consumer |
+| `reverie-backend` | `web` | yes | Spring Boot, Flyway migrations, `production` profile |
+| `reverie-ai` | `pserv` | **no** | FastAPI worker, Kafka consumer |
 
 ```bash
 # from the repo root, on the branch you want live
@@ -709,7 +709,7 @@ render blueprint launch     # or point the dashboard at render.yaml
 describes bringing staging up from `dev`.
 
 Fill every `sync: false` value in the dashboard before the first build.
-`ORION_INTERNAL_TOKEN` is generated on the backend and referenced by the
+`REVERIE_INTERNAL_TOKEN` is generated on the backend and referenced by the
 ai-service, so the two always match — do not set it by hand on one side only,
 or every worker callback returns 401.
 
@@ -760,27 +760,27 @@ inlined.
 
 1. **Provision the managed dependencies** — Neon (sections 1), Confluent (2),
    R2 (3), Clerk (4). Nothing deploys until these exist.
-2. **Deploy the Render staging services from `dev`** — `orion-backend` and
-   `orion-ai`. `APP_FRONTEND_URL` gets a placeholder for now.
-3. **Take the public backend URL**, e.g. `https://orion-backend.onrender.com`.
+2. **Deploy the Render staging services from `dev`** — `reverie-backend` and
+   `reverie-ai`. `APP_FRONTEND_URL` gets a placeholder for now.
+3. **Take the public backend URL**, e.g. `https://reverie-backend.onrender.com`.
    Confirm `/actuator/health` is `UP` before going further.
 4. **Configure the Vercel Preview environment** — every variable in section 7,
    with `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL` built from step 3, and
    the **development** Clerk keys.
 5. **Deploy the frontend from `dev`** and take its URL, e.g.
    `https://<your-project>.vercel.app`.
-6. **Put that URL into `APP_FRONTEND_URL`** on `orion-backend`. Add it to the
+6. **Put that URL into `APP_FRONTEND_URL`** on `reverie-backend`. Add it to the
    R2 CORS `AllowedOrigins` (section 3) and to the Clerk instance's allowed
    domains at the same time — all three want the same value, and forgetting the
    R2 one fails only at upload.
-7. **Restart `orion-backend`** so it picks the value up.
+7. **Restart `reverie-backend`** so it picks the value up.
 8. **Run the end-to-end staging checks**: sign in, record and upload a meeting,
    watch the status arrive over the socket, open the finished summary, ask the
    chat a question, export. Each exercises a different one of the four
    dependencies, which is the point of doing all five rather than just the
    first.
 9. **Only then create `main`** and repeat 2–8 with the production Clerk
-   instance, production Vercel environment, and a fresh `ORION_INTERNAL_TOKEN`.
+   instance, production Vercel environment, and a fresh `REVERIE_INTERNAL_TOKEN`.
 
 Steps 6 and 7 are the ones people skip, because the frontend loads fine without
 them — it is every API call behind it that fails, which reads as "the backend is
@@ -792,7 +792,7 @@ down".
 
 - **No CI.** Nothing runs the backend or ai-service suites before a deploy.
   This blueprint deploys whatever is on the branch.
-- **No bounce handling.** Resend accepting the message is where Orion's
+- **No bounce handling.** Resend accepting the message is where Reverie's
   knowledge ends. A hard bounce, a spam complaint, or an address that stopped
   existing is not fed back: the row is marked sent and nothing reconciles it.
   There is no webhook endpoint to point Resend at.

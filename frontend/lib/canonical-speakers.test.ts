@@ -2,7 +2,7 @@
  * Meeting-local speaker numbering, and the colour that follows a speaker around.
  *
  * The bug these pin: AssemblyAI clusters voices and names the clusters "A",
- * "B", "C"… and Orion decoded the letter by its position in the alphabet, so
+ * "B", "C"… and Reverie decoded the letter by its position in the alphabet, so
  * a two-person meeting whose voices clustered as A and D displayed **Speaker 1
  * and Speaker 4** — with no Speaker 2 or 3 anywhere, which reads as two people
  * missing from the room.
@@ -66,7 +66,7 @@ describe("numbering", () => {
   });
 
   it("keeps a real name rather than replacing it with a number", () => {
-    // Speaker identification returns names. A name beats anything Orion
+    // Speaker identification returns names. A name beats anything Reverie
     // could invent, and it still gets a key so the colour behaves.
     const speakers = new CanonicalSpeakers();
     const cindy = speakers.resolve("Cindy");

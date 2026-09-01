@@ -14,7 +14,7 @@ import type { PreferencesResponse, PrivacyOverview, SpeakerSettings } from "@/li
  * so the test that matters is that saving one does not quietly clear another,
  * which is what a form that sends its whole state on every keystroke would do.
  *
- * <i>Email and password are shown and not editable.</i> Neither is Orion's to
+ * <i>Email and password are shown and not editable.</i> Neither is Reverie's to
  * change; a development session has no sign-in provider and therefore no
  * password at all, and an Edit control over them would be a promise the product
  * cannot keep.
@@ -22,7 +22,7 @@ import type { PreferencesResponse, PrivacyOverview, SpeakerSettings } from "@/li
  * <i>The footer says nothing rather than something useless.</i> The version
  * line and the jump link to this page's own retention section are gone, and the
  * legal line does not appear at all unless somebody has supplied real URLs —
- * Orion ships no terms of service of its own.
+ * Reverie ships no terms of service of its own.
  */
 const {
   update, setRetention, closeAccount, signOut, toastError,
@@ -183,7 +183,7 @@ describe("who you are", () => {
   it("names the provider somebody actually signed in with", () => {
     // It used to say "Managed by your sign-in provider" to every Clerk account,
     // which is both vaguer than it needs to be and wrong for half of them --
-    // an account made here with an email has a password, held for Orion by
+    // an account made here with an email has a password, held for Reverie by
     // Clerk, and it is the account holder's to change.
     mode = "clerk";
     identity = { ...identity, provider: "google" };
@@ -247,7 +247,7 @@ describe("editing", () => {
   it("shows the address without offering to change it", async () => {
     await openEditor();
 
-    // No kind of account changes its address in Orion. It is the credential,
+    // No kind of account changes its address in Reverie. It is the credential,
     // so every route to changing it is a route to losing an account.
     expect(screen.getByLabelText("Email")).toBeDisabled();
     expect(screen.queryByRole("button", { name: /Change email/i })).not.toBeInTheDocument();
@@ -256,7 +256,7 @@ describe("editing", () => {
   it("never puts a real password in the DOM", async () => {
     await openEditor();
 
-    // Dots are a drawing of a password, not one. Orion has never held it,
+    // Dots are a drawing of a password, not one. Reverie has never held it,
     // and rendering anything else here would mean it had started to.
     expect(screen.getByLabelText("Password")).toBeDisabled();
     expect(screen.getByLabelText("Password")).toHaveValue("••••••••••");
@@ -376,10 +376,10 @@ describe("the rest of the page", () => {
   it("shows no legal line when there are no documents to link to", () => {
     render(<GeneralTab />);
 
-    // Orion ships no terms of service of its own, and a link to a page that
+    // Reverie ships no terms of service of its own, and a link to a page that
     // does not exist is worse than no link.
     expect(screen.queryByText(/Terms of Service/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/By using Orion/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/By using Reverie/)).not.toBeInTheDocument();
   });
 });
 
@@ -519,7 +519,7 @@ describe("closing the account", () => {
  * Voice recognition ~ the only consent on this page, and the only data on it
  * that is derived from somebody's body.
  *
- * <p>Matching a voice across meetings cannot be done from names. Orion held a
+ * <p>Matching a voice across meetings cannot be done from names. Reverie held a
  * list of names for a year and it could never have identified anybody: it needs
  * a numerical description of how a person sounds, which is a stable identifier
  * and, under GDPR Article 9, biometric data when used to identify someone.
@@ -665,7 +665,7 @@ describe("voice recognition", () => {
 /**
  * The email switches.
  *
- * <p>V56 deleted every message Recallix sent, and its stated reason was not
+ * <p>V56 deleted every message Reverie sent, and its stated reason was not
  * that the messages were wrong — it was that the switches had no UI to reach
  * them, so nothing went out and nobody could have asked for it. This section is
  * the half that was missing, and these tests are what stop it going missing

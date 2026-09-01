@@ -2,7 +2,7 @@
 
 A PDF carries its own typesetting. Unlike a DOCX — which names a font and lets
 Word find one — a PDF that references a font the reader does not have draws
-empty boxes, so the glyphs for every script Orion works in have to be here.
+empty boxes, so the glyphs for every script Reverie works in have to be here.
 
 | File | Covers |
 |---|---|
@@ -23,6 +23,6 @@ actually used.
 Source: <https://github.com/notofonts>, the `hinted/ttf` builds.
 Licence: SIL Open Font License 1.1, in `LICENSE-OFL.txt`.
 
-See `com.orion.export.PdfFonts` for how they are selected, and for the one
+See `com.reverie.export.PdfFonts` for how they are selected, and for the one
 known limit — OpenPDF does not shape Devanagari, so Hindi is legible but not
 correctly typeset.

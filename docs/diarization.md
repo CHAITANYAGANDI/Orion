@@ -1,8 +1,8 @@
-# Speaker diarization: provider clusters, Orion speakers
+# Speaker diarization: provider clusters, Reverie speakers
 
 Two bugs were reported from real meetings. They turned out to be one mistake
-seen from two ends — Orion treated the provider's speaker label as if it
-were a Orion speaker number.
+seen from two ends — Reverie treated the provider's speaker label as if it
+were a Reverie speaker number.
 
 This is what was wrong, how it was measured, and what the fix does.
 
@@ -11,14 +11,14 @@ This is what was wrong, how it was measured, and what the fix does.
 ## 1. The short interjection that got swallowed
 
 Someone talks for thirty seconds, someone else says "Exactly.", the first
-person carries on. Orion showed:
+person carries on. Reverie showed:
 
 ```
 Speaker 1: We need to finish authentication … Exactly … then deploy staging.
 ```
 
 **Root cause.** Modern diarization attributes **every word**, not only every
-utterance. Orion's parser read `utterance["speaker"]` and then dropped the
+utterance. Reverie's parser read `utterance["speaker"]` and then dropped the
 per-word `speaker` field on the way past — `_words_of` kept only text, start,
 end and confidence. A speaker change *inside* an utterance was therefore
 unrepresentable: the interjection was absorbed into whichever turn surrounded
@@ -26,14 +26,14 @@ it, and the evidence that would have shown otherwise had already been discarded.
 
 **Whose bug?** Ours, on both paths, but for different reasons:
 
-| Path | What the provider did | What Orion did |
+| Path | What the provider did | What Reverie did |
 |---|---|---|
 | Final (async) | Correct. Put "Exactly." on its own utterance, labelled B. | Discarded word-level labels, so a mid-utterance switch had nowhere to live. |
 | Live (streaming) | Correct, but in **two messages**. | Read the wrong field on the second one, so the correction never arrived. |
 
 The live case is the one users actually saw, and it is worth spelling out. The
 provider sends a turn it has not yet clustered with `speaker_label: "PENDING"`,
-then sends a `SpeakerRevision` naming it. Orion read `message.turns`; the
+then sends a `SpeakerRevision` naming it. Reverie read `message.turns`; the
 wire field is `message.revisions`. **Every speaker revision was silently
 discarded.** And `"PENDING"` fell through to the "it must be a real name"
 branch, so the transcript showed turns spoken by somebody called *PENDING* —
@@ -43,7 +43,7 @@ marked `attributed`, so it read as an answer rather than a placeholder.
 
 ## 2. The second person to speak was "Speaker 4"
 
-**Root cause.** AssemblyAI names voice clusters "A", "B", "C"… and Orion
+**Root cause.** AssemblyAI names voice clusters "A", "B", "C"… and Reverie
 rendered them by alphabet position: `ord(label) - ord("A") + 1` in Python,
 `charCodeAt(0) - 64` in TypeScript. A meeting whose two voices clustered as A
 and D displayed **Speaker 1 and Speaker 4**, with no Speaker 2 or 3 anywhere —
@@ -62,7 +62,7 @@ positions.
 ## 3. How it was measured
 
 Section 31 of the brief asks for a diagnostic that says whether a mislabel came
-from the provider or from Orion. That question was answered before any
+from the provider or from Reverie. That question was answered before any
 parsing changed, because the answer decides what can be fixed and where.
 
 Two Windows TTS voices — one male, one female, so acoustic separation is not in
@@ -83,7 +83,7 @@ disagreeing with their parent utterance. The provider was right both times.
 
 **Streaming** — seven turns, and the two interjections arrived as
 `speaker_label: "PENDING"`, corrected to `"B"` by a single `SpeakerRevision`
-message. The provider was right here too; Orion was not reading the
+message. The provider was right here too; Reverie was not reading the
 correction.
 
 Neither benchmark file is committed (`benchmark-audio/` is gitignored) and
@@ -201,7 +201,7 @@ No heuristic infers a speaker from the words. Specifically absent:
 - any LLM asked who was talking.
 
 Every boundary traces back to an explicit provider attribution, and where the
-provider declines to attribute, so does Orion. Diarization is an acoustic
+provider declines to attribute, so does Reverie. Diarization is an acoustic
 task; a heuristic that reads well in a demo invents speakers in a real meeting,
 which is worse than the provider's own mistake because it is confident and it
 is ours.
@@ -218,7 +218,7 @@ become "IPhone".
 
 Verified against the current API.
 
-**Async.** Orion sends `speakers_expected` when the exact count is known and
+**Async.** Reverie sends `speakers_expected` when the exact count is known and
 `speaker_options{min,max}` for a range — never both, which the provider rejects
 with a 400. The count comes from the import dialog's *Expected speakers* control
 (Auto / 2 / 3 / 4 / 5 / custom range, V45), never from a calendar attendee count:
@@ -233,7 +233,7 @@ four people invited is not four people who spoke.
 | 10+ min | **30** |
 
 A 30-wide search on a two-person meeting is the documented way one person
-fragments across several labels. Orion does **not** currently override this,
+fragments across several labels. Reverie does **not** currently override this,
 and that is a deliberate abstention rather than an oversight: capping it would
 merge real speakers past the cap ("additional speakers are merged into existing
 labels"), and no measurement is available here to say which harm is larger. The
@@ -299,7 +299,7 @@ stored as JSONB, and rows written by the older shape read back with both null.
 
 ## 10. When the provider merges two people
 
-Sections 1 and 2 were about Orion mishandling what the provider said.
+Sections 1 and 2 were about Reverie mishandling what the provider said.
 This one is about the provider being wrong, which needs a different answer.
 
 ### The report
@@ -320,13 +320,13 @@ unambiguous. The audio was re-submitted to AssemblyAI four ways:
 
 | Request | Result at 22.00-32.26 |
 |---|---|
-| As Orion sends it today | one utterance, speaker `B` |
+| As Reverie sends it today | one utterance, speaker `B` |
 | `speakers_expected: 2` | one utterance, speaker `B` |
 | `speaker_options{min: 2, max: 2}` | one utterance, speaker `B` |
 | `universal-2` instead | one utterance, speaker `B` |
 
 **Every word was labelled `B`** in both the `utterances` array and the top-level
-`words` array. Orion's parser was faithful; there was nothing in the response
+`words` array. Reverie's parser was faithful; there was nothing in the response
 to recover, and `split_by_speaker` had nothing to split on.
 
 Speaker constraints did not help, and it is worth being clear why: the provider
@@ -346,7 +346,7 @@ that gets this case right invents boundaries elsewhere, confidently.
 
 ### What it does instead
 
-Since V53 Orion has a speaker embedding model of its own (see
+Since V53 Reverie has a speaker embedding model of its own (see
 [speaker-identification.md](./speaker-identification.md)). `app/rediarize.py`
 uses it to ask one question of each suspiciously long turn: *does the audio
 actually stay with one person?*
@@ -473,7 +473,7 @@ must not be split. Media is not committed; see the generator note in
 | System | Attribution | cpWER | Missed | False |
 | --- | --- | --- | --- | --- |
 | A. AssemblyAI raw | 100.0% | 0.0% | 0 | 0 |
-| B. Orion today | 100.0% | 0.0% | 0 | 0 |
+| B. Reverie today | 100.0% | 0.0% | 0 | 0 |
 | C. SpeakerRefiner | 100.0% | 0.0% | 0 | 0 |
 | D. Reconciliation | 100.0% | 0.0% | 0 | 0 |
 
@@ -501,7 +501,7 @@ A phone call captured through a speaker, with a narrator layer. 296 words.
 The honest conclusion: this recording's two voices arrive down one heavily
 compressed telephone channel. Acoustic diarization keys on channel and timbre,
 and here the channel is identical for both people. The model is not broken; this
-audio defeats it, and Orion's users record a lot of audio like it.
+audio defeats it, and Reverie's users record a lot of audio like it.
 
 ### The rule that came out of it
 
@@ -566,7 +566,7 @@ behaviour that matters is a pure function of times. That is why they were kept.
   were never a voiceprint — that feature could not have identified anybody, and
   it is gone (V51). Neither transcription provider offers cross-file speaker
   identity either; AssemblyAI documents that it does not and points at exactly
-  the approach Orion now takes. Speakers are still numbered by who spoke
+  the approach Reverie now takes. Speakers are still numbered by who spoke
   first and can still be renamed by hand; a rename is now also what teaches a
   voice, for accounts that have opted in. See
   [speaker-identification.md](./speaker-identification.md). The adapter will
