@@ -185,8 +185,9 @@ public class DeploymentCheck {
                 "It is the single allowed CORS origin and the STOMP allowed origin, so a wrong "
                         + "value blocks every browser request and every socket."));
         problems.addAll(urlProblem("APP_PUBLIC_URL", publicUrl, true,
-                "Calendar feeds are fetched by Google's and Apple's servers, which cannot "
-                        + "resolve a private address."));
+                "It is this service's own public address. Nothing reads it at runtime since "
+                        + "V48 removed the calendar feed, but a private address here would be "
+                        + "wrong for anything outside this network that has to reach the API."));
 
         if (trim(aiServiceUrl).isEmpty()) {
             problems.add("AI_SERVICE_URL is not set. Nothing can be transcribed or summarised.");

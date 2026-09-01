@@ -477,7 +477,7 @@ Two variables, both on **Render** (`reverie-backend`), both `sync: false`:
 | Variable | Value |
 |---|---|
 | `RESEND_API_KEY` | `re_…` from the Resend dashboard |
-| `REVERIE_MAIL_FROM` | `Reverie <notifications@send.reverieai.in>` |
+| `REVERIE_MAIL_FROM` | `Reverie <notifications@reverieai.in>` |
 
 `REVERIE_MAIL_FROM` must be on a **domain verified in Resend**. `DeploymentCheck`
 refuses to start on `resend.dev`, `example.*`, `localhost`, `test` and
@@ -495,25 +495,44 @@ offers. A `.xyz` or `.com` is roughly $1–15/year at Porkbun, Namecheap or
 Cloudflare Registrar; that is the whole cost.
 
 1. Buy the domain. Any registrar whose DNS you can edit.
-2. Resend → **Domains** → **Add Domain**. Give it a **subdomain**, e.g.
-   `send.reverieai.in`, not the root. Sending reputation then accrues to the
-   subdomain and leaves the root free for ordinary mail later.
-3. Resend generates the DNS records — an `MX` for bounce feedback, a `TXT` SPF,
-   and a `TXT` DKIM key at `resend._domainkey.…`. The exact values are per
-   domain and per region, so copy them from the dashboard rather than from any
-   example. Add them at the registrar.
-4. Click **Verify**. Usually minutes; DNS can take longer.
+2. Resend → **Domains** → **Add Domain**.
+
+   The **root** (`reverieai.in`) is the simplest choice and is what this
+   deployment uses. A subdomain (`send.reverieai.in`) keeps sending reputation
+   off the root and is what Resend suggests for a real product — but then the
+   from-address must be on the subdomain too, and that mismatch is the failure
+   described below. Pick one and make step 6 agree with it.
+3. On **GoDaddy, Cloudflare or Vercel**, click **Auto Configure**. It uses
+   Domain Connect to write the records for you, which also sidesteps GoDaddy's
+   habit of appending the domain to whatever you type in its Host field.
+
+   Anywhere else, add them by hand: an `MX` for bounce feedback, a `TXT` SPF,
+   and a `TXT` DKIM key at `resend._domainkey.…`. Values are per domain and per
+   region — copy them from the dashboard, not from any example.
+4. Wait for **Verified**. The timeline goes *Domain added → DNS verified →
+   Verifying domain*; the last step is the provider confirming DKIM and is the
+   one that takes the time. Re-running Auto Configure restarts it rather than
+   hurrying it.
 5. Resend → **API Keys** → create one with **Sending access**. That is the
    `re_…` value.
+6. Set `REVERIE_MAIL_FROM` to an address on the domain that shows **Verified**.
 
-**The from-address must be on the domain you actually verified.** Verifying
-`send.reverieai.in` does not verify the root — `notifications@reverieai.in`
-is then an unverified sender and Resend rejects it, which shows up here as
-messages queued, retried and abandoned rather than as a startup failure. Match
-them exactly:
+Note that Resend puts the SPF and MX records on a `send.` subdomain even when
+the sending domain is the root. That subdomain is the Return-Path for bounce
+handling — it is **not** a second verified sender, and a from-address on it is
+rejected.
+
+**The from-address must be on the domain you actually verified**, and this is
+the one mistake here that costs hours. Verifying `send.reverieai.in` does not
+verify the root, and verifying the root does not verify the subdomain. Either
+way round, the wrong one is an unverified sender that Resend rejects — and
+`DeploymentCheck` passes it, because it can tell a placeholder domain from a
+real one but not a verified one from an unverified one. So there is no startup
+failure: messages queue, retry for about five hours, and are abandoned with
+nobody told. Match them exactly:
 
 ```
-REVERIE_MAIL_FROM = Reverie <notifications@send.reverieai.in>
+REVERIE_MAIL_FROM = Reverie <notifications@reverieai.in>
 ```
 
 ### No domain? Then say so, and mean it
@@ -625,17 +644,29 @@ Environment Variables, per environment.
 | Variable | Value | Notes |
 |---|---|---|
 | `NEXT_PUBLIC_API_URL` | public **HTTPS** Render backend URL | e.g. `https://reverie-backend.onrender.com` |
-| `NEXT_PUBLIC_WS_URL` | public **WSS** backend socket URL | e.g. `wss://reverie-backend.onrender.com/ws` |
+| `NEXT_PUBLIC_WS_URL` | public **HTTPS** backend socket URL | e.g. `https://reverie-backend.onrender.com/ws` |
 | `NEXT_PUBLIC_AUTH_MODE` | `clerk` | never `dev` — that mode trusts an `X-Dev-User` header |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | `pk_test_…` staging / `pk_live_…` production | |
 | `CLERK_SECRET_KEY` | `sk_test_…` staging / `sk_live_…` production | **server-side only**, never `NEXT_PUBLIC_` |
 | `NEXT_PUBLIC_CLERK_SIGN_IN_URL` | `/sign-in` | |
 | `NEXT_PUBLIC_CLERK_SIGN_UP_URL` | `/sign-up` | |
 
-`wss://`, not `https://`, on the socket URL, and it keeps the `/ws` path. And
-both URLs need the scheme: a scheme-less `NEXT_PUBLIC_API_URL` is read as a
-relative path, so the app calls *itself* instead of the API and every request
-404s from the frontend's own origin.
+**`https://`, not `wss://`**, on the socket URL, and it keeps the `/ws` path.
+That is not a typo: `frontend/lib/ws.ts` connects with **SockJS**, whose
+handshake is an ordinary HTTP GET, and the client rejects a `ws`/`wss` scheme.
+The code's own fallback says the same thing — `http://localhost:8080/ws`. An
+earlier version of this table said `wss://` and was wrong.
+
+`NEXT_PUBLIC_API_URL` is the **bare origin**, with no path: `lib/api.ts` builds
+`${API_BASE}/api/v1` itself, so a trailing slash gives `//api/v1` and an
+included `/api/v1` gives it twice.
+
+Both need the scheme. A scheme-less `NEXT_PUBLIC_API_URL` is read as a relative
+path, so the app calls *itself* instead of the API and every request 404s from
+the frontend's own origin. Unset entirely it falls back to
+`http://localhost:8080`, which in a deployed app means every request goes to the
+visitor's own machine — the whole UI fails at once while the backend is healthy
+and logs nothing.
 
 Without the two `SIGN_IN`/`SIGN_UP` URLs, Clerk's components link to its hosted
 pages on `accounts.dev` — a different domain, a different look, and a route out

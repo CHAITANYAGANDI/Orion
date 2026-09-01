@@ -254,10 +254,10 @@ reverie:
 app:
   frontend-url: ${APP_FRONTEND_URL:http://localhost:3000}
   # Where this API is reachable from the public internet. Distinct from the
-  # frontend URL and only used for the calendar feed, which is fetched by
-  # Google's and Apple's servers rather than by a browser on the user's network
-  # — a localhost or docker-internal address works everywhere else and is dead
-  # on arrival there.
+  # frontend URL, and with no runtime consumer since V48 removed the calendar
+  # feed it was added for. DeploymentCheck still requires it in production, so
+  # it must be set and must be a real public address rather than a localhost or
+  # docker-internal one.
   public-url: ${APP_PUBLIC_URL:http://localhost:8080}
   ai-service-url: ${AI_SERVICE_URL:http://localhost:8000}
 

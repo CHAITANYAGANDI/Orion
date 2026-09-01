@@ -120,12 +120,20 @@ services:
         value: auto
 
       # --- Wiring -----------------------------------------------------------
-      # Left auto-wired, unlike the two public URLs. `hostport` yields
-      # `reverie-ai:10000` -- the right host and the right port, no scheme --
-      # and AiClient prefixes `http://` because a private service on Render's
-      # internal network can only mean that. Worth repairing rather than
-      # refusing: the alternative is writing the private port out by hand and
-      # keeping it in step forever.
+      # Left auto-wired, unlike the two public URLs. `hostport` yields the
+      # host and the port Render detected, with no scheme, and AiClient prefixes
+      # `http://` because a private service on Render's internal network can
+      # only mean that. Worth repairing rather than refusing: the alternative is
+      # writing the private port out by hand and keeping it in step forever.
+      #
+      # THE PORT IS 8000, not Render's usual 10000. ai-service/Dockerfile ends
+      # with an exec-form `CMD ["uvicorn", ..., "--port", "8000"]`, which does no
+      # variable expansion, and nothing in that service reads $PORT -- so it
+      # binds 8000 whatever Render sets. An earlier version of this comment
+      # asserted 10000 from Render's default rather than from the Dockerfile,
+      # and anyone who hardcoded that got a connection refused on every call:
+      # live transcription, AI chat and semantic search all go over this hop,
+      # and AiClient reports the failure by returning null rather than throwing.
       - key: AI_SERVICE_URL
         fromService:
           type: pserv
@@ -161,7 +169,7 @@ services:
       - key: RESEND_API_KEY
         sync: false
       - key: REVERIE_MAIL_FROM
-        sync: false        # Reverie <notifications@send.reverieai.in>
+        sync: false        # Reverie <notifications@reverieai.in>
 
       # No domain yet? Resend will only send from onboarding@resend.dev, which
       # delivers to the Resend account owner and nobody else -- so there is no
@@ -180,14 +188,13 @@ services:
       - key: REVERIE_MAIL_SELF_USER_ID
         sync: false        # user_xxxxxxxxxxxxxxxxxxxxxxxxxx
 
-      # Where this API is reachable from the public internet. Only used for the
-      # calendar feed -- which is fetched by Google's and Apple's servers, not
-      # by the user's browser, so this is the one URL where a private address
-      # fails for somebody who is not you and cannot be noticed locally.
+      # This service's own address on the public internet.
       #
-      # Was absent from this file entirely, which meant it fell back to
-      # http://localhost:8080 and every subscribed calendar silently stopped
-      # updating.
+      # It has no runtime consumer any more. It existed for the calendar feed,
+      # which V48__remove_calendar_feed.sql deleted, and the only thing that
+      # reads it today is DeploymentCheck -- which still refuses to start
+      # without it, so it must be set and must be right. Left unset it falls
+      # back to http://localhost:8080.
       - key: APP_PUBLIC_URL
         sync: false        # https://reverie-backend.onrender.com
 
