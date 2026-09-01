@@ -1,5 +1,6 @@
 package com.orion.service;
 
+import com.orion.security.SelfOnlyAccess;
 import com.orion.common.ApiException;
 import com.orion.entity.UserEntity;
 import com.orion.repository.UserRepository;
@@ -103,7 +104,7 @@ class UserPreferencesTest {
 
     @BeforeEach
     void setUp() {
-        service = new UserService(users, "dev");
+        service = new UserService(users, new SelfOnlyAccess(false, ""), "dev");
         user = new UserEntity();
         user.setId(USER);
         user.setClerkUserId("clerk_1");
@@ -140,7 +141,7 @@ class UserPreferencesTest {
             // `provision` rewrites this column from the sign-in token on the
             // very next request, so accepting the edit would be a control that
             // appeared to work and undid itself a second later.
-            var clerk = new UserService(users, "clerk");
+            var clerk = new UserService(users, new SelfOnlyAccess(false, ""), "clerk");
             user.setEmail("old@example.com");
 
             assertThatThrownBy(() -> clerk.updatePreferences(USER, address("new@example.com")))
@@ -156,7 +157,7 @@ class UserPreferencesTest {
             // The profile form sends every field it shows. Somebody renaming
             // themselves under a provider must not be told they cannot change
             // an address they never touched.
-            var clerk = new UserService(users, "clerk");
+            var clerk = new UserService(users, new SelfOnlyAccess(false, ""), "clerk");
             user.setEmail("same@example.com");
 
             clerk.updatePreferences(USER, address("same@example.com"));

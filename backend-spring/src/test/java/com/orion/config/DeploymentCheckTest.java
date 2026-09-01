@@ -34,9 +34,10 @@ class DeploymentCheckTest {
     private static final String DB = "jdbc:postgresql://ep-cool-sun-123.us-east-2.aws.neon.tech/neondb";
     private static final String MAIL_KEY = "re_EXAMPLE_NOT_A_REAL_KEY";
     private static final String MAIL_FROM = "Recallix <notifications@recallix.app>";
+    private static final String SELF_USER = "user_2abcMineOwnAccount";
 
     private static DeploymentCheck ready() {
-        return new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI, DB, MAIL_KEY, MAIL_FROM, false);
+        return new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI, DB, MAIL_KEY, MAIL_FROM, false, "");
     }
 
     @Test
@@ -56,7 +57,7 @@ class DeploymentCheckTest {
         @DisplayName("dev mode is refused, and the message says what it costs")
         void devModeIsRefused() {
             List<String> problems =
-                    new DeploymentCheck("dev", ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI, DB, MAIL_KEY, MAIL_FROM, false).problems();
+                    new DeploymentCheck("dev", ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI, DB, MAIL_KEY, MAIL_FROM, false, "").problems();
 
             assertThat(problems).hasSize(1);
             // Named as the consequence, not as the setting. "ORION_AUTH_MODE
@@ -72,7 +73,7 @@ class DeploymentCheckTest {
             // fail-closed default on the @Value never got a say.
             for (String mode : new String[] { "", "  ", "development", "DEV", "prod", "clerkk" }) {
                 List<String> problems =
-                        new DeploymentCheck(mode, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI, DB, MAIL_KEY, MAIL_FROM, false).problems();
+                        new DeploymentCheck(mode, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI, DB, MAIL_KEY, MAIL_FROM, false, "").problems();
 
                 assertThat(problems).as("mode=%s", mode).isNotEmpty();
             }
@@ -85,7 +86,7 @@ class DeploymentCheckTest {
             // three problems when there is one sends somebody to configure
             // Clerk when what they need to do is stop using dev mode.
             List<String> problems =
-                    new DeploymentCheck("dev", "", "", TOKEN, FRONTEND, PUBLIC, AI, DB, MAIL_KEY, MAIL_FROM, false).problems();
+                    new DeploymentCheck("dev", "", "", TOKEN, FRONTEND, PUBLIC, AI, DB, MAIL_KEY, MAIL_FROM, false, "").problems();
 
             assertThat(problems).hasSize(1);
         }
@@ -102,7 +103,7 @@ class DeploymentCheckTest {
             // deployment docs. Anybody who has read any of those can forge a
             // transcript callback.
             List<String> problems = new DeploymentCheck(
-                    MODE, ISSUER, JWKS, "dev-internal-token", FRONTEND, PUBLIC, AI, DB, MAIL_KEY, MAIL_FROM, false).problems();
+                    MODE, ISSUER, JWKS, "dev-internal-token", FRONTEND, PUBLIC, AI, DB, MAIL_KEY, MAIL_FROM, false, "").problems();
 
             assertThat(problems).hasSize(1);
             assertThat(problems.get(0)).contains("forge a result callback");
@@ -112,7 +113,7 @@ class DeploymentCheckTest {
         @DisplayName("an unset token is refused")
         void anUnsetTokenIsRefused() {
             List<String> problems =
-                    new DeploymentCheck(MODE, ISSUER, JWKS, "", FRONTEND, PUBLIC, AI, DB, MAIL_KEY, MAIL_FROM, false).problems();
+                    new DeploymentCheck(MODE, ISSUER, JWKS, "", FRONTEND, PUBLIC, AI, DB, MAIL_KEY, MAIL_FROM, false, "").problems();
 
             assertThat(problems).hasSize(1);
         }
@@ -130,7 +131,7 @@ class DeploymentCheckTest {
             // wrong makes every request from the browser fail, and it looks
             // exactly like the API being down.
             List<String> problems = new DeploymentCheck(
-                    MODE, ISSUER, JWKS, TOKEN, "http://localhost:3000", PUBLIC, AI, DB, MAIL_KEY, MAIL_FROM, false).problems();
+                    MODE, ISSUER, JWKS, TOKEN, "http://localhost:3000", PUBLIC, AI, DB, MAIL_KEY, MAIL_FROM, false, "").problems();
 
             assertThat(problems).hasSize(1);
             assertThat(problems.get(0)).contains("only this container can reach");
@@ -154,7 +155,7 @@ class DeploymentCheckTest {
                     "http://[::1]",
             }) {
                 List<String> problems =
-                        new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, url, PUBLIC, AI, DB, MAIL_KEY, MAIL_FROM, false).problems();
+                        new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, url, PUBLIC, AI, DB, MAIL_KEY, MAIL_FROM, false, "").problems();
 
                 assertThat(problems).as("url=%s", url).isNotEmpty();
             }
@@ -168,7 +169,7 @@ class DeploymentCheckTest {
             // a bare host is not an origin -- CORS compares it against
             // `https://host` and never matches.
             List<String> problems = new DeploymentCheck(
-                    MODE, ISSUER, JWKS, TOKEN, "orion-frontend.onrender.com", PUBLIC, AI, DB, MAIL_KEY, MAIL_FROM, false).problems();
+                    MODE, ISSUER, JWKS, TOKEN, "orion-frontend.onrender.com", PUBLIC, AI, DB, MAIL_KEY, MAIL_FROM, false, "").problems();
 
             assertThat(problems).hasSize(1);
             assertThat(problems.get(0)).contains("https://orion-frontend.onrender.com");
@@ -181,7 +182,7 @@ class DeploymentCheckTest {
             // browser, so this is the one URL where "it works on my machine" is
             // literally the failure.
             List<String> problems = new DeploymentCheck(
-                    MODE, ISSUER, JWKS, TOKEN, FRONTEND, "http://localhost:8080", AI, DB, MAIL_KEY, MAIL_FROM, false).problems();
+                    MODE, ISSUER, JWKS, TOKEN, FRONTEND, "http://localhost:8080", AI, DB, MAIL_KEY, MAIL_FROM, false, "").problems();
 
             assertThat(problems).hasSize(1);
             assertThat(problems.get(0)).contains("APP_PUBLIC_URL");
@@ -194,15 +195,15 @@ class DeploymentCheckTest {
             // internal network can only mean http. Refusing it here would make
             // the blueprint's auto-wiring unusable for no gain.
             assertThat(new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC,
-                    "orion-ai:10000", DB, MAIL_KEY, MAIL_FROM, false).problems()).isEmpty();
+                    "orion-ai:10000", DB, MAIL_KEY, MAIL_FROM, false, "").problems()).isEmpty();
             assertThat(new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC,
-                    "http://orion-ai:10000", DB, MAIL_KEY, MAIL_FROM, false).problems()).isEmpty();
+                    "http://orion-ai:10000", DB, MAIL_KEY, MAIL_FROM, false, "").problems()).isEmpty();
         }
 
         @Test
         @DisplayName("but an unset ai-service URL is still refused")
         void theInternalUrlMustExist() {
-            assertThat(new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, "", DB, MAIL_KEY, MAIL_FROM, false)
+            assertThat(new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, "", DB, MAIL_KEY, MAIL_FROM, false, "")
                     .problems()).hasSize(1);
         }
     }
@@ -221,7 +222,7 @@ class DeploymentCheckTest {
                     MODE,
                     "https://touching-locust-18.clerk.accounts.dev",
                     "https://touching-locust-18.clerk.accounts.dev/.well-known/jwks.json",
-                    TOKEN, FRONTEND, PUBLIC, AI, DB, MAIL_KEY, MAIL_FROM, false);
+                    TOKEN, FRONTEND, PUBLIC, AI, DB, MAIL_KEY, MAIL_FROM, false, "");
 
             assertThat(check.problems()).isEmpty();
             assertThat(check.warnings()).singleElement()
@@ -235,7 +236,7 @@ class DeploymentCheckTest {
         // Fixing a deploy one restart per variable, each cycle revealing the
         // next thing wrong, is how a five-minute checklist becomes an afternoon.
         DeploymentCheck check = new DeploymentCheck(
-                "dev", "", "", "dev-internal-token", "http://localhost:3000", "", "", DB, MAIL_KEY, MAIL_FROM, false);
+                "dev", "", "", "dev-internal-token", "http://localhost:3000", "", "", DB, MAIL_KEY, MAIL_FROM, false, "");
 
         assertThat(check.problems()).hasSize(5);
     }
@@ -244,7 +245,7 @@ class DeploymentCheckTest {
     @DisplayName("startup fails, and the exception carries the list")
     void theContextRefusesToStart() {
         DeploymentCheck check = new DeploymentCheck(
-                "dev", "", "", "dev-internal-token", "http://localhost:3000", "", "", DB, MAIL_KEY, MAIL_FROM, false);
+                "dev", "", "", "dev-internal-token", "http://localhost:3000", "", "", DB, MAIL_KEY, MAIL_FROM, false, "");
 
         assertThatThrownBy(check::check)
                 .isInstanceOf(IllegalStateException.class)
@@ -282,7 +283,7 @@ class DeploymentCheckTest {
             List<String> problems = new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND,
                     PUBLIC, AI,
                     "jdbc:postgresql://ep-cool-sun-123-pooler.us-east-2.aws.neon.tech/neondb",
-                    MAIL_KEY, MAIL_FROM, false
+                    MAIL_KEY, MAIL_FROM, false, ""
             ).problems();
 
             assertThat(problems).hasSize(1);
@@ -298,7 +299,7 @@ class DeploymentCheckTest {
         void pgbouncerParameterIsRefused() {
             assertThat(new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI,
                     "jdbc:postgresql://db.example.com/orion?sslmode=require&pgbouncer=true",
-                    MAIL_KEY, MAIL_FROM, false
+                    MAIL_KEY, MAIL_FROM, false, ""
             ).problems()).hasSize(1);
         }
 
@@ -315,14 +316,14 @@ class DeploymentCheckTest {
             // would accuse this host, which is a perfectly ordinary one.
             assertThat(new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI,
                     "jdbc:postgresql://carpooler-db.example.com/orion",
-                    MAIL_KEY, MAIL_FROM, false).problems()).isEmpty();
+                    MAIL_KEY, MAIL_FROM, false, "").problems()).isEmpty();
         }
 
         @Test
         @DisplayName("an unset url is left to Spring, which has its own complaint")
         void unsetUrlIsNotThisCheckSProblem() {
             assertThat(new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI, "",
-                    MAIL_KEY, MAIL_FROM, false).problems()).isEmpty();
+                    MAIL_KEY, MAIL_FROM, false, "").problems()).isEmpty();
         }
     }
 
@@ -349,7 +350,7 @@ class DeploymentCheckTest {
         @DisplayName("refuses to start with no API key, and names what cannot be sent")
         void noKey() {
             List<String> problems = new DeploymentCheck(
-                    MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI, DB, "", MAIL_FROM, false).problems();
+                    MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI, DB, "", MAIL_FROM, false, "").problems();
 
             assertThat(problems).anyMatch(p -> p.contains("RESEND_API_KEY"));
             assertThat(problems).anyMatch(p -> p.contains("account closed"));
@@ -359,7 +360,7 @@ class DeploymentCheckTest {
         @DisplayName("refuses to start with no sender")
         void noSender() {
             List<String> problems = new DeploymentCheck(
-                    MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI, DB, MAIL_KEY, "", false).problems();
+                    MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI, DB, MAIL_KEY, "", false, "").problems();
 
             assertThat(problems).anyMatch(p -> p.contains("ORION_MAIL_FROM is not set"));
         }
@@ -376,7 +377,7 @@ class DeploymentCheckTest {
              */
             String secret = "re_EXAMPLE_PRETEND_THIS_IS_PRODUCTION";
             DeploymentCheck check = new DeploymentCheck(
-                    MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI, DB, secret, "", false);
+                    MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI, DB, secret, "", false, "");
 
             String everything = String.join(" ", check.problems()) + String.join(" ", check.warnings());
 
@@ -391,7 +392,7 @@ class DeploymentCheckTest {
             for (String from : List.of("notifications@recallix.app",
                     "Recallix <notifications@recallix.app>")) {
                 assertThat(new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI,
-                        DB, MAIL_KEY, from, false).mailProblem())
+                        DB, MAIL_KEY, from, false, "").mailProblem())
                         .as(from).isEmpty();
             }
         }
@@ -402,7 +403,7 @@ class DeploymentCheckTest {
             for (String from : List.of("Recallix", "notifications@", "@recallix.app",
                     "notifications at recallix.app")) {
                 assertThat(new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI,
-                        DB, MAIL_KEY, from, false).mailProblem())
+                        DB, MAIL_KEY, from, false, "").mailProblem())
                         .as(from).isNotEmpty();
             }
         }
@@ -418,7 +419,7 @@ class DeploymentCheckTest {
              * whose account it was.
              */
             List<String> problems = new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND,
-                    PUBLIC, AI, DB, MAIL_KEY, "Recallix <onboarding@resend.dev>", false).mailProblem();
+                    PUBLIC, AI, DB, MAIL_KEY, "Recallix <onboarding@resend.dev>", false, "").mailProblem();
 
             assertThat(problems).hasSize(1);
             assertThat(problems.get(0)).contains("resend.dev").contains("only delivers to your own");
@@ -431,7 +432,7 @@ class DeploymentCheckTest {
             // Copying that file and filling in everything except this line is the
             // most likely way a deployment reaches production unable to send.
             assertThat(new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI, DB,
-                    MAIL_KEY, "Recallix <notifications@yourdomain.com>", false).mailProblem())
+                    MAIL_KEY, "Recallix <notifications@yourdomain.com>", false, "").mailProblem())
                     .isNotEmpty();
         }
 
@@ -441,7 +442,7 @@ class DeploymentCheckTest {
             for (String from : List.of("orion@localhost", "orion@recallix.test",
                     "orion@example.com", "orion@mail.example.com")) {
                 assertThat(new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI,
-                        DB, MAIL_KEY, from, false).mailProblem())
+                        DB, MAIL_KEY, from, false, "").mailProblem())
                         .as(from).isNotEmpty();
             }
         }
@@ -453,83 +454,131 @@ class DeploymentCheckTest {
         }
 
         /**
-         * The escape hatch, and why it is a flag rather than an edit.
+         * The second valid mode, and why it now needs a name in it.
          *
-         * <p>A check that cannot be satisfied is a check somebody deletes -- at
-         * the end of a bad afternoon, in the file, permanently, for every future
-         * deployment. A flag that has to be typed out and announces itself on
-         * every boot is a decision anybody can see afterwards. Deleting the
-         * check is a decision nobody can.
+         * <h2>What this replaces</h2>
+         *
+         * <p>{@code ORION_MAIL_SELF_ONLY} started as a bare declaration — "this
+         * deployment has no users other than me" — which existed so a solo
+         * deployment with no mail domain could pass this check honestly rather
+         * than have the check deleted. It was load-bearing: it is the only thing
+         * that makes Resend's shared sender acceptable, because that sender
+         * delivers to the Resend account owner and nobody else.
+         *
+         * <p>Nothing made it true. A stranger reaching Clerk's hosted sign-up
+         * got a valid token and Orion provisioned them an account, at which
+         * point this check was resting on a fact that had quietly stopped
+         * holding. So the declaration now has to name the account, and
+         * {@link com.orion.security.SelfOnlyAccess} enforces it at provisioning.
          */
         @Nested
-        @DisplayName("with no domain to send from")
+        @DisplayName("self-only mode")
         class SelfOnly {
 
-            private DeploymentCheck selfOnly(String key, String from) {
+            private DeploymentCheck selfOnly(String key, String from, String allowed) {
                 return new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI, DB,
-                        key, from, true);
+                        key, from, true, allowed);
             }
 
             @Test
-            @DisplayName("boots with nothing configured at all")
-            void bootsUnconfigured() {
-                assertThat(selfOnly("", "").mailProblem()).isEmpty();
+            @DisplayName("refuses to start when no allowed account is named")
+            void needsTheAccount() {
+                /*
+                 * The whole point. Without an id the mode enforces nothing, so a
+                 * stranger can sign up into a deployment whose only justification
+                 * for a shared sender was that no stranger can. That is worse
+                 * than either honest alternative, so it is a refusal.
+                 */
+                List<String> problems = selfOnly(MAIL_KEY, "x@resend.dev", "").mailProblem();
+
+                assertThat(problems).hasSize(1);
+                assertThat(problems.get(0))
+                        .contains("ORION_MAIL_SELF_USER_ID")
+                        .contains("user_");
             }
 
             @Test
-            @DisplayName("boots on Resend's shared sender, which is the whole point of it")
-            void bootsOnTheSharedSender() {
-                // onboarding@resend.dev delivers only to the Resend account
-                // owner. That is wrong for a product and right for a deployment
-                // whose only account is the operator's.
-                assertThat(selfOnly(MAIL_KEY, "Recallix <onboarding@resend.dev>").mailProblem())
-                        .isEmpty();
+            @DisplayName("accepts resend.dev once the account is named and enforced")
+            void sharedSenderIsFineWhenEnforced() {
+                // onboarding@resend.dev reaches the Resend account owner only.
+                // With exactly one enforced account, the owner IS the account
+                // holder, so the message is correct rather than misdirected.
+                assertThat(selfOnly(MAIL_KEY, "Recallix <onboarding@resend.dev>", SELF_USER)
+                        .mailProblem()).isEmpty();
             }
 
             @Test
-            @DisplayName("says what is being given up, every single boot")
+            @DisplayName("boots with no mail credentials at all")
+            void mailIsOptionalHere() {
+                // A private deployment that never sends anything is a coherent
+                // thing to run. It is warned about rather than refused.
+                assertThat(selfOnly("", "", SELF_USER).mailProblem()).isEmpty();
+            }
+
+            @Test
+            @DisplayName("still refuses a sender that is not an address")
+            void aTypoIsStillATypo() {
+                // Not a trust question. It fails at the provider rather than at
+                // boot, which is the thing this class exists to prevent.
+                assertThat(selfOnly(MAIL_KEY, "Recallix", SELF_USER).mailProblem()).isNotEmpty();
+            }
+
+            @Test
+            @DisplayName("names the enforced account, every single boot")
             void warnsLoudly() {
                 /*
-                 * Unconditional, not once. The declaration stops being true the
-                 * moment somebody else signs up, and nothing here can detect
-                 * that -- so the only defence is that it is impossible to forget.
+                 * Unconditional. The declaration stops being true the moment the
+                 * deployment is meant to be a product, and the only defence
+                 * against forgetting is that it is impossible to forget.
                  */
-                List<String> warnings = selfOnly(MAIL_KEY, "x@resend.dev").warnings();
+                List<String> warnings = selfOnly(MAIL_KEY, "x@resend.dev", SELF_USER).warnings();
 
-                assertThat(warnings).hasSize(1);
-                assertThat(warnings.get(0))
-                        .contains("Nobody but you will be told")
-                        .contains("account was closed")
-                        .contains("no users but you");
+                assertThat(String.join(" ", warnings))
+                        .contains("SELF-ONLY MODE")
+                        .contains(SELF_USER)
+                        .contains("no account is created for it");
             }
 
             @Test
-            @DisplayName("tells the truth about which of the two situations it is in")
-            void namesTheSituation() {
-                assertThat(selfOnly("", "").warnings().get(0))
-                        .contains("nothing will be sent at all")
-                        .contains("expire unsent");
-                assertThat(selfOnly(MAIL_KEY, "x@resend.dev").warnings().get(0))
-                        .contains("reach only you");
+            @DisplayName("says plainly that nothing is delivered when mail is unconfigured")
+            void saysNothingIsDelivered() {
+                // "Mail is not configured" reads as a missing feature. What
+                // actually happens is that messages about irreversible acts are
+                // written down, never sent, and thrown away three months later.
+                assertThat(String.join(" ", selfOnly("", "", SELF_USER).warnings()))
+                        .contains("NOTHING IS DELIVERED")
+                        .contains("expired unsent");
             }
 
             @Test
-            @DisplayName("still never puts the key in the warning")
+            @DisplayName("still never puts the key in the output")
             void stillNoKey() {
                 String secret = "re_EXAMPLE_PRETEND_THIS_IS_PRODUCTION";
+                DeploymentCheck check = selfOnly(secret, "x@resend.dev", SELF_USER);
 
-                assertThat(String.join(" ", selfOnly(secret, "x@resend.dev").warnings()))
+                assertThat(String.join(" ", check.problems()) + String.join(" ", check.warnings()))
                         .doesNotContain(secret);
             }
 
             @Test
-            @DisplayName("is off unless it is asked for")
-            void offByDefault() {
+            @DisplayName("changes nothing for an ordinary production deployment")
+            void ordinaryProductionIsUntouched() {
                 // The default is the refusal. Somebody who never heard of this
-                // flag gets the check, which is the correct way round.
-                assertThat(ready().warnings()).noneMatch(w -> w.contains("Nobody but you"));
+                // gets the strict check, which is the correct way round.
+                assertThat(ready().problems()).isEmpty();
+                assertThat(ready().warnings()).noneMatch(w -> w.contains("SELF-ONLY"));
                 assertThat(new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI, DB,
-                        "", "", false).mailProblem()).isNotEmpty();
+                        "", "", false, "").mailProblem()).isNotEmpty();
+            }
+
+            @Test
+            @DisplayName("resend.dev is still refused when self-only is off")
+            void sharedSenderStaysRefusedOtherwise() {
+                // Naming the account does not help: without the mode it is not
+                // enforced, so the sender is simply wrong.
+                assertThat(new DeploymentCheck(MODE, ISSUER, JWKS, TOKEN, FRONTEND, PUBLIC, AI, DB,
+                        MAIL_KEY, "Recallix <onboarding@resend.dev>", false, SELF_USER)
+                        .mailProblem()).isNotEmpty();
             }
         }
     }

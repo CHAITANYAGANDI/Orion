@@ -157,7 +157,22 @@ orion:
     # check honestly. This is that way, and it announces itself on every boot.
     #
     # Unset it before anybody else signs up.
+    #
+    # ENFORCED, not trusted. It was a bare declaration once, which is a claim
+    # nothing checked -- a stranger reaching Clerk's hosted sign-up got a valid
+    # token and was provisioned an account, and the deployment check was then
+    # resting on a fact that had quietly stopped holding. So it now requires the
+    # id below, and SelfOnlyAccess refuses every other subject at provisioning.
     self-only: ${ORION_MAIL_SELF_ONLY:false}
+
+    # The single account allowed when self-only is on. Required with it, and
+    # production refuses to start without it.
+    #
+    # The Clerk user id -- the JWT subject, which is what provisioning is keyed
+    # on. Starts with `user_`; it is on your user in the Clerk dashboard. NOT
+    # the email address: that can be changed at the provider, is not unique
+    # across providers, and is the thing an attacker would try to control.
+    self-user-id: ${ORION_MAIL_SELF_USER_ID:}
     reply-to: ${ORION_MAIL_REPLY_TO:}
     # Below this, a finished recording is not worth a message: it was done
     # before the reader left the page, and mailing it is the V56 recap again.

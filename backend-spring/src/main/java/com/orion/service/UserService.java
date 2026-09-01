@@ -1,5 +1,6 @@
 package com.orion.service;
 
+import com.orion.security.SelfOnlyAccess;
 import com.orion.common.ApiException;
 import com.orion.common.IdGenerator;
 import com.orion.domain.Language;
@@ -20,6 +21,7 @@ import java.util.stream.Collectors;
 public class UserService {
 
     private final UserRepository users;
+    private final SelfOnlyAccess selfOnly;
 
     /**
      * {@code clerk} or {@code dev}, and the only thing that decides whether the
@@ -33,8 +35,10 @@ public class UserService {
     private final String authMode;
 
     public UserService(UserRepository users,
+                       SelfOnlyAccess selfOnly,
                        @Value("${orion.auth-mode:dev}") String authMode) {
         this.users = users;
+        this.selfOnly = selfOnly;
         this.authMode = authMode == null ? "dev" : authMode;
     }
 
@@ -43,9 +47,25 @@ public class UserService {
         return "clerk".equalsIgnoreCase(authMode);
     }
 
-    /** Upsert a local user for the given Clerk (or dev) subject; returns local user id. */
+    /**
+     * Upsert a local user for the given Clerk (or dev) subject; returns local
+     * user id.
+     *
+     * <p><b>This is the gate for self-only mode, and it is the only one that
+     * works.</b> Hiding the sign-up button is not access control: Clerk creates
+     * an account for anybody who reaches its hosted flow, the token it mints is
+     * valid, and this method is where Orion decides that subject deserves a
+     * row. Refusing here means a stranger gets no account rather than an account
+     * they are then refused the use of -- and the difference is a real user id,
+     * with real rows, left behind for every later request to act as.
+     *
+     * <p>Before the lookup, deliberately. {@link SelfOnlyAccess} covers every
+     * caller of this method -- the HTTP filter, the STOMP interceptor, and
+     * whatever is written next -- rather than each of them remembering.
+     */
     @Transactional
     public String provision(String clerkUserId, String email) {
+        selfOnly.requireOrThrow(clerkUserId);
         UserEntity user = users.findByClerkUserId(clerkUserId).orElseGet(() -> {
             UserEntity u = new UserEntity();
             u.setId(IdGenerator.user());

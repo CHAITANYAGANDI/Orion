@@ -173,6 +173,13 @@ services:
       - key: ORION_MAIL_SELF_ONLY
         sync: false        # true, only while you are the only account
 
+      # Required whenever the above is true, and the reason it is enforceable
+      # rather than a promise: every other Clerk subject is refused at
+      # provisioning, so no account is created for it. Your Clerk user id --
+      # it starts with `user_` and is on your user in the Clerk dashboard.
+      - key: ORION_MAIL_SELF_USER_ID
+        sync: false        # user_xxxxxxxxxxxxxxxxxxxxxxxxxx
+
       # Where this API is reachable from the public internet. Only used for the
       # calendar feed -- which is fetched by Google's and Apple's servers, not
       # by the user's browser, so this is the one URL where a private address

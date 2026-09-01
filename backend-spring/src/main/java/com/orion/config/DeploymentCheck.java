@@ -1,5 +1,6 @@
 package com.orion.config;
 
+import com.orion.security.SelfOnlyAccess;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -96,6 +97,7 @@ public class DeploymentCheck {
     private final String mailApiKey;
     private final String mailFrom;
     private final boolean mailSelfOnly;
+    private final String mailSelfUserId;
 
     public DeploymentCheck(
             @Value("${orion.auth-mode:clerk}") String authMode,
@@ -108,7 +110,8 @@ public class DeploymentCheck {
             @Value("${spring.datasource.url:}") String datasourceUrl,
             @Value("${orion.mail.api-key:}") String mailApiKey,
             @Value("${orion.mail.from:}") String mailFrom,
-            @Value("${orion.mail.self-only:false}") boolean mailSelfOnly) {
+            @Value("${orion.mail.self-only:false}") boolean mailSelfOnly,
+            @Value("${orion.mail.self-user-id:}") String mailSelfUserId) {
         this.authMode = authMode;
         this.issuer = issuer;
         this.jwksUrl = jwksUrl;
@@ -122,6 +125,7 @@ public class DeploymentCheck {
         this.mailApiKey = mailApiKey;
         this.mailFrom = mailFrom;
         this.mailSelfOnly = mailSelfOnly;
+        this.mailSelfUserId = mailSelfUserId;
     }
 
     @PostConstruct
@@ -228,6 +232,22 @@ public class DeploymentCheck {
      * outcome than either sending or not sending, and it is invisible until it
      * happens — which is the same shape as every other check in this class.
      *
+     * <h2>Two valid modes</h2>
+     *
+     * <ul>
+     *   <li><b>Real mail.</b> {@code ORION_MAIL_SELF_ONLY=false}, a key, and a
+     *       sender on a domain somebody owns. This is what a product is.</li>
+     *   <li><b>Self-only.</b> {@code ORION_MAIL_SELF_ONLY=true} with
+     *       {@code ORION_MAIL_SELF_USER_ID} naming the single allowed account.
+     *       A shared or absent sender is then acceptable, because the operator
+     *       is the only account holder — and {@link SelfOnlyAccess} makes that
+     *       true rather than assumed.</li>
+     * </ul>
+     *
+     * <p>Anything else is a refusal, including self-only with no allowed
+     * account: that is the shape where a stranger can sign up into a deployment
+     * whose entire justification for a shared sender was that no stranger can.
+     *
      * <h2>Development is untouched</h2>
      *
      * <p>This whole class is {@code @Profile("production")}. A laptop runs with
@@ -244,10 +264,63 @@ public class DeploymentCheck {
      * whether it is set, and this reports that.
      */
     List<String> mailProblem() {
-        if (mailSelfOnly) {
-            // Declared, not defaulted. See mailWarnings() for what it costs.
-            return List.of();
+        return mailSelfOnly ? selfOnlyProblem() : realMailProblem();
+    }
+
+    /**
+     * The second valid mode: one account, enforced, mail optional.
+     *
+     * <h2>What makes this acceptable when the same configuration is refused
+     * otherwise</h2>
+     *
+     * <p>Resend's shared sender delivers only to the Resend account owner. In a
+     * product that is a misdirected account-closure notice. In a deployment with
+     * exactly one account, and where that is <em>enforced</em> rather than
+     * hoped, the operator <b>is</b> the account holder — so a message that
+     * reaches only them is correct.
+     *
+     * <p>Which is why the id is required rather than encouraged. Without it the
+     * claim is an intention, {@link SelfOnlyAccess} enforces nothing, and a
+     * stranger can sign up into a deployment whose whole justification for
+     * accepting a shared sender was that no stranger can. That is a worse
+     * position than either honest alternative, so it is a refusal.
+     *
+     * <p>Missing mail credentials are <em>not</em> a refusal here. A private
+     * deployment that never sends anything is a coherent thing to run; it is
+     * warned about, loudly, on every boot.
+     *
+     * <p><b>Not the only thing that catches a missing id.</b>
+     * {@link SelfOnlyAccess} refuses to construct in that state, so startup
+     * fails in every profile rather than only in production, and whichever of
+     * the two fires first the deployment does not come up. This branch stays
+     * because it is the one that reports the problem <em>alongside every other
+     * problem</em> — fixing a misconfigured deploy one restart per variable is
+     * how a checklist becomes an afternoon.
+     */
+    List<String> selfOnlyProblem() {
+        List<String> problems = new ArrayList<>();
+
+        if (trim(mailSelfUserId).isEmpty()) {
+            problems.add("ORION_MAIL_SELF_ONLY is set but ORION_MAIL_SELF_USER_ID is not. "
+                    + "Self-only mode is what allows a shared or missing sender, and it only "
+                    + "means anything if the single allowed account is named and enforced -- "
+                    + "otherwise anybody can sign up into a deployment that cannot email them. "
+                    + "Set it to your Clerk user id (it starts with `user_`, and is on your "
+                    + "user in the Clerk dashboard).");
+            return problems;
         }
+
+        // A sender is optional here, but a malformed one is a typo rather than a
+        // decision and fails at the provider rather than at boot.
+        String from = trim(mailFrom);
+        if (!from.isEmpty() && !isAddress(senderAddress(from))) {
+            problems.add("ORION_MAIL_FROM is not an email address.");
+        }
+        return problems;
+    }
+
+    /** The ordinary mode: a real sender, on a domain somebody owns. */
+    List<String> realMailProblem() {
         List<String> problems = new ArrayList<>();
 
         if (trim(mailApiKey).isEmpty()) {
@@ -267,26 +340,15 @@ public class DeploymentCheck {
             return problems;
         }
 
-        /*
-         * The address inside "Name <a@b>", or the whole string when it is bare.
-         * Resend accepts both forms.
-         */
-        String address = from;
-        int open = from.lastIndexOf('<');
-        int close = from.lastIndexOf('>');
-        if (open >= 0 && close > open) {
-            address = from.substring(open + 1, close).trim();
-        }
-
-        int at = address.indexOf('@');
-        if (at <= 0 || at == address.length() - 1 || address.contains(" ")) {
+        String address = senderAddress(from);
+        if (!isAddress(address)) {
             problems.add("ORION_MAIL_FROM is not an email address. Use `Recallix "
                     + "<notifications@yourdomain.com>` or a bare address on a domain verified "
                     + "in Resend.");
             return problems;
         }
 
-        String domain = address.substring(at + 1).toLowerCase(Locale.ROOT);
+        String domain = address.substring(address.indexOf('@') + 1).toLowerCase(Locale.ROOT);
         if (DEVELOPMENT_SENDER_DOMAINS.stream().anyMatch(
                 d -> domain.equals(d) || domain.endsWith("." + d))) {
             /*
@@ -310,6 +372,22 @@ public class DeploymentCheck {
                     + "has no users but you.");
         }
         return problems;
+    }
+
+    /**
+     * The address inside {@code "Name <a@b>"}, or the whole string when it is
+     * bare. Resend accepts both forms.
+     */
+    private static String senderAddress(String from) {
+        int open = from.lastIndexOf('<');
+        int close = from.lastIndexOf('>');
+        return open >= 0 && close > open ? from.substring(open + 1, close).trim() : from;
+    }
+
+    /** Enough of an address to be worth sending to. Not a validator. */
+    private static boolean isAddress(String address) {
+        int at = address.indexOf('@');
+        return at > 0 && at < address.length() - 1 && !address.contains(" ");
     }
 
     /**
@@ -401,17 +479,29 @@ public class DeploymentCheck {
         if (!mailSelfOnly) {
             return List.of();
         }
-        boolean configured = !trim(mailApiKey).isEmpty() && !trim(mailFrom).isEmpty();
-        String what = configured
-                ? "Mail is configured but ORION_MAIL_SELF_ONLY is set, so the sender is assumed "
-                        + "to reach only you -- which is what Resend's shared onboarding sender "
-                        + "does."
-                : "Mail is not configured and ORION_MAIL_SELF_ONLY is set, so nothing will be "
-                        + "sent at all. Queued messages expire unsent after ninety days.";
-        return List.of(what + " Nobody but you will be told that an account was closed and its "
-                + "data deleted, or that an allowance ran out. That is correct only while this "
-                + "deployment has no users but you -- verify a domain in Resend and unset this "
-                + "before anybody else signs up.");
+        List<String> warnings = new ArrayList<>();
+        warnings.add("SELF-ONLY MODE: only the account " + trim(mailSelfUserId)
+                + " may use this deployment. Every other sign-in is refused and no account is "
+                + "created for it. Unset ORION_MAIL_SELF_ONLY, and verify a domain in Resend, "
+                + "before this is meant to be a product.");
+
+        if (trim(mailApiKey).isEmpty() || trim(mailFrom).isEmpty()) {
+            /*
+             * Said as plainly as it can be. "Mail is not configured" reads as a
+             * missing feature; what actually happens is that messages about
+             * irreversible acts are written down, never delivered, and thrown
+             * away three months later.
+             */
+            warnings.add("Mail is not configured, so NOTHING IS DELIVERED. Messages are still "
+                    + "queued in mail_outbox -- including the two that have no switch, an "
+                    + "account closed and an allowance spent -- and are expired unsent after "
+                    + "ninety days without ever reaching anybody.");
+        } else {
+            warnings.add("Mail is configured, but self-only mode assumes the sender reaches "
+                    + "only you, which is what Resend's shared onboarding sender does. Nobody "
+                    + "else would be told that their account was closed and its data deleted.");
+        }
+        return warnings;
     }
 
     /**
