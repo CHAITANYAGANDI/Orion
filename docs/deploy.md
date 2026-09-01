@@ -465,8 +465,89 @@ Add the production domain to the Clerk instance once Vercel has issued it.
 
 Add an `email` claim to the JWT template. Clerk's default session token
 carries no email, and without it every Clerk-authenticated user lands with a
-null address — which is the address shown on their own profile page. Nothing is
-mailed to it either way; Orion sends no email (V56).
+null address — which is the address shown on their own profile page, **and the
+address every queued message is delivered to**. No longer cosmetic: seven
+messages now depend on it — see section 4b below.
+
+---
+
+## 4b. Resend — email
+
+Seven messages, all written to `mail_outbox` inside the transaction that caused
+them and delivered later by a relay. Two have no user switch: an account closed
+and its data deleted, and an allowance spent. The closure notice is the only
+record of the deletion that exists once the account is gone.
+
+Two variables, both on **Render** (`orion-backend`), both `sync: false`:
+
+| Variable | Value |
+|---|---|
+| `RESEND_API_KEY` | `re_…` from the Resend dashboard |
+| `ORION_MAIL_FROM` | `Recallix <notifications@yourdomain.com>` |
+
+`ORION_MAIL_FROM` must be on a **domain verified in Resend**. `DeploymentCheck`
+refuses to start on `resend.dev`, `example.*`, `localhost`, `test` and
+`invalid`, because those fail at the provider rather than here — every message
+is queued, retried for five hours, abandoned, and nobody is told anything.
+`onboarding@resend.dev` is the sharp one: it works, and it delivers only to the
+Resend account owner, so in production every closure notice reaches the
+developer instead of the account holder.
+
+### No domain? Then say so, and mean it
+
+There is a second valid mode, for a deployment whose only account is yours. It
+is not a bypass — it is enforced.
+
+| Variable | Value |
+|---|---|
+| `ORION_MAIL_SELF_ONLY` | `true` |
+| `ORION_MAIL_SELF_USER_ID` | your Clerk user id, `user_…` |
+
+**Both, or the service will not start.** `ORION_MAIL_SELF_ONLY=true` with a
+blank id once meant "enforce nothing", which made the one setting whose job is
+to restrict access silently do the opposite of what it said. `SelfOnlyAccess`
+now refuses to construct in that state, so the bean fails and the container
+exits 1 with the reason in the log:
+
+```
+IllegalStateException: ORION_MAIL_SELF_ONLY is true but ORION_MAIL_SELF_USER_ID is blank
+```
+
+That is this, and it is one dashboard variable away from fixed.
+
+What it enforces: every Clerk subject other than the named one is refused at
+`UserService.provision` with a 403, **before the lookup**, so no row is written
+and a rejected stranger leaves nothing behind. Hiding the sign-up button would
+not do — Clerk creates the account whatever Orion's UI shows, and the token it
+mints is real.
+
+With the id set, `onboarding@resend.dev` is accepted: the Resend account owner
+and the only Orion account holder are the same person, so a sender that reaches
+only them is correct rather than misdirected. Leaving both mail variables blank
+is accepted too — nothing is delivered, messages expire unsent after ninety
+days, and every boot says so in as many words.
+
+### Getting the id, in the right order
+
+The id is **per Clerk instance** — see "Two instances, two sets of users" above.
+A `user_…` copied from the development instance will not match the production
+JWT `sub`, and the symptom is not a startup failure: the service comes up and
+returns 403 to you on every request. The refusal log names both ids, which is
+how you tell that apart from a broken token.
+
+If nobody has signed up on the production instance yet, there is no id to name.
+Sign up first. Clerk's flow is entirely client-side and does not need the
+backend, so it works while the service is down:
+
+1. Sign up through the Vercel frontend, against the **production** Clerk
+   instance. The dashboard will fail to load its data — that is the backend
+   being down, and it does not matter here.
+2. Clerk dashboard → **Users** → your user → copy the id (`user_…`).
+3. Render → `orion-backend` → **Environment** → set `ORION_MAIL_SELF_USER_ID`.
+4. Save. Render redeploys, and your first request provisions the account.
+
+Unset `ORION_MAIL_SELF_ONLY`, and verify a domain, before anybody else is meant
+to sign up. Until you do, they cannot.
 
 ---
 
@@ -675,9 +756,16 @@ down".
 
 - **No CI.** Nothing runs the backend or ai-service suites before a deploy.
   This blueprint deploys whatever is on the branch.
-- **No email.** Not "not configured" — not implemented. Every sender was
-  removed in V56, so there is no relay to provision and nothing that degrades
-  without one.
+- **No bounce handling.** Resend accepting the message is where Orion's
+  knowledge ends. A hard bounce, a spam complaint, or an address that stopped
+  existing is not fed back: the row is marked sent and nothing reconciles it.
+  There is no webhook endpoint to point Resend at.
+- **Mail delivery is at-least-once, not exactly-once.** The relay claims rows
+  with `FOR UPDATE SKIP LOCKED` and sends each one under a dedupe key passed as
+  Resend's `Idempotency-Key`, which Resend honours for **24 hours**. Every
+  automatic retry happens well inside that window, so it cannot duplicate. An
+  operator who manually replays an abandoned row *after* the window can, and
+  there is nothing provider-side to prevent it.
 - **Rate limiting is per-instance.** The streaming-token counter is a map in
   the backend, so two instances allow twice the limit. It is burst protection
   rather than a quota — the thing that actually costs money is the AI-minute
