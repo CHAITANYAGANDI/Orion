@@ -115,7 +115,7 @@ services:
       - key: S3_SECRET_KEY
         sync: false
       - key: S3_BUCKET
-        value: orion   # NOT renamed: R2 cannot rename a bucket in place
+        value: reverie
       - key: S3_REGION
         value: auto
 
@@ -269,7 +269,7 @@ services:
       - key: S3_SECRET_KEY
         sync: false
       - key: S3_BUCKET
-        value: orion   # NOT renamed: R2 cannot rename a bucket in place
+        value: reverie
       - key: S3_REGION
         value: auto
 

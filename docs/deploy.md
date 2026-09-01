@@ -368,54 +368,48 @@ In the Cloudflare dashboard, **R2 → `reverie` → Settings → CORS policy**:
 ```json
 [
   {
-    "AllowedOrigins": ["https://your-app.vercel.app"],
-    "AllowedMethods": ["GET"],
-    "AllowedHeaders": [],
-    "ExposeHeaders": ["Content-Length", "Content-Type"],
+    "AllowedOrigins": ["https://<your-project>.vercel.app"],
+    "AllowedMethods": ["PUT", "GET", "HEAD"],
+    "AllowedHeaders": ["content-type"],
+    "ExposeHeaders": ["ETag", "Content-Length", "Content-Type"],
     "MaxAgeSeconds": 3600
   }
 ]
 ```
 
-- **`AllowedOrigins`** is the frontend's origin — the same value as
-  `APP_FRONTEND_URL` on `reverie-backend`. Add the preview origin too if MP3
-  export is tested from one.
-- **`AllowedHeaders` is empty on purpose.** The request carries no headers at
-  all: the credential is the signature in the URL, and adding `Authorization`
-  would both fall outside the signature and turn a simple GET into a preflighted
-  one. Empty keeps it simple, which means no `OPTIONS` round trip per download.
-- **`GET` only.** Uploads are presigned PUTs performed by the browser too, and
-  if that ever needs a rule it is a separate one; nothing here needs write.
+One rule covers both directions, because both are the browser talking straight
+to R2 with a presigned URL:
+
+- **`PUT`** is the upload. `putWithProgress` in `frontend/lib/uploads.ts` sends
+  the file to the bucket directly; without this the upload fails in the browser
+  while every server-side check still passes.
+- **`GET`** is the MP3 export download, so the converted recording can go into
+  the same archive as the summary and the transcript. Not proxied through
+  Spring on purpose: an hour of audio through a request thread is a
+  denial-of-service tool with a login.
+- **`AllowedHeaders` must include `content-type`.** `uploads.ts` calls
+  `setRequestHeader("Content-Type", file.type)`, and a non-simple `Content-Type`
+  makes the PUT a *preflighted* request — the browser sends `OPTIONS` first and
+  refuses the upload if the header is not allowed. `["*"]` works too; this is
+  just the smallest set that is correct.
+- **`ExposeHeaders`** carries `ETag` back from the upload and the two
+  `Content-*` headers back from the download. Nothing breaks loudly without
+  them, which is why they are easy to leave out and annoying to debug.
+- **`AllowedOrigins`** is the frontend origin — the same value as
+  `APP_FRONTEND_URL` on `reverie-backend`. List every origin that can reach the
+  app: the Vercel production origin, any custom domain you attach, and a preview
+  origin if you upload or export from one.
+
+The failure mode is silent from the server's side. The browser refuses the
+request before it is sent, so the API sees nothing, R2 sees nothing, and the
+only evidence is a console message.
 
 Nothing else in Reverie depends on this. Document exports come from the API, and
 the audio player uses a presigned URL as an element `src`, which is not a
 `fetch` and is not subject to CORS.
 
-> **Historical only.** The bucket was called `reverie` before the rename and
-> its API token was scoped to that name. It is not the deployment bucket and
-> nothing reads it. Buckets cannot be renamed in place, so `reverie` was created
-> fresh — if you still have objects in the old one, copy them across and then
-> retire it. Do not point any service at `reverie`.
-
 No code change is needed: `S3Config` already overrides the endpoint and uses
 path-style addressing.
-
-**CORS is required.** The browser uploads audio straight to the bucket with a
-presigned `PUT`; without a CORS rule that upload fails in the browser while
-every server-side check still passes:
-
-Set `AllowedOrigins` to the **Vercel** origin — the same value that goes into
-`APP_FRONTEND_URL`. List the preview origin too if you upload from staging.
-
-```json
-[{
-  "AllowedOrigins": ["https://<your-project>.vercel.app"],
-  "AllowedMethods": ["PUT", "GET", "HEAD"],
-  "AllowedHeaders": ["*"],
-  "ExposeHeaders": ["ETag"],
-  "MaxAgeSeconds": 3000
-}]
-```
 
 ---
 

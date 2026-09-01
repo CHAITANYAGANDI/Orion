@@ -255,7 +255,7 @@ class Settings(BaseSettings):
     s3_endpoint: str | None = None
     s3_access_key: str | None = None
     s3_secret_key: str | None = None
-    s3_bucket: str = "orion"
+    s3_bucket: str = "reverie"
     # Where AssemblyAI should fetch a recording from, when it fetches one
     # itself. Distinct from `s3_endpoint`, which is reachable from inside the
     # compose network and from nowhere else: a presigned URL signed against
