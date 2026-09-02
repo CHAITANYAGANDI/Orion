@@ -605,3 +605,90 @@ async def test_a_pipeline_with_no_refiner_behaves_exactly_as_before():
 
     assert len(response.segments) == 6
     assert response.transcript == original
+
+
+class TestDecliningIsSaidOutLoud:
+    """Why refinement did nothing, which nothing used to record.
+
+    Refinement is what stands between a provider that merged two people into
+    one turn and a transcript that shows it. It has five ways of declining and
+    only one of them was ever logged, so "the model is not installed on this
+    deployment" and "this recording has no turn worth examining" produced
+    identical evidence: none. They have completely different responses.
+    """
+
+    @staticmethod
+    def _segments(spans):
+        from app.schemas import Segment, Word
+        out = []
+        for index, (speaker, start, end) in enumerate(spans):
+            words = [
+                Word(text=f"w{n}", start=start + n * 0.5, end=start + (n + 1) * 0.5)
+                for n in range(max(4, int((end - start) * 2)))
+            ]
+            out.append(Segment(
+                start=start, end=end, speaker=speaker, text=" ".join(w.text for w in words),
+                speaker_key=f"spk_{1 if speaker.endswith('1') else 2}",
+                speaker_status="attributed", words=words,
+            ))
+        return out
+
+    @pytest.mark.asyncio
+    async def test_no_embedder_is_reported_not_silent(self, caplog):
+        import logging
+
+        from app.pipeline import Pipeline
+        from app.providers.mock_adapter import MockLlmAdapter
+        from app.rediarize import SpeakerRefiner
+        from app.schemas import TranscriptResponse
+
+        segments = self._segments([("Speaker 1", 0.0, 40.0), ("Speaker 2", 40.5, 44.0)])
+
+        class _Provider:
+            async def transcribe(self, audio, filename, language=None, *, request=None):
+                return TranscriptResponse(transcript="x", language="en", segments=list(segments))
+
+        # A refiner with no embedder and no sampler: exactly a deployment
+        # without torch, which is a configuration problem and not a property of
+        # the recording.
+        refiner = SpeakerRefiner()
+        refiner._checked = True
+        refiner._embedder = None
+
+        pipeline = Pipeline(_Provider(), MockLlmAdapter(), refiner=refiner, name_speakers=False)
+        with caplog.at_level(logging.INFO, logger="ai-service.pipeline"):
+            await pipeline.process("mtg_refine", b"audio", "a.wav",
+                                   audio_loader=_loader)
+
+        said = "\n".join(r.getMessage() for r in caplog.records)
+        assert "Speaker refinement made no change" in said
+        assert "embedder not installed" in said
+
+    @pytest.mark.asyncio
+    async def test_a_recording_with_nothing_to_examine_says_so(self, caplog):
+        import logging
+
+        from app.pipeline import Pipeline
+        from app.providers.mock_adapter import MockLlmAdapter
+        from app.rediarize import SpeakerRefiner
+        from app.schemas import TranscriptResponse
+
+        # Every turn is short, so none can be hiding another. A completely
+        # different situation from the one above and it used to look the same.
+        segments = self._segments([("Speaker 1", 0.0, 3.0), ("Speaker 2", 3.5, 6.0)])
+
+        class _Provider:
+            async def transcribe(self, audio, filename, language=None, *, request=None):
+                return TranscriptResponse(transcript="x", language="en", segments=list(segments))
+
+        refiner = SpeakerRefiner(sampler_for=lambda audio: (lambda a, b: [0.1] * 192))
+        pipeline = Pipeline(_Provider(), MockLlmAdapter(), refiner=refiner, name_speakers=False)
+        with caplog.at_level(logging.INFO, logger="ai-service.pipeline"):
+            await pipeline.process("mtg_short", b"audio", "a.wav", audio_loader=_loader)
+
+        said = "\n".join(r.getMessage() for r in caplog.records)
+        assert "no turn long enough to hide another" in said
+
+
+async def _loader():
+    return b"audio-bytes"

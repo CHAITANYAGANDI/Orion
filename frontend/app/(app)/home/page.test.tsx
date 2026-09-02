@@ -91,6 +91,10 @@ function result<T>(data: T | undefined, opts: {
 }
 
 vi.mock("@/lib/api", () => ({
+  // The per-meeting poll that a processing row runs underneath its socket
+  // subscription. Home lists meetings; only the rows that are still being
+  // processed reach for this, and none of these tests is about one.
+  useGetMeetingQuery: () => ({ data: undefined }),
   useGetMeetingsQuery: (q: MeetingListQuery, options?: { skip?: boolean }) => {
     if (options?.skip) {
       return {

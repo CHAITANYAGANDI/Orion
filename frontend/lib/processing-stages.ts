@@ -77,7 +77,18 @@ export interface ProcessingFacts {
   hasSummary?: boolean;
 }
 
-const ORDER: MeetingStatus[] = [
+/**
+ * The pipeline's stages, in the order they happen.
+ *
+ * Exported because more than one place needs to answer "which of these two
+ * statuses is further along?" -- `stageText` here, and the row on Home
+ * reconciling a pushed status against a polled one. Two copies of an ordering
+ * is two chances to disagree about whether SUMMARIZING is before EXTRACTING.
+ *
+ * FAILED is deliberately absent: it is not a point on this line, it is the line
+ * stopping. Callers test `isTerminal` for that.
+ */
+export const STATUS_ORDER: MeetingStatus[] = [
   "CREATED",
   "UPLOADED",
   "QUEUED",
@@ -89,8 +100,8 @@ const ORDER: MeetingStatus[] = [
 
 /** Whether the worker has reported a status at or past `mark`. */
 function reachedStatus(status: MeetingStatus, mark: MeetingStatus): boolean {
-  const at = ORDER.indexOf(status);
-  const want = ORDER.indexOf(mark);
+  const at = STATUS_ORDER.indexOf(status);
+  const want = STATUS_ORDER.indexOf(mark);
   // FAILED is not on the ladder. A failed meeting has no stage past the one it
   // died in, and pretending otherwise is how a stuck spinner gets a tick.
   return at >= 0 && want >= 0 && at >= want;

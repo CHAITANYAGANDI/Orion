@@ -4,9 +4,20 @@ import * as React from "react";
 import { subscribeMeetingStatus } from "@/lib/ws";
 import { statusProgress, isTerminal } from "@/lib/format";
 import { useMeetingProgress } from "@/lib/progress";
-import { stageText } from "@/lib/processing-stages";
+import { stageText, STATUS_ORDER } from "@/lib/processing-stages";
+import { useGetMeetingQuery } from "@/lib/api";
 import { Progress } from "@/components/ui/progress";
 import type { MeetingStatus } from "@/lib/types";
+
+/**
+ * How often to ask the server where a job has got to.
+ *
+ * <p>Five seconds is chosen against the shortest thing worth seeing rather than
+ * against server load: a stage on a brief recording can last ten. Polling
+ * slower than that would let a whole stage begin and end between two requests,
+ * which is the failure being fixed, arriving by a slower route.
+ */
+const POLL_MS = 5_000;
 
 /**
  * A meeting still being made, said inside its own row in the list.
@@ -18,12 +29,31 @@ import type { MeetingStatus } from "@/lib/types";
  * section or a second card: the meeting has one place in the list, and it keeps
  * it while it is being made.
  *
- * <p><b>The status is live, from the socket.</b> Home does not poll its list, so
- * without this the row would freeze on whatever status the page load happened to
- * see. This is the same subscription the meeting page and the docked bar use;
- * only rows that are actually processing open one, so a list of finished
- * meetings costs nothing.
+ * <p><b>The status comes from the socket and a poll, together.</b> Either alone
+ * is wrong, and the socket alone was the bug:
+ *
+ * <p>A stage event is a <em>push with no replay</em>. Saving a recording
+ * navigates here and the row mounts, and only then does SockJS handshake and
+ * STOMP subscribe — several hundred milliseconds during which the worker is
+ * already running and every event it emits is delivered to nobody. On a short
+ * recording the whole pipeline can be over before the subscription exists. The
+ * row then sat on the status the list was loaded with, `QUEUED`, whose band
+ * ceiling is 4% — which is exactly the reported symptom: <b>a bar stuck at 4%
+ * on a meeting that finished normally.</b> Catching the same events a moment
+ * earlier gave 3% -> 35%, the same job, the same code, a different race.
+ *
+ * <p>So there is a poll underneath, which `lib/ws` has always said callers
+ * need: <em>"should implement a polling fallback (GET /meetings/&#123;id&#125;)"</em>.
+ * It is the floor, not the primary — the socket is still what makes a row move
+ * within a second — and it covers every case a push cannot: an event emitted
+ * before the subscription existed, a dropped connection, a proxy that silently
+ * eats the upgrade, a tab restored from bfcache.
+ *
+ * <p>Only while the meeting is unfinished, and only for rows that are actually
+ * processing, so a list of a hundred finished meetings opens no socket and
+ * makes no request.
  */
+
 export function useLiveMeetingStatus(meetingId: string, fallback: MeetingStatus) {
   const [live, setLive] = React.useState<{ status: MeetingStatus; progress: number } | null>(null);
 
@@ -41,19 +71,47 @@ export function useLiveMeetingStatus(meetingId: string, fallback: MeetingStatus)
     return () => sub.deactivate();
   }, [meetingId, done]);
 
-  // The live status wins over the cached one, which is what lets a row stop
-  // saying "Processing" the moment the socket says otherwise -- without this
-  // hook needing to refetch anything.
-  //
-  // It deliberately does not invalidate the meetings cache when a meeting
-  // settles. That would make every row in a list depend on the Redux store, and
-  // the docked bar already does it for every job this tab started or opened
-  // (see components/processing-dock). What is left over -- a meeting processing
-  // in a different tab, finishing while this list is open -- still renders
-  // correctly here, because the status on screen is this one.
-  const status = live?.status ?? fallback;
+  // The floor. Stops the moment the *polled* status settles rather than when
+  // the socket says so, because believing a push about the end of a job is the
+  // same mistake as believing one about the middle of it.
+  const polled = useGetMeetingQuery(meetingId, {
+    skip: done,
+    pollingInterval: POLL_MS,
+  });
+  const fromServer = polled.data?.status;
 
-  return { status, reported: live?.progress };
+  // Whichever is further along wins, rather than whichever spoke last. A poll
+  // in flight when a stage event lands returns the older status a moment later,
+  // and "latest wins" would walk the row backwards -- the exact thing
+  // lib/progress refuses to let the *bar* do, one layer up from where the bar
+  // can see it.
+  const status = furthest(live?.status, fromServer, fallback);
+
+  // Only the socket carries a percentage; a polled status has just its floor,
+  // which `useMeetingProgress` derives itself. Handing back a number that
+  // belongs to a status we are no longer showing would clamp the bar into the
+  // wrong band.
+  const reported = status === live?.status ? live.progress : undefined;
+
+  return { status, reported };
+}
+
+/** The most advanced of the statuses given, ignoring any that are unknown. */
+function furthest(...statuses: (MeetingStatus | undefined)[]): MeetingStatus {
+  let best: MeetingStatus = "CREATED";
+  let rank = -1;
+  for (const status of statuses) {
+    if (!status) continue;
+    // A terminal status outranks everything: it is the end of the job, and
+    // FAILED does not sit on the ORDER list at all.
+    if (isTerminal(status)) return status;
+    const at = STATUS_ORDER.indexOf(status);
+    if (at > rank) {
+      rank = at;
+      best = status;
+    }
+  }
+  return best;
 }
 
 /**

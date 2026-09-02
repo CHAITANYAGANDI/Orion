@@ -321,6 +321,24 @@ class Pipeline:
                 # summarizer reads, so it has to be rebuilt from the corrected
                 # turns rather than left describing the old ones.
                 transcript.transcript = _joined(transcript.segments) or transcript.transcript
+            elif refinement.skipped_reason:
+                # Say why it declined, which nothing used to.
+                #
+                # Refinement is the one thing standing between a provider that
+                # merged two people into one turn and a transcript that shows
+                # it, and it has five separate ways of deciding not to act --
+                # no embedder installed, no audio, no turn long enough, fewer
+                # than two speakers with usable reference audio, voices too
+                # alike to separate. Only the last of those was ever logged, so
+                # the other four were indistinguishable from the refiner having
+                # run and found nothing wrong. They need completely different
+                # responses -- one is a deployment missing its model, one is a
+                # limit of the recording -- and the log said the same thing
+                # about all of them, which was nothing at all.
+                logger.info(
+                    "Speaker refinement made no change for %s: %s (examined %d turn(s)).",
+                    meeting_id, refinement.skipped_reason, refinement.examined,
+                )
 
         # A second opinion from an acoustic diarizer, where one is configured.
         # This does not adjust the provider's boundaries the way the refiner

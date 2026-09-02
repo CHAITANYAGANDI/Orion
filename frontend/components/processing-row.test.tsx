@@ -9,14 +9,27 @@ import { render, screen, act, waitFor, renderHook } from "@testing-library/react
  * percentage — in the same row, not in a separate section and not in a card of
  * its own, because a meeting has one place in this list and keeps it.
  *
- * <p>The status here is live from the socket, and that is not a detail: Home
- * does not poll its list, so without the subscription a row would freeze on
- * whatever the page load happened to see and go on claiming to be processing
- * long after it finished.
+ * <p>The status here comes from the socket <em>and</em> a poll, and that is not
+ * a detail. A stage event is a push with no replay: the row mounts, SockJS
+ * handshakes, STOMP subscribes, and everything the worker emitted in between
+ * went to nobody. On a short recording the job can be over by then, which left
+ * the bar stuck at 4% -- the ceiling of the QUEUED band -- on a meeting that
+ * finished perfectly well. The poll is the floor under that.
  */
 let emit: ((e: unknown) => void) | null = null;
 const deactivate = vi.fn();
 const subscribe = vi.fn();
+
+/** What the poll currently reports, or nothing at all. */
+let polled: MeetingStatus | undefined;
+const query = vi.fn();
+
+vi.mock("@/lib/api", () => ({
+  useGetMeetingQuery: (id: string, options: { skip?: boolean }) => {
+    query(id, options);
+    return { data: polled ? { status: polled } : undefined };
+  },
+}));
 
 vi.mock("@/lib/ws", () => ({
   subscribeMeetingStatus: (id: string, handlers: { onEvent: (e: unknown) => void }) => {
@@ -32,6 +45,7 @@ import type { MeetingStatus } from "@/lib/types";
 beforeEach(() => {
   vi.clearAllMocks();
   emit = null;
+  polled = undefined;
 });
 
 async function say(status: MeetingStatus, progress: number) {
@@ -126,5 +140,75 @@ describe("the live status behind it", () => {
     });
 
     expect(result.current.status).toBe("QUEUED");
+  });
+});
+
+describe("the poll under the socket", () => {
+  it("moves the row for a status the socket never delivered", () => {
+    // The bug, exactly: the subscription was established after the worker had
+    // already reported TRANSCRIBING, so nothing was ever pushed. Before the
+    // poll the row sat on QUEUED, whose band tops out at 4%.
+    polled = "TRANSCRIBING";
+    const { result } = renderHook(() => useLiveMeetingStatus("mtg_9", "QUEUED"));
+
+    expect(result.current.status).toBe("TRANSCRIBING");
+  });
+
+  it("keeps the socket's answer when the socket is ahead", async () => {
+    // The poll is the floor, not the primary. A push arriving within a second
+    // must not wait up to five for a request to agree with it.
+    polled = "QUEUED";
+    const { result } = renderHook(() => useLiveMeetingStatus("mtg_9", "QUEUED"));
+    await say("SUMMARIZING", 60);
+
+    expect(result.current.status).toBe("SUMMARIZING");
+    expect(result.current.reported).toBe(60);
+  });
+
+  it("a lagging poll cannot walk the row backwards", async () => {
+    // A request already in flight when a stage event lands answers with the
+    // older status a moment later. "Whichever spoke last" would rewind the row.
+    const { result, rerender } = renderHook(() => useLiveMeetingStatus("mtg_9", "QUEUED"));
+    await say("SUMMARIZING", 60);
+    polled = "TRANSCRIBING";
+    rerender();
+
+    expect(result.current.status).toBe("SUMMARIZING");
+  });
+
+  it("drops the socket's percentage when the poll is the one being shown", async () => {
+    // A progress number belongs to the status it was reported for. Carrying it
+    // over would clamp the bar into a band it no longer occupies.
+    const { result, rerender } = renderHook(() => useLiveMeetingStatus("mtg_9", "QUEUED"));
+    await say("TRANSCRIBING", 30);
+    polled = "EXTRACTING";
+    rerender();
+
+    expect(result.current.status).toBe("EXTRACTING");
+    expect(result.current.reported).toBeUndefined();
+  });
+
+  it("a terminal status ends the job however it arrives", () => {
+    polled = "READY";
+    const { result } = renderHook(() => useLiveMeetingStatus("mtg_9", "TRANSCRIBING"));
+
+    expect(result.current.status).toBe("READY");
+  });
+
+  it("a finished meeting neither subscribes nor polls", () => {
+    renderHook(() => useLiveMeetingStatus("mtg_9", "READY"));
+
+    expect(subscribe).not.toHaveBeenCalled();
+    expect(query).toHaveBeenCalledWith("mtg_9", expect.objectContaining({ skip: true }));
+  });
+
+  it("polls often enough to see a short stage", () => {
+    // A stage on a brief recording can last ten seconds. Polling slower than
+    // that reintroduces the bug by a slower route.
+    renderHook(() => useLiveMeetingStatus("mtg_9", "QUEUED"));
+
+    const [, options] = query.mock.calls[0];
+    expect(options.pollingInterval).toBeLessThanOrEqual(5_000);
+    expect(options.skip).toBe(false);
   });
 });
