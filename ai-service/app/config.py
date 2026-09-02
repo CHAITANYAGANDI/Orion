@@ -280,6 +280,17 @@ class Settings(BaseSettings):
     # taking transcription down with it.
     transcode_max_bytes: int = 2 * 1024 * 1024 * 1024
 
+    # Log the provider's own diarization, one line per utterance, as
+    # `index speaker start end` -- and no transcript text at all, which is what
+    # makes it safe to switch on in a deployment holding other people's
+    # meetings. Off by default because it is one line per utterance.
+    #
+    # It exists for one question: a transcript that comes out with a single
+    # speaker either arrived that way from the provider or lost the rest here,
+    # and those have opposite fixes. The summary line above it ("across N
+    # speaker(s)") answers that; this shows the sequence.
+    diarization_trace: bool = False
+
     # --- Speaker naming (reading names out of the dialogue) ---
     # Whether a finished meeting may take speakers' names from what was said in
     # it: "hi, how are you Michael?" makes the *other* speaker Michael. Costs one

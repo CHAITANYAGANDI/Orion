@@ -539,3 +539,60 @@ class TestTheAdapter:
         assert "Michael is NOT Speaker 1" in chat.system
         assert "SPOKEN TO" in chat.system
         assert "Speaker 1, Speaker 2" in chat.user
+
+
+class TestPrecedence:
+    """manual name  >  inferred name  >  the label diarization produced.
+
+    Stated as its own tier list because it is the rule a reader most needs to
+    trust: a name somebody typed must survive everything the pipeline does
+    afterwards, including a pass whose whole job is assigning names.
+    """
+
+    def test_a_manual_name_outranks_an_inference(self):
+        assert naming.display_name("Sarah", "attributed", "Michael") == "Sarah"
+
+    def test_an_inference_fills_a_placeholder(self):
+        assert naming.display_name("Speaker 2", "attributed", "Michael") == "Michael"
+
+    def test_the_label_stands_when_there_is_no_inference(self):
+        assert naming.display_name("Speaker 2", "attributed", None) == "Speaker 2"
+
+    def test_an_unattributed_turn_consults_nothing(self):
+        # Checked before the placeholder test: "Unknown speaker" looks like a
+        # placeholder and is not one. The provider declined to say whose this
+        # was, so there is nobody here to name.
+        assert naming.display_name("Unknown speaker", "unknown", "Michael") == "Unknown speaker"
+
+    @pytest.mark.parametrize("typed", ["Sarah", "Facilitator", "Interviewer 2",
+                                       "Speaker of the House", "The candidate"])
+    def test_names_a_person_chose_are_never_displaced(self, typed):
+        # Including the ones that look like labels. Somebody who renamed a
+        # speaker to "Interviewer 2" made a decision about their transcript.
+        assert naming.display_name(typed, "attributed", "Michael") == typed
+
+    @pytest.mark.parametrize("empty", [None, "", "   "])
+    def test_a_turn_with_no_label_at_all_is_left_alone(self, empty):
+        # Not a placeholder waiting to be filled -- an unattributed turn
+        # wearing a different spelling. `is_unresolved` refuses these for the
+        # same reason, and the two have to agree or the guard has a hole.
+        assert naming.display_name(empty, "attributed", "Michael") == empty
+
+    def test_apply_honours_the_same_order(self):
+        # The precedence is not advisory: `apply` routes through it, so a
+        # mapping that names a real person's label writes nothing.
+        segments = [
+            seg("Sarah", "Morning, how are you Michael?", 0.0, key="spk_1"),
+            seg("Speaker 2", "Good thanks.", 4.0, key="spk_2"),
+        ]
+        applied = naming.apply(segments, {"Sarah": "Michael", "Speaker 2": "Michael"})
+        assert applied == ["Michael"]
+        assert [s.speaker for s in segments] == ["Sarah", "Michael"]
+
+    def test_a_rematch_result_is_manual_for_this_purpose(self):
+        # An acoustic rematch writes a real name, so it lands in the top tier
+        # and inference cannot revise it. Voice evidence outranks text here by
+        # the same mechanism a typed name does.
+        segments = [seg("Sarah", "How are you Michael?", 0.0, key="spk_1")]
+        assert naming.apply(segments, {"Sarah": "Michael"}) == []
+        assert segments[0].speaker == "Sarah"

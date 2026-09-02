@@ -532,6 +532,35 @@ def language_choice(requested: str | None, configured: str | None) -> str | None
     return (requested or "").strip() or (configured or "").strip() or None
 
 
+def utterance_speakers(payload: dict[str, Any]) -> list[str]:
+    """The provider's diarization, before anything here has touched it.
+
+    ``index speaker start end`` per utterance and **not one word of transcript**.
+    That restriction is the reason this can be turned on in a deployment holding
+    other people's meetings, and the reason it is separate from ``_trace``
+    below, which prints words and is developer-only by construction.
+
+    It answers one question that nothing else can: when a transcript comes out
+    with a single speaker on it, did the provider send one speaker or did
+    Reverie lose the rest? Those have opposite fixes and identical symptoms, and
+    reasoning about the parser distinguishes them not at all.
+    """
+    utterances = payload.get("utterances")
+    if not isinstance(utterances, list):
+        return []
+    lines = []
+    for index, utterance in enumerate(utterances):
+        if not isinstance(utterance, dict):
+            continue
+        lines.append("%d %s %s %s" % (
+            index,
+            utterance.get("speaker"),
+            _seconds(utterance.get("start")),
+            _seconds(utterance.get("end")),
+        ))
+    return lines
+
+
 def parse_response(payload: dict[str, Any]) -> TranscriptResponse:
     """Map AssemblyAI's response onto the shape the rest of the pipeline expects.
 
@@ -557,8 +586,25 @@ def parse_response(payload: dict[str, Any]) -> TranscriptResponse:
         "Provider labels %s mapped to canonical speakers in order of first appearance.",
         len(segments), speakers.count, language, sorted(speakers.mapping()),
     )
+    _speaker_trace(payload)
     _trace(segments)
     return TranscriptResponse(transcript=transcript, language=language, segments=segments)
+
+
+def _speaker_trace(payload: dict[str, Any]) -> None:
+    """The provider's diarization sequence, when a deployment has asked for it.
+
+    Separate switch from `_trace` because it is a different promise: that one
+    prints words and is gated on DEBUG so it cannot be left on by accident, and
+    this one prints no text at all and is therefore safe to turn on while
+    chasing a real recording.
+    """
+    from app.config import get_settings
+
+    if not get_settings().diarization_trace:
+        return
+    for line in utterance_speakers(payload):
+        logger.info("diarization utterance %s", line)
 
 
 def _trace(segments: list[Segment]) -> None:

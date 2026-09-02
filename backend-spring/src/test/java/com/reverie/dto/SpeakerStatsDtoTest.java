@@ -152,6 +152,83 @@ class SpeakerStatsDtoTest {
                 .containsOnlyNulls();
     }
 
+    /**
+     * Two diarized voices stay two rows once the pipeline has named them.
+     *
+     * <p>The regression this guards: a four-minute two-person recording
+     * reported as <b>Speaker 1 (100%)</b>. Automatic transcript naming writes
+     * the display name and nothing else, so a named transcript and an unnamed
+     * one describe the same two people holding the floor for the same lengths
+     * of time — only the labels on the rows differ.
+     */
+    @Test
+    void naming_two_speakers_leaves_two_rows_with_the_same_share_each() {
+        var unnamed = SpeakerStatsDto.from(List.of(
+                keyed("Speaker 1", "spk_1", 0.0, 30.0),
+                keyed("Speaker 2", "spk_2", 30.0, 40.0),
+                keyed("Speaker 1", "spk_1", 40.0, 50.0),
+                keyed("Speaker 2", "spk_2", 50.0, 60.0)));
+
+        var named = SpeakerStatsDto.from(List.of(
+                keyed("Charles", "spk_1", 0.0, 30.0),
+                keyed("Michael", "spk_2", 30.0, 40.0),
+                keyed("Charles", "spk_1", 40.0, 50.0),
+                keyed("Michael", "spk_2", 50.0, 60.0)));
+
+        assertThat(named).hasSize(2);
+        // Never one row, and never 100% to anybody, when two voices were heard.
+        assertThat(named).extracting(SpeakerStatsDto::percentage)
+                .doesNotContain(100.0);
+        // Identical arithmetic, identical canonical keys; only the names moved.
+        assertThat(named).extracting(SpeakerStatsDto::speakingSeconds)
+                .isEqualTo(unnamed.stream().map(SpeakerStatsDto::speakingSeconds).toList());
+        assertThat(named).extracting(SpeakerStatsDto::speakerKey)
+                .isEqualTo(unnamed.stream().map(SpeakerStatsDto::speakerKey).toList());
+        assertThat(named).extracting(SpeakerStatsDto::speaker)
+                .containsExactly("Charles", "Michael");
+    }
+
+    /**
+     * Talk time is owned by the canonical key, so a rename cannot move it.
+     *
+     * <p>Stated separately because the totals are what a reader checks against
+     * the transcript in front of them: if naming a speaker changed how long
+     * they were speaking for, one of the two would be lying.
+     */
+    @Test
+    void a_rename_moves_no_seconds_between_speakers() {
+        var named = SpeakerStatsDto.from(List.of(
+                keyed("Charles", "spk_1", 0.0, 30.0),
+                keyed("Michael", "spk_2", 30.0, 40.0)));
+
+        assertThat(named).extracting(SpeakerStatsDto::speakerKey)
+                .containsExactly("spk_1", "spk_2");
+        assertThat(named).extracting(SpeakerStatsDto::speakingSeconds)
+                .containsExactly(30.0, 10.0);
+        assertThat(named).extracting(SpeakerStatsDto::percentage)
+                .containsExactly(75.0, 25.0);
+    }
+
+    /**
+     * The one case where a single row IS the right answer.
+     *
+     * <p>A person renaming two labels to the same name is saying "these are
+     * one human", and two rows both reading "Sarah" would look like a bug. This
+     * is why the rows are grouped by the displayed name and not by the key —
+     * and it is reachable only by hand. Automatic naming refuses to put one
+     * name on two voices, which is asserted on the other side of the wire in
+     * {@code ai-service/tests/test_naming_is_an_overlay.py}.
+     */
+    @Test
+    void a_deliberate_manual_merge_still_produces_one_row() {
+        var stats = SpeakerStatsDto.from(List.of(
+                keyed("Sarah", "spk_1", 0.0, 30.0),
+                keyed("Sarah", "spk_2", 30.0, 40.0)));
+
+        assertThat(stats).hasSize(1);
+        assertThat(stats.get(0).percentage()).isEqualTo(100.0);
+    }
+
     private static TranscriptSegment keyed(String speaker, String key, double start, double end) {
         var segment = segment(speaker, start, end);
         segment.setId("seg_" + key + start);

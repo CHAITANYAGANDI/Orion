@@ -126,6 +126,145 @@ That collision is what a mention looks like from the inside, and unlike the
 nickname case the two candidates are not two descriptions of one person — they
 are two people, one of whom is about to be given the other's name.
 
+## 3a. Precedence: a person's answer always wins
+
+One rule, in [`naming.display_name`](../ai-service/app/naming.py), read top to
+bottom:
+
+```
+display =  a name a person gave this speaker      (a rename, or a rematch)
+        ?? a name the conversation gave them      (this feature)
+        ?? the label diarization produced         ("Speaker 2")
+```
+
+Inference occupies the **middle** tier and can only ever fill an empty one. A
+name somebody typed and a name an acoustic rematch resolved are both "not a
+placeholder", so both win the first branch and nothing below is consulted. That
+is what makes *manual beats inferred* true by construction rather than by
+ordering the callers correctly — there is no path that reaches the second line
+while the first has an answer.
+
+It is a function and not a guard on purpose. It used to be a negated condition
+inside `apply` — *don't write unless the label is unresolved* — which is the
+same rule read backwards, and a rule that can only be read backwards is one the
+next caller re-implements slightly differently.
+
+`status == "unknown"` short-circuits above both, and is checked first because
+*"Unknown speaker"* looks like a placeholder and is not one: the provider
+declined to say whose the turn was, so naming it would invent the single fact
+the provider refused to supply.
+
+## 3b. What the realtime provider actually sends
+
+Checked against AssemblyAI's published streaming spec rather than assumed,
+because "live text stopped identifying speakers" has two causes with one
+symptom, and only one of them is Reverie's.
+
+**The realtime provider does supply speaker ids.** `speaker_labels=true` on
+`wss://streaming.assemblyai.com/v3/ws` puts a `speaker_label` on **every** Turn
+event, partial and final alike. Word-level `speaker` is **only present on final
+words** (`word_is_final: true`). The default model when `speech_model` is
+omitted is `universal-3-5-pro`, which is why this app deliberately does not pin
+one.
+
+```jsonc
+// realtime, before Reverie transforms it
+{ "type": "Turn", "turn_order": 0, "turn_is_formatted": true, "end_of_turn": true,
+  "transcript": "Hello world.", "speaker_label": "A",
+  "words": [ { "text": "Hello", "start": 0, "end": 500, "speaker": "A" } ] }
+
+{ "type": "SpeakerRevision",
+  "revisions": [ { "turn_order": 3, "speaker_label": "B",
+                   "words": [ { "text": "Hello", "speaker": "B", "start": 1200 } ] } ] }
+```
+
+```jsonc
+// offline, before Reverie transforms it — a different API and a different shape
+{ "utterances": [
+    { "speaker": "A", "text": "Hi Michael, how are you?", "start": 0, "end": 2100,
+      "confidence": 0.98,
+      "words": [ { "text": "Hi", "start": 0, "end": 300, "speaker": "A" } ] } ] }
+```
+
+The partial case is the one that matters: a partial carries `speaker_label` but
+its words carry no `speaker`, so `linesFor` takes the turn's own label as the
+fallback for every word. That is why a partial is attributed at all, and it is
+worth knowing the two do not degrade together — **offline diarization working is
+not evidence that realtime diarization is working**, and vice versa. They are
+different endpoints with different models and different message shapes.
+
+To settle it in a live deployment rather than by reading this, turn on the raw
+trace in the recording tab's console:
+
+```js
+localStorage.setItem("reverie:live-trace", "1")   // then record; off with removeItem
+```
+
+It prints every `Begin`, `Turn` and `SpeakerRevision` exactly as the provider
+sent it. A `Turn` with no `speaker_label` is the provider declining; a `Turn`
+carrying one that renders as *Unknown speaker* is Reverie's bug.
+
+## 3c. Settling it on a real recording
+
+Two traces, one on each path, because **offline diarization working is not
+evidence that realtime diarization is working** and vice versa — different
+endpoints, different models, different message shapes.
+
+Record 1–2 minutes with two clearly different voices alternating several times.
+
+**Live** — in the recording tab's console, before pressing record:
+
+```js
+localStorage.setItem("reverie:live-trace", "1")   // speaker metadata only, no text
+localStorage.setItem("reverie:live-trace", "full") // whole message, if a shape is unclear
+localStorage.removeItem("reverie:live-trace")      // off
+```
+
+```
+[reverie:live] Turn turn_order=0 end_of_turn=true formatted=true speaker_label="A" words=["A" x11]
+[reverie:live] Turn turn_order=1 end_of_turn=true formatted=true speaker_label="B" words=["B" x7]
+[reverie:live] SpeakerRevision turn=0 -> "B" words=["B" x11]
+```
+
+**Offline** — set `DIARIZATION_TRACE=true` on the ai-service and reprocess:
+
+```
+diarization utterance 0 A 0.0 4.12
+diarization utterance 1 B 4.31 9.04
+```
+
+Neither prints a word of transcript. The existing INFO line already gives the
+summary without any flag at all:
+
+```
+AssemblyAI returned 87 segment(s) across 1 speaker(s) ... Provider labels ['A']
+```
+
+### Reading the result
+
+| | realtime provider | rendered live | verdict |
+|---|---|---|---|
+| **A** | `A,B,A,B` | one speaker | **Reverie live bug** |
+| **B** | `A,A,A,A` | one speaker | provider or capture |
+
+| | offline provider | processed result | verdict |
+|---|---|---|---|
+| **C** | `A,B,A,B` | one speaker | **Reverie pipeline bug** |
+| **D** | `A,A,A,A` | one speaker | provider or capture |
+
+A and C are the ones that would mean the code is still wrong despite everything
+in §8, and neither has been ruled out by observation — only by construction.
+
+**SpeakerRevision is applied, not logged.** `applySpeakerRevision` rewrites the
+buffered turn's `speaker`, `speakerKey`, `speakerRaw` and `speakerStatus` in
+place, including on a turn that has already finalised and is on screen. Proven in
+`live-speaker-ownership.test.ts`: an A→B revision relabels the settled line and
+reuses the canonical identity already assigned to B rather than inventing a
+third number; `PENDING`→`A` resolves an unattributed line; a revision whose
+words disagree splits the turn into `A, B, A`; a revision to `PENDING` after a
+real answer is ignored; and a revision carrying a turn order from a previous
+session is dropped rather than relabelling the wrong line.
+
 ## 4. What it will never do
 
 - **Never overwrite a name a person typed.** Only labels Reverie itself
@@ -208,3 +347,83 @@ the meeting they were said in, and keeps nothing.
   is a real gap and is stated here rather than discovered: the honest version
   would carry the provenance through to the UI, and the reason it does not yet
   is that no column records it.
+
+## 8. It is an overlay, and here is the proof
+
+A four-minute two-person recording was reported rendering as **Speaker 1
+(100%)** shortly after this feature shipped, and the natural reading was that
+naming had merged the speakers. It had not, and the reasoning is worth keeping
+because the same suspicion will arise again.
+
+**Three identities travel with every segment and only one of them is mutable:**
+
+| Field | Example | Written by |
+|---|---|---|
+| `speaker_raw` | `"A"` | the provider, once. Never displayed, never rewritten. |
+| `speaker_key` | `"spk_1"` | the canonical mapper, once. Owns colour, talk-time and voiceprints. |
+| `speaker` | `"Speaker 1"` | a rename, a rematch, or this feature. Display only. |
+
+`naming.apply` assigns `speaker` and touches nothing else. It cannot merge two
+speakers because a name claimed for two of them is refused outright (§3), and it
+cannot renumber anybody because it never writes `speaker_key`.
+
+The chain was checked end to end and every link preserves ownership:
+
+```
+AssemblyAI utterances   A, B, A, B
+  parse_response        spk_1, spk_2, spk_1, spk_2   raw A, B, A, B
+  naming.apply          Charles, Michael, Charles, Michael   raw + keys UNCHANGED
+  Spring replaceSegments  persists speaker, speaker_key, speaker_raw separately
+  groupIntoTurns        merges on speakerKey, never on the displayed name
+  SpeakerStatsDto       two keys, two rows, 75% / 25%
+```
+
+`tests/test_naming_is_an_overlay.py` runs exactly that, from a realistic
+provider payload through the real pipeline, and asserts the raw tuple survives
+naming, model failure, malformed claims, a collision and a pre-existing manual
+name.
+
+**So a transcript that shows one speaker has one speaker in the provider's
+response.** The next place to look is the recording, not the code — and the line
+that settles it is already logged at INFO by the ai-service:
+
+```
+AssemblyAI returned 87 segment(s) across 1 speaker(s), language=en.
+Provider labels ['A'] mapped to canonical speakers in order of first appearance.
+```
+
+`across 1 speaker(s)` with `['A']` is the provider clustering the whole room as
+one voice. Reverie has nothing to recover from that: `app/rediarize.py` can move
+words *between speakers the provider already found*, and deliberately cannot
+invent a second one, so with a single label there is nothing for it to do.
+
+### An untested hypothesis, labelled as one
+
+Everything above this line is proven. What follows is **not**, and is recorded
+as a lead rather than as an answer: no failing recording has yet been traced end
+to end, so the sentence "the provider returned one speaker" is a deduction from
+the code being correct, not an observation of the provider's output.
+
+The two are not the same claim. Proven: `A,B,A,B` in gives `A,B,A,B` out. Not
+proven: that the failing recording was ever `A,A,A,A`. Until a real reproduction
+shows the provider's own labels, the honest position is that the collapse
+happens *before* `parse_response` and the reason is unknown.
+
+See §3c for what a reproduction has to capture to settle it.
+
+### Why a hybrid call *might* collapse — a lead, not a conclusion
+
+`use-recorder.ts` captures the **microphone only** — "the microphone is the
+whole recording" — with echo cancellation off so that people in the room and
+coming out of the laptop are both audible.
+
+That is right for a room and is the hard case for diarization. Everyone dialling
+in is reproduced by *one loudspeaker* and re-recorded by *one microphone*, so
+the acoustic differences a speaker embedding relies on are flattened into the
+same channel, the same room and the same speaker cone. Clustering them as one
+voice is a defensible answer to the audio that arrived.
+
+This is not a claim that it always happens, and it is not a defect in the
+clustering. It is the reason a transcript can be plainly multi-party to a reader
+and single-speaker to a model, and the reason **Rematch speakers** and manual
+renaming both still exist.

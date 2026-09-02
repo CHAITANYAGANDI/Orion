@@ -90,6 +90,93 @@ export interface UseLiveTranscript {
 const WS_URL = "wss://streaming.assemblyai.com/v3/ws";
 
 /**
+ * The provider's own messages, before this file has touched them.
+ *
+ * Off unless somebody explicitly turns it on:
+ *
+ *     localStorage.setItem("reverie:live-trace", "1")   // then re-record
+ *     localStorage.removeItem("reverie:live-trace")     // off again
+ *
+ * It exists because "live text has stopped identifying speakers" has two
+ * completely different causes with the same symptom — the provider is not
+ * sending `speaker_label`, or Reverie is dropping it — and no amount of
+ * reasoning about this file distinguishes them. One line of untransformed JSON
+ * does, immediately.
+ *
+ * Logged rather than reported anywhere: it contains what was said, so it goes
+ * to the console of the person recording and nowhere else. Never on by default,
+ * for the same reason.
+ */
+const TRACE_KEY = "reverie:live-trace";
+
+function traceRaw(message: Record<string, unknown>): void {
+  let mode: string | null;
+  try {
+    mode = window.localStorage.getItem(TRACE_KEY);
+  } catch {
+    return; // storage blocked; tracing is a developer convenience, not a feature
+  }
+  if (mode !== "1" && mode !== "full") return;
+
+  const type = message.type;
+  if (type !== "Turn" && type !== "SpeakerRevision" && type !== "Begin") return;
+
+  // "full" prints the message as it arrived, for a shape that is not
+  // understood yet. "1" prints speaker metadata and no transcript text at all,
+  // which is what makes it safe to run against a real meeting and paste
+  // somewhere — the question is always who the provider said was talking, never
+  // what they said.
+  // eslint-disable-next-line no-console
+  console.debug("[reverie:live]", mode === "full" ? JSON.stringify(message) : speakersOnly(message));
+}
+
+/** `type turn_order end_of_turn speaker_label [word speakers]`, and nothing else. */
+function speakersOnly(message: Record<string, unknown>): string {
+  const type = String(message.type);
+  if (type === "Begin") {
+    // Echoes the session configuration back, which is how you confirm
+    // `speaker_labels` was actually accepted rather than silently ignored.
+    const { id, ...rest } = message as Record<string, unknown>;
+    return `Begin ${JSON.stringify(rest)}`;
+  }
+  if (type === "SpeakerRevision") {
+    const revisions = (message.revisions ?? message.turns ?? []) as Record<string, unknown>[];
+    return `SpeakerRevision ${revisions
+      .map((r) => `turn=${r.turn_order} -> ${r.speaker_label}${wordSpeakers(r.words)}`)
+      .join("; ")}`;
+  }
+  return [
+    "Turn",
+    `turn_order=${message.turn_order}`,
+    `end_of_turn=${message.end_of_turn === true}`,
+    `formatted=${message.turn_is_formatted === true}`,
+    `speaker_label=${JSON.stringify(message.speaker_label ?? null)}`,
+    wordSpeakers(message.words).trim(),
+  ].join(" ");
+}
+
+/**
+ * The per-word labels, run-length encoded.
+ *
+ * Compressed because a forty-word turn spoken by one person is forty identical
+ * letters, and `A x40` says the same thing while leaving an interjection —
+ * `A x12, B x1, A x9` — visible at a glance, which is the only reason to print
+ * them. Absent on partials: the provider attaches word-level speakers only to
+ * final words, so an empty list there is expected and not a fault.
+ */
+function wordSpeakers(words: unknown): string {
+  if (!Array.isArray(words) || words.length === 0) return "";
+  const runs: { token: unknown; n: number }[] = [];
+  for (const word of words as Record<string, unknown>[]) {
+    const token = word?.speaker ?? null;
+    const last = runs[runs.length - 1];
+    if (last && last.token === token) last.n += 1;
+    else runs.push({ token, n: 1 });
+  }
+  return ` words=[${runs.map((r) => `${JSON.stringify(r.token)} x${r.n}`).join(", ")}]`;
+}
+
+/**
  * Query parameters, verified against the live service.
  *
  * `speaker_labels` is the one that matters and the one the published docs
@@ -225,6 +312,7 @@ export function useLiveTranscript({
         } catch {
           return;
         }
+        traceRaw(message);
         const session = sessionRef.current;
         const speakers = speakersRef.current;
         if (message.type === "Turn") {

@@ -287,16 +287,62 @@ def resolve(claims, segments) -> dict[str, str]:
 def apply(segments, names: dict[str, str]) -> list[str]:
     """Write the names onto the turns. Returns the names actually applied.
 
-    Matched on the label as it stands, and re-guarded rather than trusted: this
-    is the line between "a bad reading of the dialogue" and "overwrote a name a
-    person typed", and it costs one comparison to make the second impossible.
+    <h2>Resolved to canonical keys first, then written by key</h2>
+
+    ``names`` arrives keyed by the label the model was shown, because a label is
+    the only identity visible in a transcript. It is **applied** by
+    ``speaker_key``, which is the identity that actually owns an utterance —
+    the same two-step, for the same reason, as
+    ``MeetingService.renameSpeakers``.
+
+    The difference matters even though the two are one-to-one today. Writing by
+    label means the string on screen is the lookup key, and a lookup key that
+    two speakers can share is one refactor away from merging them. Writing by
+    key means a rename is arithmetic on ownership that was decided by the
+    provider, and no display name can move an utterance between two people.
+    Both passes are over the original labels, so a segment renamed early cannot
+    change what a later one matches on.
+
+    Re-guarded rather than trusted: ``_nameable`` runs again here. This is the
+    line between "a bad reading of the dialogue" and "overwrote a name a person
+    typed", and it costs one comparison to make the second impossible.
     """
     if not names:
         return []
+
+    # Pass one: which canonical speakers the named labels belong to.
+    #
+    # A label that turns out to cover more than one key is dropped rather than
+    # applied to both. Naming both is the merge this whole file exists to
+    # prevent — two canonical speakers wearing one name — and naming whichever
+    # came first is answering a question the evidence did not settle. Unreachable
+    # from `CanonicalSpeakers`, which numbers speakers apart, and the refusal
+    # costs nothing where it never happens.
+    keys_for: dict[str, set[str]] = {}
+    for segment in segments:
+        if not _nameable(segment) or not segment.speaker_key:
+            continue
+        if names.get(segment.speaker) is not None:
+            keys_for.setdefault(segment.speaker, set()).add(segment.speaker_key)
+
+    by_key: dict[str, str] = {}
+    for label, keys in keys_for.items():
+        if len(keys) != 1:
+            logger.info("Speaker naming: a label covering %d canonical speakers was left alone.",
+                        len(keys))
+            continue
+        by_key[next(iter(keys))] = names[label]
+
+    # Pass two: write. The key decides where there is one; the label is the
+    # fallback only for a transcript recorded before canonical keys existed,
+    # where it is the only identity there is.
     applied: list[str] = []
     for segment in segments:
-        name = names.get(segment.speaker)
-        if name is None or not _nameable(segment):
+        if not _nameable(segment):
+            continue
+        name = by_key.get(segment.speaker_key) if segment.speaker_key \
+            else names.get(segment.speaker)
+        if name is None:
             continue
         segment.speaker = name
         if name not in applied:
@@ -472,8 +518,62 @@ def _speaking(segments) -> list:
     return [s for s in segments if getattr(s, "text", "") and s.text.strip()]
 
 
+def display_name(current: str | None, status: str, inferred: str | None) -> str | None:
+    """The precedence, stated once, in the order it is meant to be read.
+
+    ::
+
+        display =  a name a person gave this speaker      (manual, or a rematch)
+                ?? a name the conversation gave them      (this module)
+                ?? the label diarization produced         ("Speaker 2")
+
+    Inference occupies the **middle** tier and can only ever fill an empty one.
+    A name somebody typed, and a name an acoustic rematch resolved, are both
+    "not a placeholder" — so both fall through the first branch and nothing
+    below them is consulted. That is what makes "manual beats inferred" true by
+    construction rather than by ordering the callers correctly.
+
+    <h2>Why it is a function rather than a guard</h2>
+
+    It was a negated condition inside ``apply`` — *don't write unless the label
+    is unresolved* — which is the same rule read backwards, and a rule that can
+    only be read backwards is one the next caller re-implements slightly
+    differently. Stated forwards it can be called, tested and quoted.
+
+    <h2>Unattributed turns</h2>
+
+    ``status == "unknown"`` returns the label untouched and never consults
+    ``inferred``. The provider declined to say whose the turn was, so the audio
+    under it may be anybody's; naming it would be inventing the one fact the
+    provider refused to supply. It is checked before the placeholder test on
+    purpose — "Unknown speaker" *looks* like a placeholder and is not one.
+    """
+    if status == "unknown":
+        return current
+    if not current:
+        # No label at all. `is_unresolved` deliberately calls this *not*
+        # unresolved for the same reason: a turn with no speaker is an
+        # unattributed one wearing a different spelling, and the audio under it
+        # may be anybody's. Filling it in would be the guess, not the fix.
+        return current
+    if not is_unresolved(current):
+        return current
+    return inferred if inferred else current
+
+
 def _nameable(segment) -> bool:
-    """Whether this turn's speaker is still a placeholder that may be named."""
-    if getattr(segment, "speaker_status", "attributed") == "unknown":
-        return False
-    return is_unresolved(getattr(segment, "speaker", None))
+    """Whether inference is allowed to fill this turn's display name.
+
+    The middle tier of :func:`display_name`, as a predicate: true exactly when
+    the first branch would not have won and the third is all that is left.
+    """
+    return display_name(
+        getattr(segment, "speaker", None),
+        getattr(segment, "speaker_status", "attributed"),
+        _PROBE,
+    ) is _PROBE
+
+
+#: A sentinel that cannot collide with a real name, so `_nameable` asks
+#: `display_name` the question rather than restating its rules.
+_PROBE = "\x00inferred\x00"

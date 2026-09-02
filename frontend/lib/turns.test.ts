@@ -90,3 +90,52 @@ describe("grouping by speakerKey", () => {
     expect(turns).toHaveLength(2);
   });
 });
+
+/**
+ * The last layer of the A/B/A/B round trip.
+ *
+ * The server half is `SpeakerOwnershipRoundTripTest`: provider payload ->
+ * callback JSON -> rows -> GET transcript. This is what the browser then does
+ * with the response, and it is the last place two speakers could still become
+ * one — by grouping on the name instead of the key.
+ *
+ * The segments below are shaped exactly as `SegmentDto` serialises them, down
+ * to `speakerRaw` being absent: the client is never sent the provider's cluster
+ * id, so `speakerKey` has to be sufficient on its own.
+ */
+describe("A/B/A/B survives rendering", () => {
+  /** What `GET /meetings/:id/transcript` returns for the round-trip fixture. */
+  const fromApi = [
+    { id: "s1", start: 0.0, end: 3.0, speaker: "Charles", text: "Hi Michael, how are you?", speakerKey: "spk_1", speakerStatus: "attributed" },
+    { id: "s2", start: 3.2, end: 6.0, speaker: "Michael", text: "I'm good, Charles.", speakerKey: "spk_2", speakerStatus: "attributed" },
+    { id: "s3", start: 6.2, end: 10.0, speaker: "Charles", text: "Did you finish the deployment?", speakerKey: "spk_1", speakerStatus: "attributed" },
+    { id: "s4", start: 10.2, end: 11.0, speaker: "Michael", text: "Yes.", speakerKey: "spk_2", speakerStatus: "attributed" },
+  ] as unknown as Parameters<typeof groupIntoTurns>[0];
+
+  it("renders four alternating turns, never one", () => {
+    const turns = groupIntoTurns(fromApi);
+
+    expect(turns).toHaveLength(4);
+    expect(turns.map((t) => t.speakerKey)).toEqual(["spk_1", "spk_2", "spk_1", "spk_2"]);
+    expect(turns.map((t) => t.speaker)).toEqual(["Charles", "Michael", "Charles", "Michael"]);
+  });
+
+  it("groups on the key, so inferred names cannot merge two speakers", () => {
+    // The reported failure, forced: a naming pass that put one name on both
+    // voices. Refused upstream, and refused again here — different keys never
+    // merge however the names read.
+    const collided = fromApi.map((s) => ({ ...s, speaker: "Michael" })) as typeof fromApi;
+
+    expect(groupIntoTurns(collided)).toHaveLength(4);
+    expect(groupIntoTurns(collided).map((t) => t.speakerKey))
+      .toEqual(["spk_1", "spk_2", "spk_1", "spk_2"]);
+  });
+
+  it("still merges consecutive utterances by one speaker", () => {
+    // The other direction: grouping has to keep doing its job. One person
+    // talking across three segments is one paragraph, not three rows.
+    const runOn = [fromApi[0], { ...fromApi[0], id: "s1b" }, fromApi[1]] as typeof fromApi;
+
+    expect(groupIntoTurns(runOn).map((t) => t.segments.length)).toEqual([2, 1]);
+  });
+});
