@@ -660,9 +660,16 @@ class TestDecliningIsSaidOutLoud:
             await pipeline.process("mtg_refine", b"audio", "a.wav",
                                    audio_loader=_loader)
 
-        said = "\n".join(r.getMessage() for r in caplog.records)
-        assert "Speaker refinement made no change" in said
-        assert "embedder not installed" in said
+        lines = [r.getMessage() for r in caplog.records
+                 if "Speaker refinement" in r.getMessage()]
+        # Exactly one line, whichever branch declined.
+        assert len(lines) == 1
+        assert "reason=embedder not installed" in lines[0]
+        assert "examinedTurns=" in lines[0]
+        # The provider had two voices; refinement never got far enough to
+        # build a reference for either. That pair of numbers is the diagnosis.
+        assert "usableReferences=0" in lines[0]
+        assert "providerSpeakers=2" in lines[0]
 
     @pytest.mark.asyncio
     async def test_a_recording_with_nothing_to_examine_says_so(self, caplog):
@@ -686,9 +693,66 @@ class TestDecliningIsSaidOutLoud:
         with caplog.at_level(logging.INFO, logger="ai-service.pipeline"):
             await pipeline.process("mtg_short", b"audio", "a.wav", audio_loader=_loader)
 
-        said = "\n".join(r.getMessage() for r in caplog.records)
-        assert "no turn long enough to hide another" in said
+        lines = [r.getMessage() for r in caplog.records
+                 if "Speaker refinement" in r.getMessage()]
+        assert len(lines) == 1
+        assert "reason=no turn long enough to hide another" in lines[0]
+        assert "providerSpeakers=2" in lines[0]
 
 
 async def _loader():
     return b"audio-bytes"
+
+
+class TestTheDiagnosticIsSafeToShip:
+    """What the line may contain, asserted rather than intended.
+
+    It is emitted at INFO on a deployment holding other people's meetings, so
+    the useful check is not that it says the right things — it is that it
+    cannot say the wrong ones. `Report` carries a reason and three integers and
+    has nowhere to put a name, a sentence or a vector.
+    """
+
+    def test_the_line_is_counts_and_a_reason_and_nothing_else(self):
+        from app.rediarize import Report
+
+        report = Report(examined=3, split=0, references=1, provider_speakers=3,
+                        skipped_reason="fewer than two speakers with usable reference audio")
+
+        assert report.as_log_fields() == (
+            "reason=fewer than two speakers with usable reference audio "
+            "examinedTurns=3 usableReferences=1 providerSpeakers=3"
+        )
+
+    def test_every_field_is_a_count_or_the_reason(self):
+        # Guards the shape against a future field. Anything added to Report that
+        # is not an int or the reason string has to be considered for this line
+        # before it can appear in a log on somebody's meeting.
+        import dataclasses
+
+        from app.rediarize import Report
+
+        for field in dataclasses.fields(Report):
+            if field.name == "skipped_reason":
+                continue
+            assert field.type in ("int", int), (
+                f"{field.name} is not a count; decide whether it may be logged"
+            )
+
+    @pytest.mark.parametrize("reason", [
+        "nothing to examine",
+        "embedder not installed",
+        "no turn long enough to hide another",
+        "no audio available",
+        "fewer than two speakers with usable reference audio",
+        "speakers too alike to judge (cos=0.61)",
+    ])
+    def test_every_reason_is_a_fixed_phrase(self, reason):
+        # None of the six is built from anything the meeting said. The only
+        # interpolated value anywhere is a cosine, which is a scalar derived
+        # from two references and not a template.
+        from app.rediarize import Report
+
+        line = Report(skipped_reason=reason).as_log_fields()
+        assert line.startswith(f"reason={reason} ")
+        assert "\n" not in line

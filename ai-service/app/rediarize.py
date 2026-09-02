@@ -170,15 +170,46 @@ class Limits:
 
 @dataclass
 class Report:
-    """What happened, for the log line and the tests."""
+    """What happened, for the log line and the tests.
+
+    Counts and one reason string, and deliberately nothing else. No speaker
+    names, no turn text, no timings, no vectors and no similarity matrix — this
+    object is what gets logged on a deployment holding other people's meetings,
+    so what it cannot carry it cannot leak.
+    """
 
     examined: int = 0
     split: int = 0
     skipped_reason: str | None = None
 
+    #: Speakers with enough short, trustworthy audio to say what they sound
+    #: like. Two is the minimum for any split to be judged, so this is the
+    #: number that distinguishes "declined for want of evidence" from "looked
+    #: and found nothing wrong".
+    references: int = 0
+
+    #: Distinct attributed speakers the provider reported. Set on every path,
+    #: including the ones that return before any audio is decoded, because it is
+    #: the one figure that says whether the provider had already collapsed the
+    #: meeting before refinement was ever asked.
+    provider_speakers: int = 0
+
     @property
     def changed(self) -> bool:
         return self.split > 0
+
+    def as_log_fields(self) -> str:
+        """The diagnostic, as one line of `key=value` pairs.
+
+        Assembled here rather than at the call site so there is one definition
+        of what this component is allowed to say about a meeting.
+        """
+        return (
+            f"reason={self.skipped_reason} "
+            f"examinedTurns={self.examined} "
+            f"usableReferences={self.references} "
+            f"providerSpeakers={self.provider_speakers}"
+        )
 
 
 def _duration(seg: Segment) -> float:
@@ -262,6 +293,14 @@ class SpeakerRefiner:
         only ever going to improve it.
         """
         report = Report()
+        # Counted first, so every early return below still carries it. A
+        # meeting the provider had already collapsed to one voice and a meeting
+        # refinement simply had nothing to do on are different problems, and
+        # without this figure they produce the same log line.
+        report.provider_speakers = len({
+            seg.speaker for seg in segments
+            if seg.speaker and seg.speaker_status == "attributed"
+        })
         if not segments or audio_loader is None:
             report.skipped_reason = "nothing to examine"
             return segments, report
@@ -311,6 +350,7 @@ class SpeakerRefiner:
         del audio
 
         references = self._references(segments, embed)
+        report.references = len(references)
         if len(references) < 2:
             report.skipped_reason = "fewer than two speakers with usable reference audio"
             return segments, report
@@ -324,8 +364,15 @@ class SpeakerRefiner:
             # Not a failure. The honest reading is that this model cannot
             # separate these voices in this recording, and a split made on that
             # basis would be a guess with a confident face.
+            # No log line here. This was the one decline that said anything,
+            # and it now says it in the same place as the other four -- the
+            # caller emits exactly one line covering all of them, so a reader
+            # greps for one string rather than knowing which branch fired.
+            #
+            # The cosine is kept: it is a scalar derived from two references,
+            # not a template, and it is the only number that distinguishes "this
+            # model cannot separate these voices" from a threshold being wrong.
             report.skipped_reason = f"speakers too alike to judge (cos={worst:.2f})"
-            logger.info("Refinement declined: %s", report.skipped_reason)
             return segments, report
 
         identities = {

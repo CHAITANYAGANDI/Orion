@@ -335,9 +335,21 @@ class Pipeline:
                 # responses -- one is a deployment missing its model, one is a
                 # limit of the recording -- and the log said the same thing
                 # about all of them, which was nothing at all.
+                #
+                # One line, four counted facts, and no content. `as_log_fields`
+                # owns what may be said: a reason, three integers and the
+                # meeting id. No speaker names, no turn text, no timings, no
+                # vectors -- so this is safe on a deployment holding other
+                # people's meetings, which is the only deployment where the
+                # question ever gets asked.
+                #
+                # It reads next to the provider's own summary a few lines
+                # earlier ("returned N segment(s) across M speaker(s)"), and the
+                # pair is the whole diagnosis: that line says what arrived, this
+                # one says why it was left alone.
                 logger.info(
-                    "Speaker refinement made no change for %s: %s (examined %d turn(s)).",
-                    meeting_id, refinement.skipped_reason, refinement.examined,
+                    "Speaker refinement made no change for %s: %s",
+                    meeting_id, refinement.as_log_fields(),
                 )
 
         # A second opinion from an acoustic diarizer, where one is configured.
