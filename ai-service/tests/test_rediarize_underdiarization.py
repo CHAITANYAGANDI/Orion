@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.rediarize import SpeakerRefiner
+from app.rediarize import Limits, SpeakerRefiner
 from tests.test_rediarize import ALICE, BOB, blend, refine, seg, timeline, voice
 
 CAROL, DAVE, ERIN = voice(3), voice(4), voice(5)
@@ -81,39 +81,60 @@ class TestOneLabelTwoPeople:
         ("A", ALICE),
     ]
 
-    async def test_the_two_regions_become_two_canonical_speakers(self):
+    async def test_it_is_recognised_but_not_acted_on(self):
+        # REVERTED to observation. The mechanism was built for one production
+        # case and, deployed, left that case wrong while other regions
+        # regressed: real cost, unproven benefit. It still analyses and still
+        # reports what it would have done, so the evidence to re-enable it can
+        # be gathered from a deployment without the deployment being the
+        # experiment.
         segments, sampler = meeting(self.REUSED)
 
         out, report = await refine(segments, sampler)
 
+        assert report.labels_would_split == 1
+        assert report.labels_split == 0
+        assert report.substantial_reassigned == 0
+        assert out[3].speaker_key == out[6].speaker_key      # provider's answer stands
+
+    async def test_the_capability_still_works_when_switched_on(self):
+        # Proof the revert is a switch and not a demolition: turning it on
+        # separates the two regions exactly as before.
+        segments, sampler = meeting(self.REUSED)
+
+        out, report = await refine(segments, sampler,
+                                   Limits(split_labels_enabled=True))
+
         assert report.labels_split == 1
         assert report.substantial_reassigned >= 1
-        early = out[3].speaker_key
-        late = out[6].speaker_key
-        assert early != late
+        assert out[3].speaker_key != out[6].speaker_key
 
     async def test_the_provider_label_is_identical_on_both(self):
         # No provenance loss. Both turns still say the provider called them D.
         segments, sampler = meeting(self.REUSED)
 
-        out, _ = await refine(segments, sampler)
+        out, _ = await refine(segments, sampler, Limits(split_labels_enabled=True))
 
         assert out[3].speaker_raw == "D"
         assert out[6].speaker_raw == "D"
         assert raws(out) == ["A", "B", "C", "D", "A", "B", "D", "A"]
 
-    async def test_one_raw_label_now_has_two_canonical_owners(self):
+    async def test_one_raw_label_can_have_two_canonical_owners_when_enabled(self):
+        # The representation is retained even while the mechanism is off: a raw
+        # label is a default owner, not a law, and the island correction relies
+        # on the same property.
         segments, sampler = meeting(self.REUSED)
 
-        out, _ = await refine(segments, sampler)
+        out, _ = await refine(segments, sampler, Limits(split_labels_enabled=True))
 
         owners = [s.speaker_key for s in out if s.speaker_raw == "D"]
         assert len(set(owners)) == 2
+        assert [s.speaker_raw for s in out].count("D") == 2
 
     async def test_everybody_else_keeps_their_own_identity(self):
         segments, sampler = meeting(self.REUSED)
 
-        out, _ = await refine(segments, sampler)
+        out, _ = await refine(segments, sampler, Limits(split_labels_enabled=True))
 
         by_raw = {}
         for segment in out:
@@ -126,7 +147,7 @@ class TestOneLabelTwoPeople:
         segments, sampler = meeting(self.REUSED)
         before = [(s.start, s.end, s.text) for s in segments]
 
-        out, _ = await refine(segments, sampler)
+        out, _ = await refine(segments, sampler, Limits(split_labels_enabled=True))
 
         assert [(s.start, s.end, s.text) for s in out] == before
         assert {w.speaker_raw for w in out[6].words} == {"D"}
@@ -236,8 +257,9 @@ class TestTheDiagnostic:
         _, report = await refine(segments, sampler)
 
         line = report.as_log_fields()
-        assert "rawLabelsSplit=1" in line
-        assert "substantialTurnsReassigned=" in line
+        # Observed, not applied -- which is the whole point of the rollback.
+        assert "rawLabelsWouldSplit=1" in line
+        assert "rawLabelsSplit=0" in line
         # A split is not a merge, and a reader can tell which way the provider
         # was wrong without opening the transcript.
         assert "mergedLabels=0" in line

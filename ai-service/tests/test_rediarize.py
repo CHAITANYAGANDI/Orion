@@ -725,7 +725,8 @@ class TestTheDiagnosticIsSafeToShip:
             "examinedTurns=3 usableReferences=1 providerSpeakers=3 "
             "mergedLabels=2 canonicalSpeakers=1 splitTurns=0 "
             "microTurnsExamined=0 microTurnsCorrected=0 microTurnsAmbiguous=0 "
-            "rawLabelsSplit=0 substantialTurnsReassigned=0"
+            "rawLabelsSplit=0 substantialTurnsReassigned=0 rawLabelsWouldSplit=0 "
+            "heterogeneousLabels=0"
         )
 
     def test_every_field_is_a_count_or_the_reason(self):

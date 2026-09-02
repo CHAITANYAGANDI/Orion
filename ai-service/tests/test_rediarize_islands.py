@@ -206,47 +206,43 @@ class TestWhenItMustRefuse:
         assert report.islands_corrected == 0
         assert out[3].speaker_key == "spk_3"
 
-    async def test_a_short_turn_between_different_speakers_goes_to_the_evidence(self):
-        # Brief D. A, C, B -- neither neighbour is assumed, and the two sides
-        # are asked separately. The island's audio runs on unbroken from the
-        # previous speaker and is contaminated from the following one, so
-        # exactly one side agrees and that is the answer.
-        #
-        # This is the production shape too: the [01:17] "That's--" sits between
-        # Cindy and Speaker 1, and belongs to the speaker on one side only.
+    async def test_a_short_turn_between_two_different_speakers_is_left_alone(self):
+        # REVERTED. Correcting these was tried and withdrawn: it is the only
+        # mechanism able to move the *start* of a legitimate turn onto the
+        # speaker before it, and three production regressions had exactly that
+        # shape. With differing neighbours there is no continuous reading to
+        # test against, so nothing is assumed from either side.
         segments, sampler = meeting([
             ("A", 30.0, ALICE),
             ("B", 20.0, BOB),
             ("A", 30.0, ALICE),
-            ("C", 0.4, ALICE),      # <- acoustically the previous speaker
+            ("C", 0.4, ALICE),      # acoustically the previous speaker
             ("B", 30.0, BOB),
             ("C", 30.0, CAROL),
         ])
 
         out, report = await refine(segments, sampler)
 
-        assert report.islands_corrected == 1
-        assert out[3].speaker_key == "spk_1"
+        assert report.islands_corrected == 0
+        assert report.islands_ambiguous == 1
+        assert out[3].speaker_key == "spk_3"
         assert out[3].speaker_raw == "C"
-        assert out[-1].speaker_key == "spk_3"      # the real Speaker 3, untouched
 
-    async def test_the_island_can_belong_to_the_following_speaker(self):
-        # The other direction, and the exact [01:17] case: the fragment starts
-        # the turn that continues after it rather than ending the one before.
+    async def test_a_leading_fragment_of_a_turn_is_not_pulled_backwards(self):
+        # The production regression, as an assertion. "Yeah, same." opening a
+        # legitimate Speaker 4 turn must not be reassigned to whoever spoke
+        # before it -- that split one correct turn into two wrong ones.
         segments, sampler = meeting([
             ("A", 30.0, ALICE),
-            ("C", 30.0, CAROL),     # Cindy's turn
-            ("B", 0.4, ALICE),      # <- "That's--", really the next speaker
-            ("A", 30.0, ALICE),     # the continuation
-            ("B", 20.0, BOB),       # B is a real speaker elsewhere
+            ("C", 30.0, CAROL),
+            ("B", 0.4, BOB),        # leading fragment of the following B turn
+            ("B", 20.0, BOB),
         ])
 
         out, report = await refine(segments, sampler)
 
-        assert report.islands_corrected == 1
-        assert out[2].speaker_key == out[3].speaker_key == "spk_1"
-        assert out[2].speaker_raw == "B"
-        assert out[-1].speaker_key == "spk_3"
+        assert report.islands_corrected == 0
+        assert out[2].speaker_key == out[3].speaker_key
 
     async def test_a_third_voice_between_two_different_speakers_is_preserved(self):
         # Both sides contaminated, so neither agrees and nothing is assumed.
