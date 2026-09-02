@@ -189,6 +189,29 @@ class Limits:
     #: enough to be drawing conclusions from anywhere in this recording.
     merge_margin: float = 0.10
 
+    # --- micro-turn islands (segment-level correction) ---------------------- #
+    #: A turn this short, surrounded by other people, is a candidate for having
+    #: been mislabelled outright. Not a rule about interjections -- plenty are
+    #: real -- only about which turns are worth the cost of asking.
+    island_max_seconds: float = 2.0
+    #: The stretch embedded to judge one. Just above the embedder's own
+    #: `MIN_SPAN_SECONDS` of 0.8, below which it refuses to answer at all: a
+    #: one-word turn is mostly the tail of somebody else's word, and the model
+    #: says so rather than guessing. Sitting just above the floor keeps the
+    #: island the largest possible share of what is being listened to.
+    island_probe_seconds: float = 1.0
+    #: How far below its neighbours' own score the probe may fall and still count
+    #: as "no other voice in here". The probe necessarily contains a little of
+    #: the neighbouring audio, so it is scored against a same-length window of
+    #: *pure* neighbour rather than against an absolute number -- otherwise the
+    #: padding would make every island match its neighbour by construction.
+    #:
+    #: Small, because the comparison is like for like: two windows of one person
+    #: score within a hair of each other, so anything more than a hair is a
+    #: second voice. Measured against constructed voices, an island that is even
+    #: 45% somebody else costs the neighbour's score more than this.
+    island_tolerance: float = 0.02
+
     #: The winning speaker on each side must beat the runner-up by this much.
     assign_margin: float = 0.10
     #: And the two sides must be this dissimilar to each other. The check that
@@ -237,11 +260,21 @@ class Report:
     #: Distinct voices left after that folding: what the transcript will show.
     canonical_speakers: int = 0
 
+    #: Very short turns sitting between other speakers, and what became of them.
+    #: A different correction from `merged` and deliberately counted apart: that
+    #: one decides two labels are one person everywhere, this one decides a
+    #: single turn was filed under the wrong person while its label stays a real
+    #: person elsewhere in the same meeting.
+    islands_examined: int = 0
+    islands_corrected: int = 0
+    islands_ambiguous: int = 0
+
     @property
     def changed(self) -> bool:
-        # Merging renames turns, so it changes the transcript as surely as a
-        # split does and the flat text has to be rebuilt either way.
-        return self.split > 0 or self.merged > 0
+        # Merging and island corrections both rename turns, so they change the
+        # transcript as surely as a split does and the flat text has to be
+        # rebuilt for any of the three.
+        return self.split > 0 or self.merged > 0 or self.islands_corrected > 0
 
     def as_log_fields(self) -> str:
         """The diagnostic, as one line of `key=value` pairs.
@@ -256,8 +289,68 @@ class Report:
             f"providerSpeakers={self.provider_speakers} "
             f"mergedLabels={self.merged} "
             f"canonicalSpeakers={self.canonical_speakers} "
-            f"splitTurns={self.split}"
+            f"splitTurns={self.split} "
+            f"microTurnsExamined={self.islands_examined} "
+            f"microTurnsCorrected={self.islands_corrected} "
+            f"microTurnsAmbiguous={self.islands_ambiguous}"
         )
+
+
+@dataclass
+class _Run:
+    """Consecutive turns the transcript currently gives to one speaker."""
+
+    speaker: str | None
+    segments: list[Segment]
+
+    @property
+    def start(self) -> float:
+        return float(self.segments[0].start)
+
+    @property
+    def end(self) -> float:
+        return float(self.segments[-1].end)
+
+    @property
+    def seconds(self) -> float:
+        return sum(_duration(s) for s in self.segments)
+
+
+def _speaker_runs(segments: Sequence[Segment]) -> list[_Run]:
+    """Group consecutive turns by who currently owns them.
+
+    Runs rather than segments, so that two short turns in a row under one wrong
+    label are examined once as a region. Looked at individually they would be
+    two separate islands, each with the other as a neighbour, and the answer for
+    one would depend on the order the other was decided in.
+    """
+    runs: list[_Run] = []
+    for seg in segments:
+        speaker = seg.speaker if seg.speaker_status == "attributed" else None
+        if runs and runs[-1].speaker == speaker:
+            runs[-1].segments.append(seg)
+        else:
+            runs.append(_Run(speaker=speaker, segments=[seg]))
+    return runs
+
+
+def _clear_best(vector: list[float], references: dict[str, list[float]],
+                margin: float) -> str | None:
+    """The voice this stretch belongs to, or None if it is not clearly one.
+
+    The margin is what makes a wrong answer unlikely rather than merely
+    unlucky: a stretch that scores 0.71 against one person and 0.69 against
+    another has told us nothing, and saying so is the whole point.
+    """
+    ranked = sorted(
+        ((cosine(vector, ref), name) for name, ref in references.items()),
+        reverse=True,
+    )
+    if not ranked:
+        return None
+    if len(ranked) > 1 and ranked[0][0] - ranked[1][0] < margin:
+        return None
+    return ranked[0][1]
 
 
 def _consistency(vectors: list[list[float]]) -> float | None:
@@ -490,6 +583,13 @@ class SpeakerRefiner:
             report.skipped_reason = f"speakers too alike to judge (cos={worst:.2f})"
             return segments, report
 
+        # Layer 2: a single turn filed under the wrong speaker, while that
+        # speaker goes on being real elsewhere. Before the split search, because
+        # a mislabelled micro-turn sitting inside what is really one person's
+        # speech is also a spurious boundary in the middle of the region the
+        # split search is about to reason over.
+        self._correct_islands(segments, references, embed, report)
+
         identities = {
             seg.speaker: _identity_of(seg)
             for seg in segments
@@ -697,6 +797,131 @@ class SpeakerRefiner:
             if moved:
                 combined.setdefault(moved[0], []).append(references[name])
         return segments, {k: _robust_centroid(v) for k, v in combined.items()}, merged
+
+    # --- micro-turn islands -------------------------------------------------- #
+    def _correct_islands(self, segments: list[Segment], references: dict[str, list[float]],
+                         embed, report: Report) -> None:
+        """Re-own a very short turn the provider filed under the wrong speaker.
+
+        A different correction from `_merge_labels`, and the two must not be
+        confused. That one asks *"are these two labels the same person for the
+        whole meeting?"*. This one asks *"is this one turn filed under the wrong
+        person, while its label goes on being a real person elsewhere?"* — and
+        answering the second with the first would destroy a genuine speaker.
+
+        The shape, from a real recording:
+
+            02:38  Speaker 1   ................................
+            02:41  Speaker 3   "Yeah."                    <- 0.4s
+            02:41  Speaker 1   ................................
+            ...
+            03:25  Speaker 3   ................................  <- really them
+
+        Correcting the tiny turn must leave 03:25 alone. Merging `C` into `A`
+        would have taken a real participant out of the meeting.
+
+        <h2>Adjacency is a filter, never a reason</h2>
+
+        Being short and surrounded is only what makes a turn worth the cost of
+        asking. Nothing is reassigned without acoustic evidence, because
+        "somebody agreed briefly in the middle of a sentence" is one of the most
+        ordinary things in a conversation, and a rule that flattened those would
+        quietly delete every interjection in the product.
+
+        The words are never read. "Yeah", "No", "Exactly" and "Sure" are the
+        same input to this function; only the sound decides.
+        """
+        runs = _speaker_runs(segments)
+        if len(runs) < 3:
+            return
+        for i in range(1, len(runs) - 1):
+            run, before, after = runs[i], runs[i - 1], runs[i + 1]
+            if run.speaker is None or before.speaker is None or after.speaker is None:
+                continue
+            if run.speaker == before.speaker:
+                continue                       # not an island, just a neighbour
+            if run.seconds > self._limits.island_max_seconds:
+                continue                       # long enough to speak for itself
+
+            report.islands_examined += 1
+            owner = self._island_owner(run, before, after, references, embed)
+            if owner is None:
+                report.islands_ambiguous += 1
+                continue
+            if owner == run.speaker:
+                continue                       # the provider was right
+            report.islands_corrected += 1
+            key = next((s.speaker_key for s in segments
+                        if s.speaker == owner and s.speaker_key), None)
+            for seg in run.segments:
+                seg.speaker = owner
+                seg.speaker_key = key
+                for word in seg.words:
+                    # The provider's own token stays on the word, exactly as it
+                    # stays on the segment. Only ownership moves.
+                    if word.speaker is not None:
+                        word.speaker = owner
+
+    def _island_owner(self, run, before, after, references, embed) -> str | None:
+        """Whose voice the island actually is, or None for "cannot tell".
+
+        Two ways of asking, chosen by whether there is enough audio to embed.
+        """
+        limits = self._limits
+        direct = embed(run.start, run.end)
+        if direct is not None:
+            # Long enough to speak for itself. Rank it against every voice in
+            # the meeting and require a clear winner -- including over the
+            # speaker it is currently filed under, which is one of the
+            # candidates rather than a default.
+            return _clear_best(direct, references, limits.assign_margin)
+
+        # Too short for the embedder, which refuses below `MIN_SPAN_SECONDS`
+        # rather than returning a vector it does not believe. That refusal is
+        # information: a turn this short cannot be identified on its own, so the
+        # question changes from "whose is this?" to "is there a second voice in
+        # here at all?"
+        if before.speaker != after.speaker:
+            # Different neighbours, so there is no single "continuous" reading
+            # to test against. Nothing is assumed from either side.
+            return None
+        neighbour = before.speaker
+        reference = references.get(neighbour)
+        if reference is None:
+            return None
+
+        span = limits.island_probe_seconds
+        centre = (run.start + run.end) / 2
+        probe = embed(centre - span / 2, centre + span / 2)
+        if probe is None:
+            return None
+
+        # The probe unavoidably contains some neighbouring audio, so it is
+        # scored against windows of *pure* neighbour of exactly the same length.
+        # Without that control the padding would make every island match its
+        # neighbour by construction, which is the trap this whole branch exists
+        # to avoid.
+        controls = [
+            embed(run.start - span, run.start),
+            embed(run.end, run.end + span),
+        ]
+        clean = [cosine(c, reference) for c in controls if c is not None]
+        if not clean:
+            return None
+
+        # If the island's own speaker is established elsewhere in the meeting
+        # and the probe prefers them, that is a real interjection and the answer
+        # is theirs. Checked before the contamination test, so strong positive
+        # evidence for the provider's answer always wins.
+        own = references.get(run.speaker)
+        if own is not None and cosine(probe, own) > cosine(probe, reference):
+            return run.speaker
+
+        if cosine(probe, reference) >= max(clean) - limits.island_tolerance:
+            # The island costs the neighbour's score nothing measurable, so
+            # there is no second voice in it.
+            return neighbour
+        return None
 
     def _one_voice(self, a: str, b: str, score: float, consistency: dict[str, float]) -> bool:
         """Whether two labels are one person, judged against their own spread.
