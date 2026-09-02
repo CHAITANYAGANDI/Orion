@@ -60,6 +60,38 @@ def stamp(seconds: float) -> str:
     return f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
 
 
+def grouping(out, expected) -> list[str | None]:
+    """Each output speaker mapped to the person it best accounts for.
+
+    The **optimal one-to-one assignment**, which is what `app.diareval` already
+    computes for every other measurement in this repo. Label-agnostic on
+    purpose: the question is whether the turns one person said end up together,
+    not whether they end up under the number a human would have picked. A
+    meeting that merely renumbered has not regressed.
+
+    Mapping a speaker to whoever it happens to speak for *first* is the obvious
+    alternative and it is wrong in a way that flatters the builds under test.
+    One provider label in the launch meeting opens with a turn it misattributed
+    and then holds four real ones; by first appearance, a build that put all
+    five under one speaker scores the misattributed turn right and the four real
+    ones wrong — the truth upside down, and not what the transcript shows a
+    reader.
+
+    One-to-one also means a surplus speaker maps to `None` rather than doubling
+    up on somebody, so a build that split one person in half cannot score as
+    though it had not.
+    """
+    from app.diareval import best_mapping
+
+    hypothesis = [segment.speaker for segment in out]
+    mapping = best_mapping(list(expected), hypothesis)
+    return [mapping.get(label) for label in hypothesis]
+
+
+def correct(out, expected) -> int:
+    return sum(1 for a, b in zip(grouping(out, expected), expected) if a == b)
+
+
 def assemble(timeline: list[Row]):
     """`(segments, sampler_factory, expected)` for one timeline.
 

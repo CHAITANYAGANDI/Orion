@@ -207,16 +207,17 @@ class TestRegionReassignment:
         assert outcome.split == 0
         assert len(set(outcome.mapping.values())) == 2
 
-    def test_a_turn_matching_nobody_stays_where_the_provider_put_it(self):
-        # The safety property that makes reassignment different from splitting:
-        # a region that no existing voice claims goes home rather than founding
-        # a person on evidence nobody corroborated.
+    def test_a_turn_matching_nobody_is_never_handed_to_the_nearest_voice(self):
+        # The safety property that separates reassignment from splitting: this
+        # step only ever moves a region to somebody it actually resembles, so a
+        # region nobody claims leaves it untouched. What happens to it after
+        # that is `_split`'s decision, on its own evidence.
         priors = meeting([
             ("A", 20.0, ALICE), ("A", 20.0, ALICE), ("A", 20.0, CAROL),
             ("B", 20.0, BOB), ("B", 18.0, BOB),
         ])
 
-        outcome = reconcile(priors, LIMITS)
+        outcome = reconcile(priors, Limits(split_labels_enabled=False))
 
         assert outcome.reassigned == 0
         assert outcome.would_split == 1
@@ -330,8 +331,16 @@ class TestSeparation:
         assert separated([region(0, 0.0, 20.0, ALICE)], LIMITS) is None
 
 
-class TestTheLabelSplitStaysOff:
-    """Kept working, kept disabled — so re-enabling it is a switch."""
+class TestTheLabelSplit:
+    """A label's second voice, given an identity — the one correction here that
+    can invent somebody who was never in the room.
+
+    Off for two releases, and the bar for turning it back on was a different
+    mechanism plus measured evidence rather than a better argument. What makes
+    it safe is that "unclaimed" is not enough: the leftover has to be one voice
+    all the way through, hold real audio, and resemble **nobody** already in the
+    meeting, judged on each of their own scales.
+    """
 
     #: One label used by two people, neither of whom is anywhere else.
     REUSED = [
@@ -340,27 +349,86 @@ class TestTheLabelSplitStaysOff:
         ("D", 24.0, voice(8)), ("A", 24.0, ALICE),
     ]
 
-    def test_it_is_seen_and_not_acted_on(self):
-        outcome = reconcile(meeting(self.REUSED), LIMITS)
+    def test_the_second_voice_gets_an_identity(self):
+        priors = meeting(self.REUSED)
+
+        outcome = reconcile(priors, LIMITS)
+
+        assert outcome.would_split == 1
+        assert outcome.split == 1
+        assert owner(outcome, priors, 3) != owner(outcome, priors, 6)
+
+    def test_the_switch_still_turns_it_off(self):
+        priors = meeting(self.REUSED)
+
+        outcome = reconcile(priors, Limits(split_labels_enabled=False))
 
         assert outcome.would_split == 1
         assert outcome.split == 0
-        assert outcome.reassigned == 0
-
-    def test_the_capability_still_works_when_switched_on(self):
-        priors = meeting(self.REUSED)
-
-        outcome = reconcile(priors, Limits(split_labels_enabled=True))
-
-        assert outcome.split == 1
-        assert owner(outcome, priors, 3) != owner(outcome, priors, 6)
+        assert owner(outcome, priors, 3) == owner(outcome, priors, 6)
 
     def test_the_second_voice_is_numbered_after_the_people_already_heard(self):
         priors = meeting(self.REUSED)
 
-        outcome = reconcile(priors, Limits(split_labels_enabled=True))
+        outcome = reconcile(priors, LIMITS)
 
         assert outcome.order[-1] == owner(outcome, priors, 6)
+
+    def test_nobody_else_under_that_label_is_disturbed(self):
+        priors = meeting(self.REUSED)
+
+        outcome = reconcile(priors, LIMITS)
+
+        assert owner(outcome, priors, 0) == outcome.mapping["A"]
+        assert owner(outcome, priors, 3) == outcome.mapping["D"]
+
+    def test_a_leftover_that_resembles_somebody_here_is_refused(self):
+        # Unclaimed is not the same as unlike, and this is the difference.
+        # B and C are two people the model renders very similarly, and the
+        # leftover under A is close to both — so reassignment refuses it for
+        # *ambiguity* rather than for belonging to nobody. It is almost
+        # certainly one of them; it is certainly not somebody new.
+        twin = nearby(BOB, CAROL, 0.20)
+        either = nearby(BOB, CAROL, 0.10)
+        priors = meeting([
+            ("A", 20.0, ALICE), ("A", 20.0, ALICE), ("A", 20.0, either),
+            ("B", 20.0, BOB), ("B", 18.0, BOB),
+            ("C", 20.0, twin), ("C", 18.0, twin),
+        ])
+
+        outcome = reconcile(priors, LIMITS)
+
+        assert outcome.would_split == 1        # the situation arose
+        assert outcome.split == 0              # and the evidence was not enough
+        assert owner(outcome, priors, 2) == outcome.mapping["A"]
+
+    def test_a_noisy_stretch_inside_one_turn_is_not_a_person(self):
+        # Music, a door, somebody turning away from the microphone. The turn's
+        # own windows disagree, which is what a second speaker inside a turn
+        # looks like too -- and from here the two are indistinguishable, so the
+        # boundary search downstream is left to argue about it.
+        rough = Region(index=2, start=45.0, end=65.0, seconds=9.0,
+                       vector=CAROL, samples=[ALICE, CAROL, CAROL])
+        priors = meeting([
+            ("A", 20.0, ALICE), ("A", 20.0, ALICE),
+            ("B", 20.0, BOB), ("B", 18.0, BOB),
+        ])
+        priors["A"].append(rough)
+
+        outcome = reconcile(priors, LIMITS)
+
+        assert outcome.split == 0
+        assert 2 not in outcome.moved
+
+    def test_too_little_audio_is_not_a_person_either(self):
+        priors = meeting([
+            ("A", 20.0, ALICE), ("A", 20.0, ALICE), ("A", 2.5, CAROL),
+            ("B", 20.0, BOB), ("B", 18.0, BOB),
+        ])
+
+        outcome = reconcile(priors, LIMITS)
+
+        assert outcome.split == 0
 
 
 class TestTheTrace:

@@ -608,6 +608,15 @@ behaviour that matters is a pure function of times. That is why they were kept.
   three production regressions and was rolled back. Such a turn keeps the
   provider's attribution and is marked provisional, so no inferred name can
   attach to it.
+- **A name heard once is applied.** Transcript naming writes a name over a
+  person's whole transcript on the strength of one utterance, and proper nouns
+  are where speech recognition is least reliable. One meeting said *"What do you
+  think, Sydney?"* and the woman who answered — Cindy — was labelled Sydney
+  throughout, from a single mishearing that the same transcript contradicts
+  twice elsewhere in words no rule may read as evidence. Every check in
+  `app/naming.py` passed, correctly, on the text it was given: this is a
+  transcription error wearing an attribution error's clothes, and the fix is a
+  rename, which outranks inference by construction (`display_name`).
 - **A provider label seen only in sub-second fragments still shows as a
   speaker.** It produces no region, so it is numbered after every voice the
   meeting could actually hear and cannot carry a name — but it is not
@@ -668,7 +677,27 @@ four-second one and is not fifteen *independent* observations of it.
    it. **Nothing is created here.** A region no existing voice claims goes back
    exactly where the provider put it, so the failure mode is a missed correction
    rather than an invented person.
-4. **Number** by first *stable* appearance — see section 5.
+4. **Split** — the one step that can invent a person, and therefore last, acting
+   only on what step 3 could not place. Three production transcripts have now
+   reported the same shape: one provider label holding two people, where the
+   second is nowhere else in the meeting and so has nothing to be reassigned to.
+   Four conditions, all positive evidence rather than the absence of a refusal:
+   the label's regions genuinely separated; the leftover holds audio above the
+   reference floor; each of its turns is one voice *throughout*, because a noisy
+   patch inside one person's speech looks identical from here and the boundary
+   search downstream is the stage that gets to argue about it; and it resembles
+   **nobody** already in the meeting, judged against each of their own internal
+   consistency rather than a flat cosine. In the recording this was written for
+   the leftover scored **-0.004** against the nearest voice in the room.
+5. **Number** by first *stable* appearance — see section 5.
+
+> A mechanism with this name existed once, was deployed, and was withdrawn when
+> the case it was built for came back still wrong while other regions had
+> regressed. It bisected *any* label whose windows disagreed and redistributed
+> **every turn of that label** across both halves by a margin, so one person with
+> one noisy stretch got torn in two. The switch (`split_labels_enabled`) is kept
+> so the counting either side of it — `rawLabelsWouldSplit` against
+> `rawLabelsSplit` — is what the next report about this gets argued from.
 
 ### What changed about "one doubtful pair stops the meeting"
 

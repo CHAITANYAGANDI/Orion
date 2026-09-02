@@ -261,16 +261,25 @@ class Limits:
     #: simply stays where the provider put it.
     reassign_min_seconds: float = 2.0
 
-    #: Whether a provider label found to cover two voices is actually split.
+    #: Whether a provider label found to cover two voices may become two
+    #: speakers.
     #:
-    #: **Off.** Built for one production case -- a substantial turn nine minutes
-    #: in belonging to a different person -- and after deployment that case was
-    #: still wrong while other regions had regressed. Real cost, unproven
-    #: benefit, so it stays disabled until a trace from the real recording shows
-    #: what its raw and acoustic shape actually is. The analysis still runs and
-    #: still reports what it *would* have done, so the evidence needed to
-    #: re-enable it can be gathered without the deployment being the experiment.
-    split_labels_enabled: bool = False
+    #: **On**, and it was off for two releases. A mechanism with this name was
+    #: built for one production case, deployed, and withdrawn when that case
+    #: came back still wrong while other regions had regressed -- so the bar for
+    #: turning it back on was a different mechanism and measured evidence, not a
+    #: better argument.
+    #:
+    #: Both arrived. `app.regions._split` acts only on regions that withholding
+    #: isolated and reassignment could not place, leaves every other turn under
+    #: the label alone, and requires the leftover to resemble **nobody** already
+    #: in the meeting rather than merely to be unclaimed. Measured across three
+    #: human-verified production timelines it corrects the case in two of them
+    #: and fires nowhere else.
+    #:
+    #: Kept as a switch because the counting either side of it -- `would_split`
+    #: against `split` -- is what makes the next report about it answerable.
+    split_labels_enabled: bool = True
 
     #: The winning speaker on each side must beat the runner-up by this much.
     assign_margin: float = 0.10

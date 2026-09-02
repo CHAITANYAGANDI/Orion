@@ -17,11 +17,12 @@ import pytest
 
 from app.rediarize import SpeakerRefiner
 from tests.golden_opening_meeting import TIMELINE, build, mm
+from tests.meeting_fixture import correct
 
-#: What the two shipped builds scored on this timeline: 23 of 30 regions, with
-#: the main speaker split four ways and every interruption fragment filed as
-#: somebody else. Not a target -- a floor.
-SHIPPED_SCORE = 23
+#: The better of the two shipped builds on this timeline: 25 of 30 regions,
+#: with the main speaker split three ways and every interruption fragment filed
+#: as somebody else. The other scored 20. Not a target -- a floor.
+SHIPPED_SCORE = 25
 
 
 async def run(limits=None):
@@ -35,12 +36,6 @@ async def run(limits=None):
     return out, report, expected
 
 
-def grouping(out, expected):
-    """Each output label mapped to the person it first speaks for."""
-    seen: dict[str, str] = {}
-    for segment, want in zip(out, expected):
-        seen.setdefault(segment.speaker, want)
-    return [seen[segment.speaker] for segment in out]
 
 
 def at(out, time: str):
@@ -182,9 +177,8 @@ class TestTheScore:
     async def test_correctness_improves_on_both_shipped_builds(self):
         out, _, expected = await run()
 
-        correct = sum(1 for a, b in zip(grouping(out, expected), expected) if a == b)
-        assert correct > SHIPPED_SCORE
-        assert correct >= 29
+        assert correct(out, expected) > SHIPPED_SCORE
+        assert correct(out, expected) >= 29
 
     async def test_one_person_is_not_spread_over_several_speakers(self):
         # False splits, counted. Both shipped builds scored three or four here,

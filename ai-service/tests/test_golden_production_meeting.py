@@ -16,6 +16,7 @@ import pytest
 
 from app.rediarize import Limits, SpeakerRefiner
 from tests.golden_production_meeting import TIMELINE, build, mm, stamp
+from tests.meeting_fixture import correct
 
 
 async def run(limits=None):
@@ -29,12 +30,6 @@ async def run(limits=None):
     return out, report, expected
 
 
-def grouping(out, expected):
-    """Each label mapped to the person it first speaks for. Label-agnostic."""
-    seen: dict[str, str] = {}
-    for segment, want in zip(out, expected):
-        seen.setdefault(segment.speaker, want)
-    return [seen[segment.speaker] for segment in out]
 
 
 class TestTheGoldenMeeting:
@@ -56,22 +51,29 @@ class TestTheGoldenMeeting:
 
         assert [s.speaker_raw for s in out] == [row[2] for row in TIMELINE]
 
-    async def test_no_label_is_split_and_none_is_merged(self):
-        # Both label-level mechanisms are off or unproven here. The meeting is
-        # corrected by micro-turn ownership alone, which is the conservative
-        # floor this release rolled back to.
+    async def test_no_two_labels_are_folded_together(self):
+        # Five voices, five labels, and no two of them one person. Nothing here
+        # is over-diarized, so a merge would be a mistake.
         _, report, _ = await run()
 
-        assert report.labels_split == 0
         assert report.merged == 0
 
-    async def test_the_speaker_count_is_the_provider_s(self):
-        # Nothing invented and nobody deleted. Five provider labels in, five
-        # canonical speakers out.
+    async def test_the_extra_person_under_label_d_is_separated_out(self):
+        # Five provider labels, six people: label D carries Speaker 4 early and
+        # Speaker 5 nine minutes later, and human verification says they are
+        # different. The turn at 09:32 resembles nobody already in the meeting,
+        # which is the evidence that it is somebody new rather than a turn
+        # somebody else's label mislaid.
         out, report, _ = await run()
 
         assert report.provider_speakers == 5
-        assert len({s.speaker_key for s in out}) == 5
+        assert report.labels_split == 1
+        assert len({s.speaker_key for s in out}) == 6
+
+        early = next(s for s in out if s.start == mm("2:04"))
+        late = next(s for s in out if s.start == mm("9:32"))
+        assert early.speaker != late.speaker
+        assert early.speaker_raw == late.speaker_raw == "D"
 
     async def test_islands_are_only_corrected_between_matching_neighbours(self):
         _, report, _ = await run()
@@ -82,11 +84,13 @@ class TestTheGoldenMeeting:
         assert report.islands_corrected == 2
         assert report.islands_ambiguous == 1
 
-    async def test_the_within_label_split_is_observed_and_not_applied(self):
-        # Still off: no provider label is turned into two canonical speakers.
+    async def test_only_the_one_label_that_holds_two_people_is_split(self):
+        # Four other labels are each one voice, and a split is the one
+        # correction here that can invent a person who was never in the room.
         _, report, _ = await run()
 
-        assert report.labels_split == 0
+        assert report.labels_split == 1
+        assert report.heterogeneous_labels == 2
 
     async def test_the_cadence_turn_goes_to_the_speaker_who_said_it(self):
         # [02:33] is four seconds the provider filed under Brian's label and the
@@ -103,7 +107,7 @@ class TestTheGoldenMeeting:
         cadence = next(s for s in out if s.start == mm("2:33"))
         opening = next(s for s in out if s.start == mm("1:18"))
         assert cadence.speaker == opening.speaker
-        assert report.substantial_reassigned == 1
+        assert report.substantial_reassigned == 2      # the cadence turn, and 09:32
 
     async def test_the_reassigned_turn_still_says_who_the_provider_blamed(self):
         out, _, _ = await run()
@@ -132,15 +136,14 @@ class TestTheGoldenMeeting:
         ]
 
     async def test_the_grouping_improves_on_what_the_shipped_releases_achieved(self):
-        # The comparative acceptance rule, pinned. Both shipped builds group 13
-        # of these 26 regions correctly; region reconciliation reaches 21, and
-        # neither number is a target -- 13 is the floor a change may not fall
-        # below, and 21 is the ratchet so that a later change cannot quietly
+        # The comparative acceptance rule, pinned. Both shipped builds group 23
+        # of these 26 regions correctly; region reconciliation reaches 25, and
+        # neither number is a target -- 23 is the floor a change may not fall
+        # below, and 25 is the ratchet so that a later change cannot quietly
         # give this back.
         out, _, expected = await run()
 
-        correct = sum(1 for a, b in zip(grouping(out, expected), expected) if a == b)
-        assert correct >= 21
+        assert correct(out, expected) >= 25
 
     async def test_the_diagnostic_says_what_happened_without_saying_what_was_said(self):
         _, report, _ = await run()

@@ -33,7 +33,7 @@ that it cannot be the last word. What is treated as evidence instead is a
 meeting -> regions -> region embeddings -> clusters -> per-segment identity
 ```
 
-## The four steps, and why they are in this order
+## The five steps, and why they are in this order
 
 1. **Withhold** the regions that disagree with their own label. A label holding
    two voices has a centroid sitting between them, describing neither, and
@@ -44,9 +44,14 @@ meeting -> regions -> region embeddings -> clusters -> per-segment identity
 3. **Reassign** the withheld regions, to whichever canonical voice they clearly
    match. After the merge, so they are matched against the strongest references
    the meeting can produce. A region that matches nobody goes back where the
-   provider put it — *this step never creates a speaker*, which is what keeps a
-   fragment from inventing one.
-4. **Number** by first *stable* appearance, so an early half-second fragment
+   provider put it — *this step never creates a speaker*.
+4. **Split**, and only here: a leftover that is one voice throughout, holds real
+   audio, and resembles **nobody** already in the meeting is a participant the
+   provider filed under somebody else's label. This is the one step that can
+   invent a person, so it is last, it acts only on what the previous two could
+   not place, and every one of its conditions is positive evidence rather than
+   the absence of a refusal.
+5. **Number** by first *stable* appearance, so an early half-second fragment
    cannot take `Speaker 2` and push every later ordinal along behind it.
 
 ## The error-cost policy, which decides every threshold below
@@ -164,10 +169,11 @@ class Outcome:
     withheld: int = 0
     reassigned: int = 0
     heterogeneous: int = 0
-    #: Labels holding a second voice that nobody in the meeting claimed, and how
-    #: many of those were actually given an identity of their own. The second is
-    #: zero unless `split_labels_enabled`; the first is the evidence for turning
-    #: it on, gathered without the deployment being the experiment.
+    #: Labels holding a second voice nobody claimed, and how many of those had
+    #: evidence enough to be given an identity. Counted apart because they answer
+    #: different questions -- how often the situation arises, and how often it is
+    #: clear enough to act on -- and the gap between them is what a later report
+    #: about this correction has to be argued from.
     would_split: int = 0
     split: int = 0
 
@@ -292,6 +298,45 @@ def divide(regions: Sequence[Region]) -> tuple[list[Region], list[Region]] | Non
 
 def _seconds(regions: Iterable[Region]) -> float:
     return sum(region.seconds for region in regions)
+
+
+def claims(voice: Sequence[float], cluster: Cluster, limits) -> bool:
+    """Whether this voice is near enough to be that cluster's, on its own scale.
+
+    Judged against how well the cluster agrees with *itself*, because a cosine
+    means nothing without knowing what agreement looks like in this recording.
+    0.87 is a stranger where a speaker's own regions score 0.99 against each
+    other, and is a comfortable match where they score 0.90.
+
+    A cluster too thin to have measurable consistency cannot be calibrated, so
+    it falls back to the flat bar the merge uses for "comfortably not the same
+    person" — conservative in the right direction, since the consequence of
+    saying yes here is only that nobody new is created.
+    """
+    score = cosine(voice, cluster.vector)
+    floor = cluster.consistency
+    if floor is None:
+        return score >= limits.merge_similarity - limits.merge_margin
+    return score >= floor - limits.assign_margin
+
+
+def steady(region: Region, limits) -> float | None:
+    """How badly one turn disagrees with itself, or None if it does not.
+
+    A turn is sampled from several windows and they normally agree; where they
+    do not, the turn is either two people or one person through a bad stretch of
+    audio — music, a door, somebody turning away from the microphone. Both mean
+    the same thing to this module: **the turn as a whole is not evidence of
+    anybody**, and neither moving it wholesale nor founding a speaker on it is
+    something the audio supports.
+
+    Returned as the offending figure rather than a boolean so a trace line can
+    say how far off it was. `None` is the good case.
+    """
+    within = consistency(region.samples)
+    if within is None or within >= limits.merge_similarity:
+        return None
+    return within
 
 
 def separated(regions: Sequence[Region], limits) -> tuple[list[Region], list[Region]] | None:
@@ -574,8 +619,8 @@ def _reassign(clusters: dict[str, Cluster], groups: dict[str, list[str]],
             if region.seconds < limits.reassign_min_seconds:
                 say("reassign", decision="too short", seconds=round(region.seconds, 2))
                 continue
-            internal = consistency(region.samples)
-            if internal is not None and internal < limits.merge_similarity:
+            internal = steady(region, limits)
+            if internal is not None:
                 # This turn's own windows disagree with each other, so it may
                 # hold two people — which is precisely what the boundary search
                 # downstream exists to divide. Handing the whole turn to one
@@ -621,21 +666,44 @@ _HALF = chr(0) + "b"
 
 def _split(clusters: dict[str, Cluster], groups: dict[str, list[str]], limits,
            outcome: Outcome, say: Trace) -> None:
-    """Give a label's unplaced second voice an identity of its own. **Off.**
+    """Give a label's unplaced second voice an identity of its own.
 
     What is left after `_reassign` is the hardest case in the module: a label
-    holding two people, only one of whom is anywhere else in the meeting. The
-    other has no reference to be matched against, so the only way to represent
-    them is to create a speaker — and creating a speaker on acoustic evidence
-    alone is the mechanism that was built once, deployed, and withdrawn when the
-    case it was written for came back still wrong while other regions had
-    regressed.
+    holding two people, **only one of whom is anywhere else in the meeting**.
+    The other has no reference to be matched against, so the only way to
+    represent them at all is to create a speaker.
 
-    So it stays behind a switch that is off, and what runs by default is the
-    counting: `would_split` is how often the situation arose, which is the
-    evidence needed to decide whether to turn it on. The capability is kept
-    working, and tested, so that turning it on remains a switch rather than a
-    rewrite.
+    <h2>Why this is on, having been off</h2>
+
+    A mechanism with this name was built for one production case, deployed, and
+    withdrawn when that case came back still wrong while other regions had
+    regressed. It is worth being precise about what has changed, because the
+    name is the same and almost nothing else is.
+
+    That one bisected any label whose windows disagreed and then re-offered
+    *every turn of that label* to both halves, so a label that was really one
+    person with one noisy stretch got torn in two and its turns redistributed by
+    a margin. This one acts on the regions `_withhold` already isolated and
+    `_reassign` already failed to place, and it touches nothing else under the
+    label.
+
+    And the condition is now positive rather than residual. A region reaches
+    here because nobody *clearly* claimed it, which includes the dangerous case
+    of a region sitting ambiguously between two similar speakers. So the last
+    check asks the opposite question: is this region **unlike everybody**? A new
+    participant is not merely unclaimed, they are comfortably nobody who is
+    already here — the same bar, and the same number, the merge uses to call two
+    labels comfortably two people. In the recording this was written for the
+    answer was a cosine of -0.004 against the nearest voice in the room.
+
+    Four things have to hold, and the situation is counted in `would_split`
+    whether or not they do:
+
+    * the label's regions genuinely separated, and the minority holds real audio;
+    * no existing voice claimed them;
+    * they are one voice among themselves, so two strays do not become one
+      person;
+    * and they resemble nobody already in the meeting.
     """
     for head in list(groups):
         cluster = clusters[head]
@@ -643,10 +711,42 @@ def _split(clusters: dict[str, Cluster], groups: dict[str, list[str]], limits,
         if not cluster.heterogeneous or not unplaced:
             continue
         outcome.would_split += 1
-        say("split", decision="second voice", regions=len(unplaced),
-            seconds=round(_seconds(unplaced), 1), applied=limits.split_labels_enabled)
-        if not limits.split_labels_enabled:
+
+        voice = robust_centroid([region.vector for region in unplaced])
+        claimants = [key for key in groups if claims(voice, clusters[key], limits)]
+        nearest = max((cosine(voice, clusters[key].vector) for key in groups),
+                      default=1.0)
+        refusal = None
+        if _seconds(unplaced) < limits.reference_floor_seconds:
+            refusal = "too little audio"
+        elif any(steady(region, limits) is not None for region in unplaced):
+            # A turn whose own windows disagree is the shape of a noisy patch
+            # inside one person's speech as much as of a second person, and the
+            # two are indistinguishable from here. A fabricated participant is
+            # far worse than a missed one, so this is where it stops: the
+            # boundary search downstream is the stage that gets to argue about
+            # what happens *inside* a turn.
+            refusal = "turn is not one voice"
+        elif separated(unplaced, limits) is not None:
+            refusal = "not one voice"
+        elif claimants:
+            # Unclaimed is not the same as unlike. `_reassign` declines both for
+            # "this belongs to nobody" and for "this could be either of two
+            # people", and only the first is evidence of somebody new -- so the
+            # belonging test is asked again here, against every voice rather
+            # than only the winner. A region that any established voice could
+            # own is ambiguous evidence, and ambiguous evidence may not create a
+            # person.
+            refusal = "resembles a voice already here"
+        elif not limits.split_labels_enabled:
+            refusal = "disabled"
+
+        say("split", decision=refusal or "second voice", regions=len(unplaced),
+            seconds=round(_seconds(unplaced), 1), nearest=round(nearest, 3),
+            applied=refusal is None)
+        if refusal is not None:
             continue
+
         key = f"{head}{_HALF}"
         clusters[key] = Cluster(key=key, regions=sorted(unplaced, key=lambda r: r.start))
         groups[key] = [key]

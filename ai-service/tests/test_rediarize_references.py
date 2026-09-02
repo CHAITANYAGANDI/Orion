@@ -233,9 +233,11 @@ class TestHeterogeneity:
 
         assert built["Speaker 2"].heterogeneous is False
 
-    def test_detection_does_not_split_anybody(self):
-        # `split_labels_enabled` stays off. Detection is how the evidence for
-        # turning it on gets collected; it is not the turning on.
+    def test_a_label_covering_two_people_becomes_two_speakers(self):
+        # Detection is not the correction, and for two releases it was all there
+        # was. Here the minority under label B is twenty-five seconds of a third
+        # voice that resembles nobody else in the meeting, which is what a
+        # participant looks like and what a bad stretch of audio does not.
         import asyncio
 
         segments, sampler = meeting(self.HETEROGENEOUS)
@@ -248,5 +250,7 @@ class TestHeterogeneity:
 
         assert report.heterogeneous_labels == 1
         assert report.labels_would_split == 1
-        assert report.labels_split == 0
-        assert len({s.speaker_key for s in out}) == 2
+        assert report.labels_split == 1
+        assert len({s.speaker_key for s in out}) == 3
+        # Provenance is untouched: both halves still say the provider said B.
+        assert {s.speaker_raw for s in out if s.speaker_raw == "B"} == {"B"}
