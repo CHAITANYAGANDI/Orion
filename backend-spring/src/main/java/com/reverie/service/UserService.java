@@ -61,19 +61,48 @@ public class UserService {
      *
      * <p>Before the lookup, deliberately. {@link SelfOnlyAccess} covers every
      * caller of this method -- the HTTP filter, the STOMP interceptor, and
-     * whatever is written next -- rather than each of them remembering.
+     * whatever is written next -- rather than each of them remembering. It also
+     * runs before the insert below, so a refused subject touches the repository
+     * not at all and leaves nothing behind.
+     *
+     * <h2>Why the creation is one statement</h2>
+     *
+     * <p>A browser opening the app for the first time fires several requests at
+     * once, all authenticating the same brand-new subject. Read-then-save gave
+     * every one of them an empty lookup, so every one of them inserted; one won
+     * and the others returned 500 against {@code users_clerk_user_id_key}. The
+     * account was created correctly -- the constraint saw to that -- but the
+     * user's first page load was mostly errors and a refresh cleared it, which
+     * is the worst way for a bug to present.
+     *
+     * <p>{@link UserRepository#insertIfAbsent} makes the decision atomically in
+     * Postgres. The loser of the race inserts nothing and reads the winner's
+     * row, so every concurrent caller leaves with the same user id and none of
+     * them fails. Nothing is caught and retried: a uniqueness violation would
+     * surface at flush and leave this transaction already aborted, which is
+     * exactly the situation there is no recovering from inside it.
+     *
+     * <p>An account that already exists -- which is every request after the
+     * first -- takes the single lookup and stops, same as before.
      */
     @Transactional
     public String provision(String clerkUserId, String email) {
         selfOnly.requireOrThrow(clerkUserId);
-        UserEntity user = users.findByClerkUserId(clerkUserId).orElseGet(() -> {
-            UserEntity u = new UserEntity();
-            u.setId(IdGenerator.user());
-            u.setClerkUserId(clerkUserId);
-            u.setEmail(email);
-            u.setPlan("FREE");
-            return users.save(u);
-        });
+
+        Optional<UserEntity> found = users.findByClerkUserId(clerkUserId);
+        if (found.isEmpty()) {
+            users.insertIfAbsent(IdGenerator.user(), clerkUserId, email);
+            // Whoever won, this reads their row. Blocking on the unique index
+            // has already happened inside insertIfAbsent, so by here the winner
+            // has committed and READ COMMITTED can see it.
+            found = users.findByClerkUserId(clerkUserId);
+        }
+
+        UserEntity user = found.orElseThrow(() -> new IllegalStateException(
+                "No users row for " + clerkUserId + " immediately after an insert that "
+                        + "reported no conflict. Unreachable under READ COMMITTED, which is "
+                        + "the isolation level this path assumes."));
+
         if (email != null && !email.equals(user.getEmail())) {
             user.setEmail(email);
         }

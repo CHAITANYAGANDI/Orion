@@ -18,6 +18,8 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -203,11 +205,21 @@ class SelfOnlyAccessTest {
         @Test
         @DisplayName("the self account is created on its first request, like any other")
         void selfIsProvisioned() {
-            when(users.findByClerkUserId(ME)).thenReturn(Optional.empty());
-            when(users.save(any())).thenAnswer(i -> i.getArgument(0));
+            // Creation is one atomic INSERT ... ON CONFLICT DO NOTHING now,
+            // rather than read-then-save -- see UserProvisioningTest for why.
+            // What matters here is unchanged: the allowed account still gets a
+            // row on its first request.
+            UserEntity created = new UserEntity();
+            created.setId("usr_new");
+            created.setClerkUserId(ME);
+            when(users.findByClerkUserId(ME))
+                    .thenReturn(Optional.empty())
+                    .thenReturn(Optional.of(created));
+            when(users.insertIfAbsent(anyString(), eq(ME), anyString())).thenReturn(1);
 
-            assertThat(serviceWith(enforcing()).provision(ME, "me@example.com")).isNotBlank();
-            verify(users).save(any());
+            assertThat(serviceWith(enforcing()).provision(ME, "me@example.com"))
+                    .isEqualTo("usr_new");
+            verify(users).insertIfAbsent(anyString(), eq(ME), anyString());
         }
 
         @Test
@@ -233,6 +245,7 @@ class SelfOnlyAccessTest {
                     .isInstanceOf(ApiException.class);
 
             verify(users, never()).save(any());
+            verify(users, never()).insertIfAbsent(anyString(), anyString(), anyString());
             verifyNoInteractions(users);
         }
 
@@ -240,12 +253,17 @@ class SelfOnlyAccessTest {
         @DisplayName("nothing changes when the gate is off")
         void openDeploymentIsUnaffected() {
             // The ordinary production path. Any subject provisions, as before.
-            when(users.findByClerkUserId(SOMEBODY_ELSE)).thenReturn(Optional.empty());
-            when(users.save(any())).thenAnswer(i -> i.getArgument(0));
+            UserEntity created = new UserEntity();
+            created.setId("usr_them");
+            created.setClerkUserId(SOMEBODY_ELSE);
+            when(users.findByClerkUserId(SOMEBODY_ELSE))
+                    .thenReturn(Optional.empty())
+                    .thenReturn(Optional.of(created));
+            when(users.insertIfAbsent(anyString(), eq(SOMEBODY_ELSE), anyString())).thenReturn(1);
 
             assertThat(serviceWith(open()).provision(SOMEBODY_ELSE, "them@example.com"))
-                    .isNotBlank();
-            verify(users).save(any());
+                    .isEqualTo("usr_them");
+            verify(users).insertIfAbsent(anyString(), eq(SOMEBODY_ELSE), anyString());
         }
 
         @Test
