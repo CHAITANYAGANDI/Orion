@@ -280,6 +280,19 @@ class Settings(BaseSettings):
     # taking transcription down with it.
     transcode_max_bytes: int = 2 * 1024 * 1024 * 1024
 
+    # --- Speaker naming (reading names out of the dialogue) ---
+    # Whether a finished meeting may take speakers' names from what was said in
+    # it: "hi, how are you Michael?" makes the *other* speaker Michael. Costs one
+    # extra model call per recording, and pays for itself in the summary, the
+    # retrieval passages and the export, all of which carry the speaker prefix.
+    #
+    # Nothing to do with the voice templates below, and deliberately a separate
+    # switch: this one needs no consent because it stores nothing and derives
+    # nothing from anybody's body -- it reads words the meeting already said,
+    # for the meeting they were said in, and never carries a name to another
+    # recording. See app/naming.py and docs/speaker-identification.md section 2.
+    speaker_naming_enabled: bool = True
+
     # --- Speaker identification (voice templates) ---
     # A urlsafe base64 Fernet key. Unset means the whole feature is off: no
     # embedding is computed, nothing is stored, and "Rematch speakers" reports

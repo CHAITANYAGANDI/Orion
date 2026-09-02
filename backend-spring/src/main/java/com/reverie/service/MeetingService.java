@@ -658,6 +658,16 @@ public class MeetingService {
      *       acoustic question and is answered acoustically or not at all.
      * </ul>
      *
+     * <p>That last one is about <em>this</em> operation and not about the
+     * product. A meeting's own words are read once, by the pipeline, and can
+     * name a speaker the conversation introduced or addressed by name — see
+     * {@code ai-service/app/naming.py} and {@code docs/speaker-naming.md}. It is
+     * a different question with a different answer: whether this meeting said
+     * who its speakers are, rather than whose voice this is. Nothing it finds
+     * reaches another recording, and nothing it finds is learned. What remains
+     * ruled out here is using words as evidence about a <em>voice</em>, which is
+     * the claim rematch makes and the words cannot support.</p>
+     *
      * <p>Renaming nobody is a normal, common and correct outcome, and it is
      * reported as such rather than as a failure.
      */

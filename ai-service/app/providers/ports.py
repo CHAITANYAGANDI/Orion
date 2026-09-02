@@ -15,6 +15,7 @@ from app.schemas import (
     ActionItem,
     DraftEmailRequest,
     DraftEmailResponse,
+    SpeakerNameClaim,
     SummaryResponse,
     SummaryTemplate,
     TranscriptResponse,
@@ -104,6 +105,32 @@ class LlmPort(ABC):
     async def extract_action_items(
         self, transcript: str, language: str = "en"
     ) -> list[ActionItem]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def identify_speaker_names(
+        self, dialogue: str, labels: list[str], language: str = "en"
+    ) -> list[SpeakerNameClaim]:
+        """Who the conversation says these speakers are, if it says at all.
+
+        `dialogue` is the numbered turns; `labels` are the placeholder speakers
+        that may be named — anybody already carrying a name is not on the list
+        and is not up for discussion.
+
+        Returns **claims, not answers.** Every one carries the turn and the
+        words it came from, and `app.naming.resolve` checks all of it against
+        the transcript before a single label changes. An implementation that
+        returns nothing is behaving correctly: most meetings never say anybody's
+        name, and `Speaker 1` is the right answer for those.
+
+        The contract that matters is `basis`. A name said *to* somebody belongs
+        to whoever was spoken to, not to the person speaking — "how are you,
+        Michael?" makes the **other** speaker Michael — and a self-introduction
+        is the opposite. Implementations must report which of the two they saw
+        rather than pre-resolving it, because that is the field the caller
+        verifies and the one that swaps two people through an entire transcript
+        when it is wrong.
+        """
         raise NotImplementedError
 
     @abstractmethod

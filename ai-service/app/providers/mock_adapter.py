@@ -31,6 +31,7 @@ from app.schemas import (
     DraftEmailResponse,
     OutlineGroup,
     Segment,
+    SpeakerNameClaim,
     SummaryResponse,
     SummarySection,
     SummaryTemplate,
@@ -268,6 +269,60 @@ def _mock_sections(tpl: SummaryTemplate, script: MockScript) -> list[SummarySect
     return sections
 
 
+# Two shapes of evidence, three patterns, and no ambition beyond that. A real
+# model reads "Michael, before you go —"; this reads greetings, sign-offs and
+# self-introductions, which is enough to demonstrate the feature without
+# becoming a second implementation nobody remembers to keep in step.
+#
+# The name must be capitalised, which is the cheap stand-in for knowing what a
+# name is. It costs the mock every lowercased name a transcript contains, and
+# that is the right way round for something whose mistakes get applied.
+_MOCK_CLAIM_PATTERNS = (
+    # "I'm Michael", "my name is Michael" -> names the person talking.
+    (re.compile(r"(?i:i'm|i am|my name is|this is)\s+(?P<name>[A-Z][a-z]{1,19})\b"),
+     "introduced"),
+    # "hi Michael", "thanks Michael", "how are you Michael" -> names the other one.
+    (re.compile(r"(?i:hi|hello|hey|thanks|thank you|how are you|good morning"
+                r"|good afternoon)[,\s]+(?P<name>[A-Z][a-z]{1,19})\b"),
+     "addressed"),
+    # "...good, Charles." — the trailing vocative, which is where the second
+    # half of a two-line greeting exchange puts the name.
+    (re.compile(r",\s*(?P<name>[A-Z][a-z]{1,19})\s*[.?!]*$"), "addressed"),
+)
+
+#: The numbered rendering `app.naming.dialogue` produces, read back apart.
+_MOCK_TURN = re.compile(r"^\s*(?P<n>\d+)\.\s*(?P<speaker>[^:]+):\s*(?P<text>.*)$")
+
+
+def _mock_turns(dialogue: str) -> list[tuple[str, str]]:
+    """`(speaker, text)` per turn, in order."""
+    turns: list[tuple[str, str]] = []
+    for line in dialogue.splitlines():
+        hit = _MOCK_TURN.match(line)
+        if hit:
+            turns.append((hit.group("speaker").strip(), hit.group("text").strip()))
+    return turns
+
+
+def _mock_neighbour(turns: list[tuple[str, str]], index: int, speaker: str) -> str | None:
+    """Whoever is on the other side of this turn — the one being addressed.
+
+    Looks forward first: a greeting is usually answered. Falls back to the turn
+    before, because the other half of that exchange ("I'm good, Charles") is
+    addressed to somebody who has already spoken and may never speak again.
+
+    A guess, and knowingly one — `app.naming` re-derives adjacency from the
+    segments and refuses the claim if this was wrong.
+    """
+    for step in (1, -1):
+        cursor = index + step
+        while 0 <= cursor < len(turns):
+            if turns[cursor][0] != speaker:
+                return turns[cursor][0]
+            cursor += step
+    return None
+
+
 class MockTranscriptionAdapter(TranscriptionPort):
     """Returns one of the scripted sprint meetings."""
 
@@ -320,6 +375,42 @@ class MockLlmAdapter(LlmPort):
         self, transcript: str, language: str = "en"
     ) -> list[ActionItem]:
         return list(script_for_transcript(transcript).action_items)
+
+    async def identify_speaker_names(
+        self, dialogue: str, labels: list[str], language: str = "en"
+    ) -> list[SpeakerNameClaim]:
+        """Greetings and self-introductions, found with two patterns.
+
+        The one mock that does real work rather than replaying a script, and
+        deliberately: without a provider key there would otherwise be no way to
+        see this feature at all, and "it never names anybody" is also what a
+        broken version looks like.
+
+        It is a *claim* generator, not a second implementation. Everything it
+        returns goes through `app.naming.resolve` and is checked against the
+        turns exactly as the real model's answers are — which is the useful
+        property, because it means the dev environment exercises the
+        verification rather than bypassing it. It finds far less than the real
+        thing and is wrong in the ways a pattern is wrong; the checks are what
+        make that safe.
+        """
+        turns = _mock_turns(dialogue)
+        claims: list[SpeakerNameClaim] = []
+        for index, (spoken_by, text) in enumerate(turns):
+            for pattern, basis in _MOCK_CLAIM_PATTERNS:
+                for hit in pattern.finditer(text):
+                    name = hit.group("name")
+                    if basis == "introduced":
+                        target = spoken_by
+                    else:
+                        target = _mock_neighbour(turns, index, spoken_by)
+                    if target is None or target not in labels:
+                        continue
+                    claims.append(SpeakerNameClaim(
+                        speaker=target, name=name, turn=index + 1,
+                        quote=hit.group(0), basis=basis,
+                    ))
+        return claims
 
 
 

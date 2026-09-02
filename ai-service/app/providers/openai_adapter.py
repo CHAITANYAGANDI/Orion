@@ -29,6 +29,7 @@ from app.schemas import (
     DraftEmailResponse,
     OutlineGroup,
     Segment,
+    SpeakerNameClaim,
     SummaryResponse,
     SummarySection,
     SummaryTemplate,
@@ -223,6 +224,47 @@ _ENTITY_SYSTEM = (
     "named in the transcript. Do not infer, invent, or generalize. Every array "
     "element must be a plain string — the name alone, with no quote, no "
     "explanation and no surrounding object. Respond with a single JSON object only."
+)
+
+# Naming speakers is the one extraction where a confident wrong answer is worse
+# than silence, so the brief is written to make refusing easy and guessing hard.
+#
+# The single most important line is the one about direction. Left to itself a
+# model reads "Speaker 1: how are you Michael?" and files Michael under
+# Speaker 1, because the name and the label are on the same line — and that one
+# habit swaps two people across a whole transcript, a summary, every retrieval
+# passage and every quotation with a name under it.
+#
+# It is not asked to resolve the direction, only to report which kind of
+# evidence it saw. `app.naming` does the resolving, against the turns, where it
+# can be checked.
+_NAMING_SYSTEM = (
+    "You identify who the speakers in a meeting transcript are, using ONLY what "
+    "the conversation itself establishes. You are cautious: returning nothing is "
+    "the correct and expected answer for most transcripts, and is always better "
+    "than a plausible guess.\n\n"
+    "There are exactly two kinds of evidence.\n"
+    "1. INTRODUCED — a speaker states their own name: 'I'm Michael', "
+    "'Michael here', 'this is Michael speaking', 'my name is Michael'. This "
+    "names the person who is TALKING.\n"
+    "2. ADDRESSED — a speaker says someone else's name TO them: 'how are you, "
+    "Michael?', 'thanks, Michael', 'Michael, can you take this?', 'over to you, "
+    "Michael'. This names the person being SPOKEN TO — never the person "
+    "talking. In 'Speaker 1: how are you Michael?', Michael is NOT Speaker 1.\n\n"
+    "Report the evidence, not a conclusion: set `basis` to which of the two you "
+    "saw, and `speaker` to the label of the person that evidence names.\n\n"
+    "NEVER report a name because:\n"
+    "- it was merely mentioned — 'Michael said he'd handle it' and 'let's ask "
+    "Michael' describe somebody who may not even be in the meeting;\n"
+    "- of the topic, the project, the company, the meeting title, or who is "
+    "likely to attend a meeting like this;\n"
+    "- a speaker seems senior, seems to be chairing, or speaks first;\n"
+    "- it is a form of address rather than a name: 'everyone', 'guys', 'team', "
+    "'mate', 'sir', 'doctor'.\n\n"
+    "`quote` must be copied verbatim from the turn given in `turn`, and must "
+    "contain the name. If you cannot quote it, do not report it. If the "
+    "transcript does not establish who somebody is, leave them out. "
+    "Respond with a single JSON object only."
 )
 
 # ISO-639-1 codes we can name explicitly. Naming the language works markedly
@@ -703,6 +745,49 @@ class OpenAiLlmAdapter(LlmPort):
             attempts=self._settings.openai_max_retries + 1,
             fallback=[],
             label="extract_action_items",
+        )
+
+    async def identify_speaker_names(
+        self, dialogue: str, labels: list[str], language: str = "en"
+    ) -> list[SpeakerNameClaim]:
+        async def _op() -> list[SpeakerNameClaim]:
+            user = (
+                "Which of these speakers does the conversation name, and how? "
+                'Return JSON: {"speakers":[{"speaker","name","turn","quote",'
+                '"basis"}]}.\n'
+                "`speaker` must be one of exactly these labels: "
+                + ", ".join(labels)
+                + ".\n"
+                "`basis` is \"introduced\" (they said their own name) or "
+                "\"addressed\" (someone said their name to them).\n"
+                "`turn` is the number of the turn the quote is in.\n"
+                "Return an empty list if the conversation does not say who "
+                "these people are.\n\n"
+                "Turns:\n" + dialogue
+            )
+            data = await self._chat_json(
+                _NAMING_SYSTEM + _language_instruction(language), user
+            )
+            claims = []
+            for raw in data.get("speakers", []):
+                try:
+                    claims.append(SpeakerNameClaim.model_validate(raw))
+                except Exception:  # noqa: BLE001 - a malformed claim is one fewer claim
+                    # Per item rather than per response: one claim missing a
+                    # field should not discard the three beside it that are
+                    # well formed, and every one of them is verified against the
+                    # transcript afterwards regardless.
+                    continue
+            return claims
+
+        # Fallback is the empty list, which is the same thing this returns for a
+        # transcript that names nobody — so a model that is down or slow leaves
+        # the meeting with Speaker 1 and Speaker 2, exactly as it arrived.
+        return await _with_retries(
+            _op,
+            attempts=self._settings.openai_max_retries + 1,
+            fallback=[],
+            label="identify_speaker_names",
         )
 
     # Asked for a lookup. Concise is right here: "what did we decide about

@@ -22,6 +22,7 @@ from typing import Awaitable, Callable
 
 from app.insights import derive_insights
 from app.language import annotate_segments
+from app import naming
 from app.quotes import anchor_outline, verify_quotes
 from app.suggestions import meeting_material
 from app.providers.ports import LlmPort, TranscriptionPort
@@ -106,9 +107,14 @@ class Pipeline:
 
     def __init__(self, transcription: TranscriptionPort, llm: LlmPort,
                  refiner: "SpeakerRefiner | None" = None,
-                 diarizer=None) -> None:
+                 diarizer=None,
+                 name_speakers: bool = True) -> None:
         self._transcription = transcription
         self._refiner = refiner
+        #: Whether to read speakers' names out of what they said to each other.
+        #: A plain flag rather than a Settings object, so this class still
+        #: depends on nothing but its ports; `app.main` supplies the setting.
+        self._name_speakers = name_speakers
         #: An acoustic DiarizationPort allowed to overrule the provider's
         #: speaker labels outright, or None to keep them.
         #:
@@ -119,6 +125,54 @@ class Pipeline:
         #: diarizer would have to supply.
         self._diarizer = diarizer
         self._llm = llm
+
+    async def _read_names(self, meeting_id: str, transcript: TranscriptResponse) -> None:
+        """Give the speakers the names the conversation gave them.
+
+        People say who they are — "I'm Michael" — and say who each other are —
+        "how are you, Michael?" — and until now Reverie printed *Speaker 1* over
+        the top of both. This reads them, and the direction is the whole
+        difficulty: a name said in a turn almost never belongs to the person
+        saying it. `app.naming` holds the rules and checks every claim against
+        the turns; nothing here decides anything.
+
+        Runs before analysis rather than after, so the names are in the flat
+        transcript the summarizer reads, in the passages chat retrieves, and in
+        the export. Doing it afterwards would mean a brief that says *Speaker 2*
+        beside a transcript that says Michael, and a re-index to repair.
+
+        Never raises and never partly applies. A meeting whose speakers cannot
+        be named is a meeting with Speaker 1 and Speaker 2 in it, which is where
+        it started and a perfectly good place to stay.
+        """
+        if not self._name_speakers or not transcript.segments:
+            return
+        labels = naming.open_labels(transcript.segments)
+        if not labels:
+            # Everybody is already named, or nobody was attributed at all.
+            return
+        try:
+            claims = await self._llm.identify_speaker_names(
+                naming.dialogue(transcript.segments), labels, transcript.language or "en",
+            )
+        except Exception:  # noqa: BLE001 - a nameless transcript is a working one
+            logger.warning("Speaker naming unavailable for %s; keeping the numbers.", meeting_id)
+            return
+
+        applied = naming.apply(transcript.segments, naming.resolve(claims, transcript.segments))
+        if not applied:
+            # Much the most common outcome, and not a failure: most meetings
+            # never say anybody's name out loud.
+            return
+        # The flat text carries the speaker prefix and is what the summarizer
+        # reads, so it has to be rebuilt rather than left describing the numbers.
+        transcript.transcript = _joined(transcript.segments) or transcript.transcript
+        # Counts, not names. A speaker's name is transcript content, and the
+        # logs are the one place it would end up outside the user's own account.
+        logger.info(
+            "Named %d of %d speaker(s) in %s from the dialogue.",
+            len(applied), len(labels), meeting_id,
+        )
 
     async def _reattribute(self, segments, audio, audio_loader):
         """Replace the provider's speakers with the diarizer's, or keep them.
@@ -287,6 +341,13 @@ class Pipeline:
         # After reattribution, deliberately: a split creates segments and every
         # one of them needs its language decided.
         annotate_segments(transcript.segments, transcript.language)
+
+        # Who these people are, according to the people themselves. Last of the
+        # transcript stage and before anything reads the text, because every
+        # artefact below this line carries the speaker prefix: the summary, the
+        # retrieval passages, the quotations and the export.
+        await self._read_names(meeting_id, transcript)
+
         transcribed_at = time.perf_counter()
         # Still TRANSCRIBING, deliberately: the status has not moved on, but the
         # long part of it is over. This is the one place a stage reports above

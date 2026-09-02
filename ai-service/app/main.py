@@ -48,7 +48,8 @@ async def lifespan(app: FastAPI):
     # the numbers. The seam it plugged into is still there and still tested
     # (app/reconcile.py, app/reattribute.py), so a future diarizer is a
     # constructor argument rather than a rewrite.
-    pipeline = Pipeline(transcription, llm, refiner, diarizer=None)
+    pipeline = Pipeline(transcription, llm, refiner, diarizer=None,
+                        name_speakers=settings.speaker_naming_enabled)
     app.state.pipeline = pipeline
 
     # RAG service (pgvector). Indexes transcripts + answers grounded questions.

@@ -48,6 +48,19 @@ identifiers. AssemblyAI documents that they carry no meaning across files.
 **Reading the transcript.** "Thanks, Sarah" identifies who was *spoken to*, not
 who was speaking, and gets the answer backwards about as often as not.
 
+> Still ruled out, and worth being precise about what: the words cannot tell you
+> that the voice in *this* meeting is the voice in *that* one. A transcript
+> mentioning Sarah is not evidence that any particular speaker is her.
+>
+> Reverie does now read names out of a conversation — see
+> [speaker-naming.md](./speaker-naming.md) — and that is a different question
+> with a different answer. It asks whether *this meeting* said who its own
+> speakers are, which is a question about the words and therefore one the words
+> can answer. It never compares anybody to anybody, writes no profile, and
+> carries no name to another recording. The failure named in this bullet is the
+> one it is built around: which way the name points is a required, checked field
+> there rather than something inferred from the prose.
+
 **Asking a language model.** It has never heard the audio. It will answer
 anyway, fluently, and the answer will be a plausible reading of the words.
 

@@ -51,6 +51,30 @@ class ActionItem(CamelModel):
     source_sentence: str
 
 
+class SpeakerNameClaim(CamelModel):
+    """A model's claim that one of the speakers is called something.
+
+    Every field exists to be checked. `turn` and `quote` say where the evidence
+    is so `app.naming` can confirm it is really there; `basis` says which way
+    round the name points, which is the one thing that cannot be recovered from
+    the text afterwards and the one thing that swaps two people when it is
+    wrong. Nothing here is applied as given — see `app.naming.resolve`.
+    """
+
+    #: Which speaker is being named, by the label as it appears in the dialogue.
+    speaker: str
+    #: What they are called.
+    name: str
+    #: 1-based index of the turn the evidence was found in.
+    turn: int
+    #: The words that say so, copied verbatim from that turn.
+    quote: str
+    #: `introduced` — they said their own name. `addressed` — somebody said it
+    #: to them, so the name belongs to whoever was being spoken to and never to
+    #: the speaker of the quote.
+    basis: Literal["addressed", "introduced"]
+
+
 class Word(CamelModel):
     """One spoken word with its own timing, in seconds.
 
