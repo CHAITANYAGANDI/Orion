@@ -24,9 +24,16 @@ import pytest
 from app.providers.assemblyai_adapter import parse_response
 
 
+#: Milliseconds per word. Unhurried, and deliberately so: at 300ms a four-word
+#: turn lasts 1.2 seconds, which is faster than anybody speaks and thin enough
+#: that `naming.MIN_SPEECH_FOR_A_NAME` would refuse to name a real participant.
+#: A fixture whose timings are not plausible tests the wrong thing.
+_MS_PER_WORD = 600
+
+
 def _words(text: str, speaker: str, start_ms: int):
     """Word-level detail, which is what the parser prefers over the utterance."""
-    step = 300
+    step = _MS_PER_WORD
     out = []
     for index, token in enumerate(text.split()):
         out.append({
@@ -44,7 +51,7 @@ def payload(turns) -> dict:
     utterances = []
     cursor = 0
     for speaker, text in turns:
-        span = 300 * len(text.split())
+        span = _MS_PER_WORD * len(text.split())
         utterances.append({
             "speaker": speaker,
             "text": text,

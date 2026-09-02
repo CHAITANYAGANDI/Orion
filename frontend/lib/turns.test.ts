@@ -139,3 +139,56 @@ describe("A/B/A/B survives rendering", () => {
     expect(groupIntoTurns(runOn).map((t) => t.segments.length)).toEqual([2, 1]);
   });
 });
+
+/**
+ * Coalescing after an acoustic correction.
+ *
+ * When `rediarize` re-owns a mislabelled fragment, the transcript is left with
+ * two adjacent segments carrying the same canonical speaker and different
+ * provider labels:
+ *
+ *     raw C  01:17  "That's--"        -> spk_1   (corrected)
+ *     raw A  01:19  "so I guess..."   -> spk_1
+ *
+ * They should read as one turn. The question is whether grouping already does
+ * that, and it does -- `sameVoice` compares `speakerKey` and nothing else, so a
+ * corrected fragment merges with its continuation without any further work.
+ *
+ * The individual segments survive underneath: their timestamps, their text and
+ * their provider labels are all still there, which is what keeps a correction
+ * reversible and a complaint traceable.
+ */
+describe("corrected fragments coalesce for display", () => {
+  const corrected = [
+    { id: "s1", start: 73.0, end: 73.4, speaker: "Speaker 1", text: "That's-", speakerKey: "spk_1", speakerStatus: "attributed" },
+    { id: "s2", start: 79.0, end: 95.0, speaker: "Speaker 1", text: "so I guess the next-", speakerKey: "spk_1", speakerStatus: "attributed" },
+    { id: "s3", start: 95.5, end: 120.0, speaker: "Speaker 3", text: "So we have the Jira stuff", speakerKey: "spk_3", speakerStatus: "attributed" },
+  ] as unknown as Parameters<typeof groupIntoTurns>[0];
+
+  it("reads as one turn once the fragment has been re-owned", () => {
+    const turns = groupIntoTurns(corrected);
+
+    expect(turns).toHaveLength(2);
+    expect(turns[0].speakerKey).toBe("spk_1");
+    expect(turns[0].segments).toHaveLength(2);
+    expect(turns[1].speakerKey).toBe("spk_3");
+  });
+
+  it("keeps every underlying segment, timestamp and text", () => {
+    const [first] = groupIntoTurns(corrected);
+
+    expect(first.start).toBe(73.0);
+    expect(first.segments.map((s) => s.id)).toEqual(["s1", "s2"]);
+    expect(first.segments.map((s) => s.text)).toEqual(["That's-", "so I guess the next-"]);
+  });
+
+  it("does not coalesce before the correction", () => {
+    // The same three segments as diarization first produced them. Two visible
+    // turns where there should be one, which is the reported symptom.
+    const uncorrected = corrected.map((s, i) =>
+      i === 0 ? { ...s, speaker: "Speaker 3", speakerKey: "spk_3" } : s,
+    ) as typeof corrected;
+
+    expect(groupIntoTurns(uncorrected)).toHaveLength(3);
+  });
+});

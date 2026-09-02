@@ -206,14 +206,55 @@ class TestWhenItMustRefuse:
         assert report.islands_corrected == 0
         assert out[3].speaker_key == "spk_3"
 
-    async def test_a_short_turn_between_two_different_speakers_is_left_alone(self):
-        # Brief D. A, C, B. There is no "continuous" reading to test the island
-        # against, so neither neighbour is assumed and the answer is nobody's.
+    async def test_a_short_turn_between_different_speakers_goes_to_the_evidence(self):
+        # Brief D. A, C, B -- neither neighbour is assumed, and the two sides
+        # are asked separately. The island's audio runs on unbroken from the
+        # previous speaker and is contaminated from the following one, so
+        # exactly one side agrees and that is the answer.
+        #
+        # This is the production shape too: the [01:17] "That's--" sits between
+        # Cindy and Speaker 1, and belongs to the speaker on one side only.
         segments, sampler = meeting([
             ("A", 30.0, ALICE),
             ("B", 20.0, BOB),
             ("A", 30.0, ALICE),
-            ("C", 0.4, ALICE),
+            ("C", 0.4, ALICE),      # <- acoustically the previous speaker
+            ("B", 30.0, BOB),
+            ("C", 30.0, CAROL),
+        ])
+
+        out, report = await refine(segments, sampler)
+
+        assert report.islands_corrected == 1
+        assert out[3].speaker_key == "spk_1"
+        assert out[3].speaker_raw == "C"
+        assert out[-1].speaker_key == "spk_3"      # the real Speaker 3, untouched
+
+    async def test_the_island_can_belong_to_the_following_speaker(self):
+        # The other direction, and the exact [01:17] case: the fragment starts
+        # the turn that continues after it rather than ending the one before.
+        segments, sampler = meeting([
+            ("A", 30.0, ALICE),
+            ("C", 30.0, CAROL),     # Cindy's turn
+            ("B", 0.4, ALICE),      # <- "That's--", really the next speaker
+            ("A", 30.0, ALICE),     # the continuation
+            ("B", 20.0, BOB),       # B is a real speaker elsewhere
+        ])
+
+        out, report = await refine(segments, sampler)
+
+        assert report.islands_corrected == 1
+        assert out[2].speaker_key == out[3].speaker_key == "spk_1"
+        assert out[2].speaker_raw == "B"
+        assert out[-1].speaker_key == "spk_3"
+
+    async def test_a_third_voice_between_two_different_speakers_is_preserved(self):
+        # Both sides contaminated, so neither agrees and nothing is assumed.
+        segments, sampler = meeting([
+            ("A", 30.0, ALICE),
+            ("B", 20.0, BOB),
+            ("A", 30.0, ALICE),
+            ("C", 0.4, CAROL),      # <- genuinely the third speaker
             ("B", 30.0, BOB),
             ("C", 30.0, CAROL),
         ])
@@ -385,3 +426,87 @@ class TestDownstream:
         assert held["spk_2"] == pytest.approx(20.0)
         assert held["spk_3"] == pytest.approx(30.0)
         assert [s.speaker_raw for s in result.segments] == ["A", "B", "A", "C", "A", "C"]
+
+
+class TestNamingConsumesCorrectedOwnership:
+    """Required case 3: naming sees the corrected owner, never the stale one.
+
+    Ordering, asserted rather than assumed. `app.pipeline` runs refinement,
+    then reattribution, then naming — so by the time a name is attached to a
+    canonical speaker, every acoustic correction has already happened. A
+    fragment the provider filed under the wrong person cannot carry that
+    person's name into the transcript, because it is no longer theirs.
+    """
+
+    @staticmethod
+    def _named(plan, claims):
+        from app import naming as naming_module
+        return plan, claims, naming_module
+
+    async def test_the_corrected_owner_is_what_naming_is_offered(self):
+        from app import naming
+
+        segments, sampler = meeting(PRODUCTION)
+        out, report = await refine(segments, sampler)
+        assert report.islands_corrected == 1
+
+        # The fragment now belongs to Speaker 1, so Speaker 3 is nowhere near
+        # it -- and any name the conversation gives Speaker 1 lands on a turn
+        # that is genuinely theirs.
+        assert out[3].speaker == "Speaker 1"
+        assert "Speaker 3" in naming.open_labels(out)
+        assert "Speaker 1" in naming.open_labels(out)
+
+    async def test_a_stale_owner_cannot_pull_a_name_onto_the_fragment(self):
+        from app import naming
+
+        segments, sampler = meeting(PRODUCTION)
+        out, _ = await refine(segments, sampler)
+
+        # A claim naming the speaker who *used* to own the fragment. It resolves
+        # against Speaker 3's real turn, and the fragment is not part of it.
+        claims = [_claim("Speaker 3", "Brian", out)]
+        resolved = naming.resolve([c for c in claims if c], out)
+        assert resolved.get("Speaker 1") is None
+
+    async def test_an_unresolved_island_is_marked_for_naming(self):
+        # The other outcome: examined, not resolved. `speaker_provisional` is
+        # how that fact reaches naming, and it is the only thing that does.
+        segments, sampler = meeting([
+            ("A", 30.0, ALICE),
+            ("B", 20.0, BOB),
+            ("A", 30.0, ALICE),
+            ("C", 0.4, blend(ALICE, CAROL, 0.5)),
+            ("A", 30.0, ALICE),
+            ("C", 30.0, CAROL),
+        ])
+
+        out, report = await refine(segments, sampler)
+
+        assert report.islands_ambiguous == 1
+        assert out[3].speaker_provisional is True
+        # Speaker 3 still has a substantial turn of their own, so they remain
+        # nameable -- the fragment simply is not part of the case for it.
+        from app import naming
+        assert "Speaker 3" in naming.open_labels(out)
+
+    async def test_the_flag_never_leaves_the_process(self):
+        # It is read by naming a few lines later and by nothing else. Spring has
+        # no column for it and the API does not expose it.
+        segments, sampler = meeting(PRODUCTION)
+        out, _ = await refine(segments, sampler)
+
+        assert "speakerProvisional" not in out[3].model_dump(by_alias=True)
+        assert "speaker_provisional" not in out[3].model_dump()
+
+
+def _claim(speaker, name, segments):
+    """A well-formed claim for `speaker`, anchored to a turn they really hold."""
+    from app.schemas import SpeakerNameClaim
+
+    for index, segment in enumerate(segments, start=1):
+        if segment.speaker != speaker:
+            continue
+        return SpeakerNameClaim(speaker=speaker, name=name, turn=index,
+                                quote=segment.text[:20], basis="introduced")
+    return None

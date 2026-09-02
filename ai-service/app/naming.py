@@ -101,10 +101,26 @@ from __future__ import annotations
 import logging
 import re
 
+from app.providers.ecapa_embedder import MIN_SPAN_SECONDS
 from app.quotes import normalise
 from app.voiceprints import is_unresolved
 
 logger = logging.getLogger("ai-service.naming")
+
+#: Below this, nothing has ever been able to confirm who owns a turn.
+#:
+#: The speaker embedder's own floor, imported rather than copied: `embed`
+#: refuses to answer for a shorter stretch, so a turn under it has an owner that
+#: no acoustic check has verified or could verify. That is the property being
+#: tested -- not the length itself, which is why the number belongs to the model
+#: rather than to this module.
+#:
+#: The distinction matters and was got wrong once. A blanket "a speaker must
+#: have spoken for N seconds in total" rule suppresses *"Hi, I'm Sarah"*, which
+#: takes about a second and a quarter and is the best identity evidence a
+#: meeting can hold. This asks a different question about each turn: could
+#: anybody have checked who said it?
+MIN_VERIFIABLE_SECONDS = MIN_SPAN_SECONDS
 
 #: How far from the evidence an addressed speaker may be, counted in *runs* of
 #: consecutive turns by one voice rather than in turns.
@@ -221,20 +237,64 @@ def dialogue(segments) -> str:
     return "\n".join(lines)
 
 
+def _ownership_is_sound(segment) -> bool:
+    """Whether who owns this turn is known well enough to name them from it.
+
+    Two ways it is not, and neither of them is "this person did not say much".
+
+    **The acoustic layer tried and failed.** ``speaker_provisional`` is set by
+    `app.rediarize` on a turn it examined — short, sitting between other
+    speakers — and could not resolve. The provider's answer stands because it is
+    the best one available, but it is known to be unconfirmed, and an
+    unconfirmed owner is not somebody to attach a real person's name to.
+
+    **The acoustic layer could not have checked.** Below the embedder's own
+    ``MIN_SPAN_SECONDS`` there is no vector to compare — `embed` refuses rather
+    than returning one it does not believe — so ownership of such a turn has
+    never been verifiable by anything. Half a second of audio reading "I." is
+    exactly this: whoever the provider filed it under, nothing has confirmed it
+    and nothing can.
+
+    Note what this is *not*. It is a per-turn question about ownership, not a
+    budget a participant has to spend to deserve a name. Somebody whose whole
+    contribution is *"Hi, I'm Sarah"* has said one thing, it lasts well over the
+    floor, and it is the strongest identity evidence a meeting can contain.
+    """
+    if getattr(segment, "speaker_provisional", False):
+        return False
+    start, end = getattr(segment, "start", None), getattr(segment, "end", None)
+    if start is None or end is None:
+        return True                       # no timings at all: not evidence of a fault
+    # The tolerance is for the arithmetic, not the rule: a duration is a
+    # subtraction of two floats, and a turn the provider timed at exactly the
+    # floor can land a fraction under it. Without this the boundary behaves
+    # differently depending on where in the recording the turn happens to sit.
+    return float(end) - float(start) >= MIN_VERIFIABLE_SECONDS - 1e-6
+
+
 def open_labels(segments) -> list[str]:
     """The speaker labels a name is allowed to be attached to.
 
-    Placeholders only, attributed only, in the order they first speak. Handed to
-    the model so it is asked about the right people, and enforced again on the
-    way back — the wire is not a place to keep a rule.
+    Placeholders only, attributed only, and **holding at least one turn whose
+    ownership is sound** — in the order they first speak. Handed to the model so
+    it is asked about the right people, and enforced again on the way back: the
+    wire is not a place to keep a rule.
+
+    One sound turn is the whole requirement. A speaker who has one and a dozen
+    unverifiable fragments is a person who was diarized imperfectly; a speaker
+    who has *only* fragments is far more likely to be an artefact of a boundary,
+    and naming one puts a real person's name somewhere nothing has confirmed.
     """
+    sound: set[str] = {
+        segment.speaker for segment in _speaking(segments)
+        if _nameable(segment) and _ownership_is_sound(segment)
+    }
     seen: list[str] = []
     for segment in _speaking(segments):
         label = segment.speaker
-        if not _nameable(segment):
+        if not _nameable(segment) or label in seen or label not in sound:
             continue
-        if label not in seen:
-            seen.append(label)
+        seen.append(label)
     return seen
 
 

@@ -596,3 +596,119 @@ class TestPrecedence:
         segments = [seg("Sarah", "How are you Michael?", 0.0, key="spk_1")]
         assert naming.apply(segments, {"Sarah": "Michael"}) == []
         assert segments[0].speaker == "Sarah"
+
+
+class TestEvidenceQuality:
+    """A turn has to have a *knowable* owner before it can name anybody.
+
+    Production put a real participant's name on a fragment reading "I." — half a
+    second that diarization had handed its own canonical speaker. The name was
+    correct about that speaker; the speaker was the mistake.
+
+    The first attempt at a guard here was a blanket "a speaker must have spoken
+    for two seconds in total", and it was the wrong instrument: *"Hi, I'm
+    Sarah"* lasts about a second and a quarter and is the strongest identity
+    evidence a meeting can contain. Suppressing it to catch a half-second
+    artefact trades a real feature for a rare fault.
+
+    So the question is asked per turn and it is about *ownership*, not about how
+    much somebody said: could anything have checked who spoke this? Below the
+    embedder's own floor nothing could, and where the acoustic layer looked and
+    failed, `speaker_provisional` says so.
+    """
+
+    def test_a_short_self_introduction_still_names_its_speaker(self):
+        # Required case 1. Just over the floor, and the best evidence there is.
+        segments = [
+            seg("Speaker 1", "Right, let us go round the room.", 0.0, key="spk_1"),
+            seg("Speaker 2", "Hi, I'm Sarah.", 5.0, key="spk_2"),
+        ]
+        segments[1].end = 6.3                       # 1.3s
+
+        assert "Speaker 2" in naming.open_labels(segments)
+        claims = [claim("Speaker 2", "Sarah", 2, "I'm Sarah", "introduced")]
+        assert naming.resolve(claims, segments) == {"Speaker 2": "Sarah"}
+
+    @pytest.mark.parametrize("seconds", [0.8, 1.0, 1.5])
+    def test_the_whole_of_a_participant_may_be_one_short_turn(self, seconds):
+        segments = [
+            seg("Speaker 1", "Who else is on the call?", 0.0, key="spk_1"),
+            seg("Speaker 2", "Michael here.", 5.0, key="spk_2"),
+        ]
+        segments[1].end = 5.0 + seconds
+
+        assert "Speaker 2" in naming.open_labels(segments)
+        claims = [claim("Speaker 2", "Michael", 2, "Michael here", "introduced")]
+        assert naming.resolve(claims, segments) == {"Speaker 2": "Michael"}
+
+    def test_a_fragment_below_the_embedder_s_floor_cannot_name_anybody(self):
+        # Required case 2. Nothing has confirmed who said this and nothing
+        # could: `embed` refuses below MIN_SPAN_SECONDS.
+        segments = [
+            seg("Speaker 1", "Morning Brian, did the deploy land?", 0.0, key="spk_1"),
+            seg("Speaker 2", "I.", 4.0, key="spk_2"),
+        ]
+        segments[1].end = 4.4                       # 0.4s
+
+        assert "Speaker 2" not in naming.open_labels(segments)
+        claims = [claim("Speaker 2", "Brian", 1, "Morning Brian", "addressed")]
+        assert naming.resolve(claims, segments) == {}
+
+    def test_ownership_the_acoustic_layer_could_not_confirm_cannot_name(self):
+        # Required case 5. Long enough to embed, but `rediarize` examined it as
+        # an island and could not resolve it. The provider's answer stands and
+        # is known to be unconfirmed, which is not somebody to name.
+        segments = [
+            seg("Speaker 1", "Morning Brian, did the deploy land?", 0.0, key="spk_1"),
+            seg("Speaker 2", "Mm hm.", 4.0, key="spk_2"),
+        ]
+        segments[1].end = 5.5
+        segments[1].speaker_provisional = True
+
+        assert "Speaker 2" not in naming.open_labels(segments)
+        assert naming.resolve(
+            [claim("Speaker 2", "Brian", 1, "Morning Brian", "addressed")], segments) == {}
+
+    def test_one_sound_turn_is_enough_however_many_fragments_surround_it(self):
+        # A person diarized imperfectly is still a person. The rule asks whether
+        # *any* of their turns has a knowable owner, not whether all of them do.
+        segments = [
+            seg("Speaker 1", "Morning Brian, did the deploy land?", 0.0, key="spk_1"),
+            seg("Speaker 2", "I.", 4.0, key="spk_2"),
+            seg("Speaker 2", "It did, last night.", 6.0, key="spk_2"),
+        ]
+        segments[1].end = 4.4
+
+        assert "Speaker 2" in naming.open_labels(segments)
+        assert naming.resolve(
+            [claim("Speaker 2", "Brian", 1, "Morning Brian", "addressed")],
+            segments) == {"Speaker 2": "Brian"}
+
+    def test_a_short_vocative_exchange_still_resolves(self):
+        # Required case 4. Both turns brief, both ownerships sound.
+        segments = [
+            seg("Speaker 1", "Michael?", 0.0, key="spk_1"),
+            seg("Speaker 2", "Yeah, Charles?", 1.2, key="spk_2"),
+        ]
+        segments[0].end = 1.0
+        segments[1].end = 2.4
+
+        claims = [
+            claim("Speaker 2", "Michael", 1, "Michael", "addressed"),
+            claim("Speaker 1", "Charles", 2, "Yeah, Charles", "addressed"),
+        ]
+        assert naming.resolve(claims, segments) == {
+            "Speaker 1": "Charles", "Speaker 2": "Michael",
+        }
+
+    def test_an_unverifiable_turn_is_still_shown_to_the_model(self):
+        # Excluded from being *named*, not from the dialogue: removing it would
+        # close a gap and make two turns look adjacent that were not, which is
+        # exactly what the adjacency rule reads.
+        segments = [
+            seg("Speaker 1", "Morning Brian, did the deploy land?", 0.0, key="spk_1"),
+            seg("Speaker 2", "I.", 4.0, key="spk_2"),
+        ]
+        segments[1].end = 4.4
+
+        assert "Speaker 2: I." in naming.dialogue(segments)

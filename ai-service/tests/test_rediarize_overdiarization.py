@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.rediarize import SpeakerRefiner
+from app.rediarize import Reference, SpeakerRefiner
 from tests.test_rediarize import (
     ALICE,
     BOB,
@@ -89,12 +89,12 @@ class TestTheProductionFailure:
         segments, sampler = long_meeting(PRODUCTION)
         refiner = SpeakerRefiner(sampler_for=sampler)
 
-        references, consistency = refiner._references(segments, sampler(b"audio"))
+        references = refiner._references(segments, sampler(b"audio"))
 
         # Five, where the old whole-turn rule produced zero.
         assert len(references) == 5
         assert set(references) == {f"Speaker {i}" for i in range(1, 6)}
-        assert all(consistency[name] > 0 for name in references)
+        assert all(references[name].consistency > 0 for name in references)
 
     async def test_the_five_labels_collapse_onto_the_two_real_voices(self):
         segments, sampler = long_meeting(PRODUCTION)
@@ -196,23 +196,49 @@ class TestWhatMustNeverHappen:
         assert report.merged == 0
         assert {s.speaker for s in out} == {"Speaker 1", "Speaker 2"}
 
+    @staticmethod
+    def _reference(*vectors):
+        return Reference(vector=vectors[0],
+                         windows=[((i * 3.0, i * 3.0 + 3.0), v)
+                                  for i, v in enumerate(vectors)])
+
     def test_a_label_with_no_measurable_spread_is_never_merged(self):
         # A single window has no spread, so "do they agree better than either
         # agrees with itself?" cannot be asked -- and an uncalibrated merge is
         # exactly the guess this rule exists to avoid.
         refiner = SpeakerRefiner()
+        refs = {"A": self._reference(ALICE), "B": self._reference(ALICE, ALICE)}
 
-        assert refiner._one_voice("A", "B", 0.99, {"A": 0.95}) is False
-        assert refiner._one_voice("A", "B", 0.99, {}) is False
+        assert refiner._one_voice("A", "B", 0.99, refs, ["A", "B"]) is False
 
     def test_agreement_is_judged_against_each_label_s_own_spread(self):
         refiner = SpeakerRefiner()
+        varied = blend(ALICE, BOB, 0.2)          # about 0.97 against ALICE
 
-        # They agree better than either agrees with itself: one voice, twice.
-        assert refiner._one_voice("A", "B", 0.99, {"A": 0.95, "B": 0.96}) is True
-        # Both are internally near-perfect, so 0.99 is a real gap: two people
-        # this model renders very similarly, and nothing may be concluded.
-        assert refiner._one_voice("A", "B", 0.99, {"A": 0.999, "B": 0.999}) is False
+        # Each label's own windows only agree at ~0.97, so agreeing with each
+        # other at 0.99 is better than either manages alone: one voice, twice.
+        loose = {"A": self._reference(ALICE, varied), "B": self._reference(ALICE, varied)}
+        assert refiner._one_voice("A", "B", 0.99, loose, ["A", "B"]) is True
+
+        # Both are internally perfect, so 0.99 is a real gap: two people this
+        # model renders very similarly, and nothing may be concluded.
+        tight = {"A": self._reference(ALICE, ALICE), "B": self._reference(BOB, BOB)}
+        assert refiner._one_voice("A", "B", 0.99, tight, ["A", "B"]) is False
+
+    def test_a_third_voice_nearly_as_close_blocks_the_merge(self):
+        # One cosine between two averages is not meeting-wide evidence. Where
+        # some other established voice is almost as close, these references are
+        # not telling people apart at all.
+        refiner = SpeakerRefiner()
+        varied = blend(ALICE, BOB, 0.2)
+        refs = {
+            "A": self._reference(ALICE, varied),
+            "B": self._reference(ALICE, varied),
+            "C": self._reference(ALICE, varied),
+        }
+        # C is identical to both, so it is a duplicate rather than a rival and
+        # must not protect them from being recognised.
+        assert refiner._one_voice("A", "B", 0.99, refs, ["A", "B", "C"]) is True
 
     async def test_an_unattributed_turn_is_not_given_a_voice(self):
         segments, sampler = long_meeting([("A", ALICE), ("B", BOB), ("A", ALICE)])

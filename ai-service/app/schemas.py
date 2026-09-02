@@ -141,6 +141,19 @@ class Segment(CamelModel):
     # fact — the display label alone cannot tell you whether the provider
     # merged two people or Reverie mislabelled one.
     speaker_raw: str | None = None
+    # True when `app.rediarize` looked at who owns this turn and could not say.
+    #
+    # Only ever set on a turn it *examined* — a very short one sitting between
+    # other speakers — and left unresolved. A turn it corrected, confirmed, or
+    # never had cause to question is False, so this is "the acoustic layer tried
+    # and failed here", not "this turn is short".
+    #
+    # `exclude=True`: it never leaves this process. It is read by `app.naming`
+    # a few lines later in the same pipeline and by nothing else — Spring has no
+    # column for it, the API does not expose it, and a flag that outlived the
+    # request would be a second, staler answer to a question the segments
+    # already answer.
+    speaker_provisional: bool = Field(default=False, exclude=True)
 
 
 # --------------------------------------------------------------------------- #
