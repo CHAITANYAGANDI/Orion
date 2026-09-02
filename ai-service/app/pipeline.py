@@ -319,9 +319,15 @@ class Pipeline:
             if refinement.changed:
                 # The flat text carries the speaker prefixes and is what the
                 # summarizer reads, so it has to be rebuilt from the corrected
-                # turns rather than left describing the old ones.
+                # turns rather than left describing the old ones. A merge
+                # renames turns without moving a word, and needs this exactly as
+                # much as a split does.
                 transcript.transcript = _joined(transcript.segments) or transcript.transcript
-            elif refinement.skipped_reason:
+                logger.info(
+                    "Speaker refinement corrected %s: %s",
+                    meeting_id, refinement.as_log_fields(),
+                )
+            if not refinement.changed and refinement.skipped_reason:
                 # Say why it declined, which nothing used to.
                 #
                 # Refinement is the one thing standing between a provider that

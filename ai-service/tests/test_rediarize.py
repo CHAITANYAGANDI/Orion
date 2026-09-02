@@ -717,11 +717,13 @@ class TestTheDiagnosticIsSafeToShip:
         from app.rediarize import Report
 
         report = Report(examined=3, split=0, references=1, provider_speakers=3,
+                        merged=2, canonical_speakers=1,
                         skipped_reason="fewer than two speakers with usable reference audio")
 
         assert report.as_log_fields() == (
             "reason=fewer than two speakers with usable reference audio "
-            "examinedTurns=3 usableReferences=1 providerSpeakers=3"
+            "examinedTurns=3 usableReferences=1 providerSpeakers=3 "
+            "mergedLabels=2 canonicalSpeakers=1 splitTurns=0"
         )
 
     def test_every_field_is_a_count_or_the_reason(self):
