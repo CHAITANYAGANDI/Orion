@@ -106,6 +106,23 @@ from app.voiceprints import cosine
 
 logger = logging.getLogger("ai-service.rediarize")
 
+#: Why the acoustic stage did not produce evidence. A closed set, because these
+#: strings are logged on a deployment holding other people's meetings and a
+#: message assembled from a failure is a message that can carry a path.
+#:
+#: The first three are new, and the reason they exist is a production meeting
+#: that reported the fourth. Twenty-seven segments, five provider labels, audio
+#: downloaded, and `usableReferences=0` — which reads as "this recording has
+#: nothing usable in it" and was not what happened. Every embedding call had
+#: failed, identically, and the failure had been caught and turned into `None`
+#: one span at a time. The refiner then reported the absence of evidence it had
+#: never been in a position to produce.
+DECODE_FAILED = "the recording could not be decoded"
+MODEL_UNAVAILABLE = "the embedding model could not be loaded"
+NOTHING_EMBEDDED = "the embedder returned nothing for any span"
+NO_REFERENCE_AUDIO = "no turn produced usable reference audio"
+ONE_SPEAKER_ONLY = "only one speaker produced usable reference audio"
+
 #: Returns the recording's bytes. Called at most once per meeting, and only when
 #: there is a turn worth examining — so a meeting the provider got right costs
 #: nothing at all.
@@ -294,6 +311,41 @@ class Limits:
     max_reference_similarity: float = 0.55
 
 
+class _Unprepared(Exception):
+    """The acoustic stage could not start, with one of the reasons above.
+
+    Separate from `SpeakerEmbeddingUnavailable` on purpose: that one means both
+    "this span is too short to judge", which is ordinary and expected several
+    times a meeting, and "there is no model", which is a deployment being
+    broken. Collapsing the two is what made a broken deployment look like a
+    quiet recording.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+@dataclass
+class _Embedding:
+    """What the embedder was asked for and what came back. Counts only.
+
+    No vectors, no spans, no audio — this exists so that "nothing could be
+    embedded" and "nothing was worth embedding" stop being the same log line.
+    """
+
+    attempts: int = 0
+    successes: int = 0
+    #: The embedder declined: less than `MIN_SPAN_SECONDS` of audio in the span.
+    #: Ordinary, and expected on the short turns near a boundary.
+    refusals: int = 0
+    #: It raised for some other reason. Never ordinary.
+    failures: int = 0
+    #: Seconds the decoder produced, so a recording that decoded to almost
+    #: nothing is distinguishable from one the model could not read.
+    audio_seconds: float = 0.0
+
+
 @dataclass
 class Report:
     """What happened, for the log line and the tests.
@@ -355,6 +407,22 @@ class Report:
     #: `substantial_reassigned` -- given to a different voice.
     regions: int = 0
     regions_withheld: int = 0
+    #: What the embedder was actually asked for and what came back, and how
+    #: much audio the decoder produced. The four figures that separate "this
+    #: recording had nothing usable in it" from "the acoustic stage never
+    #: worked" -- which were one log line until a production meeting spent a
+    #: deployment cycle looking like the first and being the second.
+    embedding_attempts: int = 0
+    embedding_successes: int = 0
+    embedding_refusals: int = 0
+    embedding_failures: int = 0
+    audio_seconds: int = 0
+
+    #: Whether region reconciliation ran at all. The invariant this release is
+    #: about: usable acoustic regions exist -> the region stage gets to look at
+    #: them. It is not a claim that it changed anything.
+    reconciliation_ran: bool = False
+
     #: Label pairs that landed in the maybe-band and were left as two
     #: speakers. Non-zero is not a failure; it is the error-cost policy
     #: working, and it is worth seeing because it used to abandon merging
@@ -392,7 +460,13 @@ class Report:
             f"heterogeneousLabels={self.heterogeneous_labels} "
             f"regions={self.regions} "
             f"regionsWithheld={self.regions_withheld} "
-            f"mergeAmbiguousPairs={self.merge_ambiguous}"
+            f"mergeAmbiguousPairs={self.merge_ambiguous} "
+            f"audioSeconds={self.audio_seconds} "
+            f"embeddingAttempts={self.embedding_attempts} "
+            f"embeddingSuccesses={self.embedding_successes} "
+            f"embeddingRefusals={self.embedding_refusals} "
+            f"embeddingFailures={self.embedding_failures} "
+            f"reconciliationRan={self.reconciliation_ran}"
         )
 
 
@@ -502,6 +576,22 @@ def _identity_of(seg: Segment) -> tuple[str, str | None, str]:
     return (seg.speaker, seg.speaker_key, seg.speaker_status)
 
 
+def _why_nothing(priors: dict, counts: "_Embedding") -> str:
+    """Which of the three shapes of "no evidence" this actually is.
+
+    Ordered by how far the stage got. An embedder that answered nothing at all
+    is a different fact about the deployment from a recording whose turns were
+    all too short, and both are different from a meeting with one speaker in
+    it -- and the three used to share a sentence that described only the middle
+    one.
+    """
+    if counts.attempts and not counts.successes:
+        return NOTHING_EMBEDDED
+    if not priors:
+        return NO_REFERENCE_AUDIO
+    return ONE_SPEAKER_ONLY
+
+
 def _reference_of(regions: Sequence[Region], limits: Limits) -> Reference:
     """One label's regions, as the reference the rest of this module reads."""
     return Reference(
@@ -573,28 +663,86 @@ class SpeakerRefiner:
     def available(self) -> bool:
         return self._sampler_for is not None or self.embedder is not None
 
-    def _default_sampler(self, audio: bytes) -> Sampler:
-        """Decode once, then embed whatever stretch is asked for.
+    def _sampler(self, audio: bytes, counts: "_Embedding") -> Sampler:
+        """The sampler, wrapped so that failures are counted rather than lost.
 
-        The PCM is held for the length of one meeting's refinement and dropped
-        with the closure. Nothing is written to disk, and no waveform is logged.
+        <h2>The bug this wrapper exists for</h2>
+
+        The counting used to be no counting, and the classification used to be
+        `except Exception: return None`. Read one span at a time that is
+        defensible — a stretch the embedder will not judge is a stretch this
+        module does not judge either. Read across a meeting it is a hole: an
+        embedder that cannot load at all fails **every** span, identically and
+        silently, and the refiner then reports that the *recording* had no
+        usable reference audio in it.
+
+        A production meeting did exactly that. Twenty-seven segments, five
+        provider labels, audio downloaded successfully, and
+        `usableReferences=0 regions=0` — a sentence about the audio, describing
+        a stage that never ran.
+
+        So the three outcomes are now separate. A vector is a success. `None`
+        from an embedder that is working is a refusal, which is ordinary. An
+        exception is a failure, which is not.
         """
-        from app.providers.ecapa_embedder import decode_to_pcm, take_spans
-
-        pcm = decode_to_pcm(audio)
+        inner = (self._sampler_for(audio) if self._sampler_for
+                 else self._default_sampler(audio, counts))
         cache: dict[tuple[float, float], list[float] | None] = {}
 
         def sample(start: float, end: float) -> list[float] | None:
             key = (round(start, 2), round(end, 2))
-            if key not in cache:
-                try:
-                    cache[key] = self.embedder.embed(take_spans(pcm, [(start, end)]))
-                except Exception:  # noqa: BLE001 - too short, or a bad stretch
-                    # A stretch that cannot be embedded is one this module
-                    # declines to judge, which is the same outcome as judging it
-                    # and finding nothing.
-                    cache[key] = None
-            return cache[key]
+            if key in cache:
+                return cache[key]
+            counts.attempts += 1
+            try:
+                vector = inner(start, end)
+            except Exception:  # noqa: BLE001 - classified, not interpreted
+                vector = None
+                counts.failures += 1
+            else:
+                if vector:
+                    counts.successes += 1
+                else:
+                    counts.refusals += 1
+            cache[key] = vector
+            return vector
+
+        return sample
+
+    def _default_sampler(self, audio: bytes, counts: "_Embedding") -> Sampler:
+        """Decode once, load the model once, then embed whatever is asked for.
+
+        The PCM is held for the length of one meeting's refinement and dropped
+        with the closure. Nothing is written to disk, and no waveform is logged.
+
+        `load()` is called **here** rather than being left to the first `embed`.
+        It is idempotent either way, so this is not about cost: `embed` calls it
+        internally and raises the same exception class whether the model is
+        missing or the span is short, so a model that cannot be loaded was
+        indistinguishable from a meeting of very short turns — once per window,
+        for the whole meeting. Asked once, up front, it is a single answer about
+        the deployment.
+        """
+        from app.providers.ecapa_embedder import (
+            SAMPLE_RATE,
+            SpeakerEmbeddingUnavailable,
+            decode_to_pcm,
+            take_spans,
+        )
+
+        try:
+            pcm = decode_to_pcm(audio)
+        except SpeakerEmbeddingUnavailable as exc:
+            raise _Unprepared(DECODE_FAILED) from exc
+        counts.audio_seconds = len(pcm) / SAMPLE_RATE
+
+        try:
+            self.embedder.load()
+        except SpeakerEmbeddingUnavailable as exc:
+            raise _Unprepared(MODEL_UNAVAILABLE) from exc
+
+        def sample(start: float, end: float) -> list[float] | None:
+            return self.embedder.embed(take_spans(pcm, [(start, end)]))
 
         return sample
 
@@ -665,18 +813,46 @@ class SpeakerRefiner:
         read from here — one meeting is refined at a time, because the pipeline
         awaits this before moving on.
         """
-        embed = (self._sampler_for or self._default_sampler)(audio)
+        # Whatever happens below, the meeting already has this many canonical
+        # speakers. Reporting zero on an early return was a third of the reason
+        # the production failure read as "the recording is empty": five provider
+        # labels went in and `canonicalSpeakers=0` came out, which describes no
+        # possible meeting.
+        report.canonical_speakers = report.provider_speakers
+
+        counts = _Embedding()
+        try:
+            embed = self._sampler(audio, counts)
+        except _Unprepared as exc:
+            # The acoustic stage could not start. Say *that*, rather than
+            # reporting the absence of evidence it was never in a position to
+            # produce.
+            report.skipped_reason = exc.reason
+            return segments, report
+        finally:
+            report.audio_seconds = int(counts.audio_seconds)
         del audio
 
         priors = self._regions(segments, embed)
-        refs = {name: _reference_of(found, self._limits)
-                for name, found in priors.items()}
-        report.references = len(refs)
         report.regions = sum(len(found) for found in priors.values())
-        report.heterogeneous_labels = sum(1 for r in refs.values() if r.heterogeneous)
-        report.canonical_speakers = len(refs)
-        if len(refs) < 2:
-            report.skipped_reason = "fewer than two speakers with usable reference audio"
+        report.references = len(priors)
+        report.embedding_attempts = counts.attempts
+        report.embedding_successes = counts.successes
+        report.embedding_refusals = counts.refusals
+        report.embedding_failures = counts.failures
+
+        # The gate, and it is worth being exact about what it gates. `priors` is
+        # the region evidence itself -- one entry per speaker the audio could
+        # say anything about -- so this is not a legacy reference builder
+        # standing in front of the region stage. It is the region stage's own
+        # input, and below two speakers there is nothing for it to compare.
+        #
+        # What was wrong was the reason it gave. One sentence covered a
+        # recording with nothing usable in it, a recording with one speaker, and
+        # an embedder that never worked, and only the last was true in
+        # production.
+        if len(priors) < 2:
+            report.skipped_reason = _why_nothing(priors, counts)
             return segments, report
 
         # Everything above this line still reasons in provider-label space,
@@ -693,6 +869,7 @@ class SpeakerRefiner:
         # two labels for a whole meeting, with a single foreign turn under one
         # of them -- was unreachable from either.
         segments, refs = self._reconcile(segments, priors, report)
+        report.reconciliation_ran = True
         if len(refs) < 2:
             # One voice, recorded under several labels. Nothing left to split
             # against, and the reconciliation is still worth keeping.
@@ -825,11 +1002,14 @@ class SpeakerRefiner:
                 candidates.setdefault(seg.speaker, []).append((index, seg, spans))
 
         built: dict[str, list[Region]] = {}
-        for speaker, found in candidates.items():
+        for ordinal, (speaker, found) in enumerate(candidates.items(), start=1):
             regions: list[Region] = []
             sampled = 0.0
+            windows = successes = 0
             for index, seg, spans in self._spread(found):
+                windows += len(spans)
                 vectors = [v for v in (embed(lo, hi) for lo, hi in spans) if v]
+                successes += len(vectors)
                 if not vectors:
                     continue
                 seconds = sum(hi - lo for lo, hi in spans)
@@ -842,8 +1022,19 @@ class SpeakerRefiner:
                     samples=vectors,
                 ))
                 sampled += seconds
-            if regions and sampled >= floor:
+            accepted = bool(regions) and sampled >= floor
+            if accepted:
                 built[speaker] = regions
+            # Per label, so "which speaker had no evidence, and how far did it
+            # get?" is answerable without opening the recording. An ordinal
+            # rather than the label, because a provider running speaker
+            # identification returns real names in that field.
+            self._trace(
+                "label", ordinal=ordinal, providerSegments=len(found),
+                candidateRegions=len(self._spread(found)), sampledWindows=windows,
+                embeddingSuccesses=successes, independentRegions=len(regions),
+                seconds=round(sampled, 1), accepted=accepted,
+            )
         return built
 
     # --- micro-turn islands -------------------------------------------------- #

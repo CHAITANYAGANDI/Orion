@@ -277,7 +277,7 @@ async def test_a_meeting_with_one_speaker_is_never_touched():
     out, report = await refine(solo, sampler)
 
     assert report.split == 0
-    assert "fewer than two" in (report.skipped_reason or "")
+    assert report.skipped_reason == "only one speaker produced usable reference audio"
     assert len(out) == 4
 
 
@@ -371,7 +371,15 @@ async def test_an_embedder_that_throws_loses_nothing():
     out, report = await refine(segments, exploding)
 
     assert out == segments
-    assert (report.skipped_reason or "").startswith("failed:")
+    # And it says which thing broke. This used to read `failed: RuntimeError` --
+    # true, and silent about how much had been attempted -- and on the default
+    # sampler it was caught per span and reported as the *recording* having no
+    # usable audio in it. A production meeting spent a deployment cycle looking
+    # like that.
+    assert report.skipped_reason == "the embedder returned nothing for any span"
+    assert report.embedding_attempts == report.embedding_failures > 0
+    assert report.embedding_successes == 0
+    assert report.reconciliation_ran is False
 
 
 async def test_without_the_model_it_reports_itself_off_and_changes_nothing():
@@ -726,7 +734,9 @@ class TestTheDiagnosticIsSafeToShip:
             "mergedLabels=2 canonicalSpeakers=1 splitTurns=0 "
             "microTurnsExamined=0 microTurnsCorrected=0 microTurnsAmbiguous=0 "
             "rawLabelsSplit=0 substantialTurnsReassigned=0 rawLabelsWouldSplit=0 "
-            "heterogeneousLabels=0 regions=0 regionsWithheld=0 mergeAmbiguousPairs=0"
+            "heterogeneousLabels=0 regions=0 regionsWithheld=0 mergeAmbiguousPairs=0 "
+            "audioSeconds=0 embeddingAttempts=0 embeddingSuccesses=0 "
+            "embeddingRefusals=0 embeddingFailures=0 reconciliationRan=False"
         )
 
     def test_every_field_is_a_count_or_the_reason(self):
@@ -740,7 +750,9 @@ class TestTheDiagnosticIsSafeToShip:
         for field in dataclasses.fields(Report):
             if field.name == "skipped_reason":
                 continue
-            assert field.type in ("int", int), (
+            # `bool` is allowed alongside `int`: it is a count of one thing and
+            # is exactly as incapable of carrying a name or a sentence.
+            assert field.type in ("int", int, "bool", bool), (
                 f"{field.name} is not a count; decide whether it may be logged"
             )
 
@@ -751,6 +763,14 @@ class TestTheDiagnosticIsSafeToShip:
         "no audio available",
         "fewer than two speakers with usable reference audio",
         "speakers too alike to judge (cos=0.61)",
+        # The five the execution-flow audit added. Each names a different stage
+        # of the acoustic pipeline failing, where one sentence used to cover all
+        # of them and described only the middle one.
+        "the recording could not be decoded",
+        "the embedding model could not be loaded",
+        "the embedder returned nothing for any span",
+        "no turn produced usable reference audio",
+        "only one speaker produced usable reference audio",
     ])
     def test_every_reason_is_a_fixed_phrase(self, reason):
         # None of the six is built from anything the meeting said. The only
