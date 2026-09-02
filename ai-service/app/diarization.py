@@ -262,6 +262,22 @@ def split_by_speaker(
     about and leaves gaps mid-utterance, and honouring every gap would shred a
     sentence into alternating known and unknown fragments. A gap at the *start*
     of a run is a genuine unknown and is kept as one.
+
+    <h2>Why a two-word run still becomes a turn here</h2>
+
+    Production transcripts contain runs like "and I'm—" and "And that—" that are
+    the surrounding speaker carrying on, and it is tempting to suppress them
+    with a minimum length. Nothing here does, for two reasons. The rule cannot
+    be written: "Exactly." and "and I'm—" are the same shape, and the difference
+    between them is in the sound. And this function has no sound — it runs in
+    the adapter, on a parsed response, before any audio is fetched.
+
+    So a raw label change makes a turn, always, and the question of whether that
+    turn is really a second person is asked once, later, where the audio is:
+    `app.regions` requires an actual acoustic region before a label may be a
+    voice, and `SpeakerRefiner` marks a label that never produced one as
+    provisional so that no name can be pinned to it. Splitting here is what
+    keeps the evidence; nothing is decided by it.
     """
     runs: list[SpeakerRun] = []
     for word in words:

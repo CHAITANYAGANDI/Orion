@@ -92,8 +92,17 @@ from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Sequence
 
 from app.diarization import join_words
+from app.regions import (
+    Cluster,
+    Region,
+    consistency as _consistency,
+    separated,
+    one_voice,
+    reconcile,
+    robust_centroid as _robust_centroid,
+)
 from app.schemas import Segment, Word
-from app.voiceprints import centroid, cosine
+from app.voiceprints import cosine
 
 logger = logging.getLogger("ai-service.rediarize")
 
@@ -221,6 +230,37 @@ class Limits:
     #: and varying is not separating.
     split_margin: float = 0.10
 
+    #: Regions a label needs before the minority of them may be held back.
+    #: Two, not three: a label carrying exactly one turn of somebody else's
+    #: is the commonest shape of the failure, and there is no third region
+    #: to break the tie with. What makes it safe at two is that the rule is
+    #: self-calibrating -- with one region each side there is no measurable
+    #: internal spread, so the bar falls back to a flat `split_margin` below
+    #: perfect agreement, which two recordings of one voice clear easily --
+    #: and that holding a region back never moves it anywhere by itself.
+    withhold_min_regions: int = 2
+
+    #: Region-to-region comparisons a merge has to rest on. Two labels that
+    #: each spoke once produce exactly one, and one cosine from one model
+    #: over one stretch of audio is the claim this module exists to refuse.
+    #: If either is really a duplicate of a third label that did speak
+    #: twice, the merge still reaches them through it.
+    merge_min_comparisons: int = 2
+    #: The share of those comparisons that must clear `merge_similarity`.
+    #: Not all of them: six regions a side is thirty-six comparisons, and
+    #: demanding unanimity lets one unlucky region -- a cough, an overlap, a
+    #: laugh -- refuse a merge the other thirty-five support. Safe only
+    #: because a label whose regions really split into two voices has had
+    #: the minority withheld before this is asked.
+    merge_agreement: float = 0.75
+
+    #: How much audio a withheld region needs before it may be given to a
+    #: different voice. Far above the embedder's own 0.8s floor, because a
+    #: fragment identified from one second of audio is the shape of every
+    #: regression this module has caused. A region that cannot clear it
+    #: simply stays where the provider put it.
+    reassign_min_seconds: float = 2.0
+
     #: Whether a provider label found to cover two voices is actually split.
     #:
     #: **Off.** Built for one production case -- a substantial turn nine minutes
@@ -300,6 +340,18 @@ class Report:
     labels_would_split: int = 0
     heterogeneous_labels: int = 0
 
+    #: The region-level view of the same meeting. `merged` counts labels
+    #: folded together; these count the individual turns that were embedded,
+    #: held back from their label's own reference, and -- through
+    #: `substantial_reassigned` -- given to a different voice.
+    regions: int = 0
+    regions_withheld: int = 0
+    #: Label pairs that landed in the maybe-band and were left as two
+    #: speakers. Non-zero is not a failure; it is the error-cost policy
+    #: working, and it is worth seeing because it used to abandon merging
+    #: for the entire meeting rather than for the pair.
+    merge_ambiguous: int = 0
+
     @property
     def changed(self) -> bool:
         # Merging and island corrections both rename turns, so they change the
@@ -328,7 +380,10 @@ class Report:
             f"rawLabelsSplit={self.labels_split} "
             f"substantialTurnsReassigned={self.substantial_reassigned} "
             f"rawLabelsWouldSplit={self.labels_would_split} "
-            f"heterogeneousLabels={self.heterogeneous_labels}"
+            f"heterogeneousLabels={self.heterogeneous_labels} "
+            f"regions={self.regions} "
+            f"regionsWithheld={self.regions_withheld} "
+            f"mergeAmbiguousPairs={self.merge_ambiguous}"
         )
 
 
@@ -389,65 +444,6 @@ def _clear_best(vector: list[float], references: dict[str, list[float]],
     return ranked[0][1]
 
 
-#: Marks the second half of a label being split, until `_renumber` gives every
-#: speaker a real number again. A control character so it cannot collide with a
-#: label the provider or a user could produce.
-_HALF = chr(0) + "b"
-
-
-def _other_half(name: str) -> str:
-    return f"{name}{_HALF}"
-
-
-def _is_half(name: str) -> bool:
-    return name.endswith(_HALF)
-
-
-def _span_seconds(windows) -> float:
-    return sum(hi - lo for (lo, hi), _ in windows)
-
-
-def _cross_similarity(first, second, *, worst: bool = False) -> float:
-    """How alike two sets of windows are: the mean, or the weakest pair."""
-    pairs = [cosine(a, b) for _, a in first for _, b in second]
-    if not pairs:
-        return 0.0
-    return min(pairs) if worst else sum(pairs) / len(pairs)
-
-
-def _bisect(windows):
-    """Split one speaker's windows into the two most separated groups, or None.
-
-    Seeded from the least similar pair rather than at random, so the answer does
-    not depend on window order, and every other window joins whichever seed it
-    is closer to. Deliberately the crudest clustering that can answer the
-    question -- the decision about whether the two groups are *really* two
-    people is made by the caller against the groups' own spread, and a cleverer
-    partition would not change that judgement, only make it harder to read.
-    """
-    if len(windows) < 2:
-        # Nothing to divide. Two regions is enough to ask the question -- each
-        # side is then a whole turn, not a fragment of one -- and the caller
-        # still requires both sides to hold real speech before believing it.
-        return None
-    worst, seeds = 2.0, None
-    for i, (_, a) in enumerate(windows):
-        for j, (_, b) in enumerate(windows[i + 1:], start=i + 1):
-            score = cosine(a, b)
-            if score < worst:
-                worst, seeds = score, (i, j)
-    if seeds is None:
-        return None
-    left_seed, right_seed = windows[seeds[0]][1], windows[seeds[1]][1]
-    first, second = [], []
-    for window in windows:
-        target = first if cosine(window[1], left_seed) >= cosine(window[1], right_seed) else second
-        target.append(window)
-    if not first or not second:
-        return None
-    return first, second
-
-
 @dataclass
 class Reference:
     """What one canonical speaker sounds like, and the evidence behind it.
@@ -489,61 +485,48 @@ class Reference:
         return _consistency(self.vectors) or _consistency(self.samples)
 
 
-def _consistency(vectors: list[list[float]]) -> float | None:
-    """How alike one speaker's own windows are, or None if there is only one.
-
-    This is the number that makes merging safe without a magic threshold. Two
-    labels scoring 0.99 against each other means nothing on its own: it is
-    "obviously the same person" if either label's own windows only manage 0.95
-    among themselves, and "two people this model cannot separate" if they manage
-    0.999. The same figure, opposite conclusions, and the difference is a
-    property of the recording rather than of any constant.
-
-    A speaker with one window has no spread to measure, and no merge involving
-    them can be justified this way.
-    """
-    if len(vectors) < 2:
-        return None
-    pairs = [
-        cosine(a, b)
-        for i, a in enumerate(vectors)
-        for b in vectors[i + 1:]
-    ]
-    return sum(pairs) / len(pairs)
-
-
-def _robust_centroid(vectors: list[list[float]]) -> list[float]:
-    """The average of the windows, after discarding the least typical one.
-
-    A reference is only as good as the audio behind it, and one window can be
-    ruined by a cough, a door, or the speaker the provider missed. Averaging
-    everything lets that one window pull the reference toward a voice its owner
-    does not have; the effect is small, and small is enough, because every later
-    decision is a margin between two similarities.
-
-    Dropping the *single* least central vector is deliberately the weakest
-    version of this. A median or a medoid would throw away more and would also
-    discard the natural variation that makes a reference describe a person
-    rather than a moment. With fewer than three windows nothing is dropped —
-    there is no majority to be typical of, and two windows disagreeing is not
-    evidence about which one is wrong.
-    """
-    if len(vectors) < 3:
-        return centroid(vectors)
-    scores = [
-        sum(cosine(vec, other) for j, other in enumerate(vectors) if j != i)
-        for i, vec in enumerate(vectors)
-    ]
-    worst = scores.index(min(scores))
-    return centroid([v for i, v in enumerate(vectors) if i != worst])
-
-
 def _duration(seg: Segment) -> float:
     return max(0.0, float(seg.end) - float(seg.start))
 
 
 def _identity_of(seg: Segment) -> tuple[str, str | None, str]:
     return (seg.speaker, seg.speaker_key, seg.speaker_status)
+
+
+def _reference_of(regions: Sequence[Region], limits: Limits) -> Reference:
+    """One label's regions, as the reference the rest of this module reads."""
+    return Reference(
+        vector=_robust_centroid([region.vector for region in regions]),
+        windows=[((region.start, region.end), region.vector) for region in regions],
+        samples=[vec for region in regions for vec in region.samples],
+        heterogeneous=_holds_two_voices(regions, limits),
+    )
+
+
+def _holds_two_voices(regions: Sequence[Region], limits: Limits) -> bool:
+    """Whether this label's own regions fall into two separated voices.
+
+    Detection, and nothing else. What it is used for is making the merge refuse:
+    a label that disagrees with itself has a reference describing an average of
+    two people, and an average of two people can resemble a third convincingly.
+    """
+    split = separated(regions, limits)
+    if split is None:
+        return False
+    return sum(region.seconds for region in split[1]) >= limits.reference_floor_seconds
+
+
+def _cluster_of(name: str, reference: Reference) -> Cluster:
+    """A `Reference` seen as the regions it was built from."""
+    return Cluster(
+        key=name,
+        regions=[
+            Region(index=index, start=lo, end=hi, seconds=hi - lo,
+                   vector=vector, samples=[vector])
+            for index, ((lo, hi), vector) in enumerate(reference.windows)
+        ],
+        heterogeneous=reference.heterogeneous,
+    )
 
 
 class SpeakerRefiner:
@@ -561,6 +544,7 @@ class SpeakerRefiner:
         self._embedder = embedder
         self._checked = embedder is not None
         self._sampler_for = sampler_for
+        self._trace_enabled: bool | None = None
 
     # --- availability ------------------------------------------------------- #
     @property
@@ -675,45 +659,66 @@ class SpeakerRefiner:
         embed = (self._sampler_for or self._default_sampler)(audio)
         del audio
 
-        refs = self._references(segments, embed)
+        priors = self._regions(segments, embed)
+        refs = {name: _reference_of(found, self._limits)
+                for name, found in priors.items()}
         report.references = len(refs)
+        report.regions = sum(len(found) for found in priors.values())
         report.heterogeneous_labels = sum(1 for r in refs.values() if r.heterogeneous)
         report.canonical_speakers = len(refs)
         if len(refs) < 2:
             report.skipped_reason = "fewer than two speakers with usable reference audio"
             return segments, report
 
-        # Over-diarization, before under-diarization. The provider can be wrong
-        # in both directions in one recording -- five labels for two people, and
-        # a turn holding two of them -- and the merge has to happen first
-        # because every check below compares references to each other. Left
-        # unmerged, one person's two labels are a pair of references that are
-        # nearly identical, and the "too alike to judge" gate reads that as a
-        # model that cannot separate the voices in this meeting and declines
-        # everything. That is exactly what the production recording did.
-        segments, refs, merged = self._merge_labels(segments, refs)
-        report.merged = merged
-        report.canonical_speakers = len(refs)
+        # Everything above this line still reasons in provider-label space,
+        # because a label is what the provider handed over. Everything below it
+        # reasons in region space, and `app.regions` is the crossing: it decides
+        # which labels are one voice, which individual turns were filed under
+        # the wrong one, and what the canonical numbering should be -- from the
+        # audio, with the provider's labels as a prior rather than a constraint.
+        #
+        # It replaced two separate passes that each argued about labels. They
+        # could fold two labels together and they could notice a label holding
+        # two people, but neither could say *which turn* was the wrong one, so
+        # the commonest failure in the evidence -- one voice alternating between
+        # two labels for a whole meeting, with a single foreign turn under one
+        # of them -- was unreachable from either.
+        segments, refs = self._reconcile(segments, priors, report)
         if len(refs) < 2:
             # One voice, recorded under several labels. Nothing left to split
-            # against, and the merge is still worth keeping.
+            # against, and the reconciliation is still worth keeping.
             report.skipped_reason = "one voice once the provider's labels were merged"
             return segments, report
 
-        # Under-diarization at the label level: one provider label covering two
-        # people. The mirror of the merge above and it has to run after it, so
-        # that what is examined for heterogeneity is a canonical speaker rather
-        # than whichever fragment of one the provider happened to label.
-        segments, refs = self._split_labels(segments, refs, embed, report)
-        report.canonical_speakers = len(refs)
-
         references = {name: ref.vector for name, ref in refs.items()}
-        worst = max(
+        # The best-separated pair in the meeting, not the worst.
+        #
+        # This used to take the worst, and decline everything if any two
+        # speakers were closer than the bar. The reasoning was that a model
+        # which cannot separate two voices in this recording is guessing about
+        # all of them -- and in a two-speaker meeting that is exactly right, and
+        # is still what happens here, because with one pair the best and the
+        # worst are the same number.
+        #
+        # In a six-speaker meeting it is not right at all. Two participants who
+        # happen to sound alike silenced every correction for the other four,
+        # including corrections resting on margins of 0.9 against 0.1. The real
+        # meeting has six labels and a pair at 0.62, and this branch is why not
+        # one of its mislabelled fragments was ever examined.
+        #
+        # What protects the confusable pair is not this gate but the margin each
+        # decision carries in its own right: `_clear_best` refuses whenever the
+        # top two candidates are within `assign_margin`, which is the same
+        # judgement made where it applies rather than everywhere. So the gate
+        # now asks the only question that is genuinely about the recording --
+        # can this model tell *anybody* here apart? -- and leaves the rest to
+        # the decisions.
+        apart = min(
             cosine(a, b)
             for i, a in enumerate(references.values())
             for b in list(references.values())[i + 1:]
         )
-        if worst > self._limits.max_reference_similarity:
+        if apart > self._limits.max_reference_similarity:
             # Not a failure. The honest reading is that this model cannot
             # separate these voices in this recording, and a split made on that
             # basis would be a guess with a confident face.
@@ -725,7 +730,7 @@ class SpeakerRefiner:
             # The cosine is kept: it is a scalar derived from two references,
             # not a template, and it is the only number that distinguishes "this
             # model cannot separate these voices" from a threshold being wrong.
-            report.skipped_reason = f"speakers too alike to judge (cos={worst:.2f})"
+            report.skipped_reason = f"speakers too alike to judge (cos={apart:.2f})"
             return segments, report
 
         # Layer 2: a single turn filed under the wrong speaker, while that
@@ -759,235 +764,78 @@ class SpeakerRefiner:
         return out, report
 
     # --- references --------------------------------------------------------- #
-    def _references(self, segments: Sequence[Segment], embed):
-        """What each speaker sounds like, from short turns *and* window interiors.
+    def _references(self, segments: Sequence[Segment], embed) -> dict[str, "Reference"]:
+        """What each provider label sounds like, before anything is reconciled."""
+        return {name: _reference_of(found, self._limits)
+                for name, found in self._regions(segments, embed).items()}
 
-        <h2>The bug this replaced</h2>
+    def _regions(self, segments: Sequence[Segment], embed) -> dict[str, list[Region]]:
+        """One embedded region per turn, grouped by the label the provider gave it.
 
-        This used to take whole turns and only whole turns, and only ones no
-        longer than `reference_to_seconds`. The reasoning was sound — a short
-        turn cannot be concealing a second speaker, so it is the safest evidence
-        of what one person sounds like — and it had a hole big enough to lose a
-        meeting through: **a recording made entirely of long turns has no safe
-        evidence at all.**
+        <h2>Why a region and not a window</h2>
 
-        One did, in production:
+        The rule this replaced took short turns *exclusively* whenever their
+        total reached the floor, and only looked at long ones when it did not.
+        Being short makes a turn trustworthy -- it is too brief to be concealing
+        a second speaker -- and the rule treated that as making it sufficient.
+        In a real meeting one provider label held 157 seconds across seven
+        turns; eleven of them were short, so **146 seconds were never looked
+        at**, and four of the eleven were a turn the provider had attributed to
+        the wrong person. A third of that speaker's whole reference was somebody
+        else's voice, with a minute and a half of their own sitting unread.
 
-            AssemblyAI returned 7 segment(s) across 5 speaker(s)
-            reason=fewer than two speakers with usable reference audio
-            usableReferences=0  providerSpeakers=5
-
-        Seven turns over two and a half minutes averages twenty seconds each.
-        Every one of them was longer than the cutoff, so every one was excluded,
-        `by_speaker` came out empty, and refinement returned before examining a
-        single turn — on exactly the recording it was written for.
-
-        <h2>What replaced it</h2>
-
-        The old rule confused two different things: *"is this stretch safe to
-        trust?"* and *"is this whole turn short?"* Only the first matters, and a
-        twenty-second turn contains a great deal of stretch that is perfectly
-        safe. So evidence is now gathered per *window* rather than per turn:
+        So every turn contributes now -- a short one whole, a long one through
+        its interior windows:
 
             turn A, 20s  ->  |--inset--|  win  |  win  |  win  |--inset--|
 
         The insets are the point. A speaker change the provider missed is most
-        likely at the edges of what it labelled — that is where its boundary
-        went wrong — so the interior is the part least likely to be somebody
-        else. Several independent windows beat one long embedding for the same
-        reason a photograph of a face beats a long exposure of one.
+        likely at the *edges* of what it labelled, because that is where its
+        boundary went wrong, so the interior is the part least likely to belong
+        to somebody else.
 
-        A turn short enough to trust whole still is, exactly as before, so every
-        meeting the old rule handled is handled identically.
+        <h2>One turn, one vote</h2>
 
-        Nothing here reads a word of transcript. Windows are chosen by the
+        However many windows fit inside a turn, they are collapsed to a single
+        vector before it counts. A ninety-second turn is better evidence than a
+        four-second one and is not fifteen *independent* observations of it;
+        letting it contribute fifteen vectors would outvote every region it
+        ought to be corroborated by, and would make robust aggregation a
+        formality.
+
+        Nothing here reads a word of transcript. Regions are chosen by the
         clock, and the only thing consulted is the sound.
         """
         floor = self._limits.reference_floor_seconds
-
-        # One region per turn, and every turn contributes -- a short one whole,
-        # a long one through its interior windows.
-        #
-        # This replaced a rule that took short turns *exclusively* whenever they
-        # reached the floor, and only fell back to long ones when they did not.
-        # The reasoning was that a short turn cannot be concealing a second
-        # speaker, which is true and was not the whole question. In a real
-        # meeting one provider label held 157 seconds of audio across seven
-        # turns; eleven of those seconds were short, so 146 were never looked
-        # at -- and four of the eleven were a turn the provider had attributed
-        # to the wrong person. A third of that speaker's entire reference was
-        # somebody else's voice, with a minute and a half of their own sitting
-        # unread.
-        #
-        # Being short makes a turn *trustworthy*, not *sufficient*. Both now
-        # count.
-        regions: dict[str, list[tuple[float, float, list[tuple[float, float]]]]] = {}
-        for seg in segments:
+        candidates: dict[str, list[tuple[int, Segment, list[tuple[float, float]]]]] = {}
+        for index, seg in enumerate(segments):
             if seg.speaker_status != "attributed" or not seg.speaker:
                 continue
             spans = self._reference_windows(seg)
             if spans:
-                regions.setdefault(seg.speaker, []).append(
-                    (float(seg.start), float(seg.end), spans))
+                candidates.setdefault(seg.speaker, []).append((index, seg, spans))
 
-        built: dict[str, Reference] = {}
-        for speaker, found in regions.items():
-            windows: list[tuple[tuple[float, float], list[float]]] = []
-            samples: list[list[float]] = []
+        built: dict[str, list[Region]] = {}
+        for speaker, found in candidates.items():
+            regions: list[Region] = []
             sampled = 0.0
-            for begin, finish, spans in self._spread(found):
+            for index, seg, spans in self._spread(found):
                 vectors = [v for v in (embed(lo, hi) for lo, hi in spans) if v]
                 if not vectors:
                     continue
-                # One vote per region, however many windows fit inside it. A
-                # sixty-second turn is better evidence than a four-second one
-                # and is not fifteen *independent* observations of it; letting
-                # it contribute fifteen vectors would outvote every region it
-                # ought to be corroborated by, and would make the robust
-                # aggregate below a formality.
-                windows.append(((begin, finish), _robust_centroid(vectors)))
-                samples.extend(vectors)
-                sampled += sum(hi - lo for lo, hi in spans)
-            if not windows or sampled < floor:
-                continue
-            built[speaker] = Reference(
-                vector=_robust_centroid([vec for _, vec in windows]),
-                windows=windows,
-                samples=samples,
-                heterogeneous=self._is_heterogeneous(windows),
-            )
+                seconds = sum(hi - lo for lo, hi in spans)
+                regions.append(Region(
+                    index=index,
+                    start=float(seg.start),
+                    end=float(seg.end),
+                    seconds=seconds,
+                    vector=_robust_centroid(vectors),
+                    samples=vectors,
+                ))
+                sampled += seconds
+            if regions and sampled >= floor:
+                built[speaker] = regions
         return built
-
-    def _is_heterogeneous(self, windows) -> bool:
-        """Whether one label's regions fall into two clearly separated voices.
-
-        The same test `_split_labels` applies, computed once here so the merge
-        can read it too. **Detection only** -- nothing is split on it, because
-        that mechanism is disabled pending production evidence.
-
-        What it is used for is making the merge refuse. A label whose own
-        regions disagree has a reference describing an average of two people,
-        and an average of two people can resemble a third convincingly. Merging
-        on that is how two real humans end up under one name.
-        """
-        groups = _bisect(windows)
-        if groups is None:
-            return False
-        first, second = groups
-        within = min(_consistency([v for _, v in first]) or 1.0,
-                     _consistency([v for _, v in second]) or 1.0)
-        if _cross_similarity(first, second) >= within - self._limits.split_margin:
-            return False
-        return min(_span_seconds(first), _span_seconds(second)) >=             self._limits.reference_floor_seconds
-
-    # --- over-diarization --------------------------------------------------- #
-    def _merge_labels(self, segments: list[Segment], references: dict[str, "Reference"]):
-        """Fold provider labels that are one voice into one canonical speaker.
-
-        The provider can be wrong in both directions. This module was written
-        for the merged turn — two people under one label — and production
-        produced the mirror image: **seven turns, five labels, and nowhere near
-        five people in the room.**
-
-        Only the sound is consulted. Not how many labels there are, not how
-        little any of them said, not the transcript. "Too many speakers" is not
-        evidence about any particular pair, and talk-time is not evidence of
-        identity: a person who says one word is a person.
-
-        <h2>Why an ambiguous pair stops everything</h2>
-
-        A pair scoring inside `merge_margin` of the bar abandons merging for the
-        entire meeting rather than merging only the pairs above it. It is
-        tempting to keep the confident ones, and it is wrong: similarity here is
-        one number from one model over one recording, and a pair that lands in
-        the maybe-band is evidence that these references are not clean enough to
-        be concluding anything from — including about the pairs that scored well.
-
-        The asymmetry is the usual one. A refused merge leaves two labels on one
-        person, which a reader sees and can fix with one rename. A wrong merge
-        puts two people under one name and destroys the distinction, and nothing
-        left in the transcript records that it happened.
-
-        `speaker_raw` is never touched. A turn folded from `C` into
-        `Speaker 1` still says the provider called it `C`, which is what keeps
-        this reversible and a complaint traceable.
-        """
-        limits = self._limits
-        names = list(references)
-        same: list[tuple[str, str]] = []
-        for i, a in enumerate(names):
-            for b in names[i + 1:]:
-                score = cosine(references[a].vector, references[b].vector)
-                if score < limits.merge_similarity - limits.merge_margin:
-                    continue                      # comfortably two people
-                if score < limits.merge_similarity:
-                    # Possibly the same person. "Possibly" is not a reason to
-                    # merge anybody, here or anywhere else in this meeting.
-                    return segments, references, 0
-                if not self._one_voice(a, b, score, references, names):
-                    # Alike, but no more alike than either label is to itself.
-                    # Two people this model cannot separate look exactly like
-                    # one person under two labels, and only this tells them
-                    # apart. Refusing is the same admission the "too alike to
-                    # judge" gate makes further down.
-                    return segments, references, 0
-                same.append((a, b))
-        if not same:
-            return segments, references, 0
-
-        group = {name: name for name in names}
-
-        def root(name: str) -> str:
-            while group[name] != name:
-                group[name] = group[group[name]]
-                name = group[name]
-            return name
-
-        for a, b in same:
-            ra, rb = root(a), root(b)
-            if ra != rb:
-                group[rb] = ra
-
-        # Canonical numbering by first appearance, exactly as the provider's own
-        # labels were numbered in `parse_response` -- so a merged transcript
-        # counts its speakers the same way an unmerged one does.
-        order: dict[str, int] = {}
-        for seg in segments:
-            if seg.speaker_status != "attributed" or seg.speaker not in group:
-                continue
-            key = root(seg.speaker)
-            if key not in order:
-                order[key] = len(order) + 1
-
-        renamed = {
-            name: (f"Speaker {order[root(name)]}", f"spk_{order[root(name)]}")
-            for name in names if root(name) in order
-        }
-        merged = len(names) - len(order)
-        if merged <= 0:
-            return segments, references, 0
-
-        for seg in segments:
-            moved = renamed.get(seg.speaker)
-            if moved is None or seg.speaker_status != "attributed":
-                continue
-            seg.speaker, seg.speaker_key = moved
-            for word in seg.words:
-                # The word's own label follows its turn; its `speaker_raw` does
-                # not, because that is the provider's answer and stays theirs.
-                if word.speaker is not None:
-                    word.speaker = moved[0]
-
-        combined: dict[str, list[tuple[tuple[float, float], list[float]]]] = {}
-        for name in names:
-            moved = renamed.get(name)
-            if moved:
-                combined.setdefault(moved[0], []).extend(references[name].windows)
-        rebuilt = {
-            name: Reference(vector=_robust_centroid([v for _, v in windows]), windows=windows)
-            for name, windows in combined.items()
-        }
-        return segments, rebuilt, merged
 
     # --- micro-turn islands -------------------------------------------------- #
     def _correct_islands(self, segments: list[Segment], references: dict[str, list[float]],
@@ -1138,186 +986,187 @@ class SpeakerRefiner:
         # either side and there is nothing to choose between them.
         return None
 
-    # --- under-diarization at the label level -------------------------------- #
-    def _split_labels(self, segments: list[Segment], references: dict[str, "Reference"],
-                      embed, report: Report):
-        """Separate one canonical speaker that is really two people.
+    # --- reconciliation ------------------------------------------------------ #
+    def _reconcile(self, segments: list[Segment], priors: dict[str, list[Region]],
+                   report: Report):
+        """Decide the canonical voices, then write them onto the segments.
 
-        The mirror of `_merge_labels`, and needed for the same reason: the
-        provider is wrong in both directions. A real transcript had a
-        substantial turn nine minutes in reading as the person who spoke at two
-        minutes, and it was somebody else entirely -- one provider label
-        covering two voices for the whole meeting.
+        The decision itself is in `app.regions`; this is the part that touches
+        the transcript. Three things move and one does not:
 
-        Neither the split search nor the island correction can reach that. Both
-        assume the canonical speakers are the right *set* of people and only
-        argue about which turns belong to whom; this is about the set being
-        wrong.
-
-        <h2>Judged against the label's own spread, like everything else here</h2>
-
-        A speaker's windows are clustered in two, and the split happens only
-        when the two groups are **further apart than either group is from
-        itself** -- the same self-calibrating rule the merge uses, pointed the
-        other way. A voice recorded across changing conditions varies, and this
-        must not fire on that; two people under one label do not merely vary,
-        they separate.
-
-        A group must also hold real speech before it can become a speaker, so a
-        single odd window cannot found a person.
+        * `speaker` and `speaker_key` become the reconciled identity;
+        * every word's `speaker` follows its turn;
+        * `speaker_raw` is never touched, on the segment or on any word. It is
+          the provider's own answer, it is what makes a repair reversible and a
+          complaint traceable, and a raw column that agreed with the canonical
+          one everywhere would make the trace useless for exactly the case it
+          exists for.
         """
-        limits = self._limits
-        out: dict[str, Reference] = {}
-        renumber: list[str] = []
+        outcome = reconcile(priors, self._limits, trace=self._trace)
+        report.merged = outcome.merged
+        report.merge_ambiguous = outcome.ambiguous
+        report.regions_withheld = outcome.withheld
+        report.substantial_reassigned = outcome.reassigned
+        report.heterogeneous_labels = outcome.heterogeneous
+        report.labels_would_split = outcome.would_split
+        report.labels_split = outcome.split
 
-        for name, reference in references.items():
-            if not reference.heterogeneous:
-                out[name] = reference
-                continue
-            groups = _bisect(reference.windows)
-            if groups is None:                     # unreachable; the flag implies it
-                out[name] = reference
-                continue
-            first, second = groups
-            report.labels_would_split += 1
-            logger.info(
-                "Substantial-turn analysis: decision=split regions=%d "
-                "leftRegions=%d rightRegions=%d across=%.2f applied=%s",
-                len(reference.windows), len(first), len(second),
-                _cross_similarity(first, second), limits.split_labels_enabled,
-            )
-            if not limits.split_labels_enabled:
-                # Observed, not acted on. Re-enabling this needs evidence from a
-                # real recording, and this is how that evidence is gathered
-                # without the recording being the experiment.
-                out[name] = reference
-                continue
-            renumber.append(name)
-            out[name] = Reference(
-                vector=_robust_centroid([v for _, v in first]), windows=first)
-            out[_other_half(name)] = Reference(
-                vector=_robust_centroid([v for _, v in second]), windows=second)
-
-        if not renumber:
-            return segments, references
-        return self._apply_label_split(segments, out, renumber, embed, report)
-
-    def _apply_label_split(self, segments, references, renumber, embed, report):
-        """Give each of the split speaker's turns to whichever half it matches."""
-        halves = {name: (name, _other_half(name)) for name in renumber}
-        assignment: dict[int, str] = {}
+        numbers = self._numbering(segments, outcome)
+        self._trace_regions(segments, priors, outcome, numbers)
         for index, seg in enumerate(segments):
-            pair = halves.get(seg.speaker)
-            if pair is None or seg.speaker_status != "attributed":
+            if seg.speaker_status != "attributed" or not seg.speaker:
                 continue
-            middle = (float(seg.start) + float(seg.end)) / 2
-            span = min(_duration(seg), self._limits.reference_window_seconds)
-            vector = embed(middle - span / 2, middle + span / 2)
-            if vector is None:
-                continue                       # too thin to move; stays put
-            best = _clear_best(
-                vector,
-                {half: references[half].vector for half in pair},
-                self._limits.assign_margin,
-            )
-            if best is not None and best != seg.speaker:
-                assignment[index] = best
-        if not assignment:
-            # Nothing could be moved with confidence, so the split describes
-            # nobody and is abandoned rather than left half-applied.
-            return segments, {n: r for n, r in references.items() if not _is_half(n)}
-
-        for index, half in assignment.items():
-            segments[index].speaker = half
-        report.labels_split += len(renumber)
-        report.substantial_reassigned += len(assignment)
-        return self._renumber(segments, references)
-
-    def _renumber(self, segments, references):
-        """Canonical numbering by first appearance, after a split created names."""
-        order: dict[str, int] = {}
-        for seg in segments:
-            if seg.speaker_status == "attributed" and seg.speaker and seg.speaker not in order:
-                order[seg.speaker] = len(order) + 1
-        renamed = {old: (f"Speaker {n}", f"spk_{n}") for old, n in order.items()}
-        for seg in segments:
-            moved = renamed.get(seg.speaker)
-            if moved is None or seg.speaker_status != "attributed":
+            key = outcome.moved.get(index) or outcome.mapping.get(seg.speaker, seg.speaker)
+            number = numbers.get(key)
+            if number is None:
                 continue
-            seg.speaker, seg.speaker_key = moved
+            if key not in outcome.clusters:
+                # A provider label with no embeddable stretch anywhere in the
+                # meeting. `split_by_speaker` will promote a two-word run inside
+                # an otherwise stable utterance to a turn of its own -- rightly,
+                # because a one-word "Exactly." is a real turn and the adapter
+                # has no audio to tell the two apart -- and where every one of a
+                # label's appearances is that short, the only evidence it is a
+                # person is the provider's word.
+                #
+                # It keeps its identity, because overruling the provider on
+                # silence is not better than believing it. What it does not get
+                # is the standing to carry somebody's name: `app.naming` reads
+                # this flag and will not put a real person on a turn whose
+                # ownership was never verifiable.
+                seg.speaker_provisional = True
+            seg.speaker, seg.speaker_key = f"Speaker {number}", f"spk_{number}"
             for word in seg.words:
                 if word.speaker is not None:
-                    word.speaker = moved[0]
-        return segments, {
-            renamed[name][0]: reference
-            for name, reference in references.items() if name in renamed
+                    word.speaker = seg.speaker
+
+        refs = {
+            f"Speaker {numbers[key]}": _reference_of(outcome.clusters[key].regions,
+                                                     self._limits)
+            for key in outcome.order
+            if key in numbers and outcome.clusters.get(key)
+            and outcome.clusters[key].regions
         }
+        report.canonical_speakers = len({
+            seg.speaker for seg in segments
+            if seg.speaker_status == "attributed" and seg.speaker
+        })
+        return segments, refs
+
+    def _numbering(self, segments: Sequence[Segment], outcome) -> dict[str, int]:
+        """`Speaker N` by first **stable** appearance.
+
+        Numbering used to run on first appearance of any kind, and that is how a
+        half-second fragment the provider mislabelled took `Speaker 2` and
+        pushed every real participant along behind it. The fragment was below
+        the embedder's floor, so there was never any evidence it was a person at
+        all -- and because the ordinal was spent, the shift was permanent and
+        showed up in colours, talk time and every export.
+
+        `app.regions` orders the voices it could actually hear. What is added
+        here is everybody else: a label with too little audio to embed keeps its
+        identity, because the provider said somebody spoke and this module does
+        not overrule that on silence, but it is numbered *after* the people the
+        meeting can hear, so it cannot renumber them.
+        """
+        order = list(outcome.order)
+        for seg in segments:
+            if seg.speaker_status != "attributed" or not seg.speaker:
+                continue
+            key = outcome.mapping.get(seg.speaker, seg.speaker)
+            if key not in order:
+                order.append(key)
+        return {key: number for number, key in enumerate(order, start=1)}
 
     def _one_voice(self, a: str, b: str, score: float,
                    references: dict[str, "Reference"], names: list[str]) -> bool:
         """Whether two labels are one person, judged against their own spread.
 
-        A high similarity is not evidence by itself, and this is the whole
-        reason merging is safe to attempt at all. Two labels scoring 0.99:
-
-        * if either label's own windows only manage 0.95 among themselves, then
-          the two labels agree with each other **better than either agrees with
-          itself** — which one voice recorded twice does, and two voices cannot;
-        * if both labels manage 0.999 internally, 0.99 is a real gap, and the
-          honest reading is two people this model renders very similarly.
-
-        Same number, opposite conclusions, and nothing separates them but the
-        recording's own scale. A fixed threshold has to pick one of the two
-        readings in advance and is wrong for every meeting it guessed against.
-
-        A label with a single window has no spread to measure and is never
-        merged: there is no way to calibrate, and an uncalibrated merge is the
-        guess this exists to avoid.
+        A thin adapter over `app.regions.one_voice`, which is where the rule
+        lives now that it is expressed over regions rather than over one
+        averaged vector per label. Kept here because it is the narrowest way to
+        state the merge contract in a test.
         """
-        if references[a].heterogeneous or references[b].heterogeneous:
-            # One of these labels disagrees with itself, so its reference is an
-            # average of two people. An average of two people can resemble a
-            # third convincingly, and merging on it is how two real humans end
-            # up under one name.
-            return False
-        own_a, own_b = references[a].consistency, references[b].consistency
-        if own_a is None or own_b is None:
-            return False
-        if score < min(own_a, own_b):
-            return False
+        clusters = {name: _cluster_of(name, references[name]) for name in names}
+        return one_voice(clusters[a], clusters[b], score, clusters, names,
+                         self._limits, lambda *args, **fields: None)
 
-        # One cosine between two averages is not meeting-wide evidence, and the
-        # cost of being wrong is not symmetrical: two labels left on one person
-        # is a rename away, while two people under one name corrupts the talk
-        # time, the attribution of every action item, the summary, retrieval and
-        # the export at once, invisibly. So two further checks, both of which a
-        # genuine duplicate passes easily.
+    # --- diagnostics ---------------------------------------------------------- #
+    @property
+    def _tracing(self) -> bool:
+        if self._trace_enabled is None:
+            try:
+                from app.config import get_settings
 
-        # Every window of one against every window of the other. A label whose
-        # own audio is bimodal -- one person early, another later -- can have an
-        # average that sits between them and matches another label's average
-        # convincingly, while not one of its actual windows does.
-        if _cross_similarity(references[a].windows, references[b].windows,
-                             worst=True) < self._limits.merge_similarity:
-            return False
+                self._trace_enabled = bool(get_settings().diarization_trace)
+            except Exception:  # noqa: BLE001 - absent settings is not a failure
+                self._trace_enabled = False
+        return self._trace_enabled
 
-        # And the pair has to be closer to each other than either is to anybody
-        # else by a clear margin. Where a third voice is nearly as close, these
-        # references are not discriminating between people at all.
-        for other in names:
-            if other in (a, b):
-                continue
-            near_a = cosine(references[a].vector, references[other].vector)
-            near_b = cosine(references[b].vector, references[other].vector)
-            if max(near_a, near_b) >= self._limits.merge_similarity:
-                # Not a rival: a third label of the same person, which is what
-                # a provider that split one voice five ways produces. Counting
-                # it as competition would make every duplicate protect every
-                # other duplicate from being recognised.
-                continue
-            if score - max(near_a, near_b) < self._limits.merge_margin:
-                return False
-        return True
+    def _trace(self, kind: str, **fields) -> None:
+        """One line per reconciliation decision, off unless someone asks.
+
+        Timestamps, durations, counts and similarities. No names, no words, no
+        vectors and no provider tokens -- which is what makes it safe to turn on
+        at INFO in a deployment holding other people's meetings, and that is the
+        only kind of deployment where the questions it answers can be asked.
+        """
+        if not self._tracing:
+            return
+        logger.info(
+            "Speaker reconciliation %s %s", kind,
+            " ".join(f"{key}={value}" for key, value in fields.items()),
+        )
+
+    def _trace_regions(self, segments: Sequence[Segment], priors, outcome,
+                       numbers: dict[str, int]) -> None:
+        """Every region, with the provider's prior beside the verdict.
+
+        The trace that settles whose mistake a wrong speaker is. For each turn
+        it gives the number the provider's clustering implied, how many raw word
+        labels the provider used inside it, how consistent that label's own
+        regions are, which canonical voice the audio is actually nearest, and
+        what the turn ended up as. Where the prior and the final differ, this
+        module moved it; where they agree and both are wrong, the provider did,
+        and nothing here will fix it.
+
+        `wordLabels` is the one that answers a question no other line can: a
+        turn that exists only because the provider changed its mind for two
+        words inside an otherwise stable utterance shows up here as a region
+        whose parent utterance carried more than one label.
+        """
+        if not self._tracing:
+            return
+        voices = {key: cluster for key, cluster in outcome.clusters.items()
+                  if key in numbers and cluster.regions}
+        # The provider's own labels, as ordinals rather than tokens. This is the
+        # column that answers the question: consecutive regions reading
+        # `providerLabel=1 2 1 2` mean the provider alternated and Reverie
+        # reproduced it; all reading `1` mean the alternation was made here.
+        # A number rather than the token itself, because a provider that runs
+        # speaker identification returns real names in that field.
+        ordinals = {label: index for index, label in enumerate(priors, start=1)}
+        for label, regions in priors.items():
+            prior = outcome.mapping.get(label, label)
+            spread = _consistency([region.vector for region in regions])
+            for region in regions:
+                ranked = sorted(
+                    ((cosine(region.vector, cluster.vector), key)
+                     for key, cluster in voices.items()), reverse=True)
+                near, nearest = ranked[0] if ranked else (0.0, None)
+                words = segments[region.index].words
+                logger.info(
+                    "Speaker reconciliation region at=%.2f seconds=%.1f "
+                    "providerLabel=%d wordLabels=%d priorSpeaker=%s "
+                    "labelRegions=%d labelConsistency=%s nearest=%s "
+                    "similarity=%.3f finalSpeaker=%s",
+                    region.start, region.seconds, ordinals[label],
+                    len({w.speaker_raw for w in words if w.speaker_raw}),
+                    numbers.get(prior), len(regions),
+                    "none" if spread is None else f"{spread:.3f}",
+                    numbers.get(nearest), near,
+                    numbers.get(outcome.moved.get(region.index, prior)),
+                )
 
     def _reference_windows(self, seg: Segment) -> list[tuple[float, float]]:
         """Stretches of this turn safe enough to say what its speaker sounds like.
@@ -1357,7 +1206,7 @@ class SpeakerRefiner:
         ]
 
     def _spread(self, regions: list) -> list:
-        """At most `reference_windows_max`, taken evenly across the meeting.
+        """At most `reference_regions_max`, taken evenly across the meeting.
 
         Evenly rather than the first N: a speaker's opening turn is often them
         reading an agenda in a different register, and a reference built only

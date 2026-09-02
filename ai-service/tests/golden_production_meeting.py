@@ -16,38 +16,16 @@ legible to a person; no rule may consult it.
 
 from __future__ import annotations
 
-from app.schemas import Segment, Word
-from app.voiceprints import EMBEDDING_DIM, l2_normalise
-import math
-import random
+from tests.meeting_fixture import assemble, mm, stamp, voice
 
-
-def _voice(seed: int) -> list[float]:
-    """A deterministic unit vector standing in for one person's voice.
-
-    Gaussian rather than a sampled sine, and the difference is not cosmetic: two
-    sines at different phases are the *same wave shifted*, so they correlate
-    almost perfectly. A first version of this fixture used them and every pair
-    of "different" voices scored 1.00 against each other, which made the refiner
-    decline the whole meeting and made the comparison meaningless. Independent
-    gaussians in 192 dimensions are near-orthogonal, which is what unrelated
-    voices actually look like to this model.
-    """
-    rng = random.Random(seed)
-    return l2_normalise([rng.gauss(0.0, 1.0) for _ in range(EMBEDDING_DIM)])
+__all__ = ["TIMELINE", "build", "mm", "stamp"]
 
 
 #: The people actually in the room. Brian and Speaker 5 are deliberately near
 #: each other in the space -- real meetings contain voices a model finds
 #: similar, and a fixture where everyone is orthogonal proves nothing about
 #: merging.
-SYDNEY, S1, S3, S4, S5, BRIAN = (_voice(n) for n in (11, 12, 13, 14, 15, 16))
-
-
-def mm(text: str) -> float:
-    """`m:ss` as seconds."""
-    minutes, seconds = text.split(":")
-    return int(minutes) * 60 + int(seconds)
+SYDNEY, S1, S3, S4, S5, BRIAN = (voice(n) for n in (11, 12, 13, 14, 15, 16))
 
 
 #: `(start, duration, provider_label, acoustic_truth, human_label, note)`
@@ -93,67 +71,5 @@ TIMELINE = [
 
 
 def build():
-    """`(segments, sampler_factory, expected)` for the meeting above.
-
-    Canonical numbering is applied the way `parse_response` applies it: by first
-    appearance of the provider label, which is the state the refiner is handed.
-    """
-    order: dict[str, int] = {}
-    segments, spans, expected = [], [], []
-    for start, seconds, label, voice, human, note in TIMELINE:
-        if label not in order:
-            order[label] = len(order) + 1
-        number = order[label]
-        count = max(2, int(seconds * 2))
-        step = seconds / count
-        words = [
-            Word(text=f"w{i}", start=start + i * step, end=start + (i + 1) * step,
-                 speaker=f"Speaker {number}", speaker_raw=label)
-            for i in range(count)
-        ]
-        segments.append(Segment(
-            start=start, end=start + seconds,
-            speaker=f"Speaker {number}", speaker_key=f"spk_{number}",
-            speaker_raw=label, speaker_status="attributed",
-            text=" ".join(w.text for w in words), words=words,
-        ))
-        spans.append((start, start + seconds, voice))
-        expected.append(human)
-    return segments, _sampler(spans), expected
-
-
-def _sampler(spans):
-    """Audio, as a function from a span to a voice vector.
-
-    Returns None below the embedder's own floor, exactly as the real sampler
-    does -- `ecapa_embedder.embed` refuses rather than answering for a stretch
-    it cannot judge, and a fixture that answered anyway would test a path
-    production never reaches.
-    """
-    from app.providers.ecapa_embedder import MIN_SPAN_SECONDS
-
-    def build(_audio):
-        def sample(start: float, end: float):
-            if end - start < MIN_SPAN_SECONDS:
-                return None
-            weighted = []
-            for lo, hi, vec in spans:
-                overlap = max(0.0, min(end, hi) - max(start, lo))
-                if overlap > 0:
-                    weighted.append((overlap, vec))
-            if not weighted:
-                return None
-            total = sum(w for w, _ in weighted)
-            mixed = [0.0] * EMBEDDING_DIM
-            for weight, vec in weighted:
-                for i, value in enumerate(vec):
-                    mixed[i] += (weight / total) * value
-            return l2_normalise(mixed)
-
-        return sample
-
-    return build
-
-
-def stamp(seconds: float) -> str:
-    return f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
+    """`(segments, sampler_factory, expected)` for the meeting above."""
+    return assemble(TIMELINE)

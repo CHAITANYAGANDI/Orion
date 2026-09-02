@@ -176,6 +176,14 @@ Properties that are load-bearing, each with a test:
 - **A real name outranks a number.** Speaker identification returning "Cindy"
   yields `spk_1` / "Cindy", and the next unnamed voice is Speaker 2 rather than
   colliding with her.
+- **Neither does a voice the meeting never heard.** Where refinement runs, the
+  numbering above is provisional and is redone after reconciliation, ordered by
+  first **stable** appearance — a voice with region audio the embedder would
+  answer for. A provider label seen only in sub-second fragments keeps its
+  identity but is numbered after the people who can be heard. Without this, a
+  half-second fragment the provider mislabelled took `Speaker 2` and pushed
+  every real participant along behind it, permanently, on evidence the embedder
+  had already refused to produce. See section 13.
 
 ### The three names a speaker has
 
@@ -270,6 +278,10 @@ It prints transcript content, so it is gated on the adapter logger's DEBUG
 level — off in every deployment that has not deliberately turned it on, absent
 from the structured telemetry, and covered by a test asserting that INFO stays
 clean.
+
+For **who a turn ended up belonging to and why**, rather than what was said,
+the region trace in section 13 carries no transcript content and runs at INFO
+under `DIARIZATION_TRACE`.
 
 Non-sensitive diagnostics are always on, in the `assemblyai.job` log line:
 `diarization_map` (provider label → displayed label, letters and numbers only),
@@ -409,8 +421,6 @@ its speakers — at which point the feature correctly disables itself rather tha
 guessing. That is the floor, and it is why a **4.85-second merged turn later in
 this same recording is left alone**: it is real, it is the same bug, and it is
 below the line where the evidence is good enough to act on.
-
----
 
 ## 12. A second, acoustic diarizer — evaluated, and removed
 
@@ -589,9 +599,121 @@ behaviour that matters is a pure function of times. That is why they were kept.
   moves. That is the honest state — the automatic path still gets this case
   wrong, and will until a tested system improves it without regressing other
   speech.
+- **A fragment below the embedder's floor between two different speakers is
+  left alone.** A run like `"And that--"` lasting under 0.8s produces no
+  embedding at all — the model refuses rather than guessing — so when the
+  turns either side belong to different people there is no acoustic evidence
+  and no continuous reading to test against. The only remaining argument is
+  that it sits between two turns, and correcting on adjacency alone caused
+  three production regressions and was rolled back. Such a turn keeps the
+  provider's attribution and is marked provisional, so no inferred name can
+  attach to it.
+- **A provider label seen only in sub-second fragments still shows as a
+  speaker.** It produces no region, so it is numbered after every voice the
+  meeting could actually hear and cannot carry a name — but it is not
+  removed, because overruling the provider on silence is not better than
+  believing it.
 - **Overlapping speech cannot be represented.** One `speaker` per word is the
   schema, and there is nowhere to put a second. Where the diarizer offers an
   `exclusive_speaker_diarization` it is preferred, so the overlap is resolved by
   the model that heard it rather than by a tie-break downstream, and how much was
   resolved away is kept on `Timeline.overlap_seconds`. Two people talking at once
   still end up attributed to one of them.
+
+---
+
+## 13. Regions, not labels: meeting-wide acoustic reconciliation
+
+Sections 10 and 12 both reason in **provider-label space** — a label is an
+identity, and the only question is whether two of them should be folded. A
+second production transcript showed that is not enough. Its opening:
+
+```
+[00:00]  Speaker 1     ...
+[00:14]  Speaker 2     ...
+[00:21]  Speaker 1     ...
+[00:27]  Speaker 2     ...
+```
+
+One person said all four. The same recording also contained the opposite error:
+a four-second turn under one label that somebody else had spoken. **Over- and
+under-diarization, in the same eleven minutes.**
+
+So `app/regions.py` demotes the provider label to a *prior* — good evidence,
+produced by a model that heard the same audio, and wrong often enough that it
+cannot be the last word — and reasons about **regions** instead:
+
+```
+meeting -> regions -> region embeddings -> clusters -> per-segment identity
+```
+
+A region is one turn, embedded once. A short turn is trusted whole; a long one
+is sampled from its interior and those windows are collapsed to a single vector
+before it counts, because a ninety-second turn is better evidence than a
+four-second one and is not fifteen *independent* observations of it.
+
+### The four steps, in this order
+
+1. **Withhold** the regions of a label that disagree with the rest of it. A
+   label holding two voices has a centroid sitting between them, describing
+   neither, and every later decision is a margin between two similarities.
+   Majority is by turns, not by seconds: a twenty-second turn that really does
+   hold two people contributes more sampled audio than the two clean short turns
+   beside it, and counting seconds lets it win.
+2. **Merge** labels the surviving regions say are one voice. A merge needs at
+   least two region-to-region comparisons, a supermajority of them above the
+   bar, agreement better than either label manages with *itself*, no third voice
+   nearly as close, and a pooled spread that does not loosen.
+3. **Reassign** each withheld region to whichever canonical voice clearly claims
+   it. **Nothing is created here.** A region no existing voice claims goes back
+   exactly where the provider put it, so the failure mode is a missed correction
+   rather than an invented person.
+4. **Number** by first *stable* appearance — see section 5.
+
+### What changed about "one doubtful pair stops the meeting"
+
+Two meeting-wide aborts were made local, and both had been silencing correct
+work:
+
+- an ambiguous **merge** pair used to abandon merging for the whole recording.
+  It now leaves that pair as two speakers and judges every other pair on its own
+  evidence. The old rule was about label references, which were one averaged
+  vector each and could be poisoned invisibly; a label that disagrees with
+  itself is now detected and pruned before any comparison happens.
+- the **"speakers too alike to judge"** gate used to take the *worst*-separated
+  pair in the meeting and decline everything if it was above the bar. In a
+  two-speaker recording that is exactly right and still happens. In a
+  six-speaker recording it meant two participants who happened to sound alike
+  silenced every correction for the other four. It now asks whether the model
+  can tell *anybody* here apart, and each decision is protected by the margin it
+  already carried — `_clear_best` refuses whenever its top two candidates are
+  within `assign_margin`.
+
+### Cost of being wrong, which decides every threshold
+
+A refused merge leaves one person under two names: a reader sees it and one
+rename fixes it. A wrong merge puts two people under one name and leaves nothing
+in the transcript to notice it by, corrupting talk time, action-item ownership,
+the summary, retrieval and the export together. The two are not comparable, so
+uncertainty resolves one way — **keep separate**.
+
+### The region trace
+
+`SpeakerRefiner._trace_regions`, gated on `DIARIZATION_TRACE`, emits one line
+per region:
+
+```
+Speaker reconciliation region at=144.00 seconds=4.0 providerLabel=6 wordLabels=1
+  priorSpeaker=5 labelRegions=4 labelConsistency=0.511 nearest=1
+  similarity=1.000 finalSpeaker=1
+```
+
+`providerLabel` is the ordinal of the raw token, not the token, because a
+provider running speaker identification returns real names in that field.
+Consecutive regions reading `providerLabel=1 2 1 2` mean the provider alternated
+and Reverie reproduced it; all reading `1` mean the alternation was made here.
+Counts, timestamps and similarities only — no names, no words, no vectors — so
+it is safe at INFO on a deployment holding other people's meetings, which is the
+only kind where the question can be asked.
+
+---
