@@ -48,9 +48,36 @@ RUN pip install --no-cache-dir -r requirements.txt
 # turns the first "Rematch speakers" of a deployment into a _slow_ one, and
 # fails outright anywhere egress is restricted. Downloading at build time makes
 # the image self-contained and the runtime behaviour identical everywhere.
+#
+# `from_hparams` does not put the weights in `savedir`, and that is the whole
+# bug this shape exists to prevent. It downloads them into the HuggingFace cache
+# — `$HOME/.cache/huggingface`, and this step runs as root — and then fills
+# `savedir` with **symlinks** pointing there:
+#
+#   /opt/models/ecapa/embedding_model.ckpt
+#     -> /root/.cache/huggingface/hub/models--speechbrain--.../embedding_model.ckpt
+#
+# That is invisible at build time and fatal at run time. The service drops to
+# the `ai` user below and `/root` is mode 0700 on this base image, so every one
+# of the five files came back `PermissionError: [Errno 13]`. The model never
+# loaded, `SpeakerRefiner` reported "no usable reference audio", and acoustic
+# speaker refinement was silently off for every meeting on the deployment.
+#
+# So the links are dereferenced into a real directory and the cache is dropped.
+# `cp -rL` follows them, and the image is no larger for it because the cache it
+# copies out of goes in the same layer.
+#
+# Left owned by root and world-readable rather than chowned to `ai`. Nothing at
+# run time writes here — with the files present, SpeechBrain's `fetch()` returns
+# early and never touches the directory — and a model an exploited process
+# cannot overwrite is worth more than one it can.
 RUN python -c "from speechbrain.inference.speaker import EncoderClassifier; \
 EncoderClassifier.from_hparams(source='speechbrain/spkrec-ecapa-voxceleb', \
-savedir='/opt/models/ecapa', run_opts={'device': 'cpu'})"
+savedir='/opt/models/ecapa-linked', run_opts={'device': 'cpu'})" \
+    && mkdir -p /opt/models/ecapa \
+    && cp -rL /opt/models/ecapa-linked/. /opt/models/ecapa/ \
+    && rm -rf /opt/models/ecapa-linked /root/.cache/huggingface \
+    && chmod -R a+rX /opt/models/ecapa
 
 # There is deliberately no second diarizer in this image. pyannote Community-1
 # was built, benchmarked and removed -- docs/diarization.md section 12 has the
@@ -84,6 +111,18 @@ COPY README.md ./
 # needs.
 RUN useradd --create-home --shell /usr/sbin/nologin ai && chown -R ai:ai /app
 USER ai
+
+# Prove the model loads **as the user that will run it**.
+#
+# This is the check that would have caught the symlink bug above at build time
+# instead of in production. The bake succeeded as root, the load failed as `ai`,
+# and nothing in between ever tried it from the runtime side — so the image
+# shipped, deployed green, and disabled a feature silently.
+#
+# It fails the build rather than the deployment on purpose: a broken image
+# should not reach Render at all. `scripts/check_speaker_model.py` is the same
+# check, runnable against a running container.
+RUN python scripts/check_speaker_model.py
 
 # 8000, not 80: an unprivileged user cannot bind below 1024, and there is no
 # reason to be down there behind a proxy anyway.

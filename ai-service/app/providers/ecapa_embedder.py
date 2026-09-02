@@ -47,6 +47,8 @@ waveform or an embedding**, at any level, and the test suite asserts it.
 from __future__ import annotations
 
 import logging
+import pathlib
+import re
 import subprocess
 from dataclasses import dataclass
 from typing import Sequence
@@ -74,6 +76,100 @@ MAX_SPAN_SECONDS = 45.0
 #: a writable path to let SpeechBrain fetch it at first use instead.
 DEFAULT_MODEL_DIR = "/opt/models/ecapa"
 DEFAULT_MODEL_SOURCE = "speechbrain/spkrec-ecapa-voxceleb"
+
+
+#: Anything in an exception message that could be a credential rather than a
+#: fact. A HuggingFace failure quotes the URL it was fetching, which carries a
+#: signed query string on a private repo, and an authenticated failure can quote
+#: the header it sent. A model path is not a secret and is kept; everything that
+#: might be one is not.
+_OPAQUE = re.compile(r"(?:hf_|sk-|ghp_|Bearer\s+)[A-Za-z0-9_\-.]{8,}", re.IGNORECASE)
+_URL = re.compile(r"(https?://[^/\s'\"]+)[^\s'\"]*")
+#: Long unbroken runs that are not words: hashes, tokens, signatures.
+_BLOB = re.compile(r"\b[A-Za-z0-9_\-]{40,}\b")
+
+
+def _sanitise(message: object, *, limit: int = 240) -> str:
+    """One line of an exception message, with anything credential-shaped gone.
+
+    Order matters: tokens first, then whole URLs down to scheme and host, then
+    any remaining long opaque run. A URL is reduced rather than removed because
+    the host is the useful part — it says whether this was HuggingFace, a mirror
+    or a proxy — and the path and query are where a signature lives.
+    """
+    text = " ".join(str(message).split())
+    text = _OPAQUE.sub("[redacted]", text)
+    text = _URL.sub(r"\1/[path]", text)
+    text = _BLOB.sub("[redacted]", text)
+    return text[:limit]
+
+
+def _stage_of(exc: BaseException) -> str:
+    """Which part of bringing the model up failed. A closed set of enums."""
+    name = type(exc).__name__
+    errno = getattr(exc, "errno", None)
+    if isinstance(exc, PermissionError) or errno in (1, 13, 30):
+        return "permissions"
+    if isinstance(exc, (ImportError, ModuleNotFoundError)):
+        return "import"
+    if any(word in name for word in
+           ("HTTP", "Connection", "Timeout", "Offline", "Repository",
+            "EntryNotFound", "GatedRepo", "Revision", "Resolution")):
+        return "download"
+    if isinstance(exc, FileNotFoundError) or errno == 2:
+        return "cache"
+    if any(word in name for word in ("Unpickl", "Pickl", "Serializ", "Checkpoint")):
+        return "weights"
+    if "CUDA" in name or "Device" in name:
+        return "device"
+    return "instantiate"
+
+
+def _directory_state(path: str) -> str:
+    """What the model directory looks like from here. Flags and counts only.
+
+    These are the figures that separate *the weights are not in the image* from
+    *they are there and this process cannot read them* — a distinction that cost
+    a deployment cycle because nothing reported either one.
+    """
+    import os
+
+    folder = pathlib.Path(path)
+    try:
+        entries = sorted(folder.iterdir())
+    except OSError as exc:
+        return f"dirExists={folder.is_dir()} dirError={type(exc).__name__}"
+
+    readable = unreadable = links = 0
+    for entry in entries:
+        links += entry.is_symlink()
+        try:
+            entry.stat()
+            readable += 1
+        except OSError:
+            unreadable += 1
+    return (
+        f"dirExists=True dirEntries={len(entries)} symlinks={links} "
+        f"readable={readable} unreadable={unreadable} "
+        f"dirWritable={os.access(folder, os.W_OK)} "
+        f"uid={getattr(os, 'getuid', lambda: 'n/a')()}"
+    )
+
+
+def _versions() -> str:
+    """The package versions actually installed, for the failure line."""
+    import sys
+    from importlib.metadata import PackageNotFoundError, version
+
+    out = []
+    for name in ("torch", "torchaudio", "speechbrain", "huggingface_hub",
+                 "safetensors", "numpy"):
+        try:
+            out.append(f"{name}={version(name)}")
+        except PackageNotFoundError:
+            out.append(f"{name}=absent")
+    out.append(f"python={sys.version.split()[0]}")
+    return " ".join(out)
 
 
 class SpeakerEmbeddingUnavailable(RuntimeError):
@@ -230,17 +326,48 @@ class EcapaEmbedder:
             )
         try:
             from speechbrain.inference.speaker import EncoderClassifier
+        except Exception as exc:  # noqa: BLE001
+            raise self._unloadable("import", exc) from exc
 
+        try:
             self._encoder = EncoderClassifier.from_hparams(
                 source=self._source,
                 savedir=self._model_dir,
+                # CPU explicitly, because there is no GPU on the deployment and
+                # SpeechBrain would otherwise pick from what torch reports.
                 run_opts={"device": "cpu"},
             )
-        except Exception as exc:  # noqa: BLE001 - any failure here is the same failure
-            raise SpeakerEmbeddingUnavailable(
-                f"the speaker embedding model could not be loaded: {type(exc).__name__}"
-            ) from exc
+        except Exception as exc:  # noqa: BLE001 - classified, never interpreted
+            raise self._unloadable(_stage_of(exc), exc) from exc
         logger.info("Speaker embedding model ready (%d-dim).", self.dim)
+
+    def _unloadable(self, stage: str, exc: BaseException) -> SpeakerEmbeddingUnavailable:
+        """Log why the model will not come up, safely, and return the refusal.
+
+        `installed()` asks `find_spec` whether torch and speechbrain import.
+        They do, in the image, and that is the whole of what it establishes —
+        the weights behind them are a separate question, and this is where it
+        gets asked. A deployment where the packages are present and the
+        checkpoint is not reaches exactly here, and this used to say only
+
+            the speaker embedding model could not be loaded: PermissionError
+
+        which names the symptom of something that happened three directories
+        away. It cost a deployment cycle, so the line now carries the stage, the
+        exception type, a sanitised reason, and what the model directory looks
+        like from this process — enough to tell "the weights are not in the
+        image" from "they are and this user cannot read them" without anybody
+        having to guess.
+        """
+        logger.error(
+            "Speaker embedding model load failed: exceptionType=%s stage=%s "
+            "reason=%s modelDir=%s %s %s",
+            type(exc).__name__, stage, _sanitise(exc), self._model_dir,
+            _directory_state(self._model_dir), _versions(),
+        )
+        return SpeakerEmbeddingUnavailable(
+            f"the speaker embedding model could not be loaded: {type(exc).__name__}"
+        )
 
     def embed(self, waveform: "object") -> list[float]:
         """One embedding for one speaker's concatenated speech.
