@@ -4,7 +4,7 @@ Three identities travel with every segment and they are not interchangeable:
 
     speaker_raw   "A"          the provider's own cluster. Evidence, never shown.
     speaker_key   "spk_1"      meeting-local ownership. What a colour, a
-                               talk-time row and a voiceprint are filed under.
+                               talk-time row are filed under.
     speaker       "Speaker 1"  the display name, and the only mutable one.
 
 `app.naming` writes the third and must not touch the first two. This file is the

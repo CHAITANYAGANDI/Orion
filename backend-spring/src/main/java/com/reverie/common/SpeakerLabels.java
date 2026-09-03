@@ -15,9 +15,9 @@ package com.reverie.common;
  * transcript, and a heuristic that decided those were placeholders would spend
  * its time undoing users' work.
  *
- * <p>Mirrored in {@code ai-service/app/voiceprints.py:is_unresolved}. The two
- * are checked in both places on purpose — the ai-service decides what to
- * propose, and Spring decides what to apply, so the line between "a bad match"
+ * <p>Mirrored in {@code ai-service/app/diarization.py:is_unresolved}. The two
+ * are checked in both places on purpose — the ai-service decides what a name
+ * may be, and Spring decides what to apply, so the line between "a bad guess"
  * and "overwrote a name a user typed" is defended on both sides of the wire.
  */
 public final class SpeakerLabels {

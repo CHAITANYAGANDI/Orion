@@ -110,27 +110,17 @@ def test_the_mock_path_still_works_with_no_keys_at_all():
 
 # --- and the speaker stack, which shares vocabulary with what was deleted --- #
 
-def test_speechbrain_ecapa_speaker_identification_is_still_here():
-    """The whole point of doing this audit rather than a name-based sweep.
+def test_the_speechbrain_ecapa_embedder_is_gone_too():
+    """It outlived pyannote by three stages, and then went the same way.
 
-    "Hugging Face" appears in the deleted pyannote code AND in the speaker
-    embedder that is still in use -- SpeechBrain fetches ECAPA from the Hub.
-    Removing one must not have taken the other.
-
-    ECAPA now serves exactly one purpose: **cross-meeting** voice identity, the
-    thing "Rematch speakers" runs on. The meeting-local refinement that used to
-    share it was deleted in stage two, and stage three removes this too.
+    Careful sequencing, not a name-based sweep: this file once asserted the
+    embedder *survived* the pyannote removal, because "Hugging Face" appeared in
+    both. It is gone now for its own measured reasons -- the CPU, memory, image
+    size and cold start of torch and speechbrain were not repaid by the accuracy
+    -- and the feature that needed cross-file identity went with it.
     """
-    from app.providers.ecapa_embedder import (  # noqa: F401
-        DEFAULT_MODEL_SOURCE,
-        EcapaEmbedder,
-        SpeakerEmbeddingUnavailable,
-        decode_to_pcm,
-        take_spans,
-    )
-
-    assert DEFAULT_MODEL_SOURCE == "speechbrain/spkrec-ecapa-voxceleb"
-    assert EcapaEmbedder().dim == 192
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("app.providers.ecapa_embedder")
 
 
 def test_the_meeting_local_refiner_is_gone():

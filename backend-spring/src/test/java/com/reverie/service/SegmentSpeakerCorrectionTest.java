@@ -50,7 +50,7 @@ import static org.mockito.Mockito.when;
  * utterance leaves nothing to split on. This is the manual repair, and what
  * these tests are mostly about is everything it must <em>not</em> do — because
  * a correction that quietly relabelled a neighbour, merged two turns or taught
- * a voiceprint the wrong thing would be discovered long after the transcript
+ * the wrong thing would be discovered long after the transcript
  * had been trusted.
  */
 @ExtendWith(MockitoExtension.class)

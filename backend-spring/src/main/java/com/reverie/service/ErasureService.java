@@ -48,12 +48,10 @@ import java.util.List;
  * anybody's attention, and still holding the voice somebody asked us to erase.
  * The first failure is the one worth having.
  *
- * <p><strong>And derived data before either.</strong> Erasing a recording
- * also erases the voiceprints taken from it, and that deletion runs first
- * and is required rather than best-effort — see {@link #eraseAudio(Meeting)}
- * for the failure modes both ways round. The short version: a failure there
- * leaves the audio in place and says so, and a failure after it leaves a
- * cache missing rather than a template stranded.
+ * <p>There used to be a third step before both: erasing the voice templates
+ * derived from the recording. Cross-meeting voice identity was removed and
+ * those tables were dropped, so a recording no longer has any derived
+ * biometric data to outlive it.
  *
  * <p>Used by three callers with the same code path in each: the account holder
  * pressing a button, the nightly retention pass in {@link RetentionService}, and
@@ -112,13 +110,10 @@ public class ErasureService {
      * Erase the audio and keep everything drawn from it.
      *
      * <p>Idempotent: asking twice is not an error, because the honest answer to
-     * "delete this" when it is already gone is yes. Asking twice will, however,
-     * re-confirm that the derived voiceprints are gone — see below — so a second
-     * press can finish an erasure that only half happened.
+     * "delete this" when it is already gone is yes.
      *
-     * @throws ApiException 503 when the derived voiceprints cannot be confirmed
-     *                      deleted, or when the object store refuses; in both
-     *                      cases the meeting still says it has its recording
+     * @throws ApiException 503 when the object store refuses; the meeting still
+     *                      says it has its recording
      */
     @Transactional
     public Instant eraseAudio(String userId, String meetingId) {
@@ -133,49 +128,18 @@ public class ErasureService {
      *
      * <h2>The order, and why it is this one</h2>
      *
-     * <p>Three things have to happen: the derived voiceprints go, the object
-     * goes, and the row says so. The object store is not in the transaction, so
-     * some interleaving of "done" and "not done" is reachable no matter what,
-     * and the only real choice is which leftover to have.
-     *
-     * <p><strong>Voiceprints first.</strong>
-     *
-     * <ul>
-     *   <li>If the voiceprint deletion fails, nothing else has run: the audio is
-     *       still there, the row still says so, and the caller is told plainly
-     *       that the erasure did not happen. Nothing was retained behind a
-     *       claim that it was not.</li>
-     *   <li>If the object store fails, the transaction rolls back and the
-     *       row is left saying the recording is still there, which it is.</li>
-     * </ul>
-     *
-     * <p>The other order — object first, voiceprints second — fails the other
-     * way: a failure after the delete leaves the recording gone from the bucket
-     * while the biometric-adjacent template derived from it survives, and the
-     * row, rolled back, still claims the meeting has its recording. That is the
-     * worst of the reachable states: more sensitive data retained, less of it
-     * visible, and a dangling key. It is also unrecoverable in kind rather than
-     * degree — a voiceprint whose audio is gone cannot be recomputed or checked
-     * against anything.
-     *
-     * <p>So: least sensitive data retained on failure wins, and that is this
-     * order. What it costs is that a failing ai-service blocks audio erasure
-     * entirely. That is the trade taken deliberately — the erasure is refused
-     * and reported, not silently half-done, and a retry completes it.
+     * <p>Two things have to happen: the object goes, and the row says so. The
+     * object store is not in the transaction, so some interleaving of "done"
+     * and "not done" is reachable no matter what, and the only real choice is
+     * which leftover to have. If the object store fails, the transaction rolls
+     * back and the row is left saying the recording is still there, which it
+     * is.
      *
      * <p><strong>The object still goes before the row.</strong> Unchanged, and
      * for the reason at the top of this class: a row written first and then
      * rolled back leaves an orphan nobody can see.
      */
     Instant eraseAudio(Meeting meeting) {
-        // The voiceprints computed from this recording. An ECAPA embedding is
-        // not audio and cannot be turned back into audio, so it is tempting to
-        // argue it survives a request to delete the recording. It should not: it
-        // is a durable identifier derived from the voices on that recording, and
-        // it is the specific thing that makes those voices findable again.
-        // Keeping it would answer "delete the recording of me" with a
-        // technicality.
-
         if (meeting.getAudioDeletedAt() != null) {
             return meeting.getAudioDeletedAt();
         }

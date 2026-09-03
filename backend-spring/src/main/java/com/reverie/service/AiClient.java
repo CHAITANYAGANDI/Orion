@@ -572,9 +572,8 @@ public class AiClient {
      * streams it storage-to-storage and never holds the whole file either.
      *
      * <p><strong>ffmpeg is already there.</strong> It is installed in that image
-     * for speaker embedding and is the only thing in the stack that reads
-     * everything Reverie accepts — webm/opus from a browser, m4a from a phone, wav
-     * from a desk recorder. Adding a second codec dependency to a second image
+     * and is the only thing in the stack that reads everything Reverie accepts —
+     * webm/opus from a browser, m4a from a phone, wav from a desk recorder. Adding a second codec dependency to a second image
      * to do the same job would be two things to keep patched instead of one.
      *
      * <p>Returns immediately. The call starts the work or reports on work

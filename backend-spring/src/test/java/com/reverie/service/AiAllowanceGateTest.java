@@ -333,36 +333,6 @@ class AiAllowanceGateTest {
             assertThat(meeting.getStatus()).isNotEqualTo(com.reverie.domain.MeetingStatus.QUEUED);
             verifyNoInteractions(outbox);
         }
-
-        @Test
-        @DisplayName("reprocess does not throw away the cached voiceprints on the way out")
-        void refusedReprocessChangesNothing() {
-            assertThatThrownBy(() -> service.reprocess(USER, MEETING))
-                    .isInstanceOf(ApiException.class);
-
-            // A refused reprocess must leave the meeting exactly as it was.
-            // Forgetting them here would cost the user their speaker names for
-            // an operation that did not happen.
-            // Neither route. The strict one is what reprocess uses now, and it
-            // deliberately sits *after* this gate: deleting a good cache for a
-            // reprocess that is then refused would cost a re-embed of the whole
-            // recording for an operation that did not happen.
-            verify(translations, never()).markStaleByMeetingId(anyString());
-        }
-
-        @Test
-        @DisplayName("with a minute left, all three go through")
-        void oneMinuteLeftReopensThem() {
-            row.setAiMinutesUsed(UsageLimitService.MINUTES_ALLOWANCE - 1);
-            when(templates.requireKnown(anyString())).thenReturn("general");
-
-            assertThatCode(() -> service.reprocess(USER, MEETING)).doesNotThrowAnyException();
-            // The gate is the only thing being tested here; whether these two
-            // then succeed depends on mocks this test has no interest in, so
-            // what is asserted is that they got past it.
-            assertThatThrownBy(() -> service.resummarize(USER, MEETING, "general"))
-                    .isNotInstanceOf(ApiException.class);
-        }
     }
 
     // ----------------------------------------------------------- translation //

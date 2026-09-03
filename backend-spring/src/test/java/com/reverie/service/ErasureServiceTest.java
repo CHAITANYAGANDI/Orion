@@ -73,7 +73,6 @@ class ErasureServiceTest {
     @Mock private StorageService storage;
     @Mock private AuditService audit;
     @Mock private StatusPublisher statusPublisher;
-    // Erasing a recording erases the voiceprints derived from it.
 
     private ErasureService service;
     private Meeting meeting;
@@ -236,7 +235,6 @@ class ErasureServiceTest {
 
             // A meeting id and nothing wider. Another meeting of the same
             // account keeps its cache: its recording was not the one deleted,
-            // and its voiceprints still describe audio that is still there.
         }
 
         @Test

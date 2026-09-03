@@ -331,13 +331,12 @@ class TestCrossMeetingIdentityIsGone:
         # recordings, so it stays. Nothing else does.
         assert left == ["speaker_naming_enabled"]
 
-    def test_the_embedder_survives_as_dead_infrastructure(self):
-        # Kept on purpose until stage 3B: deleting the model, its Docker layers
-        # and torch is a separate change with a separate blast radius. Nothing
-        # in the service calls it.
-        from app.providers.ecapa_embedder import EMBEDDING_DIM, EcapaEmbedder
-
-        assert EcapaEmbedder().dim == EMBEDDING_DIM == 192
+    def test_the_embedder_is_gone(self):
+        # Stage 4. It was kept through 3A/3B so that deleting the model, its
+        # Docker layers and torch stayed a separate change with its own blast
+        # radius. Nothing in the service ever called it after stage 1.
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module("app.providers.ecapa_embedder")
 
     def test_the_meeting_local_refiner_is_gone(self):
         # Stage two deleted it. Stage one had made it unreachable, which is
@@ -398,8 +397,67 @@ class TestNoRouteOrSettingRemembersAVoice:
                            "speaker_learning_enabled", "SpeakerIdentityService"):
                 if banned in text:
                     offenders.append(f"{path.name}: {banned}")
-        # `ecapa_embedder` is stage-4 infrastructure and is left untouched by
-        # instruction. Its prose still refers to the table it used to feed;
-        # that is a comment, and it goes when the module does.
-        offenders = [o for o in offenders if not o.startswith("ecapa_embedder.py")]
         assert offenders == [], offenders
+
+
+class TestNothingCanReintroduceTheModel:
+    """The resurrection guard, over the files where it would actually happen.
+
+    Not the source alone. A model comes back through a *manifest* — a line in
+    `requirements.txt`, an extra in `pyproject.toml`, a `pip install` in the
+    Dockerfile — and none of those are Python that an import test would notice.
+    By the time anything imports it, the image is already far larger and the
+    cold start already seconds longer.
+
+    Documentation is exempt: `docs/` has to be able to say what was tried, what
+    it measured and why it went, and deleting that record to satisfy a string
+    search would throw away the evidence for the decision.
+    """
+
+    BANNED = ("torch", "torchaudio", "speechbrain", "EcapaEmbedder",
+              "/opt/models/ecapa", "check_speaker_model")
+
+    @pytest.mark.parametrize("name", ["requirements.txt", "pyproject.toml", "Dockerfile"])
+    def test_no_manifest_installs_an_acoustic_model(self, name):
+        import pathlib as _p
+
+        path = _p.Path(__file__).resolve().parent.parent / name
+        # Comments are where these files explain why the model went, so only the
+        # instructions are checked: a dependency line or a `pip install`.
+        body = "\n".join(
+            line for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        )
+        for banned in self.BANNED:
+            assert banned not in body, f"{name} reintroduces {banned}"
+
+    def test_no_production_module_names_the_model(self):
+        import pathlib as _p
+
+        root = _p.Path(__file__).resolve().parent.parent / "app"
+        offenders = []
+        for path in root.rglob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            for banned in ("import torch", "import speechbrain", "EcapaEmbedder",
+                           "/opt/models/ecapa", "check_speaker_model"):
+                if banned in text:
+                    offenders.append(f"{path.name}: {banned}")
+        assert offenders == [], offenders
+
+    def test_the_deleted_files_stay_deleted(self):
+        import pathlib as _p
+
+        root = _p.Path(__file__).resolve().parent.parent
+        for gone in ("app/providers/ecapa_embedder.py",
+                     "scripts/check_speaker_model.py",
+                     "benchmarks/speaker_id"):
+            assert not (root / gone).exists(), gone
+
+    def test_the_image_still_installs_ffmpeg(self):
+        # The one thing in that layer that must not go with the model: MP3
+        # export shells out to it, and `app/transcode.py` is a live feature.
+        import pathlib as _p
+
+        dockerfile = (_p.Path(__file__).resolve().parent.parent
+                      / "Dockerfile").read_text(encoding="utf-8")
+        assert "ffmpeg" in dockerfile

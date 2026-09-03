@@ -188,9 +188,7 @@ correspond to anything in the audio. A segment with no per-word timings is
 refused rather than cut at a character offset.
 
 It changes **only** what was named. No neighbouring turn is merged, re-split or
-relabelled, no other turn by the same speaker is touched, and no voice is
-learned — enrolling a voiceprint from a turn somebody just told you was
-misattributed would train the profile on the mistake. Everything derived does
+relabelled, and no other turn by the same speaker is touched. Everything derived does
 move: the flat transcript the export reads, the retrieval index chat cites, and
 the talk-time stats (derived on read, so they follow for free). The summary is
 marked stale rather than regenerated.
@@ -233,14 +231,9 @@ retrieval index from the audio.
 
 **It is destructive and the client must say so before calling it.** Hand-typed
 corrections are gone. Speaker names are gone from *this meeting* but not from
-the account, so a rematch afterwards can put them back — which is the difference
-between this and the "Transcribe again" that was removed for being a
-one-confirm-deep way to lose an afternoon's corrections.
-
-It also drops the meeting's cached voiceprints, and that is correctness rather
-than housekeeping: they are filed under meeting-local speaker keys, the
-reprocess re-derives those keys by first appearance, and a stale entry would
-hand the previous occupant's voice to whoever inherits the key.
+the account — which is the difference between this and the "Transcribe again"
+that was removed for being a one-confirm-deep way to lose an afternoon's
+corrections.
 
 Both speaker operations re-index the meeting and rebuild the flat transcript,
 because each carries the speaker prefix and chat and the export read them.

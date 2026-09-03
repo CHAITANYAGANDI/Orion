@@ -6,15 +6,15 @@ Reverie prints **Speaker 1** and **Speaker 2** over the top of it. This module
 is the part that reads what a reader reads.
 
 It is a different question from the one
-[speaker-identification](../../docs/speaker-identification.md) answers, and the
-distinction is the whole justification for it existing. That feature asks
-*whose voice is this?* and answers acoustically, because the words cannot answer
-it. This one asks *did the conversation say who these people are?* — a question
-**about the words**, which is the only kind of question the words are evidence
-for. §2 of that document rules out "reading the transcript" as a way of
-recognising a voice across meetings, and that ruling stands: nothing here
-compares anybody to anybody, nothing here is written to a profile, and a name
-found here never becomes evidence about any other recording.
+[speaker-identification](../../docs/speaker-identification.md) described. That
+feature asked *whose voice is this?* and answered acoustically, because the
+words cannot answer it; it has been removed, and this has not. This one asks
+*did the conversation say who these people are?* — a question **about the
+words**, which is the only kind of question the words are evidence for. §2 of
+that document ruled out "reading the transcript" as a way of recognising a voice
+across meetings, and that ruling still holds here: nothing compares anybody to
+anybody, nothing is written to a profile, and a name found here never becomes
+evidence about any other recording.
 
 <h2>The direction, which is the entire bug waiting to happen</h2>
 
@@ -104,8 +104,9 @@ somebody else's pronunciation of it.
 The winner must be **at least twice as well supported** as the runner-up. Five
 turns calling somebody Michael and one calling them Mike is a nickname and
 resolves; three against two is a transcript that genuinely disagrees with
-itself, and the honest answer there is none. This mirrors the *margin* rule in
-``app.voiceprints``: when the best answer is not distinctly the best, refuse.
+itself, and the honest answer there is none. The rule it mirrors is the margin
+check the removed voice matcher used: when the best answer is not distinctly the
+best, refuse.
 
 One name claimed for **two** speakers refuses both, with no margin. That
 collision is the signature of a third-person mention leaking in ("Michael said
@@ -324,12 +325,11 @@ def _ownership_is_sound(segment) -> bool:
     rule is kept because it is the correct rule, and re-deriving it later
     would be re-deciding a question already settled here.
 
-    **The acoustic layer could not have checked.** Below the embedder's own
-    ``MIN_SPAN_SECONDS`` there is no vector to compare — `embed` refuses rather
-    than returning one it does not believe — so ownership of such a turn has
-    never been verifiable by anything. Half a second of audio reading "I." is
-    exactly this: whoever the provider filed it under, nothing has confirmed it
-    and nothing can.
+    **Nothing could have checked it.** Below ``MIN_VERIFIABLE_SECONDS`` there is
+    too little speech for anything to attribute with confidence, so ownership of
+    such a turn has never been verifiable and is not going to become so. Half a
+    second of audio reading "I." is exactly this: whoever the provider filed it
+    under, nothing has confirmed it and nothing can.
 
     Note what this is *not*. It is a per-turn question about ownership, not a
     budget a participant has to spend to deserve a name. Somebody whose whole

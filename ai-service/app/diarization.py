@@ -392,10 +392,9 @@ def is_unresolved(display_name: str | None) -> bool:
 
     Lives here because it is a fact about the labels this module *generates*.
     It used to live in `app.voiceprints`, which was reasonable while voice
-    matching was its main caller and is not reasonable now: naming needs it,
-    naming is not downstream of anything acoustic, and `app.voiceprints` is
-    scheduled for removal. `app.voiceprints` re-exports it, so every existing
-    caller is unaffected.
+    matching was its main caller; it moved here when naming needed it, and that
+    move is why naming never noticed when voice matching — and that module —
+    were removed.
     """
     if not display_name:
         # An empty label is an unattributed turn. It has no voice of its own to

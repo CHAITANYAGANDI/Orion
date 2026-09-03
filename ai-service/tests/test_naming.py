@@ -379,7 +379,7 @@ class TestApplying:
 
     def test_the_speaker_key_is_untouched(self):
         # The key is what a speaker's colour, their talk-time row and their
-        # voiceprint are filed under. A name change must not move it.
+        # talk-time row are filed under. A name change must not move it.
         segments = greeting()
         naming.apply(segments, {"Speaker 1": "Charles", "Speaker 2": "Michael"})
         assert [s.speaker_key for s in segments] == ["spk_1", "spk_2"]

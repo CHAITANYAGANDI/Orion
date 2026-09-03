@@ -320,23 +320,6 @@ class TranscriptEditTest {
         verify(summaries, never()).findFirstByMeetingIdOrderByCreatedAtDesc(MEETING);
     }
 
-    @Test
-    @DisplayName("correcting the words does not throw away the voiceprints")
-    void editingTextKeepsTheAcousticCache() {
-        // The boundary that makes the invalidation in `setSegmentSpeaker` safe
-        // to add. Voiceprints are averages of *audio spans*, chosen by which
-        // speaker key owns which stretch of the recording. Fixing a
-        // misheard word changes the text over a span and nothing about the span
-        // itself, so the cache is still an accurate description of who spoke
-        // when -- and dropping it would cost a full re-embed of the recording
-        // for a typo.
-        service.editSegments(USER, MEETING, List.of(new SegmentEdit("seg_1", "Corrected line.")));
-
-        // Neither route: not the best-effort one erasure uses, and not the
-        // strict one a speaker correction uses -- the second matters most,
-        // because it can refuse. A text edit that reached it would stop being
-        // saveable whenever the speaker service was down.
-    }
 
     @Test
     @DisplayName("renaming a speaker does not throw them away either")

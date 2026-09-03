@@ -164,7 +164,7 @@ class RetentionServiceTest {
         @Test
         @DisplayName("does not count a recording whose erasure was refused")
         void aRefusedErasureIsNotReported() {
-            // Audio erasure is allowed to refuse now: it deletes the voiceprints
+            // Audio erasure is allowed to refuse: the object store
             // derived from the recording first, and will not delete the
             // recording unless that is confirmed. The nightly pass must not
             // report a deletion it did not achieve -- the count goes into the

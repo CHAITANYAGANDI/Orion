@@ -21,10 +21,11 @@ the longer half — what it is not.
 Two different questions, and confusing them is how the wrong person ends up
 named.
 
-| | [Rematch speakers](./speaker-identification.md) | Speaker naming *(this)* |
+| | [Rematch speakers](./speaker-identification.md) *(removed)* | Speaker naming *(this)* |
 |---|---|---|
 | Asks | Whose **voice** is this? | Did the **conversation** say who these people are? |
 | Evidence | An ECAPA-TDNN embedding of the audio | The words, and only the words |
+| Status | **Removed.** The model and the stored templates are gone — see the linked page | Live |
 | Scope | Across every meeting the account has | This meeting, and no other |
 | Stores | A voice template, with consent | Nothing |
 | Runs | When the user presses the button | Automatically, once, after transcription |
@@ -117,9 +118,9 @@ turned to face somebody.
 Two different names for one speaker resolve by weight of evidence and refuse
 outright when the support is equal. Five turns calling somebody Michael and one
 calling them Mike is a nickname, not a contradiction; one each is the transcript
-disagreeing with itself. This is the *margin* rule from `app/voiceprints.py`,
-and it is here for the same reason: when the best answer is not distinctly the
-best, the honest answer is none.
+disagreeing with itself. It is the same *margin* rule the removed voice matcher
+used, and it is here for the same reason: when the best answer is not distinctly
+the best, the honest answer is none.
 
 One name landing on **two** speakers refuses both, with no margin and no winner.
 That collision is what a mention looks like from the inside, and unlike the
@@ -360,8 +361,8 @@ because the same suspicion will arise again.
 | Field | Example | Written by |
 |---|---|---|
 | `speaker_raw` | `"A"` | the provider, once. Never displayed, never rewritten. |
-| `speaker_key` | `"spk_1"` | the canonical mapper, once. Owns colour, talk-time and voiceprints. |
-| `speaker` | `"Speaker 1"` | a rename, a rematch, or this feature. Display only. |
+| `speaker_key` | `"spk_1"` | the canonical mapper, once. Owns colour and talk-time. |
+| `speaker` | `"Speaker 1"` | a rename or this feature. Display only. |
 
 `naming.apply` assigns `speaker` and touches nothing else. It cannot merge two
 speakers because a name claimed for two of them is refused outright (§3), and it
