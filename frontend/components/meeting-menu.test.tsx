@@ -95,7 +95,6 @@ function menu(over: Partial<React.ComponentProps<typeof MeetingMenu>> = {}) {
     onCopyTranscript: vi.fn(),
     onRegenerateSummary: vi.fn(),
     onTranslate: vi.fn(),
-    onRematchSpeakers: vi.fn(),
     onReprocess: vi.fn(),
     onDelete: vi.fn(),
     ...over,
@@ -127,7 +126,6 @@ describe("MeetingMenu", () => {
       "Move…",
       "Copy link",
       "Copy transcript",
-      "Rematch speakers",
       "Change language",
       "Copy summary",
       "Regenerate summary",
@@ -154,7 +152,6 @@ describe("MeetingMenu", () => {
       "Move…",
       "Copy link",
       "Copy transcript",
-      "Rematch speakers",
       "Change language",
       "Copy summary",
       "Regenerate summary",
@@ -203,16 +200,7 @@ describe("MeetingMenu", () => {
     await user.click(screen.getByRole("menuitem", { name: "Copy transcript" }));
     expect(props.onCopyTranscript).toHaveBeenCalled();
 
-    await open(user);
-    await user.click(screen.getByRole("menuitem", { name: "Rematch speakers" }));
-    expect(props.onRematchSpeakers).toHaveBeenCalled();
-    // And specifically not the reprocess, which is the other item that changes
-    // who said what. One re-reads the voices; the other throws the transcript
-    // away and starts again.
-    expect(props.onReprocess).not.toHaveBeenCalled();
-
-    // This one alone leaves the menu open, so it has to be closed by hand
-    // before the next item can be reached. That is deliberate and is asserted
+    // Reprocess is now the only item that changes who said what.
     // properly two tests down: the operation takes a few seconds and reports
     // itself on the item, and a menu that vanished on click would take the
     // spinner with it.
@@ -234,7 +222,6 @@ describe("MeetingMenu", () => {
     // transcript full of hand corrections or is a failed job with nothing in
     // it, and those deserve different warnings — so the page asks.
     expect(props.onReprocess).toHaveBeenCalled();
-    expect(props.onRematchSpeakers).not.toHaveBeenCalled();
   });
 
   it("says a reprocess is being queued, on the item that started it", async () => {
@@ -253,40 +240,14 @@ describe("MeetingMenu", () => {
     await open(user);
 
     // Merging two labels and moving a stray turn were removed along with the
-    // endpoint behind them. Rematch answers "who is this?" acoustically, and
-    // reprocessing is the answer to a diarization that came out wrong — it
-    // re-runs the clustering rather than asking a reader to repair it by hand.
+    // endpoint behind them. Reprocessing is the answer to a diarization that
+    // came out wrong — it re-runs the clustering rather than asking a reader to
+    // repair it by hand.
     expect(screen.queryByRole("menuitem", { name: /Fix diarization/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: /merge/i })).not.toBeInTheDocument();
   });
 
-  it("says a rematch is running, on the item that started it", async () => {
-    const user = userEvent.setup();
-    menu({ rematching: true });
-    await open(user);
 
-    // A few seconds of nothing is indistinguishable from a click that missed,
-    // and this item has no other place to report itself — it opens no dialog
-    // and moves the page nowhere.
-    expect(
-      screen.getByRole("menuitem", { name: "Rematching speakers…" }),
-    ).toHaveAttribute("data-disabled");
-  });
-
-  it("does not disable reprocessing while a rematch runs", async () => {
-    const user = userEvent.setup();
-    menu({ rematching: true });
-    await open(user);
-
-    // They do not collide. A rematch renames speakers in the transcript that
-    // exists; a reprocess replaces that transcript. Starting the second during
-    // the first simply throws the first's work away, which is what the confirm
-    // is for — borrowing a restriction here would grey an item for no reason
-    // the reader can see.
-    expect(
-      screen.getByRole("menuitem", { name: "Reprocess meeting" }),
-    ).not.toHaveAttribute("data-disabled");
-  });
 
   it("greys the reading language for a meeting with nothing written yet", async () => {
     const user = userEvent.setup();
@@ -347,7 +308,6 @@ describe("MeetingMenu", () => {
     // difference is an item that is simply missing.
     for (const label of [
       "Copy transcript",
-      "Rematch speakers",
       "Change language",
       "Copy summary",
       "Regenerate summary",
@@ -375,10 +335,10 @@ describe("MeetingMenu", () => {
     menu({ working: true });
     await open(user);
 
-    // Rematching, changing language and regenerating all end in the summary
-    // being rewritten. Two of those racing on one meeting is the concrete thing
-    // this prevents.
-    for (const label of ["Rematch speakers", "Change language", "Regenerate summary"]) {
+    // Changing language and regenerating both end in the summary being
+    // rewritten. The two racing on one meeting is the concrete thing this
+    // prevents.
+    for (const label of ["Change language", "Regenerate summary"]) {
       expect(screen.getByRole("menuitem", { name: label })).toHaveAttribute("data-disabled");
     }
 
@@ -513,7 +473,6 @@ describe("MeetingMenu when the minutes are gone", () => {
     await open(user);
 
     for (const label of [
-      "Rematch speakers",
       "Change language",
       "Regenerate summary",
       "Reprocess meeting",
@@ -562,7 +521,6 @@ describe("MeetingMenu when the minutes are gone", () => {
       "Move…",
       "Copy link",
       "Copy transcript",
-      "Rematch speakers",
       "Change language",
       "Copy summary",
       "Regenerate summary",
@@ -603,7 +561,6 @@ describe("MeetingMenu when the minutes are gone", () => {
     // Same reasoning, and the case that actually happens: one failed request
     // must not take four features off the menu.
     expect(marks("Regenerate summary")).not.toHaveAttribute("data-disabled");
-    expect(marks("Rematch speakers")).not.toHaveAttribute("data-disabled");
   });
 
   it("still greys what the meeting itself cannot do", async () => {

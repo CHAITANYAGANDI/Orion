@@ -121,7 +121,7 @@ describe("whether a file fits", () => {
 /**
  * The AI features, and the line the allowance is drawn along.
  *
- * <p>Chat, rewriting a summary, rematching speakers, translating and
+ * <p>Chat, rewriting a summary, translating and
  * reprocessing all close when the minutes go. Three of the five spend no
  * transcription minutes at all, so this is a decision about what the allowance
  * *is* rather than what it counts — and the tests are here so that decision has
@@ -131,7 +131,7 @@ describe("whether a file fits", () => {
  * there is nothing to buy, and a sentence that only says what stopped working
  * reads as an account that has been closed.
  */
-const FEATURES: AiFeature[] = ["chat", "summary", "speakers", "translation", "reprocess"];
+const FEATURES: AiFeature[] = ["chat", "summary", "translation", "reprocess"];
 
 describe("the AI features", () => {
   it("are all open while a single minute remains", () => {

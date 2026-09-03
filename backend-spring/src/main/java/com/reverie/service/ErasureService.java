@@ -79,7 +79,6 @@ public class ErasureService {
     private final AuditService audit;
     private final StatusPublisher statusPublisher;
 
-    private final SpeakerIdentityService speakerIdentity;
 
     public ErasureService(MeetingRepository meetings,
                           MeetingTranscriptRepository transcripts,
@@ -92,10 +91,8 @@ public class ErasureService {
                           UserRepository users,
                           StorageService storage,
                           AuditService audit,
-                          StatusPublisher statusPublisher,
-                          SpeakerIdentityService speakerIdentity) {
+                          StatusPublisher statusPublisher) {
         this.statusPublisher = statusPublisher;
-        this.speakerIdentity = speakerIdentity;
         this.meetings = meetings;
         this.transcripts = transcripts;
         this.segments = segments;
@@ -148,12 +145,8 @@ public class ErasureService {
      *       still there, the row still says so, and the caller is told plainly
      *       that the erasure did not happen. Nothing was retained behind a
      *       claim that it was not.</li>
-     *   <li>If it succeeds and the object store then fails, the transaction
-     *       rolls back and the voiceprints stay deleted. The leftover state is
-     *       "audio present, derived data absent" — safe, self-correcting, and
-     *       cheap: the vectors are a cache and the next rematch rebuilds them
-     *       from the audio that is still there. They are deliberately not
-     *       recreated to compensate.</li>
+     *   <li>If the object store fails, the transaction rolls back and the
+     *       row is left saying the recording is still there, which it is.</li>
      * </ul>
      *
      * <p>The other order — object first, voiceprints second — fails the other
@@ -182,25 +175,6 @@ public class ErasureService {
         // it is the specific thing that makes those voices findable again.
         // Keeping it would answer "delete the recording of me" with a
         // technicality.
-        //
-        // Required rather than best-effort. This used to be a swallowed failure
-        // at the end of the method, which meant the reachable state was: audio
-        // deleted, row says "erased", template still in the database, nobody
-        // told. A privacy control that reports a deletion it did not perform is
-        // worse than no control at all.
-        //
-        // Deliberately BEFORE the already-erased check below, so that pressing
-        // the button again on a meeting whose erasure half-completed finishes
-        // the job rather than returning the timestamp of the half that did.
-        // Deleting nothing is a confirmed success, so the repeat costs one
-        // round trip and changes nothing.
-        //
-        // Named profiles are untouched. Those were created by a separate,
-        // explicit act about a person, not about this file, and they are what
-        // the account holder switched the feature on for. Only this meeting's
-        // rows are in scope: the request carries a meeting id and no profile id.
-        speakerIdentity.invalidateMeetingVoiceprintsRequired(
-                meeting.getUserId(), meeting.getId());
 
         if (meeting.getAudioDeletedAt() != null) {
             return meeting.getAudioDeletedAt();

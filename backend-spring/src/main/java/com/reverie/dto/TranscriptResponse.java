@@ -9,7 +9,7 @@ public record TranscriptResponse(
         List<SegmentDto> segments,
         /**
          * Talk-time per speaker, derived from the segments on every read rather
-         * than stored — renames, edits and rematches all move it.
+         * than stored — renames and edits both move it.
          * Empty for a document, which has no speakers.
          */
         List<SpeakerStatsDto> speakers

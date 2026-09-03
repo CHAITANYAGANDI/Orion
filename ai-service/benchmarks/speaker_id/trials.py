@@ -34,7 +34,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from app.voiceprints import Candidate, Profile, Thresholds, centroid, cosine, match_speakers
+from benchmarks.speaker_id.matching import Candidate, Profile, Thresholds, centroid, cosine, match_speakers
 
 from .embed import Embedder, Voiceprint, fingerprint
 from .manifest import Clip

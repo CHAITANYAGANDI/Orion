@@ -19,7 +19,6 @@ from app.providers.factory import AiProviderFactory
 from app.rag import RagService
 from app.routers import ai as ai_router
 from app.schemas import HealthResponse
-from app.speaker_identity import SpeakerIdentityService
 from app.transcode import Mp3Transcoder
 
 logging.basicConfig(
@@ -63,14 +62,6 @@ async def lifespan(app: FastAPI):
     await rag.start()
     app.state.rag = rag
 
-    # Speaker identification. Shares the RAG pool rather than opening a second
-    # one, so there is exactly one place where `app.user_id` is stamped on a
-    # connection -- which matters more for voice templates than for anything
-    # else here. Nothing is loaded eagerly: the embedding model costs seconds
-    # and ~80MB, and an ai-service that never identifies a speaker never pays.
-    speakers = SpeakerIdentityService(settings, rag)
-    app.state.speakers = speakers
-
     # MP3 export. Holds no resources -- ffmpeg is a subprocess and the object
     # store is asked per call -- but it must be one object per process, because
     # the thing that stops two Export clicks becoming two conversions of the
@@ -85,10 +76,9 @@ async def lifespan(app: FastAPI):
     app.state.kafka_worker = worker
 
     logger.info(
-        "ai-service started (provider=%s, rag=%s, speaker-id=%s).",
+        "ai-service started (provider=%s, rag=%s).",
         settings.ai_provider,
         rag.enabled,
-        "off" if speakers.unavailable_reason() else "ready",
     )
     try:
         yield

@@ -3,10 +3,9 @@ package com.reverie.common;
 /**
  * Telling a placeholder speaker label apart from a person's name.
  *
- * <p>This one predicate is the guard on the whole of automatic speaker
- * identification. Everything a rematch is forbidden to overwrite — a name
- * somebody typed, a name an earlier rematch resolved — is protected by it, and
- * every label a rematch is allowed to touch is one it returns true for.
+ * <p>This predicate is what protects a name somebody typed. Anything it
+ * returns false for is a person's name and is never overwritten automatically;
+ * anything it returns true for is a placeholder Reverie is free to replace.
  *
  * <p>It matches the labels <b>Reverie itself generates</b> and nothing else:
  * "Speaker 1", "spk_2", "Unknown speaker". It is deliberately not a test for
@@ -28,7 +27,7 @@ public final class SpeakerLabels {
      *
      * <p>The difference is a bug a test caught before a user did: matching on
      * the prefix "speaker " also matches <b>"Speaker of the House"</b>, so a
-     * rematch would have overwritten a name somebody deliberately typed. Only
+     * rename would have overwritten a name somebody deliberately typed. Only
      * the three forms Reverie generates count, and each must match end to end.
      */
     private static final java.util.regex.Pattern UNRESOLVED = java.util.regex.Pattern.compile(

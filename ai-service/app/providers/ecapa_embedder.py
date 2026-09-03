@@ -53,7 +53,6 @@ import subprocess
 from dataclasses import dataclass
 from typing import Sequence
 
-from app.voiceprints import EMBEDDING_DIM
 
 logger = logging.getLogger("ai-service.voiceprint")
 
@@ -65,6 +64,12 @@ SAMPLE_RATE = 16_000
 #: between two people a short turn is mostly the tail of the previous speaker's
 #: word, and a one-word interjection carries almost no speaker information but
 #: pulls the average toward the middle of the space.
+#: ECAPA-TDNN speaker embeddings. Pinned rather than inferred so a model swap
+#: that changes the width fails loudly against the `vector(192)` column instead
+#: of writing truncated vectors that still compare to something. Owned here now
+#: that `app/voiceprints.py` is gone: it is this model's output width.
+EMBEDDING_DIM = 192
+
 MIN_SPAN_SECONDS = 0.8
 
 #: Ceiling on how much of one speaker goes into one embedding. Beyond roughly

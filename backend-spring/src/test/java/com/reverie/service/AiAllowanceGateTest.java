@@ -276,7 +276,6 @@ class AiAllowanceGateTest {
         @Mock private NotificationService notifications;
         @Mock private ErasureService erasure;
         @Mock private UserService userService;
-        @Mock private SpeakerIdentityService speakerIdentity;
 
         private MeetingService service;
         private Meeting meeting;
@@ -285,7 +284,7 @@ class AiAllowanceGateTest {
         void wire() {
             service = new MeetingService(meetings, transcripts, segments, summaries, insights,
                     storage, usage, outbox, audit, ai, templates, projects, translations,
-                    notifications, erasure, userService, speakerIdentity);
+                    notifications, erasure, userService);
 
             meeting = new Meeting();
             meeting.setId(MEETING);
@@ -304,7 +303,6 @@ class AiAllowanceGateTest {
             segment.setSpeaker("Speaker 1");
             segment.setText("All right, let us begin.");
             when(segments.findByMeetingIdOrderByStartTimeAsc(MEETING)).thenReturn(List.of(segment));
-            when(speakerIdentity.learningEnabled(USER)).thenReturn(true);
 
             spendEverything();
         }
@@ -319,36 +317,8 @@ class AiAllowanceGateTest {
             verifyNoInteractions(ai);
         }
 
-        @Test
-        @DisplayName("speakers cannot be rematched")
-        void rematchIsRefused() {
-            assertThatThrownBy(() -> service.rematchSpeakers(USER, MEETING))
-                    .isInstanceOf(ApiException.class)
-                    .hasMessageContaining("speakers cannot be rematched");
 
-            verify(ai, never()).identifySpeakers(anyString(), anyString(), anyString(), any());
-        }
 
-        @Test
-        @DisplayName("but rematch still explains itself when the feature is simply off")
-        void rematchStillSaysWhatToTurnOn() {
-            when(speakerIdentity.learningEnabled(USER)).thenReturn(false);
-
-            var result = service.rematchSpeakers(USER, MEETING);
-
-            // Two problems at once, and only one of them is actionable. Being
-            // told the account is out of minutes would send somebody looking
-            // for the wrong thing — and this path asks no model anything.
-            assertThat(result.unavailable()).contains("Settings");
-        }
-
-        @Test
-        @DisplayName("and rematch still answers for a meeting with no transcript")
-        void rematchStillHandlesAnEmptyMeeting() {
-            when(segments.findByMeetingIdOrderByStartTimeAsc(MEETING)).thenReturn(List.of());
-
-            assertThatCode(() -> service.rematchSpeakers(USER, MEETING)).doesNotThrowAnyException();
-        }
 
         @Test
         @DisplayName("the meeting cannot be reprocessed")
@@ -373,13 +343,10 @@ class AiAllowanceGateTest {
             // A refused reprocess must leave the meeting exactly as it was.
             // Forgetting them here would cost the user their speaker names for
             // an operation that did not happen.
-            verify(speakerIdentity, never()).forgetMeeting(anyString(), anyString());
             // Neither route. The strict one is what reprocess uses now, and it
             // deliberately sits *after* this gate: deleting a good cache for a
             // reprocess that is then refused would cost a re-embed of the whole
             // recording for an operation that did not happen.
-            verify(speakerIdentity, never())
-                    .invalidateMeetingVoiceprintsRequired(anyString(), anyString());
             verify(translations, never()).markStaleByMeetingId(anyString());
         }
 

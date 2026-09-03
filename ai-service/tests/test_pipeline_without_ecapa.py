@@ -111,12 +111,11 @@ class TestNamingOwnsItsOwnFloor:
         assert naming.MIN_VERIFIABLE_SECONDS == 0.8
 
     def test_the_placeholder_test_moved_but_did_not_change(self):
-        # `is_unresolved` now lives in `app.diarization`, which owns the labels
-        # it describes. `app.voiceprints` re-exports it so Job B is untouched.
+        # `is_unresolved` lives in `app.diarization`, which owns the labels it
+        # describes. It was moved out of `app.voiceprints` before that module
+        # was deleted, which is why naming never noticed.
         from app.diarization import is_unresolved
-        from app.voiceprints import is_unresolved as legacy
 
-        assert is_unresolved is legacy
         assert is_unresolved("Speaker 2") is True
         assert is_unresolved("spk_3") is True
         assert is_unresolved("Speaker of the House") is False
@@ -316,24 +315,29 @@ print('OK')
         assert done.returncode == 0, done.stderr[-3000:]
 
 
-class TestJobBIsUntouchedInThisStage:
-    """Cross-meeting voice profiles are stage three. Nothing here moved them."""
+class TestCrossMeetingIdentityIsGone:
+    """Stage 3A removed the product feature. The model is stage 3B."""
 
-    def test_the_identity_service_still_imports(self):
-        module = importlib.import_module("app.speaker_identity")
+    @pytest.mark.parametrize("module", ["app.speaker_identity", "app.voiceprints"])
+    def test_the_identity_modules_are_gone(self, module):
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(module)
 
-        assert hasattr(module, "SpeakerIdentityService")
-        assert hasattr(module, "SpeakerIdentityUnavailable")
+    def test_no_setting_suggests_voices_are_remembered(self):
+        from app.config import Settings
 
-    def test_the_matching_rules_are_still_there(self):
-        from app.voiceprints import EMBEDDING_DIM, match_speakers  # noqa: F401
+        left = [n for n in Settings.model_fields if "speaker" in n.lower()]
+        # Naming reads the words of one meeting and carries nothing between
+        # recordings, so it stays. Nothing else does.
+        assert left == ["speaker_naming_enabled"]
 
-        assert EMBEDDING_DIM == 192
+    def test_the_embedder_survives_as_dead_infrastructure(self):
+        # Kept on purpose until stage 3B: deleting the model, its Docker layers
+        # and torch is a separate change with a separate blast radius. Nothing
+        # in the service calls it.
+        from app.providers.ecapa_embedder import EMBEDDING_DIM, EcapaEmbedder
 
-    def test_the_embedder_still_exists(self):
-        from app.providers.ecapa_embedder import EcapaEmbedder
-
-        assert EcapaEmbedder().dim == 192
+        assert EcapaEmbedder().dim == EMBEDDING_DIM == 192
 
     def test_the_meeting_local_refiner_is_gone(self):
         # Stage two deleted it. Stage one had made it unreachable, which is
@@ -342,9 +346,56 @@ class TestJobBIsUntouchedInThisStage:
             with pytest.raises(ModuleNotFoundError):
                 importlib.import_module(module)
 
-    @pytest.mark.parametrize("route", ["/ai/speakers/identify", "/ai/speakers/learn",
-                                       "/ai/speakers/forget"])
-    def test_the_speaker_endpoints_are_still_mounted(self, route):
+    def test_no_speaker_identity_route_is_mounted(self):
         from app.routers.ai import router
 
-        assert route in {r.path for r in router.routes}
+        mounted = {r.path for r in router.routes}
+        for gone in ("/ai/speakers/identify", "/ai/speakers/learn",
+                     "/ai/speakers/forget"):
+            assert gone not in mounted
+        assert not [p for p in mounted if "speaker" in p.lower()]
+
+class TestNoRouteOrSettingRemembersAVoice:
+    """Stage 3A: the product no longer claims to remember anybody's voice."""
+
+    def test_no_speaker_identity_route_survives(self):
+        from app.routers.ai import router
+
+        mounted = {r.path for r in router.routes}
+        for gone in ("/ai/speakers/identify", "/ai/speakers/learn",
+                     "/ai/speakers/forget"):
+            assert gone not in mounted
+        assert not [p for p in mounted if "speaker" in p.lower()]
+
+    def test_no_request_or_response_schema_survives(self):
+        import app.schemas as schemas
+
+        gone = {"SpeakerTurnsDto", "SpeakerIdentifyRequest", "SpeakerIdentifyResponse",
+                "SpeakerMatchDto", "SpeakerLearnRequest", "SpeakerLearnResponse",
+                "SpeakerForgetRequest", "SpeakerForgetResponse"}
+        assert gone & set(dir(schemas)) == set()
+        # The two that are not voice identity stay: one is a naming claim about
+        # the words of one meeting, the other is a speaker-count hint.
+        assert hasattr(schemas, "SpeakerNameClaim")
+        assert hasattr(schemas, "SpeakerExpectation")
+
+    def test_the_encryption_key_setting_is_gone_with_its_only_consumer(self):
+        from app.config import Settings
+
+        assert "speaker_profile_key" not in Settings.model_fields
+
+    def test_nothing_in_the_service_reaches_a_voice_template(self):
+        import pathlib as _p
+
+        root = _p.Path(__file__).resolve().parent.parent / "app"
+        offenders = []
+        for path in root.rglob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            for banned in ("speaker_profiles", "meeting_speaker_voiceprints",
+                           "SpeakerIdentityService"):
+                if banned in text:
+                    offenders.append(f"{path.name}: {banned}")
+        # The embedder still exists as dead infrastructure and may mention the
+        # table it used to feed, but only in prose about why it is going.
+        offenders = [o for o in offenders if not o.startswith("ecapa_embedder.py")]
+        assert offenders == [], offenders

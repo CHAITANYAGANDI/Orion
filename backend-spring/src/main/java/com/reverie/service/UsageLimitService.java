@@ -203,8 +203,6 @@ public class UsageLimitService {
                 "Your meetings and the answers you already have are still here."),
         RESUMMARIZE("the summary cannot be rewritten",
                 "The summary you have is still here."),
-        SPEAKER_REMATCH("speakers cannot be rematched",
-                "The speaker names already on this meeting are still here."),
         TRANSLATION("nothing further can be translated",
                 "Translations you already have are still here."),
         REPROCESS("meetings cannot be reprocessed",
@@ -223,8 +221,8 @@ public class UsageLimitService {
      * Refuse anything that asks a model, once the minutes are gone.
      *
      * <p><b>Most of these spend no transcription minutes at all.</b> Chat spends
-     * context and a completion; rewriting a summary and rematching speakers
-     * re-read a transcript already paid for. On the arithmetic alone they could
+     * context and a completion; rewriting a summary re-reads a transcript
+     * already paid for. On the arithmetic alone they could
      * run forever on an account that can no longer record. They do not, and the
      * reason is what the allowance is for rather than what it counts: 100
      * minutes is the whole of what an account gets, and AI features still

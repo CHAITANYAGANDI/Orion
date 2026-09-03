@@ -16,8 +16,6 @@ import type {
   MomentCreateRequest,
   TranscriptMoment,
   ChatMessage,
-  SpeakerRematchResult,
-  SpeakerSettings,
   Insight,
   MeetingCreateRequest,
   MeetingUpdateRequest,
@@ -972,55 +970,6 @@ export const api = createApi({
       invalidatesTags: (_r, _e, arg) => [{ type: "Transcript", id: arg.id }],
     }),
 
-    /**
-     * Rematch speakers: identify the unresolved ones against known voices.
-     *
-     * One call, no body. Every speaker still labelled "Speaker N" is compared
-     * acoustically against the voice profiles this account has built by naming
-     * people in other meetings. Nobody who has already been named is touched,
-     * and a weak or ambiguous match renames nobody.
-     *
-     * Invalidates the transcript and the chat because a successful rematch
-     * rewrites both the labels and the retrieval passages behind them — chat
-     * would otherwise keep citing a name the transcript no longer shows.
-     * Invalidated even when nothing matched, which costs one refetch and closes
-     * the case where two tabs are open on the same meeting.
-     */
-    rematchSpeakers: builder.mutation<SpeakerRematchResult, string>({
-      query: (id) => ({
-        url: `/meetings/${id}/speakers/rematch`,
-        method: "POST",
-      }),
-      invalidatesTags: (_r, _e, id) => [
-        { type: "Transcript", id },
-        { type: "Chat", id },
-      ],
-    }),
-
-    // ---- Voice profiles ----
-    // The consent switch and the list of voices held under it. Separate from
-    // /preferences on purpose: switching this off *deletes* every voice
-    // template the account holds, and that must not be reachable from a
-    // null-means-unchanged bulk patch that the settings page sends whenever
-    // anything on it moves.
-    getSpeakerSettings: builder.query<SpeakerSettings, void>({
-      query: () => "/speakers",
-      providesTags: ["Speakers"],
-    }),
-
-    setSpeakerLearning: builder.mutation<SpeakerSettings, boolean>({
-      query: (enabled) => ({
-        url: "/speakers/learning",
-        method: "PUT",
-        body: { enabled },
-      }),
-      invalidatesTags: ["Speakers"],
-    }),
-
-    deleteSpeakerProfile: builder.mutation<void, string>({
-      query: (id) => ({ url: `/speakers/profiles/${id}`, method: "DELETE" }),
-      invalidatesTags: ["Speakers"],
-    }),
 
     deleteMeeting: builder.mutation<void, string>({
       query: (id) => ({ url: `/meetings/${id}`, method: "DELETE" }),
@@ -1270,10 +1219,6 @@ export const {
   useUpdateRetentionMutation,
   useCloseAccountMutation,
   useRenameSpeakersMutation,
-  useRematchSpeakersMutation,
-  useGetSpeakerSettingsQuery,
-  useSetSpeakerLearningMutation,
-  useDeleteSpeakerProfileMutation,
   useEditSegmentsMutation,
   useSetSegmentSpeakerMutation,
   useGetActionItemsQuery,

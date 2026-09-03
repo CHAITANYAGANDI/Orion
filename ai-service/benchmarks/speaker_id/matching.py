@@ -77,12 +77,6 @@ import math
 from dataclasses import dataclass
 from typing import Iterable, Sequence
 
-#: ECAPA-TDNN speaker embeddings. Pinned here rather than inferred so a model
-#: swap that changes the width fails loudly against the `vector(192)` column
-#: instead of writing truncated vectors that still compare to something.
-EMBEDDING_DIM = 192
-
-
 @dataclass(frozen=True)
 class Candidate:
     """One unresolved speaker in one meeting, reduced to a vector.
@@ -267,10 +261,3 @@ def match_speakers(
     return accepted
 
 
-#: Re-exported from `app.diarization`, which is where it now lives.
-#:
-#: It is a fact about the labels diarization generates, and naming needs it
-#: without needing anything acoustic. Kept importable from here because every
-#: existing caller — `app.speaker_identity` and its tests — spells it this way,
-#: and moving a definition is not a reason to touch code that works.
-from app.diarization import _UNRESOLVED, is_unresolved  # noqa: E402,F401

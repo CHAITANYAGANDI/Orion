@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { PreferencesResponse, PrivacyOverview, SpeakerSettings } from "@/lib/types";
+import type { PreferencesResponse, PrivacyOverview } from "@/lib/types";
 
 /**
  * Account Settings → General.
@@ -26,22 +26,18 @@ import type { PreferencesResponse, PrivacyOverview, SpeakerSettings } from "@/li
  */
 const {
   update, setRetention, closeAccount, signOut, toastError,
-  setSpeakerLearning, deleteSpeakerProfile,
 } = vi.hoisted(() => ({
   update: vi.fn(),
   setRetention: vi.fn(),
   closeAccount: vi.fn(),
   signOut: vi.fn(),
   toastError: vi.fn(),
-  setSpeakerLearning: vi.fn(),
-  deleteSpeakerProfile: vi.fn(),
 }));
 
 let prefs: PreferencesResponse;
 let overview: PrivacyOverview;
 let identity: { name: string; email: string; imageUrl: string; provider: string; hasPassword: boolean };
 let mode: "dev" | "clerk";
-let speakers: SpeakerSettings;
 let failure: unknown = null;
 let retentionFailure: unknown = null;
 
@@ -76,24 +72,6 @@ vi.mock("@/lib/api", () => ({
     },
     { isLoading: false },
   ],
-  // Voice recognition. Its own endpoints rather than a field on /preferences,
-  // because switching it off *deletes* every voice template the account holds
-  // and that must not be reachable from a null-means-unchanged bulk patch.
-  useGetSpeakerSettingsQuery: () => ({ data: speakers, isLoading: false }),
-  useSetSpeakerLearningMutation: () => [
-    (enabled: boolean) => {
-      setSpeakerLearning(enabled);
-      return { unwrap: () => Promise.resolve({ learningEnabled: enabled, profiles: [] }) };
-    },
-    { isLoading: false },
-  ],
-  useDeleteSpeakerProfileMutation: () => [
-    (id: string) => {
-      deleteSpeakerProfile(id);
-      return { unwrap: () => Promise.resolve() };
-    },
-    { isLoading: false },
-  ],
   useGetPreferencesQuery: () => ({ data: prefs, isLoading: false }),
   useGetLanguagesQuery: () => ({
     data: [
@@ -120,7 +98,6 @@ beforeEach(() => {
   retentionFailure = null;
   mode = "dev";
   identity = { name: "", email: "", imageUrl: "", provider: "", hasPassword: false };
-  speakers = { learningEnabled: false, profiles: [] };
   window.confirm = vi.fn(() => true);
   overview = {
     held: {
@@ -515,152 +492,6 @@ describe("closing the account", () => {
   });
 });
 
-/**
- * Voice recognition ~ the only consent on this page, and the only data on it
- * that is derived from somebody's body.
- *
- * <p>Matching a voice across meetings cannot be done from names. Reverie held a
- * list of names for a year and it could never have identified anybody: it needs
- * a numerical description of how a person sounds, which is a stable identifier
- * and, under GDPR Article 9, biometric data when used to identify someone.
- *
- * <p>So this section is held to a different standard from the toggles around it,
- * and these are the four things that have to be true of it: off unless asked
- * for, described before it is agreed to, visible once it holds anything, and
- * removable ~ where "removable" means the data goes, not just its use.
- */
-describe("voice recognition", () => {
-  it("is off until the account holder turns it on", () => {
-    render(<GeneralTab />);
-
-    expect(screen.getByRole("button", { name: "Turn on" })).toBeInTheDocument();
-    // No list at all while it is off. There is nothing held to show, and a
-    // "Saved voices (0)" heading would imply this is somewhere data collects.
-    expect(screen.queryByText(/Saved voices/i)).toBeNull();
-  });
-
-  it("says what the data is before asking for it", async () => {
-    render(<GeneralTab />);
-
-    // The sentence that makes this a decision rather than a switch. A user who
-    // reads "recognise people you have named" and nothing else has not been
-    // told that a description of their colleagues' voices is being stored.
-    expect(screen.getByText(/This is voice data/i)).toBeInTheDocument();
-    expect(screen.getByText(/stored encrypted/i)).toBeInTheDocument();
-    expect(screen.getByText(/never used to train anything/i)).toBeInTheDocument();
-    expect(screen.getByText(/turning it off again deletes everything below/i))
-      .toBeInTheDocument();
-  });
-
-  it("turns on without asking, because nothing is stored yet", async () => {
-    render(<GeneralTab />);
-
-    await userEvent.click(screen.getByRole("button", { name: "Turn on" }));
-
-    // A profile appears the first time you name somebody, not now. A confirm
-    // here would be ceremony over an act with no consequence yet.
-    expect(window.confirm).not.toHaveBeenCalled();
-    await waitFor(() => expect(setSpeakerLearning).toHaveBeenCalledWith(true));
-  });
-
-  it("lists what is held, and how thin each one is", () => {
-    speakers = {
-      learningEnabled: true,
-      profiles: [
-        { id: "spf_1", name: "Sarah", samples: 4, createdAt: "", updatedAt: "" },
-        { id: "spf_2", name: "Tom", samples: 1, createdAt: "", updatedAt: "" },
-      ],
-    };
-    render(<GeneralTab />);
-
-    expect(screen.getByText("Sarah")).toBeInTheDocument();
-    // The sample count is the only thing that makes "why did it match?"
-    // actionable: a voice built from one appearance is one worth deleting.
-    expect(screen.getByText("From 4 meetings")).toBeInTheDocument();
-    expect(screen.getByText("From 1 meeting")).toBeInTheDocument();
-  });
-
-  it("says plainly that there is nothing held yet, rather than showing an empty box", () => {
-    speakers = { learningEnabled: true, profiles: [] };
-    render(<GeneralTab />);
-
-    expect(screen.getByText(/None yet/i)).toBeInTheDocument();
-  });
-
-  it("deletes one voice on request", async () => {
-    speakers = {
-      learningEnabled: true,
-      profiles: [{ id: "spf_1", name: "Sarah", samples: 4, createdAt: "", updatedAt: "" }],
-    };
-    render(<GeneralTab />);
-
-    await userEvent.click(
-      screen.getByRole("button", { name: "Delete the saved voice for Sarah" }),
-    );
-
-    await waitFor(() => expect(deleteSpeakerProfile).toHaveBeenCalledWith("spf_1"));
-  });
-
-  it("says how much is about to be destroyed before switching off", async () => {
-    speakers = {
-      learningEnabled: true,
-      profiles: [
-        { id: "spf_1", name: "Sarah", samples: 4, createdAt: "", updatedAt: "" },
-        { id: "spf_2", name: "Tom", samples: 1, createdAt: "", updatedAt: "" },
-      ],
-    };
-    render(<GeneralTab />);
-
-    await userEvent.click(screen.getByRole("button", { name: "Turn off" }));
-
-    // Off deletes; it does not pause. Somebody expecting the second would find
-    // their saved voices gone, so the count goes in the question.
-    expect(window.confirm).toHaveBeenCalledWith(
-      expect.stringContaining("deletes 2 saved voices"),
-    );
-    await waitFor(() => expect(setSpeakerLearning).toHaveBeenCalledWith(false));
-  });
-
-  it("does nothing at all if the warning is declined", async () => {
-    window.confirm = vi.fn(() => false);
-    speakers = {
-      learningEnabled: true,
-      profiles: [{ id: "spf_1", name: "Sarah", samples: 4, createdAt: "", updatedAt: "" }],
-    };
-    render(<GeneralTab />);
-
-    await userEvent.click(screen.getByRole("button", { name: "Turn off" }));
-
-    expect(setSpeakerLearning).not.toHaveBeenCalled();
-  });
-
-  it("never sends voice learning through the preferences patch", async () => {
-    speakers = { learningEnabled: true, profiles: [] };
-    render(<GeneralTab />);
-
-    await userEvent.click(screen.getByRole("button", { name: "Turn off" }));
-
-    // The separation is the safeguard, not a tidiness preference: every other
-    // control here sends a partial patch whenever anything on the page moves,
-    // and a destructive field riding along in one of those would eventually
-    // delete somebody's voices as a side effect of renaming their department.
-    await waitFor(() => expect(setSpeakerLearning).toHaveBeenCalled());
-    expect(update).not.toHaveBeenCalled();
-  });
-
-  it("shows no accuracy figure anywhere", () => {
-    speakers = {
-      learningEnabled: true,
-      profiles: [{ id: "spf_1", name: "Sarah", samples: 4, createdAt: "", updatedAt: "" }],
-    };
-    const { container } = render(<GeneralTab />);
-
-    // The matcher thresholds on cosine similarity, which is not a calibrated
-    // probability. "94% match" would be a precision it never computed, and it
-    // would invite somebody to accept a 68% one.
-    expect(container.textContent).not.toMatch(/\d+% (match|confiden|accura)/i);
-  });
-});
 
 /**
  * The email switches.

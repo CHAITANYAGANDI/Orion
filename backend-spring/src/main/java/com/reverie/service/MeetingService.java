@@ -16,7 +16,6 @@ import com.reverie.dto.callback.AiInsight;
 import com.reverie.dto.ReprocessResponse;
 import com.reverie.dto.SegmentDto;
 import com.reverie.dto.SegmentSpeakerRequest;
-import com.reverie.dto.SpeakerRematchResponse;
 import com.reverie.dto.SpeakerStatsDto;
 import com.reverie.dto.SummaryResponse;
 import com.reverie.dto.TranscriptEditRequest;
@@ -78,7 +77,6 @@ public class MeetingService {
     private final ErasureService erasure;
     private final UserService users;
 
-    private final SpeakerIdentityService speakerIdentity;
 
     public MeetingService(MeetingRepository meetings,
                           MeetingTranscriptRepository transcripts,
@@ -95,9 +93,7 @@ public class MeetingService {
                           MeetingTranslationRepository translations,
                           NotificationService notifications,
                           ErasureService erasure,
-                          UserService users,
-                          SpeakerIdentityService speakerIdentity) {
-        this.speakerIdentity = speakerIdentity;
+                          UserService users) {
         this.users = users;
         this.erasure = erasure;
         this.notifications = notifications;
@@ -547,15 +543,15 @@ public class MeetingService {
      * name, exactly as this always did.
      *
      * <p>The key itself is never touched. That is what keeps a speaker's colour,
-     * their talk-time row and their voiceprint attached to them across a rename:
+     * their talk-time row and their colour attached to them across a rename:
      * the display name is the only thing that changes, which is the whole point
      * of having two fields.
      *
-     * <p>A rename is also the one moment a human states, about audio they own,
-     * that a particular voice is a particular person. For an account that has
-     * switched speaker learning on, that is when a voice profile is learned —
-     * see {@link SpeakerIdentityService}. Nothing is learned otherwise, and
-     * automatic identification never learns at all.
+     * <p>A rename is meeting-local and nothing else. It changes what this
+     * transcript displays for this speaker; it does not describe the person to
+     * any other recording. Reverie used to enrol a voice profile here, so that
+     * naming somebody once taught the account their voice — that feature was
+     * removed, and a rename now means exactly what it says.
      */
     @Transactional
     public TranscriptResponse renameSpeakers(String userId, String meetingId, Map<String, String> mapping) {
@@ -588,158 +584,19 @@ public class MeetingService {
         // citing a name the transcript no longer shows anywhere.
         if (changed) {
             // The flat transcript carries the prefixes too, and the export reads
-            // it. It used to be left alone here while a rematch rewrote it,
-            // which meant a rename quietly desynchronised the two.
+            // it. It used to be left alone here, which meant a rename
+            // quietly desynchronised the two.
             transcripts.findFirstByMeetingIdOrderByCreatedAtDesc(meetingId)
                     .ifPresent(t -> t.setTranscriptText(joinSegments(segs)));
             reindex(userId, meetingId, segs);
             // The outline names speakers by design, so it now refers to labels
             // the transcript no longer contains.
             markSummaryStale(meetingId);
-            // Speaker NAMING: the user has said *whose* a voice is, so the
-            // account's named profile for that person is updated from this
-            // meeting's audio. Deliberately the opposite of what
-            // `setSegmentSpeaker` does -- that one says *where* a voice belongs
-            // and therefore throws the meeting's voiceprints away rather than
-            // learning from them. Renaming does not move a single span, so the
-            // cache is still an accurate description of who said what.
-            learnFromRename(userId, meetingId, segs, keyToName);
         }
         audit.record(userId, "SPEAKERS_RENAMED", "meeting", meetingId);
         return getTranscript(userId, meetingId);
     }
 
-    /**
-     * Remember the voices behind the names somebody just typed.
-     *
-     * <p>Only for an account that has opted in, only for names that are actually
-     * names — renaming "Speaker 3" to "Speaker 2" is a merge, not an
-     * identification — and never fatally. The rename is the user's edit and has
-     * already been applied; failing it because an enrolment could not run would
-     * be the wrong end of the stick.
-     */
-    private void learnFromRename(String userId, String meetingId,
-                                 List<TranscriptSegment> segs, Map<String, String> renamed) {
-        if (renamed.isEmpty() || !speakerIdentity.learningEnabled(userId)) {
-            return;
-        }
-        var meeting = meetings.findByIdAndUserId(meetingId, userId).orElse(null);
-        if (meeting == null) {
-            return;
-        }
-        var turns = speakerIdentity.turnsOf(segs);
-        for (var entry : renamed.entrySet()) {
-            if (SpeakerLabels.isUnresolved(entry.getValue())) {
-                continue;
-            }
-            ai.learnSpeaker(userId, meetingId, meeting.getObjectKey(),
-                    entry.getKey(), entry.getValue(), turns);
-        }
-    }
-
-    /**
-     * Re-evaluate the unresolved speakers in this meeting against known voices.
-     *
-     * <p>This is what "Rematch speakers" does. It is one operation with no
-     * arguments: every speaker still wearing a generated label is compared
-     * acoustically against the profiles this account has built by naming people
-     * in other meetings, and the ones that are confidently somebody are renamed.
-     *
-     * <p><b>What it will not do</b>, because each of these is a way of being
-     * confidently wrong:
-     * <ul>
-     *   <li>touch a speaker somebody has already named — manual names and names
-     *       from an earlier rematch are both left exactly alone;
-     *   <li>touch an unattributed turn, which has no voice of its own to match;
-     *   <li>rename on a weak match, or on a match that is barely ahead of the
-     *       next candidate;
-     *   <li>match by speaker number, by position, by the provider's cluster
-     *       letters, or by anything said in the transcript. Identity here is an
-     *       acoustic question and is answered acoustically or not at all.
-     * </ul>
-     *
-     * <p>That last one is about <em>this</em> operation and not about the
-     * product. A meeting's own words are read once, by the pipeline, and can
-     * name a speaker the conversation introduced or addressed by name — see
-     * {@code ai-service/app/naming.py} and {@code docs/speaker-naming.md}. It is
-     * a different question with a different answer: whether this meeting said
-     * who its speakers are, rather than whose voice this is. Nothing it finds
-     * reaches another recording, and nothing it finds is learned. What remains
-     * ruled out here is using words as evidence about a <em>voice</em>, which is
-     * the claim rematch makes and the words cannot support.</p>
-     *
-     * <p>Renaming nobody is a normal, common and correct outcome, and it is
-     * reported as such rather than as a failure.
-     */
-    @Transactional
-    public SpeakerRematchResponse rematchSpeakers(String userId, String meetingId) {
-        var meeting = require(userId, meetingId);
-        if (!speakerIdentity.learningEnabled(userId)) {
-            return SpeakerRematchResponse.unavailable(
-                    "Turn on speaker matching in Settings to identify speakers automatically.");
-        }
-
-        var segs = segments.findByMeetingIdOrderByStartTimeAsc(meetingId);
-        if (segs.isEmpty()) {
-            return SpeakerRematchResponse.none(0);
-        }
-
-        // Here rather than at the top, so the two answers above still get
-        // through. "Turn on speaker matching in Settings" tells somebody what to
-        // do about it; being told the account is out of minutes instead would
-        // send them looking for the wrong problem -- and neither of those paths
-        // asks the model for anything.
-        usage.requireAiOrThrow(userId, UsageLimitService.AiFeature.SPEAKER_REMATCH);
-
-        var turns = speakerIdentity.turnsOf(segs);
-        var result = ai.identifySpeakers(userId, meetingId, meeting.getObjectKey(), turns);
-        if (!result.ran()) {
-            return SpeakerRematchResponse.unavailable(result.unavailable());
-        }
-        if (result.matches().isEmpty()) {
-            return SpeakerRematchResponse.none(result.considered());
-        }
-
-        Map<String, String> byKey = new java.util.LinkedHashMap<>();
-        for (var match : result.matches()) {
-            byKey.put(match.speakerKey(), match.displayName());
-        }
-
-        List<String> named = new ArrayList<>();
-        boolean changed = false;
-        for (var seg : segs) {
-            String name = seg.getSpeakerKey() == null ? null : byKey.get(seg.getSpeakerKey());
-            // Belt to the matcher's braces. It was told which labels were
-            // unresolved and is trusted not to propose the others, but this is
-            // the line between "a bad match" and "overwrote the name a user
-            // typed", and it is cheap to make that second thing impossible here.
-            if (name == null || !SpeakerLabels.isUnresolved(seg.getSpeaker())) {
-                continue;
-            }
-            if (!name.equals(seg.getSpeaker())) {
-                seg.setSpeaker(name);
-                changed = true;
-                if (!named.contains(name)) {
-                    named.add(name);
-                }
-            }
-        }
-
-        if (!changed) {
-            return SpeakerRematchResponse.none(result.considered());
-        }
-
-        // Same tail as any other change to who said what: the flat transcript
-        // carries the speaker prefixes and the export reads it, the retrieval
-        // passages carry them too and chat reads those, and the outline names
-        // speakers so it is now out of date.
-        transcripts.findFirstByMeetingIdOrderByCreatedAtDesc(meetingId)
-                .ifPresent(t -> t.setTranscriptText(joinSegments(segs)));
-        reindex(userId, meetingId, segs);
-        markSummaryStale(meetingId);
-        audit.record(userId, "SPEAKERS_REMATCHED", "meeting", meetingId);
-        return new SpeakerRematchResponse(named.size(), named, result.considered(), null);
-    }
 
     /**
      * Correct what the transcriber heard.
@@ -832,13 +689,6 @@ public class MeetingService {
      * unreviewable — the user can see one line, not the forty the rule fired
      * on.
      *
-     * <p>It also does not teach a voice. {@code learnFromRename} enrols a
-     * voiceprint when somebody puts a *name* to a speaker, which is a statement
-     * about who that voice is. Moving a turn is the opposite: a statement that
-     * these words were misattributed. Feeding that audio into a voiceprint
-     * would train the model on the very mistake being corrected, so Rematch
-     * learning is left strictly alone here.
-     *
      * <p>Everything downstream of the segments does move, because they all
      * carry the speaker: the flat transcript (which the export reads), the
      * retrieval index (which chat cites), and the speaker statistics (derived
@@ -847,19 +697,6 @@ public class MeetingService {
      * now disagree, and silently spending a model call on a one-line fix is
      * worse than saying so.
      *
-     * <h2>It can be refused</h2>
-     *
-     * <p>A correction that really moves something first invalidates this
-     * meeting's cached voiceprints, and it will not save unless that deletion
-     * is confirmed — a 503 if it cannot be, with nothing written. Unusual for an
-     * edit, and deliberate: the cache is keyed on speaker, so a correction that
-     * lands while a stale vector survives leaves a Rematch able to attach a real
-     * person's name to the wrong voice. Refusing costs the user a retry.
-     * Accepting costs them a wrong answer they have no way to see coming.
-     *
-     * @throws ApiException 503 when the voiceprint invalidation cannot be
-     *                      confirmed; the transaction rolls back and the
-     *                      transcript is untouched
      */
     @Transactional
     public TranscriptResponse setSegmentSpeaker(String userId, String meetingId,
@@ -889,54 +726,9 @@ public class MeetingService {
         // or is about to be refused. An invalid range is rejected here, so a bad
         // request stays a bad request rather than becoming a wasted deletion.
         if (!movesAnything(target, req, key)) {
-            // The segment was already attributed that way. Nothing moved, so
-            // nothing cached about this meeting has gone out of date -- and
-            // throwing away good voiceprints costs a re-embed of the whole
-            // recording on the next rematch.
+            // The segment was already attributed that way.
             return getTranscript(userId, meetingId);
         }
-
-        // Past this line the attribution really changed, so the acoustic cache
-        // is now wrong. Voiceprints are keyed on (meeting_id, speaker_key) and
-        // were built from the spans that key owned AT THE TIME -- which is
-        // exactly what the user has just told us was incorrect.
-        //
-        //   spk_1: [Alice] [Alice] [Cindy]   <-- the third span is misattributed
-        //   spk_2: [Cindy]
-        //
-        // A voiceprint for spk_1 is an average of two Alices and a Cindy. Moving
-        // that third span to spk_2 fixes the transcript and leaves the average
-        // untouched, so the next "Rematch speakers" compares a blended vector
-        // against the account's named profiles and can put a real person's name
-        // on the wrong voice -- the one failure the whole feature exists to
-        // avoid, arriving through the correction that was supposed to prevent it.
-        //
-        // Dropped rather than recomputed: recomputing needs the audio decoded
-        // and the model loaded, which is seconds of work for a correction the
-        // user expects to be instant. The next rematch rebuilds only what it
-        // actually needs.
-        //
-        // NOTE: this is speaker CORRECTION -- "that line was the other person".
-        // It invalidates the acoustic cache and teaches nothing, because the
-        // user has said where a voice belongs, not whose it is.
-        //
-        // Speaker NAMING -- "that person is Priya" -- is the other operation, in
-        // `rename` above: it feeds `learnSpeakers`, which updates the account's
-        // named speaker profile from this meeting's audio. The two look similar
-        // on screen and must not be confused here: learning from a diarization
-        // correction would fold a span the user just disowned into a real
-        // person's stored voice.
-        //
-        // Required, not best-effort, and first. If the deletion cannot be
-        // confirmed this throws and the correction is refused: the transaction
-        // rolls back, nothing here has written anything yet, and the user is
-        // told to try again. That is a worse minute than a silent save and a
-        // better week -- a correction saved over a surviving stale vector is
-        // invisible until Rematch puts somebody's name on the wrong voice, and
-        // by then nothing in the transcript records that it happened.
-        // `forgetMeeting` (best-effort) is still what erasure and account
-        // closure use, where finishing matters more than confirming.
-        speakerIdentity.invalidateMeetingVoiceprintsRequired(userId, meetingId);
 
         // Only now is anything mutated. `moveWholeSegment` writes through to a
         // managed entity, so building the replacement before the line above
@@ -947,10 +739,8 @@ public class MeetingService {
                 : moveWholeSegment(target, key, name);
 
         if (replacement.isEmpty()) {
-            // Belt and braces: `movesAnything` said this would move something,
-            // so reaching here means the two disagreed. Harmless if they ever
-            // do -- the cost is one wasted re-embed on the next rematch, not a
-            // wrong answer -- and quietly returning beats saving nothing while
+            // `movesAnything` said this would move something, so the two
+            // disagreed. Returning quietly beats saving nothing while
             // claiming otherwise.
             return getTranscript(userId, meetingId);
         }
@@ -982,14 +772,11 @@ public class MeetingService {
      * Would this request actually move anything -- and is it even askable?
      *
      * <p>Separated from the movers below because the answer is needed before
-     * they run: this meeting's cached voiceprints are invalidated before a
-     * single segment is touched, and dropping them for a no-op would cost a
-     * re-embed of the whole recording for nothing.
+     * they run: a request that moves nothing is a no-op and must not be written.
      *
      * <p>The range validation lives in {@link #wordRange}, which the split
      * itself also uses, so the two cannot drift into disagreeing about what a
-     * valid range is -- which would show up as a correction that invalidated
-     * the cache and then threw.
+     * valid range is.
      */
     private boolean movesAnything(TranscriptSegment seg, SegmentSpeakerRequest req, String key) {
         boolean alreadyTheirs = key.equals(seg.getSpeakerKey());
@@ -1218,16 +1005,10 @@ public class MeetingService {
     /**
      * Run the whole pipeline again over the same audio.
      *
-     * <p>Refusable, and in three ways. No source to re-read is a 400; a spent
-     * minute allowance is a 429; and a meeting whose cached voiceprints cannot
-     * be dropped is a 503 — see the invalidation below for why that one is
-     * fatal rather than logged. All three refuse before the status moves, so a
-     * refused reprocess never leaves a meeting reading "Processing" over a job
-     * nobody started.
-     *
-     * @throws ApiException 503 when the voiceprint invalidation cannot be
-     *                      confirmed; the transaction rolls back and the meeting
-     *                      is left exactly as it was
+     * <p>Refusable in two ways. No source to re-read is a 400; a spent minute
+     * allowance is a 429. Both refuse before the status moves, so a refused
+     * reprocess never leaves a meeting reading "Processing" over a job nobody
+     * started.
      */
     @Transactional
     public ReprocessResponse reprocess(String userId, String meetingId) {
@@ -1243,46 +1024,8 @@ public class MeetingService {
         // policy choice about AI features -- it is the minute allowance doing
         // exactly what it counts.
         usage.requireAiOrThrow(userId, UsageLimitService.AiFeature.REPROCESS);
-        // The cached voiceprints go now, and this is not housekeeping.
-        //
-        // A voiceprint is filed under a meeting-local speaker key, and a
-        // reprocess re-derives those keys from scratch by first appearance. The
-        // audio has not changed, but who ends up as spk_1 can: a re-clustering
-        // that splits an early interjection differently is enough.
-        //
-        //   before:  spk_1 = Alice   spk_2 = Cindy
-        //   after:   spk_1 = Cindy   spk_2 = Alice
-        //
-        // Left in place, the cache hands the previous occupant's voice to the
-        // new one and the next rematch names each of them after the other --
-        // confidently, because the vectors are perfectly good vectors filed
-        // under the wrong keys. The exact failure this feature is arranged to
-        // avoid, arriving through the back door.
-        //
-        // Required rather than best-effort, for the reason manual correction is:
-        // swallowing this failure saves a reprocess whose result depends on a
-        // deletion that did not happen. A confirmed deletion of zero rows is a
-        // success -- a meeting nobody ever rematched has nothing cached, and
-        // refusing that would refuse most reprocesses.
-        //
-        // Named profiles are untouched. They belong to the account, not to this
-        // meeting, which is why a rematch can put every name back afterwards.
-        //
         // ORDERING, both halves deliberate:
         //
-        // *After* the allowance check, so a reprocess that is about to be
-        // refused for a spent account does not cost the user their cached
-        // voiceprints on the way out. The check spends nothing and writes
-        // nothing, so running it first is free.
-        //
-        // *Before* the row lock below, because this is a call over the network
-        // to another service. Taking the lock first would hold `FOR NO KEY
-        // UPDATE` on the meeting row for the whole round trip -- and for the
-        // whole of a timeout, when the far end is the thing that is wrong --
-        // blocking every other reprocess and erasure of that meeting behind it.
-        // Nothing has been written yet at this point, so there is no dirty
-        // entity for a flush to sneak out ahead of the lock.
-        speakerIdentity.invalidateMeetingVoiceprintsRequired(userId, meetingId);
         // Take the row before writing anything to it, and take the run number
         // from the row rather than from the entity in memory. Two people
         // pressing Reprocess at the same moment used to read the same N and

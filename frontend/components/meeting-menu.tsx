@@ -17,7 +17,7 @@
  * every time, and "it is not there" and "it is not there yet" look identical
  * while you are hunting for it. Greyed says which of the two it is.
  *
- * <p>The three that *do* something — rematch, change language, regenerate —
+ * <p>The two that *do* something — change language, regenerate —
  * also grey while one of them is still running. Two rewrites of one summary
  * raced in the same meeting is the concrete thing this prevents; the general
  * one is that none of the three is worth starting on a brief that is about to
@@ -27,8 +27,8 @@
  * <p>Grouped by what an item acts on, and within that by what it costs to be
  * wrong. Filing and copying a link are free; then the transcript — copy it,
  * fix who said what, read it in another language; then the brief that was
- * written from it, which is the order those happen in, because rematching the
- * speakers or changing the language is the usual reason to regenerate.
+ * written from it, which is the order those happen in, because changing the
+ * language is the usual reason to regenerate.
  * Deleting the meeting is last and alone, so nothing lands there by momentum.
  *
  * <p>Deleting the recording and deleting the transcript used to sit above it,
@@ -49,12 +49,10 @@
  * of every hand correction and every speaker rename anybody had made, one
  * confirm deep in a menu people open to copy a link.
  *
- * <p>Two things changed. The confirm now says what is lost instead of asking
- * "are you sure?", and speaker names are no longer among the things that are
- * lost for good — voice profiles belong to the account rather than the meeting,
- * so one press of Rematch afterwards puts them back. Hand-typed corrections are
- * still destroyed, and the confirm says so in those words. It sits beside
- * Delete rather than beside the copy items, which is where its cost puts it.
+ * <p>One thing changed. The confirm now says what is lost instead of asking
+ * "are you sure?": hand-typed corrections and speaker names are destroyed, and
+ * the confirm says so in those words. It sits beside Delete rather than beside
+ * the copy items, which is where its cost puts it.
  *
  * <p>"Change language" translates. It does not tell the transcriber it heard
  * the wrong language: that was a *different* item with the same name, it
@@ -111,7 +109,7 @@ export interface MeetingMenuProps {
   /** Where it is filed now, so Move can show the current answer as chosen. */
   projectId?: string | null;
   /**
-   * There is a transcript to copy, and speakers in it worth rematching.
+   * There is a transcript to copy.
    *
    * False greys those items rather than removing them. See the note above.
    */
@@ -141,14 +139,6 @@ export interface MeetingMenuProps {
   onRegenerateSummary: () => void;
   onTranslate: () => void;
   /**
-   * Identify the unresolved speakers against voices this account has learned.
-   *
-   * Runs immediately. No dialog, no scrolling, no controls to fill in — the
-   * whole operation is "work out who these people are", and there is nothing
-   * for the user to tell us that we could use.
-   */
-  onRematchSpeakers: () => void;
-  /**
    * Run the whole pipeline again over the same audio.
    *
    * Destructive: the transcript is rebuilt, so hand corrections and speaker
@@ -157,16 +147,6 @@ export interface MeetingMenuProps {
    */
   onReprocess: () => void;
   onDelete: () => void;
-
-  /**
-   * A rematch is running.
-   *
-   * Its own flag rather than folding into `working`, because it shows on the
-   * item itself: the operation takes a few seconds and gives no other sign it
-   * started, so without this the honest reading of a still menu is that the
-   * click missed.
-   */
-  rematching?: boolean;
 
   /** A reprocess request is in flight. Only until it is queued, not until it finishes. */
   reprocessing?: boolean;
@@ -228,20 +208,6 @@ export function MeetingMenu(props: MeetingMenuProps) {
 
           <DropdownMenuItem disabled={!props.hasTranscript} onSelect={props.onCopyTranscript}>
             <FileText /> Copy transcript
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            disabled={!props.hasTranscript || props.working || props.rematching || spent !== null}
-            // Kept open while it runs. `onSelect` closes the menu by default,
-            // and a menu that vanishes the instant you click is indistinguishable
-            // from one that ignored you — which is exactly the doubt the spinner
-            // below exists to answer.
-            onSelect={(e) => {
-              e.preventDefault();
-              props.onRematchSpeakers();
-            }}
-          >
-            {props.rematching ? <Loader2 className="animate-spin" /> : <Users />}
-            {props.rematching ? "Rematching speakers…" : "Rematch speakers"}
           </DropdownMenuItem>
           <DropdownMenuItem
             // Closed on a spent account even though languages already

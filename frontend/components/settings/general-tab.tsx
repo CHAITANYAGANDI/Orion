@@ -53,9 +53,6 @@ import {
   useGetPrivacyOverviewQuery,
   useUpdateRetentionMutation,
   useCloseAccountMutation,
-  useGetSpeakerSettingsQuery,
-  useSetSpeakerLearningMutation,
-  useDeleteSpeakerProfileMutation,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -82,7 +79,6 @@ export function GeneralTab() {
       <IdentityBlock />
       <LanguageRow />
       <TrainingSection />
-      <VoiceRecognitionSection />
       <EmailSection />
       <RetentionSection />
       <CloseAccountSection />
@@ -322,151 +318,6 @@ function TrainingSection() {
           How long any of it stays is <a href="#data" className="text-primary underline-offset-2 hover:underline">yours to set below</a>,
           and you can delete the whole account from the same place.
         </p>
-      </div>
-    </section>
-  );
-}
-
-/**
- * Recognising the same voice in a later meeting, and the data that needs.
- *
- * <p>This is the only section on this page that asks for consent rather than
- * stating a fact, and the reason is worth being blunt about on screen as well as
- * here. Matching a voice across meetings cannot be done with names — Reverie
- * held a list of names for a year and it could never have identified anybody.
- * It needs a numerical description of how each person sounds, and that is a
- * stable identifier derived from someone's body. Under GDPR Article 9 a template
- * used to identify a natural person is biometric data. So it is off by default,
- * it is described in plain words before the switch, and turning it off deletes
- * what is held rather than merely stopping its use.
- *
- * <p>The list underneath is not decoration. A consent control that does not show
- * you what you consented to is a checkbox, not a control — the point of calling
- * this biometric-adjacent is that the person it describes can see it and remove
- * it, one voice at a time.
- *
- * <p>No accuracy figure is shown anywhere. The matcher works on cosine
- * similarity between embeddings, which is not a calibrated probability, and
- * rendering it as "94% confident" would manufacture a precision it does not
- * have. What the user gets is a count of how many speakers were renamed.
- */
-function VoiceRecognitionSection() {
-  const settings = useGetSpeakerSettingsQuery();
-  const [setLearning, learningState] = useSetSpeakerLearningMutation();
-  const [deleteProfile, deleteState] = useDeleteSpeakerProfileMutation();
-
-  const enabled = settings.data?.learningEnabled ?? false;
-  const profiles = settings.data?.profiles ?? [];
-
-  async function toggle() {
-    // Only the destructive direction asks. Turning it on stores nothing by
-    // itself — a profile is created the first time you name somebody — so a
-    // confirm there would be ceremony over an act with no consequence yet.
-    if (enabled && profiles.length > 0) {
-      const ok = window.confirm(
-        `Turning this off deletes ${profiles.length} saved ${
-          profiles.length === 1 ? "voice" : "voices"
-        }. Reverie will stop recognising them in new meetings. Continue?`,
-      );
-      if (!ok) return;
-    }
-    try {
-      await setLearning(!enabled).unwrap();
-      toast.success(enabled ? "Voice recognition off. Saved voices deleted." : "Voice recognition on.");
-    } catch (err) {
-      toast.error(settingsError(err));
-    }
-  }
-
-  async function forget(id: string, name: string) {
-    if (!window.confirm(`Delete the saved voice for ${name}?`)) return;
-    try {
-      await deleteProfile(id).unwrap();
-      toast.success(`${name}'s voice was deleted.`);
-    } catch (err) {
-      toast.error(settingsError(err));
-    }
-  }
-
-  return (
-    <section aria-labelledby="voices-heading" className="space-y-1 pt-6">
-      <h2 id="voices-heading" className="flex items-center gap-2 text-lg font-semibold">
-        <UserCheck className="h-4 w-4 text-muted-foreground" /> Voice recognition
-      </h2>
-
-      <div className="space-y-4 border-b py-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1 text-sm text-muted-foreground">
-            <p className="font-medium text-foreground">
-              Recognise people you have named before
-            </p>
-            <p>
-              When you put a name to a speaker, Reverie can save a numerical
-              description of how that voice sounds. In a later meeting,
-              <strong className="text-foreground"> Rematch speakers</strong> uses
-              it to work out who an unidentified speaker is.
-            </p>
-            {/* The sentence that makes this an informed choice rather than a
-                toggle. It is deliberately not softened: a voice template is
-                not a name, and somebody agreeing to this should know that. */}
-            <p>
-              This is voice data. It is stored encrypted, kept to your account
-              alone, never pooled with anybody else&apos;s and never used to train
-              anything. It is <strong className="text-foreground">off</strong>{" "}
-              unless you turn it on, nothing is saved until you name somebody, and
-              turning it off again deletes everything below.
-            </p>
-          </div>
-          <Button
-            variant={enabled ? "outline" : "default"}
-            size="sm"
-            className="shrink-0"
-            disabled={learningState.isLoading || settings.isLoading}
-            onClick={() => void toggle()}
-          >
-            {learningState.isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-            {enabled ? "Turn off" : "Turn on"}
-          </Button>
-        </div>
-
-        {enabled && (
-          <div className="space-y-2">
-            <p className="text-sm font-medium">
-              Saved voices{profiles.length > 0 && ` (${profiles.length})`}
-            </p>
-            {profiles.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                None yet. Name a speaker in any transcript and their voice is
-                saved here.
-              </p>
-            ) : (
-              <ul className="divide-y rounded-md border">
-                {profiles.map((profile) => (
-                  <li key={profile.id} className="flex items-center justify-between gap-3 px-3 py-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">{profile.name}</p>
-                      {/* The only thing that makes "why did it match?"
-                          actionable. A voice built from one appearance is one
-                          worth deleting and rebuilding. */}
-                      <p className="text-xs text-muted-foreground">
-                        From {profile.samples} meeting{profile.samples === 1 ? "" : "s"}
-                      </p>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      aria-label={`Delete the saved voice for ${profile.name}`}
-                      disabled={deleteState.isLoading}
-                      onClick={() => void forget(profile.id, profile.name)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
       </div>
     </section>
   );

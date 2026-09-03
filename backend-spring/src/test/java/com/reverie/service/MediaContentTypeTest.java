@@ -73,14 +73,13 @@ class MediaContentTypeTest {
     // Speaker identification is not what these tests are about; it is here
     // because MeetingService now consults it on a rename. Doing nothing is the
     // right behaviour for an account that has not opted in.
-    @Mock private SpeakerIdentityService speakerIdentity;
 
     private MeetingService service;
 
     @BeforeEach
     void setUp() {
         service = new MeetingService(meetings, transcripts, segments, summaries,
-                insights, storage, usage, outbox, audit, ai, templates, projects, translations, notifications, erasure, userService, speakerIdentity);
+                insights, storage, usage, outbox, audit, ai, templates, projects, translations, notifications, erasure, userService);
         when(storage.presignUpload(anyString(), anyString())).thenReturn("https://example/put");
         when(storage.presignDownload(anyString())).thenReturn("https://example/get");
         when(storage.presignExpirySeconds()).thenReturn(900L);

@@ -127,7 +127,7 @@ export function importRefusal(a: Allowance): string | null {
 }
 
 /** Everything that asks a model, and is therefore closed once the minutes go. */
-export type AiFeature = "chat" | "summary" | "speakers" | "translation" | "reprocess";
+export type AiFeature = "chat" | "summary" | "translation" | "reprocess";
 
 const SPENT = "You have used all 100 transcription minutes on this account";
 
@@ -146,8 +146,6 @@ const SPENT = "You have used all 100 transcription minutes on this account";
 const CLOSED: Record<AiFeature, string> = {
   chat: "AI Chat is closed. Your meetings and the answers you already have are still here.",
   summary: "the summary cannot be rewritten. The summary you have is still here.",
-  speakers:
-    "speakers cannot be rematched. The speaker names already on this meeting are still here.",
   translation:
     "nothing further can be translated. Translations you already have are still here.",
   reprocess: "meetings cannot be reprocessed. Everything already transcribed is still here.",
@@ -157,8 +155,8 @@ const CLOSED: Record<AiFeature, string> = {
  * Why an AI feature is closed, or null when it is not.
  *
  * <p><b>Most of these spend no transcription minutes at all.</b> Chat spends
- * context and a completion; rewriting a summary and rematching speakers re-read
- * a transcript already paid for. On the arithmetic they could run forever on an
+ * context and a completion; rewriting a summary re-reads a transcript
+ * already paid for. On the arithmetic they could run forever on an
  * account that can no longer record. They do not, and the reason is what the
  * allowance is *for* rather than what it counts: 100 minutes is the whole of
  * what an account gets, and AI features still running afterwards would make it

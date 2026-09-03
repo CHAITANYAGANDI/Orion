@@ -4,7 +4,6 @@ import * as React from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { rematchMessage } from "@/lib/rematch";
 import {
   RefreshCw,
   Upload,
@@ -43,7 +42,6 @@ import {
   useGetTranslationsQuery,
   useGetLanguagesQuery,
   useRenameSpeakersMutation,
-  useRematchSpeakersMutation,
   useReprocessMeetingMutation,
   useEditSegmentsMutation,
   useSetSegmentSpeakerMutation,
@@ -228,9 +226,6 @@ export default function MeetingDetailPage() {
    * stay down in the editor; it publishes what the button needs to draw itself
    * through `onStatus`, and what the button needs to *do* through the ref.
    */
-  // Rematch runs from the menu, so its pending state has to live out here
-  // beside the menu rather than inside the transcript panel.
-  const [rematchSpeakers, { isLoading: rematching }] = useRematchSpeakersMutation();
   const [reprocessMeeting, { isLoading: reprocessing }] = useReprocessMeetingMutation();
   // Keyed so the three places that can rewrite this summary share one
   // in-flight flag: this page's menu item, the template picker on the tab row,
@@ -599,30 +594,6 @@ export default function MeetingDetailPage() {
   }
 
   /**
-   * Rematch speakers: one click, no dialog, no scrolling anywhere.
-   *
-   * Every speaker still labelled "Speaker N" is compared acoustically against
-   * the voices this account has learned by naming people in other meetings.
-   * Anyone already named is left alone, and a weak or ambiguous match renames
-   * nobody — so "no new speaker matches found" is a normal outcome, not a
-   * failure, and is reported as plainly as a success.
-   *
-   * This used to open the merge dropdowns instead. That is a different repair
-   * and it still exists, on the menu item below.
-   */
-  async function onRematchSpeakers() {
-    try {
-      // The wording lives in lib/speakers because it is the feature's whole
-      // visible surface: three outcomes that are easy to collapse into one, on
-      // a transcript the user may not be looking at.
-      const { tone, text, detail } = rematchMessage(await rematchSpeakers(id).unwrap());
-      toast[tone](text, detail ? { description: detail } : undefined);
-    } catch {
-      toast.error("Could not rematch speakers.");
-    }
-  }
-
-  /**
    * Run the whole pipeline again over the same audio.
    *
    * <b>Destructive, and the confirm says exactly how.</b> Reprocessing rebuilds
@@ -632,11 +603,6 @@ export default function MeetingDetailPage() {
    * wholesale, and there is no version of "keep my edits" that would not mean
    * pasting corrections onto lines that may no longer exist.
    *
-   * The one thing that does survive is the voice profiles, because those belong
-   * to the account rather than to this meeting. So the names are recoverable
-   * with one press of Rematch afterwards, and the confirm says so — that is the
-   * difference between this and the "Transcribe again" that was taken out.
-   *
    * Not awaited to completion: the server answers 202 with a queued job, and
    * the page follows the meeting's status from there like any other processing
    * meeting.
@@ -645,8 +611,7 @@ export default function MeetingDetailPage() {
     // What it costs, first.
     //
     // This dialog warned about the hand corrections and the speaker names,
-    // which are replaceable -- the saved voices survive, so Rematch puts the
-    // names back -- and said nothing at all about the minutes, which are not.
+    // and said nothing at all about the minutes, which are not replaceable.
     // Reprocessing sends the audio back to the provider and is charged again
     // in full, so a thirty-minute meeting reprocessed three times has spent
     // ninety of the hundred an account ever gets. Until now the button that
@@ -656,9 +621,7 @@ export default function MeetingDetailPage() {
       ? "Try processing this meeting again?\n\n" + cost
       : "Reprocess this meeting?\n\n" + cost
         + "\n\nThe transcript and summary will be rebuilt from the recording. "
-        + "Any corrections you typed, and any speakers you named, will be replaced."
-        + "\n\nSaved voices are kept, so Rematch speakers can put the names "
-        + "back afterwards.";
+        + "Any corrections you typed, and any speakers you named, will be replaced.";
     if (!window.confirm(warning)) return;
     try {
       await reprocessMeeting(id).unwrap();
@@ -917,19 +880,17 @@ export default function MeetingDetailPage() {
             hasTranscript={(transcript.data?.segments?.length ?? 0) > 0}
             hasSummary={ready && Boolean(summary.data)}
             canTranslate={ready}
-            // Rematch, Change language and Regenerate grey while either is
-            // running. Both end in the summary being rewritten, and starting a
-            // second one on top of the first is the race this closes.
+            // Change language and Regenerate grey while either is running.
+            // Both end in the summary being rewritten, and starting a second
+            // one on top of the first is the race this closes.
             working={regenerating || translating}
             busy={removeState.isLoading}
             onCopySummary={() => void onCopySummary()}
             onCopyTranscript={() => void onCopyTranscript()}
             onRegenerateSummary={() => void onRegenerateSummary()}
             onTranslate={() => setPickingLanguage(true)}
-            onRematchSpeakers={() => void onRematchSpeakers()}
             onReprocess={() => void onReprocess()}
             reprocessing={reprocessing}
-            rematching={rematching}
             onDelete={() => void onDelete()}
           />}
         </div>
@@ -2148,14 +2109,6 @@ function TranscriptPanel({
   onSeek: (s: number) => void;
   /** Hands a selected passage to the chat on the Ask tab. */
   onAskAbout: (text: string, send: boolean) => void;
-  /**
-   * Bumped by "Rematch speakers" on the meeting menu.
-   *
-   * The tools were already here and findable only by scrolling to the talk-time
-   * block and noticing a ghost button — which is to say, not findable. A
-   * counter rather than a boolean because the item has to work on the second
-   * press as well as the first.
-   */
 }) {
   const [renameSpeakers, { isLoading: renaming }] = useRenameSpeakersMutation();
   const [editing, setEditing] = React.useState(false);
@@ -2332,12 +2285,9 @@ function TranscriptPanel({
       clearSelection();
       toast.success("Speaker corrected for that line.");
     } catch (err) {
-      // A correction can be refused outright now: it invalidates this meeting's
-      // cached voiceprints first, and if that cannot be confirmed the server
-      // saves nothing rather than leave a later Rematch comparing against audio
-      // that no longer belongs to that speaker. That refusal is a 503 with a
-      // sentence worth showing -- "try again in a moment" is different advice
-      // from "that did not save", and only the server knows which one applies.
+      // The server can still refuse a correction, and its sentence is worth
+      // showing: "try again in a moment" is different advice from "that did
+      // not save", and only the server knows which one applies.
       const message = (err as { data?: { message?: string } })?.data?.message;
       toast.error(message || "Could not change the speaker on that line.");
     }

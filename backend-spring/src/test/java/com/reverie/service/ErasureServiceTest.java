@@ -13,7 +13,6 @@ import com.reverie.repository.MeetingTranslationRepository;
 import com.reverie.repository.TranscriptChunkRepository;
 import com.reverie.repository.TranscriptMomentRepository;
 import com.reverie.repository.TranscriptSegmentRepository;
-import com.reverie.repository.SpeakerProfileRepository;
 import com.reverie.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -75,7 +74,6 @@ class ErasureServiceTest {
     @Mock private AuditService audit;
     @Mock private StatusPublisher statusPublisher;
     // Erasing a recording erases the voiceprints derived from it.
-    @Mock private SpeakerIdentityService speakerIdentity;
 
     private ErasureService service;
     private Meeting meeting;
@@ -83,8 +81,7 @@ class ErasureServiceTest {
     @BeforeEach
     void setUp() {
         service = new ErasureService(meetings, transcripts, segments, summaries, actionItems,
-                translations, moments, chunks, users, storage, audit, statusPublisher,
-                speakerIdentity);
+                translations, moments, chunks, users, storage, audit, statusPublisher);
         meeting = new Meeting();
         meeting.setId(MEETING);
         meeting.setUserId(USER);
@@ -200,34 +197,7 @@ class ErasureServiceTest {
             assertThat(meeting.getTranscriptDeletedAt()).isNull();
         }
 
-        @Test
-        @DisplayName("and takes the voiceprints computed from it")
-        void takesTheVoiceprints() {
-            // The documented model: erasing a recording erases the templates
-            // derived from the voices on it. An embedding is not audio and
-            // cannot be turned back into audio, which is the argument for
-            // keeping one -- and it is a technicality, because the embedding is
-            // exactly what makes those voices findable again.
-            service.eraseAudio(USER, MEETING);
 
-            verify(speakerIdentity).invalidateMeetingVoiceprintsRequired(USER, MEETING);
-        }
-
-        @Test
-        @DisplayName("and takes them first, before the object it cannot roll back")
-        void theVoiceprintsGoFirst() {
-            // The ordering decision. Object storage is not in the transaction,
-            // so one of the two has to be able to fail with the other already
-            // done. Deleting the derived data first means a failure leaves the
-            // audio in place and honest; the other way round leaves a template
-            // stranded with no recording it can ever be checked against.
-            InOrder order = inOrder(speakerIdentity, storage);
-
-            service.eraseAudio(USER, MEETING);
-
-            order.verify(speakerIdentity).invalidateMeetingVoiceprintsRequired(USER, MEETING);
-            order.verify(storage).deleteOrThrow("meetings/usr_1/mtg_1/audio.mp3");
-        }
 
         @Test
         @DisplayName("and takes any converted copy an MP3 export left behind")
@@ -267,12 +237,6 @@ class ErasureServiceTest {
             // A meeting id and nothing wider. Another meeting of the same
             // account keeps its cache: its recording was not the one deleted,
             // and its voiceprints still describe audio that is still there.
-            verify(speakerIdentity)
-                    .invalidateMeetingVoiceprintsRequired(USER, MEETING);
-            verify(speakerIdentity, never())
-                    .invalidateMeetingVoiceprintsRequired(eq(USER), eq("mtg_other"));
-            verify(speakerIdentity, never()).forgetEverything(anyString());
-            verify(speakerIdentity, never()).deleteProfile(anyString(), anyString());
         }
 
         @Test
@@ -286,20 +250,6 @@ class ErasureServiceTest {
             verify(storage).deleteOrThrow("meetings/usr_1/mtg_1/audio.mp3.mp3");
         }
 
-        @Test
-        @DisplayName("but a second press does re-confirm the derived data is gone")
-        void aSecondPressReChecksTheVoiceprints() {
-            // Cheap, and the only way an erasure that half-finished can ever be
-            // completed: the timestamp is set, so every other step is skipped,
-            // and returning it without checking would keep reporting success
-            // over a template that is still there. Deleting nothing is a
-            // confirmed success, so on the ordinary path this costs one round
-            // trip and changes nothing.
-            service.eraseAudio(USER, MEETING);
-            service.eraseAudio(USER, MEETING);
-
-            verify(speakerIdentity, times(2)).invalidateMeetingVoiceprintsRequired(USER, MEETING);
-        }
 
         @Test
         @DisplayName("somebody else's meeting is simply not found")
@@ -313,8 +263,6 @@ class ErasureServiceTest {
             // Not even the deletion. Ownership is checked before anything is
             // asked of another service, so a wrong id cannot be used to clear
             // a stranger's cache.
-            verify(speakerIdentity, never())
-                    .invalidateMeetingVoiceprintsRequired(anyString(), anyString());
         }
     }
 
@@ -322,24 +270,6 @@ class ErasureServiceTest {
     @DisplayName("erasing the recording, when something refuses")
     class AudioFailures {
 
-        @Test
-        @DisplayName("an unconfirmed voiceprint deletion leaves the recording alone")
-        void aFailedInvalidationStopsEverything() {
-            doThrow(ApiException.serviceUnavailable("Speaker matching data could not be updated"))
-                    .when(speakerIdentity).invalidateMeetingVoiceprintsRequired(USER, MEETING);
-
-            assertThatThrownBy(() -> service.eraseAudio(USER, MEETING))
-                    .isInstanceOf(ApiException.class);
-
-            // Nothing after it ran, so the meeting is exactly as it was: the
-            // recording is still there and still claimed. That is the safe end
-            // of this trade -- the user is told the erasure did not happen
-            // rather than told it did.
-            verify(storage, never()).deleteOrThrow(anyString());
-            assertThat(meeting.getObjectKey()).isEqualTo("meetings/usr_1/mtg_1/audio.mp3");
-            assertThat(meeting.getAudioDeletedAt()).isNull();
-            verify(audit, never()).record(anyString(), anyString(), anyString(), anyString());
-        }
 
         @Test
         @DisplayName("a failed object deletion does not claim the recording is gone")
@@ -363,23 +293,6 @@ class ErasureServiceTest {
             verify(audit, never()).record(anyString(), anyString(), anyString(), anyString());
         }
 
-        @Test
-        @DisplayName("the voiceprints stay deleted when the object deletion fails")
-        void deletedVoiceprintsAreNotPutBack() {
-            doThrow(new RuntimeException("S3 unavailable"))
-                    .when(storage).deleteOrThrow(anyString());
-
-            assertThatThrownBy(() -> service.eraseAudio(USER, MEETING))
-                    .isInstanceOf(ApiException.class);
-
-            // They were deleted, and nothing here tries to undo that. The
-            // leftover is "audio present, cache absent", which costs a re-embed
-            // on the next rematch and retains nothing. Recreating them to match
-            // the rolled-back row would mean writing biometric-adjacent data
-            // back out during a failed deletion.
-            verify(speakerIdentity).invalidateMeetingVoiceprintsRequired(USER, MEETING);
-            verify(speakerIdentity, never()).forgetMeeting(anyString(), anyString());
-        }
 
         @Test
         @DisplayName("retrying after a partial failure finishes the job")
@@ -400,150 +313,9 @@ class ErasureServiceTest {
             assertThat(meeting.getAudioDeletedAt()).isEqualTo(at);
             // Asked again on the retry, and harmless: the rows are already gone,
             // so the far end deletes nothing and confirms it.
-            verify(speakerIdentity, times(2)).invalidateMeetingVoiceprintsRequired(USER, MEETING);
         }
     }
 
-    @Nested
-    @DisplayName("erasing the recording, all the way down to the ai-service")
-    class AudioWithTheRealIdentityService {
-
-        // The same path with the real SpeakerIdentityService in it, so what is
-        // under test is the whole contract rather than a mock agreeing with
-        // itself. It is the layer below that knows the difference between "no
-        // rows to delete" and "no database to delete them from" -- and that
-        // difference is the entire reason this is strict.
-        @Mock private SpeakerProfileRepository profiles;
-        @Mock private AiClient ai;
-
-        private ErasureService erasing;
-
-        @BeforeEach
-        void wireTheRealThing() {
-            SpeakerIdentityService identity =
-                    new SpeakerIdentityService(users, profiles, ai, audit);
-            erasing = new ErasureService(meetings, transcripts, segments, summaries, actionItems,
-                    translations, moments, chunks, users, storage, audit, statusPublisher,
-                    identity);
-        }
-
-        @Test
-        @DisplayName("a meeting with nothing cached still loses its recording")
-        void nothingCachedIsStillASuccess() {
-            // The common case by a distance: voiceprints are computed on demand,
-            // so a meeting nobody ever rematched has none. Zero rows removed,
-            // confirmed -- and the requirement, that no template survives, is
-            // met. Reading zero as failure here would make audio erasure
-            // impossible for most meetings in the product.
-            when(ai.forgetMeetingVoiceprints(USER, MEETING))
-                    .thenReturn(new AiClient.ForgetResult(0, true));
-
-            Instant at = erasing.eraseAudio(USER, MEETING);
-
-            assertThat(at).isNotNull();
-            assertThat(meeting.getObjectKey()).isNull();
-            verify(storage).deleteOrThrow("meetings/usr_1/mtg_1/audio.mp3");
-        }
-
-        @Test
-        @DisplayName("a meeting with cached voiceprints loses both")
-        void bothGo() {
-            when(ai.forgetMeetingVoiceprints(USER, MEETING))
-                    .thenReturn(new AiClient.ForgetResult(3, true));
-
-            Instant at = erasing.eraseAudio(USER, MEETING);
-
-            assertThat(at).isNotNull();
-            verify(ai).forgetMeetingVoiceprints(USER, MEETING);
-            verify(storage).deleteOrThrow("meetings/usr_1/mtg_1/audio.mp3");
-            assertThat(meeting.getAudioDeletedAt()).isEqualTo(at);
-        }
-
-        @Test
-        @DisplayName("an unconfirmed deletion stops the erasure")
-        void unconfirmedRefuses() {
-            // The state this whole audit exists to make unreachable: audio
-            // deleted, row says erased, template still in the database, nobody
-            // told. `deleted: 0, confirmed: false` is what a service with no
-            // database behind it answers, and it is indistinguishable from the
-            // test above by the count alone.
-            when(ai.forgetMeetingVoiceprints(USER, MEETING))
-                    .thenReturn(new AiClient.ForgetResult(0, false));
-
-            Throwable thrown = catchThrowable(() -> erasing.eraseAudio(USER, MEETING));
-
-            assertThat(thrown).isInstanceOf(ApiException.class);
-            assertThat(((ApiException) thrown).getStatus())
-                    .isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
-            verify(storage, never()).deleteOrThrow(anyString());
-            assertThat(meeting.getAudioDeletedAt()).isNull();
-        }
-
-        @Test
-        @DisplayName("an unreachable ai-service stops it the same way")
-        void anExceptionRefuses() {
-            doThrow(new RuntimeException("connection refused"))
-                    .when(ai).forgetMeetingVoiceprints(USER, MEETING);
-
-            assertThatThrownBy(() -> erasing.eraseAudio(USER, MEETING))
-                    .isInstanceOf(ApiException.class);
-
-            verify(storage, never()).deleteOrThrow(anyString());
-            assertThat(meeting.getObjectKey()).isEqualTo("meetings/usr_1/mtg_1/audio.mp3");
-        }
-
-        @Test
-        @DisplayName("the named profiles survive it")
-        void namedProfilesSurvive() {
-            when(ai.forgetMeetingVoiceprints(USER, MEETING))
-                    .thenReturn(new AiClient.ForgetResult(2, true));
-
-            erasing.eraseAudio(USER, MEETING);
-
-            // A named voice belongs to the account and was created by a separate,
-            // explicit act about a person. Deleting one because a file was
-            // deleted would take away the thing the account holder switched the
-            // feature on for -- and it is the reason a rematch can put the names
-            // back on every other meeting afterwards.
-            verify(profiles, never()).deleteByUserId(anyString());
-            verify(profiles, never()).delete(any());
-            verify(ai, never()).forgetSpeakers(anyString(), anyString(), any());
-            verify(ai, never()).forgetSpeakers(anyString(), any(), any());
-        }
-
-        @Test
-        @DisplayName("another meeting's voiceprints are not in scope")
-        void anotherMeetingIsUntouched() {
-            when(ai.forgetMeetingVoiceprints(USER, MEETING))
-                    .thenReturn(new AiClient.ForgetResult(1, true));
-
-            erasing.eraseAudio(USER, MEETING);
-
-            // One meeting id crosses the wire. The other meeting's cache still
-            // describes audio that is still there, and dropping it would cost a
-            // re-embed for a recording nobody deleted.
-            verify(ai).forgetMeetingVoiceprints(USER, MEETING);
-            verify(ai, never()).forgetMeetingVoiceprints(eq(USER), eq("mtg_other"));
-        }
-
-        @Test
-        @DisplayName("and one account cannot reach another's")
-        void tenantIsolation() {
-            when(meetings.findByIdAndUserId(MEETING, "usr_2")).thenReturn(Optional.empty());
-
-            assertThatThrownBy(() -> erasing.eraseAudio("usr_2", MEETING))
-                    .isInstanceOf(ApiException.class)
-                    .hasMessageContaining("not found");
-
-            // Ownership is settled before anything is asked of the ai-service,
-            // so a guessed meeting id cannot be used to clear somebody else's
-            // cache. The far end is scoped too -- every statement it runs is
-            // filtered by user_id, under a row-level policy -- but the request
-            // is never made.
-            verify(ai, never()).forgetMeetingVoiceprints(anyString(), anyString());
-            verify(storage, never()).deleteOrThrow(anyString());
-        }
-    }
 
     @Nested
     @DisplayName("erasing the transcript")

@@ -9,7 +9,6 @@ import com.reverie.dto.MeetingUpdateRequest;
 import com.reverie.dto.PageResponse;
 import com.reverie.dto.ReprocessResponse;
 import com.reverie.dto.ResummarizeRequest;
-import com.reverie.dto.SpeakerRematchResponse;
 import com.reverie.dto.SpeakerRenameRequest;
 import com.reverie.dto.SummaryResponse;
 import com.reverie.dto.TranscriptEditRequest;
@@ -131,26 +130,6 @@ public class MeetingController {
         return meetings.renameSpeakers(SecurityUtils.currentUserId(), id, req.mapping());
     }
 
-    /**
-     * Rematch speakers: identify the unresolved ones against known voices.
-     *
-     * <p>One click, no arguments, no dialog. Every speaker still labelled
-     * "Speaker N" is compared acoustically against the voice profiles this
-     * account has built by naming people in other meetings; the ones that are
-     * confidently somebody get their name, and the rest are left exactly as they
-     * were. Speakers a human has already named are never touched.
-     *
-     * <p>POST rather than PATCH because the request body is empty and the
-     * caller is not describing a change — it is asking the server to work out
-     * whether there is one to make. It may legitimately make none.
-     *
-     * <p>Returns a count rather than a transcript: the client invalidates and
-     * refetches, and what it needs from this call is what to put in the toast.
-     */
-    @PostMapping("/{id}/speakers/rematch")
-    public SpeakerRematchResponse rematchSpeakers(@PathVariable String id) {
-        return meetings.rematchSpeakers(SecurityUtils.currentUserId(), id);
-    }
 
     /**
      * Correct what the transcriber heard, a batch of segments at a time.
@@ -170,8 +149,7 @@ public class MeetingController {
      *
      * <p>Separate from {@code PATCH /speakers}, which renames a voice
      * everywhere it appears. This corrects an attribution and changes nothing
-     * else — including nothing about any other turn, and nothing about the
-     * voice profiles Rematch has learned.
+     * else, including nothing about any other turn.
      *
      * <p>Returns the whole transcript rather than the changed line: a partial
      * move splits one segment into three, so the client cannot patch its cache

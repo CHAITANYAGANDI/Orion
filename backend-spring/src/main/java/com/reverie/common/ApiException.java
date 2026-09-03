@@ -52,7 +52,7 @@ public class ApiException extends RuntimeException {
      * <p>503 rather than 500 because it says something true and useful: the
      * request was well formed, nothing was written, and trying again later is
      * the right response. Reserved for the case where refusing is the correct
-     * outcome — see {@code SpeakerIdentityService.invalidateMeetingVoiceprintsRequired},
+     * outcome — a dependency that cannot confirm what it did,
      * where saving the user's edit without the deletion that goes with it would
      * leave the account in a state the edit was meant to prevent.
      */

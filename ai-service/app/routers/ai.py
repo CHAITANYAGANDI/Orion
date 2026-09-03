@@ -29,14 +29,6 @@ from app.schemas import (
     SemanticSearchHit,
     SemanticSearchRequest,
     SemanticSearchResponse,
-    SpeakerForgetRequest,
-    SpeakerForgetResponse,
-    SpeakerIdentifyRequest,
-    SpeakerIdentifyResponse,
-    SpeakerLearnRequest,
-    SpeakerLearnResponse,
-    SpeakerMatchDto,
-    SpeakerTurnsDto,
     SuggestionsResponse,
     SummarizeRequest,
     SummaryResponse,
@@ -53,11 +45,6 @@ from app.schemas import (
     StreamingTokenResponse,
     WorkspaceChatRequest,
     WorkspaceSuggestionsRequest,
-)
-from app.speaker_identity import (
-    SpeakerIdentityService,
-    SpeakerIdentityUnavailable,
-    SpeakerTurns,
 )
 from app.storage import fetch_audio
 from app.streaming import StreamingTokenError, StreamingTokenService
@@ -80,11 +67,6 @@ def get_rag(request: Request) -> RagService:
     return request.app.state.rag
 
 
-def get_speakers(request: Request) -> SpeakerIdentityService:
-    """Resolve the app-wide SpeakerIdentityService built during startup."""
-    return request.app.state.speakers
-
-
 def get_transcoder(request: Request) -> Mp3Transcoder:
     """Resolve the app-wide Mp3Transcoder built during startup.
 
@@ -92,18 +74,6 @@ def get_transcoder(request: Request) -> Mp3Transcoder:
     two conversions is state on that object.
     """
     return request.app.state.transcoder
-
-
-def _turns(rows: list[SpeakerTurnsDto]) -> list[SpeakerTurns]:
-    return [
-        SpeakerTurns(
-            speaker_key=r.speaker_key,
-            display_name=r.display_name or "",
-            spans=[(float(a), float(b)) for a, b in r.spans],
-        )
-        for r in rows
-        if r.speaker_key
-    ]
 
 
 @router.post("/streaming-token", response_model=StreamingTokenResponse)
@@ -311,106 +281,6 @@ async def index(body: IndexRequest, rag: RagService = Depends(get_rag)) -> Index
         body.processing_attempt,
     )
     return IndexResponse(indexed=True)
-
-
-@router.post("/speakers/identify", response_model=SpeakerIdentifyResponse)
-async def identify_speakers(
-    body: SpeakerIdentifyRequest,
-    speakers: SpeakerIdentityService = Depends(get_speakers),
-) -> SpeakerIdentifyResponse:
-    """Which unresolved speakers in this meeting are confidently somebody known.
-
-    Returns proposals only. Applying them is Spring's job, because Spring owns
-    the transcript and everything downstream of it — the flat text, the
-    retrieval index, the exports. Splitting it the other way would give this
-    service write access to a transcript it cannot re-derive.
-
-    Unavailability is reported in the body rather than as a 5xx. "We could not
-    look" and "we looked and nobody matched" are different sentences on screen,
-    and an exception here would collapse them into the same red toast.
-    """
-    try:
-        outcome = await speakers.identify(
-            body.user_id, body.meeting_id, _turns(body.speakers),
-            object_key=body.object_key,
-        )
-    except SpeakerIdentityUnavailable as exc:
-        return SpeakerIdentifyResponse(unavailable=str(exc))
-
-    return SpeakerIdentifyResponse(
-        matches=[
-            SpeakerMatchDto(
-                speaker_key=m.speaker_key,
-                display_name=m.display_name,
-                profile_id=m.profile_id,
-                similarity=round(m.similarity, 4),
-            )
-            for m in outcome.matches
-        ],
-        considered=outcome.considered,
-        profiles=outcome.profiles_available,
-    )
-
-
-@router.post("/speakers/learn", response_model=SpeakerLearnResponse)
-async def learn_speaker(
-    body: SpeakerLearnRequest,
-    speakers: SpeakerIdentityService = Depends(get_speakers),
-) -> SpeakerLearnResponse:
-    """Remember that this voice is called this, because a human said so.
-
-    Called by Spring after a manual rename, and only for accounts that have
-    switched speaker learning on. Failure is never fatal to the caller: the
-    rename the user actually asked for has already been applied and committed.
-    """
-    try:
-        profile_id = await speakers.learn(
-            body.user_id,
-            body.meeting_id,
-            SpeakerTurns(body.speaker_key, body.display_name or "", []),
-            object_key=body.object_key,
-            all_speakers=_turns(body.speakers),
-        )
-    except SpeakerIdentityUnavailable as exc:
-        return SpeakerLearnResponse(unavailable=str(exc))
-    return SpeakerLearnResponse(profile_id=profile_id, learned=profile_id is not None)
-
-
-@router.post("/speakers/forget", response_model=SpeakerForgetResponse)
-async def forget_speakers(
-    body: SpeakerForgetRequest,
-    speakers: SpeakerIdentityService = Depends(get_speakers),
-) -> SpeakerForgetResponse:
-    """Delete voice templates: one profile, one meeting's, or everything.
-
-    Never refuses to run, and never asks why it was called. Deletion has to be
-    as close to unconditional as the code can make it — a request to remove
-    biometric data that fails softly because a model is missing would be the
-    worst possible place for this service to be fussy.
-
-    What it does report is whether the deletion actually reached storage.
-    ``deleted: 0`` is ambiguous on its own — nothing was there, or nothing could
-    be done — and one caller cannot live with the ambiguity: correcting a
-    speaker invalidates this meeting's cached voiceprints, and Spring refuses to
-    save the correction unless the invalidation is proven. So ``confirmed`` says
-    a DELETE ran against a real database and committed. A failure that is not a
-    "nothing happened" — a dead pool, a timeout, a database error mid-statement
-    — raises, and the caller sees a 5xx rather than a cheerful zero.
-    """
-    # Read once, before the await, so the flag describes the same service state
-    # the deletion below ran against.
-    confirmed = speakers.storage_available
-    if body.profile_id:
-        gone = await speakers.forget_profile(body.user_id, body.profile_id)
-        return SpeakerForgetResponse(deleted=1 if gone else 0, confirmed=confirmed)
-    if body.meeting_id:
-        return SpeakerForgetResponse(
-            deleted=await speakers.forget_meeting_voiceprints(body.user_id, body.meeting_id),
-            confirmed=confirmed,
-        )
-    return SpeakerForgetResponse(
-        deleted=await speakers.forget_everything(body.user_id), confirmed=confirmed
-    )
 
 
 @router.post("/chat", response_model=ChatResponse)

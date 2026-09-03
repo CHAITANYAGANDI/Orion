@@ -304,39 +304,6 @@ class Settings(BaseSettings):
     # recording. See app/naming.py and docs/speaker-identification.md section 2.
     speaker_naming_enabled: bool = True
 
-    # --- Speaker identification (voice templates) ---
-    # A urlsafe base64 Fernet key. Unset means the whole feature is off: no
-    # embedding is computed, nothing is stored, and "Rematch speakers" reports
-    # itself unavailable. Fail-closed on purpose — the alternative failure mode
-    # is storing biometric-adjacent data in the clear because somebody forgot a
-    # variable, and that must not be reachable by omission. See V53.
-    speaker_profile_key: str | None = None
-
-    # How alike two voices must be before one is renamed to the other's name.
-    #
-    # Cosine between ECAPA-TDNN embeddings, which is a real quantity and NOT a
-    # probability: 0.55 does not mean "55% sure". It is a threshold, chosen
-    # conservatively, and it is never shown to a user as a confidence.
-    #
-    # Measured on two spliced TTS voices (male/female, different scripts,
-    # different speaking rates): same speaker scored 0.948-0.954, different
-    # speakers 0.127-0.191. That gap is much wider than real speech will give —
-    # two synthetic voices of opposite gender are the easy case — so it proves
-    # the mechanism end to end and calibrates nothing. SpeechBrain's own
-    # verification example treats roughly 0.25 as the same-speaker line for this
-    # checkpoint on human audio, so 0.55 sits well above the published boundary.
-    # Erring high is the correct direction: a refusal leaves "Speaker 2" on
-    # screen, and a false accept puts a real person's name on words they never
-    # said. See docs/speaker-identification.md before moving it.
-    speaker_match_threshold: float = 0.55
-    # How far clear of the runner-up the winner must be. This, not the threshold
-    # above, is what protects against two people who genuinely sound alike:
-    # both can clear 0.55, and when they do the honest answer is neither.
-    speaker_match_margin: float = 0.08
-    # Below this much speech a voice is not compared to anything. Short samples
-    # do not merely score worse, they drift toward the middle of the embedding
-    # space and end up plausibly close to everybody.
-    speaker_min_speech_seconds: float = 6.0
 
     # NOTE: there is no second-opinion diarizer setting any more. The only
     # implementation was pyannote Community-1, and it was removed after being

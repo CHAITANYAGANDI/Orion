@@ -12,7 +12,7 @@ import java.util.Map;
  *
  * <p>Derived on read rather than stored: it is a pure function of the segments,
  * and the segments move — a rename merges two labels into one, an edit changes
- * the text, a rematch reassigns a turn. A stored copy would be wrong after
+ * the text, a correction reassigns a turn. A stored copy would be wrong after
  * every one of those and would need invalidating in four places.
  */
 public record SpeakerStatsDto(

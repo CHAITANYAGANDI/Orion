@@ -22,7 +22,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 
-from app.voiceprints import Thresholds
+from benchmarks.speaker_id.matching import Thresholds
 
 from .trials import Comparison, Trial
 

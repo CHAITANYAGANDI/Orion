@@ -75,7 +75,6 @@ class TranscriptEditTest {
     // Speaker identification is not what these tests are about; it is here
     // because MeetingService now consults it on a rename. Doing nothing is the
     // right behaviour for an account that has not opted in.
-    @Mock private SpeakerIdentityService speakerIdentity;
 
     private MeetingService service;
     private MeetingTranscript transcript;
@@ -88,7 +87,7 @@ class TranscriptEditTest {
     @BeforeEach
     void setUp() {
         service = new MeetingService(meetings, transcripts, segments, summaries,
-                insights, storage, usage, outbox, audit, ai, templates, projects, translations, notifications, erasure, userService, speakerIdentity);
+                insights, storage, usage, outbox, audit, ai, templates, projects, translations, notifications, erasure, userService);
 
         meeting = new Meeting();
         meeting.setId(MEETING);
@@ -337,9 +336,6 @@ class TranscriptEditTest {
         // strict one a speaker correction uses -- the second matters most,
         // because it can refuse. A text edit that reached it would stop being
         // saveable whenever the speaker service was down.
-        verify(speakerIdentity, never()).forgetMeeting(anyString(), anyString());
-        verify(speakerIdentity, never())
-                .invalidateMeetingVoiceprintsRequired(anyString(), anyString());
     }
 
     @Test
@@ -350,9 +346,6 @@ class TranscriptEditTest {
         // fact what the account's named profile is learned from.
         service.renameSpeakers(USER, MEETING, java.util.Map.of("Speaker 1", "Priya"));
 
-        verify(speakerIdentity, never()).forgetMeeting(anyString(), anyString());
-        verify(speakerIdentity, never())
-                .invalidateMeetingVoiceprintsRequired(anyString(), anyString());
     }
 
     @Test

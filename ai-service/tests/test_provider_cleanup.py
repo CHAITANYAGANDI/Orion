@@ -78,7 +78,7 @@ def test_importing_the_app_does_not_import_pyannote_or_deepgram():
     import sys
 
     for module in ("app.main", "app.pipeline", "app.providers.factory",
-                   "app.speaker_identity", "app.reconcile",
+                   "app.reconcile",
                    "app.reattribute", "app.diarize_port"):
         importlib.import_module(module)
 
@@ -143,12 +143,15 @@ def test_the_meeting_local_refiner_is_gone():
             importlib.import_module(module)
 
 
-def test_speaker_identification_settings_survive():
+def test_the_voice_matching_settings_are_gone():
+    # They configured cross-meeting voice identity, removed in stage 3A. A
+    # setting whose only consumer has been deleted is the exact failure this
+    # file exists for: it still looks selectable and does nothing.
     settings = Settings()
 
-    assert settings.speaker_match_threshold == 0.55
-    assert settings.speaker_match_margin == 0.08
-    assert settings.speaker_min_speech_seconds == 6.0
+    assert [n for n in Settings.model_fields if "speaker" in n.lower()] == [
+        "speaker_naming_enabled"]
+    assert settings.speaker_naming_enabled is True
 
 
 def test_the_reconciliation_seam_is_still_wired_even_with_no_diarizer():
