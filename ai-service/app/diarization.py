@@ -273,12 +273,11 @@ def split_by_speaker(
     between them is in the sound. And this function has no sound — it runs in
     the adapter, on a parsed response, before any audio is fetched.
 
-    So a raw label change makes a turn, always, and the question of whether that
-    turn is really a second person is asked once, later, where the audio is:
-    `app.regions` requires an actual acoustic region before a label may be a
-    voice, and `SpeakerRefiner` marks a label that never produced one as
-    provisional so that no name can be pinned to it. Splitting here is what
-    keeps the evidence; nothing is decided by it.
+    So a raw label change makes a turn, always. Whether that turn is really a
+    second person used to be asked later, against the audio, by an acoustic
+    pass that has since been removed. Splitting here is what keeps the
+    evidence either way: the provider's own change of label is recorded
+    faithfully, and nothing downstream has to guess what it saw.
     """
     runs: list[SpeakerRun] = []
     for word in words:

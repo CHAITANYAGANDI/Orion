@@ -655,9 +655,10 @@ class TestEvidenceQuality:
         assert naming.resolve(claims, segments) == {}
 
     def test_ownership_the_acoustic_layer_could_not_confirm_cannot_name(self):
-        # Required case 5. Long enough to embed, but `rediarize` examined it as
-        # an island and could not resolve it. The provider's answer stands and
-        # is known to be unconfirmed, which is not somebody to name.
+        # Required case 5. `speaker_provisional` marks a turn some acoustic
+        # pass examined and could not resolve. Nothing sets it now that the
+        # meeting-local refinement is gone, so the flag is dormant -- but the
+        # rule it drives is still correct and still enforced.
         segments = [
             seg("Speaker 1", "Morning Brian, did the deploy land?", 0.0, key="spk_1"),
             seg("Speaker 2", "Mm hm.", 4.0, key="spk_2"),

@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     # meeting came back to be transcribed again. Twice, at full price.
     #
     # The real fix is that the blocking work now runs in a thread
-    # (`rediarize._refine`, `speaker_identity._voiceprints`), so the loop stays
+    # (`speaker_identity._voiceprints`), so the loop stays
     # free. This is the belt beside it: 45 seconds rather than aiokafka's
     # 10-second default, so a garbage collection, a model load or a burst of
     # GIL contention cannot cost a transcription. It is still far below
@@ -344,8 +344,11 @@ class Settings(BaseSettings):
     # exact, but so was AssemblyAI, and on the recording the work was
     # commissioned for it reported silence across 14.1 seconds the provider
     # transcribed as 62 words. docs/diarization.md section 12 keeps the numbers.
-    # Speaker segmentation is now the transcription provider's, refined by
-    # ECAPA in app/rediarize.py -- which is what has always actually shipped.
+    # Speaker segmentation is now the transcription provider's, unrefined.
+    # A local ECAPA pass over every meeting was tried and removed: it cost
+    # torch, speechbrain and a model load in every image, and the production
+    # runs it was built for still mis-attributed the turns it was meant to
+    # fix.
 
 
 @lru_cache

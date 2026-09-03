@@ -142,8 +142,8 @@ class TestWhenItWillNotLoad:
 
     def test_the_caller_is_left_able_to_carry_on(self, monkeypatch):
         # The whole contract: a missing model is a feature being off, never a
-        # meeting failing. `SpeakerRefiner` catches this and returns the
-        # provider's segmentation untouched.
+        # meeting failing. `app.speaker_identity` catches this and reports
+        # "Rematch speakers" as unavailable; ordinary meetings never call it.
         _speechbrain(monkeypatch, self._raising(RuntimeError("nope")))
         embedder = EcapaEmbedder()
 

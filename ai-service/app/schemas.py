@@ -141,12 +141,16 @@ class Segment(CamelModel):
     # fact — the display label alone cannot tell you whether the provider
     # merged two people or Reverie mislabelled one.
     speaker_raw: str | None = None
-    # True when `app.rediarize` looked at who owns this turn and could not say.
+    # Dormant. Nothing sets it any more.
     #
-    # Only ever set on a turn it *examined* — a very short one sitting between
-    # other speakers — and left unresolved. A turn it corrected, confirmed, or
-    # never had cause to question is False, so this is "the acoustic layer tried
-    # and failed here", not "this turn is short".
+    # It meant "the acoustic layer looked at who owns this turn and could not
+    # say", and its only writer was the meeting-local ECAPA refinement deleted
+    # in stage two. The field is kept rather than dropped because it is part of
+    # a response model: removing it is a wire change with its own compatibility
+    # question, and a flag that is always False costs nothing.
+    #
+    # `app.naming` still honours it, so a future acoustic stage can set it and
+    # be believed without re-deriving the rule.
     #
     # `exclude=True`: it never leaves this process. It is read by `app.naming`
     # a few lines later in the same pipeline and by nothing else — Spring has no

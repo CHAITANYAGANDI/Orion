@@ -78,7 +78,7 @@ def test_importing_the_app_does_not_import_pyannote_or_deepgram():
     import sys
 
     for module in ("app.main", "app.pipeline", "app.providers.factory",
-                   "app.rediarize", "app.speaker_identity", "app.reconcile",
+                   "app.speaker_identity", "app.reconcile",
                    "app.reattribute", "app.diarize_port"):
         importlib.import_module(module)
 
@@ -114,8 +114,12 @@ def test_speechbrain_ecapa_speaker_identification_is_still_here():
     """The whole point of doing this audit rather than a name-based sweep.
 
     "Hugging Face" appears in the deleted pyannote code AND in the speaker
-    embedder that is still very much in use -- SpeechBrain fetches ECAPA from
-    the Hub. Removing one must not have taken the other.
+    embedder that is still in use -- SpeechBrain fetches ECAPA from the Hub.
+    Removing one must not have taken the other.
+
+    ECAPA now serves exactly one purpose: **cross-meeting** voice identity, the
+    thing "Rematch speakers" runs on. The meeting-local refinement that used to
+    share it was deleted in stage two, and stage three removes this too.
     """
     from app.providers.ecapa_embedder import (  # noqa: F401
         DEFAULT_MODEL_SOURCE,
@@ -129,12 +133,14 @@ def test_speechbrain_ecapa_speaker_identification_is_still_here():
     assert EcapaEmbedder().dim == 192
 
 
-def test_the_refiner_the_pipeline_builds_is_untouched():
-    from app.rediarize import SpeakerRefiner
-
-    # Constructed unconditionally in app.main for every deployment, and the
-    # reason speaker segmentation is better than the provider's raw labels.
-    assert SpeakerRefiner() is not None
+def test_the_meeting_local_refiner_is_gone():
+    # Deleted in stage two. It ran ECAPA over every meeting to second-guess the
+    # provider's turn boundaries; the CPU, memory and image cost of carrying
+    # torch for it was not repaid, and the production runs that motivated it
+    # still mis-attributed the cases it was meant to fix.
+    for module in ("app.rediarize", "app.regions"):
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(module)
 
 
 def test_speaker_identification_settings_survive():

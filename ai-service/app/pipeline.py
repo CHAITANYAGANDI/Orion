@@ -300,17 +300,16 @@ class Pipeline:
         # No acoustic refinement of the provider's turn boundaries.
         #
         # `SpeakerRefiner` used to run here, re-checking every suspiciously long
-        # turn against local ECAPA embeddings of the audio. It is gone from the
-        # automatic path in stage one of removing that model: torch and
-        # speechbrain dominated this image and its cold start, and the accuracy
-        # they bought did not justify it -- the production runs that motivated
-        # this still mis-attributed the cases they were meant to fix.
+        # turn against local ECAPA embeddings of the audio. It was unwired in
+        # stage one and deleted in stage two: torch and speechbrain dominated
+        # this image and its cold start, and the accuracy they bought did not
+        # justify it -- the production runs that motivated the work still
+        # mis-attributed the cases they were meant to fix.
         #
         # AssemblyAI's diarization now flows straight through to
         # `CanonicalSpeakers`. `speakerRaw` is the provider's own cluster id and
         # is untouched by anything here; `speakerKey` is still derived from it
-        # deterministically and separately. `app/rediarize.py` still exists and
-        # still has its own tests, but nothing automatic reaches it.
+        # deterministically and separately.
 
         # A second opinion from an acoustic diarizer, where one is configured.
         # This does not adjust the provider's boundaries the way the removed

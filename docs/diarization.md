@@ -358,9 +358,16 @@ that gets this case right invents boundaries elsewhere, confidently.
 
 ### What it does instead
 
+> **Removed.** `app/rediarize.py` used the local speaker embedding model to ask
+> one question of each suspiciously long turn — *does the audio actually stay
+> with one person?* — and it was deleted. Carrying torch and speechbrain in the
+> image for it cost more than it returned, and the production runs it was built
+> for still mis-attributed the turns in question. The section below records what
+> it did and what was measured, because a future diarizer has to beat it.
+
 Since V53 Reverie has a speaker embedding model of its own (see
 [speaker-identification.md](./speaker-identification.md)). `app/rediarize.py`
-uses it to ask one question of each suspiciously long turn: *does the audio
+used it to ask one question of each suspiciously long turn: *does the audio
 actually stay with one person?*
 
 Measured on the reported recording, through the real modules:
@@ -728,8 +735,8 @@ uncertainty resolves one way — **keep separate**.
 
 ### The region trace
 
-`SpeakerRefiner._trace_regions`, gated on `DIARIZATION_TRACE`, emits one line
-per region:
+`SpeakerRefiner._trace_regions`, gated on `DIARIZATION_TRACE`, emitted one line
+per region (removed with the refiner; kept here as a record of the shape):
 
 ```
 Speaker reconciliation region at=144.00 seconds=4.0 providerLabel=6 wordLabels=1

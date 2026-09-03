@@ -67,7 +67,7 @@ meeting was redelivered and transcribed again. One upload was transcribed three
 times, and its status walked backwards from EXTRACTING to TRANSCRIBING in front
 of the person waiting for it. No timeout value can fix that, because the problem
 is a coroutine that is never given the loop; the blocking work runs in a thread
-now (`rediarize._refine`, `speaker_identity._voiceprints`), and
+now (`speaker_identity._voiceprints`), and
 `kafka_session_timeout_ms` is the margin beside it.
 
 **A redelivery no longer costs a transcription.** Before any work is done,

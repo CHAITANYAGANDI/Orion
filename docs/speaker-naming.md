@@ -393,9 +393,11 @@ Provider labels ['A'] mapped to canonical speakers in order of first appearance.
 ```
 
 `across 1 speaker(s)` with `['A']` is the provider clustering the whole room as
-one voice. Reverie has nothing to recover from that: `app/rediarize.py` can move
-words *between speakers the provider already found*, and deliberately cannot
-invent a second one, so with a single label there is nothing for it to do.
+one voice. Reverie has nothing to recover from that: the acoustic repair that
+used to run here (`app/rediarize.py`, since deleted) could move words *between
+speakers the provider already found* and deliberately could not invent a second
+one, so even then a single label left it nothing to do. Today there is no
+acoustic stage at all and the provider's clustering is final.
 
 ### An untested hypothesis, labelled as one
 

@@ -1,8 +1,9 @@
 """The normal meeting pipeline, with no acoustic model anywhere near it.
 
-Stage one of removing ECAPA. The model, its wrapper and `app/rediarize.py` all
-still exist and still have their own tests; what changed is that **nothing
-automatic reaches them**. A meeting now goes:
+Stages one and two of removing ECAPA. Stage one took the acoustic refinement
+out of the automatic path; stage two deleted it. The embedder itself is still
+here, for cross-meeting voice identity ("Rematch speakers") only, which stage
+three removes. A meeting now goes:
 
     AssemblyAI final transcript + provider diarization
       -> CanonicalSpeakers  (speakerRaw -> speakerKey)
@@ -16,10 +17,11 @@ becoming a deployment question again.
 
 ## Why the import-graph tests matter more than they look
 
-`torch` costs seconds to import and hundreds of megabytes resident. A single
-module-level `from app.rediarize import SpeakerRefiner` anywhere in the graph
-puts that back into every process that imports `app.main`, whether or not a
-meeting is ever refined, and nothing about the transcript would look wrong.
+`torch` costs seconds to import and hundreds of megabytes resident. It is still
+installed, because cross-meeting voice identity has not been removed yet, so a
+single module-level import of it anywhere in this graph would put it back into
+every process that serves a meeting — and nothing about the transcript would
+look wrong.
 """
 
 from __future__ import annotations
@@ -333,12 +335,12 @@ class TestJobBIsUntouchedInThisStage:
 
         assert EcapaEmbedder().dim == 192
 
-    def test_the_refiner_module_still_exists_but_nothing_calls_it(self):
-        # Stage two deletes it. Until then it must remain importable and
-        # unreachable, which is exactly what makes the deletion safe.
-        from app.rediarize import SpeakerRefiner
-
-        assert SpeakerRefiner() is not None
+    def test_the_meeting_local_refiner_is_gone(self):
+        # Stage two deleted it. Stage one had made it unreachable, which is
+        # what made deleting it a removal rather than a change of behaviour.
+        for module in ("app.rediarize", "app.regions"):
+            with pytest.raises(ModuleNotFoundError):
+                importlib.import_module(module)
 
     @pytest.mark.parametrize("route", ["/ai/speakers/identify", "/ai/speakers/learn",
                                        "/ai/speakers/forget"])

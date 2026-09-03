@@ -9,7 +9,8 @@ word inside it labelled ``B`` too, across an audible change of voice — so ther
 is no correct provider label anywhere in the response for Reverie to recover.
 See docs/diarization.md.
 
-The previous repair (``app/rediarize.py``) worked the other way round: it took
+The previous repair (``app/rediarize.py``, deleted) worked the other way round:
+it took
 the provider's segmentation as the frame and asked, per suspicious turn, whether
 a *known* speaker's voice fitted better. That shape has three limits which are
 architectural rather than tuning:

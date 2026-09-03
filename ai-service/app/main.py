@@ -40,11 +40,11 @@ async def lifespan(app: FastAPI):
     # No acoustic stage of any kind in the normal meeting pipeline.
     #
     # There were two. `SpeakerRefiner` second-guessed the provider's turn
-    # boundaries using local ECAPA embeddings, and it is gone from here in stage
-    # one of removing that model: the CPU, memory, image size and cold-start
-    # cost of carrying torch and speechbrain in this image was not paying for
-    # itself. `app/rediarize.py` still exists and is still tested on its own,
-    # but nothing automatic reaches it any more.
+    # boundaries using local ECAPA embeddings of every meeting. It was taken
+    # out of this path in stage one and deleted in stage two: the CPU, memory,
+    # image size and cold-start cost of carrying torch and speechbrain did not
+    # pay for itself, and the production runs it was built to fix still
+    # mis-attributed the turns in question.
     #
     # The other was pyannote, removed earlier after being benchmarked --
     # docs/diarization.md section 12 has the numbers. Its seam

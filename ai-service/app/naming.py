@@ -118,9 +118,9 @@ given the other's name.
 Anything that already has a name — typed by the user, resolved by an earlier
 rematch, or returned by the provider's own speaker identification — and any turn
 the provider declined to attribute at all. Both guards are
-``app.voiceprints.is_unresolved`` and the ``unknown`` status, the same two used
-by acoustic matching, so there is one definition of "still a placeholder" in the
-service rather than two that can drift.
+``app.diarization.is_unresolved`` and the ``unknown`` status, so there is one
+definition of "still a placeholder" in the service rather than two that can
+drift. It lives beside the numbering that produces those labels.
 
 Nothing here is fatal. A meeting whose speakers cannot be named is a meeting
 with Speaker 1 and Speaker 2 in it, which is exactly where it started.
@@ -313,11 +313,16 @@ def _ownership_is_sound(segment) -> bool:
 
     Two ways it is not, and neither of them is "this person did not say much".
 
-    **The acoustic layer tried and failed.** ``speaker_provisional`` is set by
-    `app.rediarize` on a turn it examined — short, sitting between other
-    speakers — and could not resolve. The provider's answer stands because it is
-    the best one available, but it is known to be unconfirmed, and an
-    unconfirmed owner is not somebody to attach a real person's name to.
+    **The acoustic layer tried and failed.** ``speaker_provisional`` marks a
+    turn some acoustic pass examined and could not resolve. The provider's
+    answer stands because it is the best one available, but it is known to be
+    unconfirmed, and an unconfirmed owner is not somebody to attach a real
+    person's name to.
+
+    Nothing sets it today — its only writer was the meeting-local refinement
+    removed in stage two — so this branch is dormant rather than dead. The
+    rule is kept because it is the correct rule, and re-deriving it later
+    would be re-deciding a question already settled here.
 
     **The acoustic layer could not have checked.** Below the embedder's own
     ``MIN_SPAN_SECONDS`` there is no vector to compare — `embed` refuses rather

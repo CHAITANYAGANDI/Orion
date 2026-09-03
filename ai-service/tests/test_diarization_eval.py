@@ -6,13 +6,14 @@
 * **B. Reverie parsing** — what ships today before any repair. Identical to A
   by construction, and that is the finding rather than a gap in the test: the
   parser is faithful, so where the provider is wrong Reverie is wrong.
-* **C. SpeakerRefiner** — the ECAPA repair, modelled by its own stated rules.
+* **C. SpeakerRefiner** — the ECAPA repair, since deleted, modelled by its own
+  stated rules. Kept as a baseline: it is what a future diarizer has to beat.
 * **D. Reconciliation** — the new path, given the diarizer's timeline.
 
 <h2>How C is modelled</h2>
 
-The old refiner needs real audio and real embeddings, so it cannot be run
-against a synthetic fixture. What *can* be run is its published contract, which
+The old refiner needed real audio and real embeddings, so it could not be run
+against a synthetic fixture, and it no longer exists to run at all. What *can* be run is its published contract, which
 is what decides its results on these cases: it examines only segments of at
 least 6 seconds, needs at least 2 seconds of speech on each side of a candidate
 boundary, and can only ever assign a speaker the provider already found.
