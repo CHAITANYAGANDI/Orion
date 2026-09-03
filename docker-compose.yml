@@ -140,19 +140,6 @@ services:
       # "prefer" downgrades to plaintext when the server allows it, which the
       # local container does. Neon refuses unencrypted connections outright.
       PG_SSLMODE: ${PG_SSLMODE:-prefer}
-      # Encrypts voice templates at rest (V53). Unset means speaker
-      # identification is switched off entirely -- no embedding is computed and
-      # nothing is stored -- which is the correct failure for a deployment that
-      # has not thought about where this key lives.
-      #
-      # The default below is a DEVELOPMENT key, committed on purpose so the
-      # feature works out of the box on a laptop. It is public, so treat every
-      # profile written with it as public. A real deployment sets
-      # SPEAKER_PROFILE_KEY from its own secret store; rotating it does not
-      # re-encrypt anything, it orphans the old rows, which are then ignored
-      # and recomputed. Generate one with:
-      #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-      SPEAKER_PROFILE_KEY: ${SPEAKER_PROFILE_KEY:-zTCIlJAzhDnULzS5z_IBhDcx4YQpVWtfRbKX2sVVNpI=}
 
   frontend:
     build:

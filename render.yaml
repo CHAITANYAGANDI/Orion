@@ -280,20 +280,6 @@ services:
       - key: S3_REGION
         value: auto
 
-      # --- Speaker identification -------------------------------------------
-      # Optional, and OFF unless set: no voice template is computed and nothing
-      # is stored. That is the correct default for a deployment that has not
-      # decided where this key lives, because the alternative is encrypting
-      # biometric-shaped data with a key committed to a public repository --
-      # which is what docker-compose does on purpose for local development.
-      #
-      # Generate one with:
-      #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-      #
-      # Rotating it does not re-encrypt anything; it orphans the old rows, which
-      # are then ignored and recomputed.
-      - key: SPEAKER_PROFILE_KEY
-        sync: false        # optional -- speaker identification stays off without it
 
       # --- Postgres for RAG -------------------------------------------------
       # The unprivileged role, same as the backend's tenant pool: this service

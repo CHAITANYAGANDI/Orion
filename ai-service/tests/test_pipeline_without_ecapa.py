@@ -385,6 +385,9 @@ class TestNoRouteOrSettingRemembersAVoice:
         assert "speaker_profile_key" not in Settings.model_fields
 
     def test_nothing_in_the_service_reaches_a_voice_template(self):
+        # The resurrection guard. Those tables no longer exist -- Spring
+        # migration V68 dropped them and erased their contents -- so a module
+        # that named one would be querying a table that is gone.
         import pathlib as _p
 
         root = _p.Path(__file__).resolve().parent.parent / "app"
@@ -392,10 +395,11 @@ class TestNoRouteOrSettingRemembersAVoice:
         for path in root.rglob("*.py"):
             text = path.read_text(encoding="utf-8")
             for banned in ("speaker_profiles", "meeting_speaker_voiceprints",
-                           "SpeakerIdentityService"):
+                           "speaker_learning_enabled", "SpeakerIdentityService"):
                 if banned in text:
                     offenders.append(f"{path.name}: {banned}")
-        # The embedder still exists as dead infrastructure and may mention the
-        # table it used to feed, but only in prose about why it is going.
+        # `ecapa_embedder` is stage-4 infrastructure and is left untouched by
+        # instruction. Its prose still refers to the table it used to feed;
+        # that is a comment, and it goes when the module does.
         offenders = [o for o in offenders if not o.startswith("ecapa_embedder.py")]
         assert offenders == [], offenders

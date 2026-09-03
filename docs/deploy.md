@@ -126,7 +126,6 @@ just quietly do less.
 
 | Unset | What silently happens |
 |---|---|
-| `SPEAKER_PROFILE_KEY` (ai-service) | Speaker identification is off entirely — no voice template computed, nothing stored. Correct default: the alternative is encrypting biometric-shaped data with the key committed in `docker-compose.yml`. |
 | `S3_PUBLIC_ENDPOINT` (ai-service) | AssemblyAI stops fetching recordings from R2 itself, so every file is downloaded into the container and uploaded again instead of never touching it. |
 
 ---

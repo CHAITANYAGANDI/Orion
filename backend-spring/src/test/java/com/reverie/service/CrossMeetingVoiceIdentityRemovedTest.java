@@ -16,10 +16,9 @@ import org.junit.jupiter.api.Test;
  * Cross-meeting voice identity is gone from the product surface.
  *
  * <p>Stage 3A removed the feature at the application layer: no endpoint, no
- * service, no entity, no stored-voice wording. What it deliberately did
- * <em>not</em> remove is the data — {@code speaker_profiles} and
- * {@code meeting_speaker_voiceprints} still exist, still hold rows, and are
- * dropped in a later stage with its own migration.
+ * service, no entity, no stored-voice wording. Stage 3B removed the schema and
+ * the data with it — V68 drops both tables and the consent column, erasing
+ * every encrypted voice template that was still held.
  *
  * <p>The tests here are the ones that would notice it coming back. The failure
  * that matters is not a leftover file; it is a rename quietly meaning "learn
@@ -95,8 +94,7 @@ class CrossMeetingVoiceIdentityRemovedTest {
         // String literals only, which is where product wording lives. Comments
         // are allowed to say the feature was removed -- that is history, and
         // deleting the record of why something went is its own kind of damage.
-        // Migrations are excluded for the same reason and a stronger one: the
-        // tables are still there in this stage.
+        // Migrations are not scanned at all: this walks the Java sources.
         String[] banned = {
                 "rematch", "voice profile", "voice template",
                 "remembered speaker", "saved voice", "learn this voice",
@@ -119,16 +117,71 @@ class CrossMeetingVoiceIdentityRemovedTest {
     }
 
     @Test
-    @DisplayName("the voice-template tables are NOT dropped in this stage")
-    void theDataIsStillThere() throws Exception {
-        // Deliberate, and asserted so that deleting it stays a decision rather
-        // than a side effect. V53 is untouched; stage 3B removes the rows.
+    @DisplayName("a forward-only migration drops the schema and the templates")
+    void theSchemaIsRemoved() throws Exception {
+        Path migrations = Path.of("src", "main", "resources", "db", "migration");
+        String removal = Files.readString(
+                migrations.resolve("V68__remove_speaker_voice_profiles.sql"));
+
+        // The cache before the profiles: neither has a foreign key to the other,
+        // so this is for the reader rather than for Postgres.
+        assertThat(removal.indexOf("DROP TABLE IF EXISTS meeting_speaker_voiceprints"))
+                .isGreaterThan(0)
+                .isLessThan(removal.indexOf("DROP TABLE IF EXISTS speaker_profiles"));
+        assertThat(removal).contains("DROP COLUMN IF EXISTS speaker_learning_enabled");
+        // No CASCADE in the SQL itself -- an unexpected dependent should fail
+        // the migration rather than be silently taken with the table. Checked
+        // on the statements only, because the comment above them explains the
+        // choice and has to be able to say the word.
+        String statements = removal.lines()
+                .filter(line -> !line.stripLeading().startsWith("--"))
+                .collect(java.util.stream.Collectors.joining(" "));
+        assertThat(statements).doesNotContain("CASCADE");
+        // And it says why, in the words the erasure decision was made in.
+        assertThat(removal).contains("intentionally erased");
+    }
+
+    @Test
+    @DisplayName("V53 is never edited, because production has already applied it")
+    void theOriginalMigrationIsUntouched() throws Exception {
         Path v53 = Path.of("src", "main", "resources", "db", "migration",
                 "V53__speaker_profiles.sql");
 
+        // Still present and still describing what it created. A migration that
+        // has run somewhere is a historical fact; rewriting it changes a
+        // checksum and breaks every database that already has it.
         assertThat(Files.exists(v53)).isTrue();
         String sql = Files.readString(v53);
-        assertThat(sql).contains("speaker_profiles");
-        assertThat(sql).contains("meeting_speaker_voiceprints");
+        assertThat(sql).contains("CREATE TABLE IF NOT EXISTS speaker_profiles");
+        assertThat(sql).contains("CREATE TABLE IF NOT EXISTS meeting_speaker_voiceprints");
+    }
+
+    @Test
+    @DisplayName("no live code depends on the dropped schema")
+    void noLiveCodeTouchesTheDroppedSchema() throws Exception {
+        // The resurrection guard. Migrations are exempt: V53 created these and
+        // V68 drops them, and both have to name them to do it.
+        String[] dropped = {
+                "speaker_profiles", "meeting_speaker_voiceprints",
+                "speaker_learning_enabled",
+        };
+        java.util.List<String> offenders = new java.util.ArrayList<>();
+        for (Path root : new Path[] {MAIN, Path.of("src", "test", "java", "com", "reverie")}) {
+            try (Stream<Path> files = Files.walk(root)) {
+                for (Path file : files.filter(f -> f.toString().endsWith(".java")).toList()) {
+                    if (file.getFileName().toString().equals(
+                            "CrossMeetingVoiceIdentityRemovedTest.java")) {
+                        continue;
+                    }
+                    String text = Files.readString(file);
+                    for (String name : dropped) {
+                        if (text.contains(name)) {
+                            offenders.add(file.getFileName() + ": " + name);
+                        }
+                    }
+                }
+            }
+        }
+        assertThat(offenders).isEmpty();
     }
 }

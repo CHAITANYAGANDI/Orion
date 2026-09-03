@@ -159,7 +159,7 @@ class UserProvisioningConcurrencyTest {
         try (Connection c = connect();
              PreparedStatement ps = c.prepareStatement("""
                      SELECT email, plan, created_at, muted_notifications,
-                            speaker_learning_enabled, retention_warning_email,
+                            retention_warning_email,
                             retention_applied_email, task_reminder_email,
                             notes_ready_email, allowance_email
                        FROM users WHERE clerk_user_id = ?
@@ -171,7 +171,6 @@ class UserProvisioningConcurrencyTest {
                 assertThat(rs.getString("plan")).isEqualTo("FREE");
                 assertThat(rs.getTimestamp("created_at")).isNotNull();
                 assertThat(rs.getString("muted_notifications")).isEqualTo("[]");
-                assertThat(rs.getBoolean("speaker_learning_enabled")).isFalse();
                 // All five email switches start off. V64 is explicit that this
                 // is the default and that two messages ignore it.
                 assertThat(rs.getBoolean("retention_warning_email")).isFalse();

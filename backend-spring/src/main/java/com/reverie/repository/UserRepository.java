@@ -65,9 +65,9 @@ public interface UserRepository extends JpaRepository<UserEntity, String> {
      *
      * <p>{@code plan} is written out because {@link UserEntity} sets it
      * explicitly and this path must not quietly disagree. Everything else a new
-     * row needs — {@code created_at}, {@code muted_notifications},
-     * {@code speaker_learning_enabled} and the five email switches — has a
-     * column default identical to the field initialiser it replaces, so a row
+     * row needs — {@code created_at}, {@code muted_notifications} and the five
+     * email switches — has a column default identical to the field initialiser
+     * it replaces, so a row
      * made here and a row made by Hibernate are the same row.
      *
      * @return 1 when this caller created the row, 0 when it already existed

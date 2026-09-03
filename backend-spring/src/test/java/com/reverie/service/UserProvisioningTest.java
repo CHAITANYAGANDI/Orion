@@ -150,9 +150,8 @@ class UserProvisioningTest {
             /*
              * The fields provision() used to set by hand. `plan` is passed
              * explicitly by the query; the rest of a new row -- created_at,
-             * muted_notifications, speaker_learning_enabled and the five email
-             * switches -- come from column defaults identical to the field
-             * initialisers on UserEntity.
+             * muted_notifications and the five email switches -- come from
+             * column defaults identical to the field initialisers on UserEntity.
              */
             when(users.findByClerkUserId(SUBJECT))
                     .thenReturn(Optional.empty())

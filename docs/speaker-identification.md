@@ -1,5 +1,26 @@
 # Recognising a voice in a later meeting
 
+> ## Removed
+>
+> **This feature no longer exists.** Cross-meeting voice identity — voice
+> profiles, remembered speakers and the "Rematch speakers" menu item — was
+> removed from Reverie in three stages: the product surface first (endpoints,
+> services, settings and UI), then the schema. Migration **V68** drops
+> `speaker_profiles`, `meeting_speaker_voiceprints` and
+> `users.speaker_learning_enabled`, and **permanently erases every encrypted
+> voice template that was still stored**. Nothing is archived.
+>
+> It went because the local ECAPA-TDNN model it depended on cost more in CPU,
+> memory, image size and cold-start latency than the feature returned, and no
+> hosted provider offers cross-file speaker identity to replace it — which is
+> the same conclusion §3 of this document reaches, now acted on.
+>
+> Everything below is kept as a record of how it worked and why it was built
+> that way. **Read it in the past tense.** What survives is *speaker naming*,
+> which reads names out of the words of a single meeting and carries nothing
+> between recordings — see [speaker-naming.md](./speaker-naming.md).
+
+
 Meeting A has *Speaker 1* and *Speaker 2*. You tag Speaker 2 as **Sarah**.
 Weeks later, meeting B has *Speaker 1* and *Speaker 2*, and one of them is
 Sarah. Pressing **⋯ → Rematch speakers** should find her.
