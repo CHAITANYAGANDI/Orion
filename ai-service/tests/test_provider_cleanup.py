@@ -156,6 +156,6 @@ def test_the_reconciliation_seam_is_still_wired_even_with_no_diarizer():
     from app.reconcile import assign  # noqa: F401
     from app.reattribute import reattribute  # noqa: F401
 
-    pipeline = Pipeline(MockTranscriptionAdapter(), llm=None, refiner=None, diarizer=None)
+    pipeline = Pipeline(MockTranscriptionAdapter(), llm=None, diarizer=None)
 
     assert pipeline._diarizer is None

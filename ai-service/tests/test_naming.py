@@ -430,7 +430,7 @@ class TestThroughThePipeline:
                     segments=list(segments),
                 )
 
-        return Pipeline(_Fixed(), MockLlmAdapter(), refiner=None, **kwargs)
+        return Pipeline(_Fixed(), MockLlmAdapter(), **kwargs)
 
     @pytest.mark.asyncio
     async def test_a_greeting_exchange_comes_out_named(self):

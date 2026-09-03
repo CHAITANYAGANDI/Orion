@@ -17,7 +17,6 @@ from app.kafka_worker import KafkaWorker
 from app.pipeline import Pipeline
 from app.providers.factory import AiProviderFactory
 from app.rag import RagService
-from app.rediarize import SpeakerRefiner
 from app.routers import ai as ai_router
 from app.schemas import HealthResponse
 from app.speaker_identity import SpeakerIdentityService
@@ -38,17 +37,24 @@ async def lifespan(app: FastAPI):
     transcription = AiProviderFactory.create_transcription(settings)
     llm = AiProviderFactory.create_llm(settings)
     embedder = AiProviderFactory.create_embedding(settings)
-    # Second-guesses the provider's turn boundaries against the audio. Loads
-    # nothing until a meeting actually has a suspiciously long turn in it, and
-    # degrades to "leave the provider's segmentation alone" without the
-    # embedder.
-    refiner = SpeakerRefiner()
-    # No acoustic second opinion. The only implementation was pyannote and it
-    # was removed after being benchmarked -- docs/diarization.md section 12 has
-    # the numbers. The seam it plugged into is still there and still tested
-    # (app/reconcile.py, app/reattribute.py), so a future diarizer is a
-    # constructor argument rather than a rewrite.
-    pipeline = Pipeline(transcription, llm, refiner, diarizer=None,
+    # No acoustic stage of any kind in the normal meeting pipeline.
+    #
+    # There were two. `SpeakerRefiner` second-guessed the provider's turn
+    # boundaries using local ECAPA embeddings, and it is gone from here in stage
+    # one of removing that model: the CPU, memory, image size and cold-start
+    # cost of carrying torch and speechbrain in this image was not paying for
+    # itself. `app/rediarize.py` still exists and is still tested on its own,
+    # but nothing automatic reaches it any more.
+    #
+    # The other was pyannote, removed earlier after being benchmarked --
+    # docs/diarization.md section 12 has the numbers. Its seam
+    # (app/reconcile.py, app/reattribute.py) is still here and still tested, so
+    # a future diarizer is a constructor argument rather than a rewrite.
+    #
+    # AssemblyAI's own diarization now flows straight into `CanonicalSpeakers`,
+    # which is where speakerKey has always come from and which never depended
+    # on any of this.
+    pipeline = Pipeline(transcription, llm, diarizer=None,
                         name_speakers=settings.speaker_naming_enabled)
     app.state.pipeline = pipeline
 
@@ -79,11 +85,10 @@ async def lifespan(app: FastAPI):
     app.state.kafka_worker = worker
 
     logger.info(
-        "ai-service started (provider=%s, rag=%s, speaker-id=%s, refine=%s).",
+        "ai-service started (provider=%s, rag=%s, speaker-id=%s).",
         settings.ai_provider,
         rag.enabled,
         "off" if speakers.unavailable_reason() else "ready",
-        "ready" if refiner.available else "off",
     )
     try:
         yield

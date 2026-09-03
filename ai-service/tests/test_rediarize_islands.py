@@ -369,59 +369,6 @@ class TestTheDiagnostic:
         assert "microTurnsCorrected=0" in report.as_log_fields()
 
 
-class TestDownstream:
-    """What the rest of the product is handed once a turn has been re-owned."""
-
-    @staticmethod
-    async def _run(plan):
-        from app.pipeline import Pipeline
-        from app.providers.mock_adapter import MockLlmAdapter
-        from app.schemas import TranscriptResponse
-
-        segments, sampler = meeting(plan)
-
-        class _Provider:
-            async def transcribe(self, audio, filename, language=None, *, request=None):
-                joined = "\n".join(f"{x.speaker}: {x.text}" for x in segments)
-                return TranscriptResponse(
-                    transcript=joined, language="en", segments=list(segments),
-                )
-
-        async def loader():
-            return b"audio"
-
-        pipeline = Pipeline(_Provider(), MockLlmAdapter(),
-                            refiner=SpeakerRefiner(sampler_for=sampler),
-                            name_speakers=False)
-        return await pipeline.process("mtg_island", b"a", "a.wav", audio_loader=loader)
-
-    async def test_the_flat_transcript_uses_the_corrected_owner(self):
-        # Brief H. The summary, the retrieval passages and the export all read
-        # this string. It must carry the corrected ownership, and must not fall
-        # back to the provider's label merely because the raw token is kept.
-        result = await self._run(PRODUCTION)
-
-        lines = result.transcript.splitlines()
-        assert lines[3].startswith("Speaker 1:")      # the corrected micro-turn
-        assert lines[5].startswith("Speaker 3:")      # the real Speaker 3
-        assert "C:" not in result.transcript
-
-    async def test_talk_time_is_computed_from_corrected_ownership(self):
-        # Brief G, on this side of the wire: the segments Spring will total up
-        # carry the corrected key, and the provider token rides along unused.
-        result = await self._run(PRODUCTION)
-
-        held = {}
-        for segment in result.segments:
-            held[segment.speaker_key] = held.get(segment.speaker_key, 0.0) + (
-                segment.end - segment.start)
-
-        # Three 30s turns plus the 0.4s island now owned by them; Speaker 3
-        # keeps only the turn that is really theirs.
-        assert held["spk_1"] == pytest.approx(90.4)
-        assert held["spk_2"] == pytest.approx(20.0)
-        assert held["spk_3"] == pytest.approx(30.0)
-        assert [s.speaker_raw for s in result.segments] == ["A", "B", "A", "C", "A", "C"]
 
 
 class TestNamingConsumesCorrectedOwnership:

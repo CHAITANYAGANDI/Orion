@@ -28,7 +28,6 @@ from app.suggestions import meeting_material
 from app.providers.ports import LlmPort, TranscriptionPort
 from app.reattribute import flatten, reattribute
 from app.reconcile import assign
-from app.rediarize import SpeakerRefiner
 from app.schemas import (
     DraftEmailRequest,
     DraftEmailResponse,
@@ -106,11 +105,9 @@ class Pipeline:
     """Coordinates the transcription + LLM ports into a MeetingBriefResult."""
 
     def __init__(self, transcription: TranscriptionPort, llm: LlmPort,
-                 refiner: "SpeakerRefiner | None" = None,
                  diarizer=None,
                  name_speakers: bool = True) -> None:
         self._transcription = transcription
-        self._refiner = refiner
         #: Whether to read speakers' names out of what they said to each other.
         #: A plain flag rather than a Settings object, so this class still
         #: depends on nothing but its ports; `app.main` supplies the setting.
@@ -300,67 +297,24 @@ class Pipeline:
             audio, filename, language, request=request
         )
 
-        # Check the provider's turn boundaries against the audio before anything
-        # downstream reads them. A missed boundary is not cosmetic: the summary,
-        # the retrieval passages and the exports all carry the speaker prefix,
-        # so two people merged into one label propagate as a quotation from
-        # somebody who never said it. See app/rediarize.py.
+        # No acoustic refinement of the provider's turn boundaries.
         #
-        # Before `annotate_segments` because a split creates segments, and every
-        # one of them needs its language decided.
-        if self._refiner is not None:
-            loader = audio_loader
-            if loader is None and audio:
-                async def loader():  # noqa: E306 - the bytes are already here
-                    return audio
-            transcript.segments, refinement = await self._refiner.refine(
-                list(transcript.segments), loader
-            )
-            if refinement.changed:
-                # The flat text carries the speaker prefixes and is what the
-                # summarizer reads, so it has to be rebuilt from the corrected
-                # turns rather than left describing the old ones. A merge
-                # renames turns without moving a word, and needs this exactly as
-                # much as a split does.
-                transcript.transcript = _joined(transcript.segments) or transcript.transcript
-                logger.info(
-                    "Speaker refinement corrected %s: %s",
-                    meeting_id, refinement.as_log_fields(),
-                )
-            if not refinement.changed and refinement.skipped_reason:
-                # Say why it declined, which nothing used to.
-                #
-                # Refinement is the one thing standing between a provider that
-                # merged two people into one turn and a transcript that shows
-                # it, and it has five separate ways of deciding not to act --
-                # no embedder installed, no audio, no turn long enough, fewer
-                # than two speakers with usable reference audio, voices too
-                # alike to separate. Only the last of those was ever logged, so
-                # the other four were indistinguishable from the refiner having
-                # run and found nothing wrong. They need completely different
-                # responses -- one is a deployment missing its model, one is a
-                # limit of the recording -- and the log said the same thing
-                # about all of them, which was nothing at all.
-                #
-                # One line, four counted facts, and no content. `as_log_fields`
-                # owns what may be said: a reason, three integers and the
-                # meeting id. No speaker names, no turn text, no timings, no
-                # vectors -- so this is safe on a deployment holding other
-                # people's meetings, which is the only deployment where the
-                # question ever gets asked.
-                #
-                # It reads next to the provider's own summary a few lines
-                # earlier ("returned N segment(s) across M speaker(s)"), and the
-                # pair is the whole diagnosis: that line says what arrived, this
-                # one says why it was left alone.
-                logger.info(
-                    "Speaker refinement made no change for %s: %s",
-                    meeting_id, refinement.as_log_fields(),
-                )
+        # `SpeakerRefiner` used to run here, re-checking every suspiciously long
+        # turn against local ECAPA embeddings of the audio. It is gone from the
+        # automatic path in stage one of removing that model: torch and
+        # speechbrain dominated this image and its cold start, and the accuracy
+        # they bought did not justify it -- the production runs that motivated
+        # this still mis-attributed the cases they were meant to fix.
+        #
+        # AssemblyAI's diarization now flows straight through to
+        # `CanonicalSpeakers`. `speakerRaw` is the provider's own cluster id and
+        # is untouched by anything here; `speakerKey` is still derived from it
+        # deterministically and separately. `app/rediarize.py` still exists and
+        # still has its own tests, but nothing automatic reaches it.
 
         # A second opinion from an acoustic diarizer, where one is configured.
-        # This does not adjust the provider's boundaries the way the refiner
-        # above does — it replaces them, attributing every word to whichever
+        # This does not adjust the provider's boundaries the way the removed
+        # refiner did — it replaces them, attributing every word to whichever
         # speaker the diarizer heard holding most of it. Off unless a
         # deployment asked for it; the benchmark behind that default is in
         # docs/diarization.md.

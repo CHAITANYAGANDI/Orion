@@ -177,7 +177,7 @@ def _pipeline(diarizer):
     from app.pipeline import Pipeline
     from app.providers.mock_adapter import MockLlmAdapter, MockTranscriptionAdapter
 
-    return Pipeline(MockTranscriptionAdapter(), MockLlmAdapter(), None, diarizer)
+    return Pipeline(MockTranscriptionAdapter(), MockLlmAdapter(), diarizer)
 
 
 def test_the_pipeline_is_built_without_a_diarizer():

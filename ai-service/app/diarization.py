@@ -51,6 +51,7 @@ so does Reverie.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Literal, Sequence
 
@@ -368,3 +369,38 @@ def trace_lines(segments: Sequence[Any]) -> list[str]:
 def _stamp(seconds: float) -> str:
     minutes, rest = divmod(max(0.0, float(seconds)), 60)
     return f"{int(minutes):02d}:{rest:05.2f}"
+
+
+#: Display names that mean "not resolved", not "a person called this".
+#:
+#: An exact shape rather than a prefix, and the difference is a bug that was
+#: caught by a test rather than by a user: "speaker " as a prefix also matches
+#: **"Speaker of the House"**, so a rematch would have overwritten a name
+#: somebody deliberately typed. Only the three forms Reverie itself generates
+#: are up for grabs, and each must match end to end.
+_UNRESOLVED = re.compile(r"^(speaker\s+\d+|spk_\d+|unknown speaker)$", re.IGNORECASE)
+
+
+def is_unresolved(display_name: str | None) -> bool:
+    """Whether this label is still a placeholder rather than a person.
+
+    Matches the labels Reverie itself generates — "Speaker 1", "spk_2",
+    "Unknown speaker" — and nothing else. It is deliberately not "does this look
+    like a name": somebody who renames a speaker to "Facilitator",
+    "Interviewer 2" or "Speaker of the House" has made a decision about their own
+    transcript, and a cleverer test would decide those were placeholders and
+    spend its time undoing users' work.
+
+    Lives here because it is a fact about the labels this module *generates*.
+    It used to live in `app.voiceprints`, which was reasonable while voice
+    matching was its main caller and is not reasonable now: naming needs it,
+    naming is not downstream of anything acoustic, and `app.voiceprints` is
+    scheduled for removal. `app.voiceprints` re-exports it, so every existing
+    caller is unaffected.
+    """
+    if not display_name:
+        # An empty label is an unattributed turn. It has no voice of its own to
+        # match on, and the caller filters it out before it gets here; treating
+        # it as unresolved here would be a second, quieter place to change that.
+        return False
+    return _UNRESOLVED.match(display_name.strip()) is not None

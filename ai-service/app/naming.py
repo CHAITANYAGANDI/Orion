@@ -131,26 +131,30 @@ from __future__ import annotations
 import logging
 import re
 
-from app.providers.ecapa_embedder import MIN_SPAN_SECONDS
+from app.diarization import is_unresolved
 from app.quotes import normalise
-from app.voiceprints import is_unresolved
 
 logger = logging.getLogger("ai-service.naming")
 
-#: Below this, nothing has ever been able to confirm who owns a turn.
+#: Below this, a turn is too short for anything to have confirmed who owns it.
 #:
-#: The speaker embedder's own floor, imported rather than copied: `embed`
-#: refuses to answer for a shorter stretch, so a turn under it has an owner that
-#: no acoustic check has verified or could verify. That is the property being
-#: tested -- not the length itself, which is why the number belongs to the model
-#: rather than to this module.
+#: Owned here, as a plain number. It was previously imported from the speaker
+#: embedder — that model refused to answer for a shorter stretch, so the floor
+#: was genuinely the model's — and naming is no longer downstream of any
+#: acoustic component. Carrying the import forward would have made this module
+#: depend on a package it never calls, for a float.
+#:
+#: The value and its meaning are unchanged. Eight tenths of a second is about
+#: the shortest stretch of speech anything can attribute with confidence, and
+#: the rule is the same either way: a turn under it has an owner nothing has
+#: verified.
 #:
 #: The distinction matters and was got wrong once. A blanket "a speaker must
 #: have spoken for N seconds in total" rule suppresses *"Hi, I'm Sarah"*, which
 #: takes about a second and a quarter and is the best identity evidence a
 #: meeting can hold. This asks a different question about each turn: could
 #: anybody have checked who said it?
-MIN_VERIFIABLE_SECONDS = MIN_SPAN_SECONDS
+MIN_VERIFIABLE_SECONDS = 0.8
 
 #: How far from the evidence an addressed speaker may be, counted in *runs* of
 #: consecutive turns by one voice rather than in turns.

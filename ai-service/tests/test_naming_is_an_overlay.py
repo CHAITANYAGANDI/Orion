@@ -93,7 +93,7 @@ async def run(turns, llm=None, **kwargs):
     from app.providers.mock_adapter import MockLlmAdapter
 
     parsed = parse_response(payload(turns))
-    pipeline = Pipeline(provider_of(parsed), llm or MockLlmAdapter(), refiner=None, **kwargs)
+    pipeline = Pipeline(provider_of(parsed), llm or MockLlmAdapter(), **kwargs)
     return await pipeline.process("mtg_overlay", b"", "a.wav")
 
 
@@ -196,7 +196,7 @@ class TestTheModelFails:
             raise TimeoutError("the model is down")
 
         llm.identify_speaker_names = _boom
-        pipeline = Pipeline(_Provider(), llm, refiner=None)
+        pipeline = Pipeline(_Provider(), llm)
         result = await pipeline.process("mtg_c", b"", "a.wav")
 
         assert [s.speaker for s in result.segments] == [
@@ -225,7 +225,7 @@ class TestTheModelFails:
             return ["not a claim", None, 42]
 
         llm.identify_speaker_names = _junk
-        result = await Pipeline(_Provider(), llm, refiner=None).process("mtg_c2", b"", "a.wav")
+        result = await Pipeline(_Provider(), llm).process("mtg_c2", b"", "a.wav")
         assert [s.speaker for s in result.segments] == [
             "Speaker 1", "Speaker 2", "Speaker 1", "Speaker 2",
         ]
@@ -303,7 +303,7 @@ class TestAnExistingManualIdentity:
             async def transcribe(self, audio, filename, language=None, *, request=None):
                 return parsed
 
-        result = await Pipeline(_Provider(), MockLlmAdapter(), refiner=None).process(
+        result = await Pipeline(_Provider(), MockLlmAdapter()).process(
             "mtg_e", b"", "a.wav"
         )
         assert [s.speaker for s in result.segments] == [
@@ -335,7 +335,7 @@ class TestAnExistingManualIdentity:
                                      quote="Hi Michael, how are you", basis="addressed")]
 
         llm.identify_speaker_names = _steal
-        result = await Pipeline(_Provider(), llm, refiner=None).process("mtg_e2", b"", "a.wav")
+        result = await Pipeline(_Provider(), llm).process("mtg_e2", b"", "a.wav")
 
         # Two people, one of them called Charles. Not two Charleses, and not
         # one Charles holding the whole meeting.
