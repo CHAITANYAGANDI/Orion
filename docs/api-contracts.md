@@ -84,10 +84,6 @@ again in the worker.
 | GET  | `/api/v1/meetings/{id}/summary` | — | `SummaryResponse` |
 | GET  | `/api/v1/meetings/{id}/action-items` | — | `ActionItemResponse[]` |
 | PATCH | `/api/v1/meetings/{id}/speakers` | `{ "mapping": { "Speaker 1": "Ana" } }` | `TranscriptResponse` |
-| POST | `/api/v1/meetings/{id}/speakers/rematch` | *(no body)* | `SpeakerRematchResponse` |
-| GET | `/api/v1/speakers` | — | `{ "learningEnabled", "profiles": [...] }` |
-| PUT | `/api/v1/speakers/learning` | `{ "enabled" }` | `SpeakerSettingsResponse` |
-| DELETE | `/api/v1/speakers/profiles/{id}` | — | `204` |
 | POST | `/api/v1/meetings/{id}/reprocess` | — | `202 { "meetingId","status" }` |
 | DELETE | `/api/v1/meetings/{id}` | — | `204` |
 
@@ -157,12 +153,12 @@ derived from the segments on every read. The percentage is a share of total
 **speaking** time, not of the meeting's wall-clock duration — the two differ
 whenever there is silence, and percentages that do not sum to 100 read as a bug.
 
-### Three operations on a speaker, and one on the whole meeting
+### Two operations on a speaker, and one on the whole meeting
 
-They are easy to confuse and they answer different questions. There used to be
-a third — `PATCH /speakers/rematch`, which merged one label into another or
-moved selected turns. It is gone, and `POST /speakers/rematch` now means the
-automatic operation, which is what every other product means by the word.
+They are easy to confuse and they answer different questions. Two others have
+been removed: `PATCH /speakers/rematch`, which merged one label into another or
+moved selected turns, and `POST /speakers/rematch`, which compared unresolved
+speakers acoustically against remembered voices. Neither exists.
 
 **Rename** — `PATCH /speakers`. "Who is Speaker 2?" Send
 `{"mapping": {"Speaker 2": "Sarah"}}`. The mapping is keyed by display name
@@ -170,9 +166,6 @@ because that is all a client can see, but it is **applied by canonical key**:
 the labels are resolved to `speaker_key`s first, and every turn by that speaker
 is renamed even if the label on it had drifted. Segments written before V46 have
 no key and fall back to matching the name.
-
-For an account with voice recognition on, this is also the moment a voice is
-learned — see below.
 
 **Correct one turn** — `PATCH /segments/{segmentId}/speaker`. "These words were
 not that person." Send `{"speakerKey": "spk_1"}` to move a whole turn, or add
@@ -201,56 +194,28 @@ Returns the whole `TranscriptResponse`, because a partial move turns one segment
 into three and a client cannot patch its cache without reimplementing the
 split.
 
-**Rematch** — `POST /speakers/rematch`, no body. "Which of these unresolved
-speakers are people we already know?" Every speaker still wearing a generated
-label is compared **acoustically** against the voice profiles this account has
-built. Returns a count, not a transcript:
-
-```json
-{ "matched": 2, "names": ["Sarah", "Tom"], "considered": 4, "unavailable": null }
-```
-
-`matched` counts **speakers**, not turns. `unavailable` is set only when the
-operation could not run at all — voice recognition switched off, not configured
-on this server — and is deliberately distinct from `matched: 0`, which means it
-ran and nobody cleared the confidence bar. That is an ordinary outcome. There is
-**no confidence score in the response**: the matcher thresholds on cosine
-similarity between embeddings, which is not a calibrated probability, and
-rendering it as a percentage would invent a precision it does not have.
-
-Never touches a speaker somebody has already named, never touches an
-unattributed turn, and never uses the speaker number, the provider's cluster
-letters or anything in the transcript text. See
-[speaker-identification.md](./speaker-identification.md).
-
-**Reprocess** — `POST /meetings/{id}/reprocess`, no body, `202`. "The
-transcriber got the boundaries wrong." The answer to a diarization that came out
-badly is now to run the clustering again rather than to ask a reader to repair
-it turn by turn. It replaces the transcript, the segments, the summary and the
-retrieval index from the audio.
-
-**It is destructive and the client must say so before calling it.** Hand-typed
-corrections are gone. Speaker names are gone from *this meeting* but not from
-the account — which is the difference between this and the "Transcribe again"
-that was removed for being a one-confirm-deep way to lose an afternoon's
-corrections.
-
 Both speaker operations re-index the meeting and rebuild the flat transcript,
 because each carries the speaker prefix and chat and the export read them.
 
 ### Voice profiles (V53)
 
-`/api/v1/speakers` is the consent control and the list of what is held under it.
-**Not** part of `PATCH /preferences`, deliberately: switching learning off
-*deletes every voice template the account holds*, and that must not be reachable
-from a null-means-unchanged bulk patch that the settings page sends whenever
-anything on it moves.
+**Removed.** `/api/v1/speakers`, `/api/v1/speakers/learning`,
+`/api/v1/speakers/profiles/{id}` and `POST /meetings/{id}/speakers/rematch` are
+gone, along with the consent switch behind them. Cross-meeting voice identity —
+remembering what somebody sounds like so a later meeting could name them — was
+removed from Reverie: the local ECAPA-TDNN model it needed cost more in CPU,
+memory, image size and cold start than the feature returned, and no transcription
+provider offers cross-file speaker identity to replace it.
 
-A profile carries `id`, `name`, `samples`, `createdAt`, `updatedAt`. It does not
-carry the embedding, and neither does the JPA entity — the column is not mapped,
-so there is no code path in Spring that could put a voice template into a
-response. See [speaker-identification.md](./speaker-identification.md) for the
-privacy boundary, and `V53__speaker_profiles.sql` for the five rules.
+`V68__remove_speaker_voice_profiles.sql` drops `speaker_profiles`,
+`meeting_speaker_voiceprints` and `users.speaker_learning_enabled`, and
+permanently erases every encrypted voice template that was still held. Nothing
+was archived. See [speaker-identification.md](./speaker-identification.md) for
+what it did and why it went.
+
+What survives is *speaker naming*, which reads names out of the words of one
+meeting and carries nothing between recordings — `PATCH /speakers` and
+`PATCH /segments/{id}/speaker` are still exactly what they were.
 
 ### Custom vocabulary & known speakers
 

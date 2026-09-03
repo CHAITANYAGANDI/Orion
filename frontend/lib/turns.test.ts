@@ -141,11 +141,12 @@ describe("A/B/A/B survives rendering", () => {
 });
 
 /**
- * Coalescing after an acoustic correction.
+ * Coalescing when one speaker holds two provider labels.
  *
- * When `rediarize` re-owns a mislabelled fragment, the transcript is left with
- * two adjacent segments carrying the same canonical speaker and different
- * provider labels:
+ * The acoustic correction that used to produce this shape has been removed, but
+ * the shape has not: a provider can cluster one voice under two raw labels that
+ * both map to the same canonical speaker, leaving two adjacent segments with
+ * the same canonical speaker and different provider labels:
  *
  *     raw C  01:17  "That's--"        -> spk_1   (corrected)
  *     raw A  01:19  "so I guess..."   -> spk_1
