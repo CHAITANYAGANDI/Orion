@@ -69,13 +69,43 @@ answer:
    otherwise show a transcript spoken by somebody called **Mate**;
 7. nobody is renamed to something a person already carries in this meeting.
 
-<h2>Ties refuse</h2>
+<h2>The model proposes candidates; the meeting decides between them</h2>
 
-Two different names for one speaker are resolved by weight of evidence — five
-turns addressing them as Michael and one as Mike is not a contradiction, it is a
-nickname — and refuse outright when the support is equal. This mirrors the
-*margin* rule in ``app.voiceprints``: when the best answer is not distinctly the
-best, the honest answer is none.
+A claim is evidence that a name is *worth considering* for somebody. It is not a
+vote, and it used to be counted as one — the tally was over claims, so whichever
+name the model happened to write down won, however many times the transcript
+said something else. That is the whole of the near-homophone failure: ASR hears
+one participant as **Cindy** three times and **Sydney** once, the model quotes
+the Sydney turn, and one transcription error outranks three independent
+mentions that were never counted because nothing looked for them.
+
+So the two jobs are separated. Verified claims contribute a **pool of candidate
+names**; the weight behind each candidate is then counted **over the whole
+meeting** by re-running the same structural checks against every turn. A name is
+supported by the turns that address the speaker by it, not by the number of
+times a model mentioned it.
+
+<h2>Independent evidence, weighted by whether it could be checked</h2>
+
+Each *distinct turn* contributes once, so a model repeating itself about one
+sentence cannot manufacture support. What a turn is worth depends on whether
+anything could confirm who spoke it — the same ``_ownership_is_sound`` question
+asked elsewhere in this file. A vocative sitting in a half-second fragment that
+diarization never verified is real evidence and weak evidence, and weighting it
+below a sound turn is what stops one poor ASR moment from outranking several
+good ones.
+
+A self-introduction outweighs being addressed, because *"Hi, I'm Sarah"* is a
+person stating their own name and needs no corroboration to be worth more than
+somebody else's pronunciation of it.
+
+<h2>Ties refuse, and so do narrow wins</h2>
+
+The winner must be **at least twice as well supported** as the runner-up. Five
+turns calling somebody Michael and one calling them Mike is a nickname and
+resolves; three against two is a transcript that genuinely disagrees with
+itself, and the honest answer there is none. This mirrors the *margin* rule in
+``app.voiceprints``: when the best answer is not distinctly the best, refuse.
 
 One name claimed for **two** speakers refuses both, with no margin. That
 collision is the signature of a third-person mention leaking in ("Michael said
@@ -134,12 +164,41 @@ MIN_VERIFIABLE_SECONDS = MIN_SPAN_SECONDS
 #: then talked for ten minutes.
 NEIGHBOUR_RUNS = 2
 
+#: What one turn of evidence is worth.
+#:
+#: Weights rather than counts, because the kinds of evidence are not
+#: interchangeable. A person saying their own name is not the same claim as
+#: somebody else pronouncing it, and a vocative in a turn whose owner nothing
+#: could verify is not the same claim as one in a turn that was checked.
+#:
+#: The ratios are what matter, not the numbers: an introduction outweighs three
+#: separate people addressing you, and an unverifiable turn can corroborate a
+#: name but never carry one on its own against sound evidence.
+INTRODUCTION_WEIGHT = 6
+ADDRESS_WEIGHT = 2
+
+#: A vocative in a turn `_ownership_is_sound` rejects. Deliberately non-zero:
+#: the words were still said, and discarding them entirely would throw away the
+#: corroboration that makes a majority a majority. Deliberately below
+#: `ADDRESS_WEIGHT`: on its own it cannot outrank a turn somebody could check.
+UNVERIFIED_WEIGHT = 1
+
+#: How much better supported the winner has to be. Two contradictory names for
+#: one speaker are a transcript disagreeing with itself, and the cost of picking
+#: the wrong one is a real person's name on the wrong voice for the length of a
+#: meeting. Twice the evidence, or leave the number alone.
+WINNING_MULTIPLE = 2
+
 #: Longest a name may be, in words. Enough for "Mary Jane" or "Van Der Berg",
 #: short enough that a clause the model mistook for a name cannot get through.
 MAX_NAME_WORDS = 3
 
 #: And in characters, against a single very long token.
 MAX_NAME_CHARS = 40
+
+#: A word as it appears in the raw text, before `app.quotes.normalise` strips
+#: the punctuation that spelling arbitration reads.
+_WORD = re.compile(r"[^\W\d_][\w'’\-]*", re.UNICODE)
 
 #: A name is letters, and the punctuation that appears inside real names.
 #: Digits are excluded deliberately: "Speaker 2" and "Interviewer 2" are labels
@@ -175,6 +234,14 @@ _NOT_A_NAME = frozenset(
         "welcome", "bye", "goodbye", "cheers",
         # Exclamations that are grammatically vocative and never a speaker.
         "god", "jesus", "christ", "lord", "heaven",
+        # Pronouns. "I" is capitalised in every sentence of English and lands
+        # between commas constantly -- "it may end up, Cindy, being you and I,
+        # just picking one" -- so without this it is the best-corroborated
+        # "name" in most meetings by an order of magnitude. Nobody is called
+        # any of these, and a model claiming one was not reading.
+        "i", "me", "my", "mine", "myself", "you", "your", "yours", "we", "us",
+        "our", "ours", "he", "him", "his", "she", "hers", "they", "them",
+        "their", "theirs", "it", "its", "this", "that", "these", "those",
         # The product, which is addressed by name in a meeting about it.
         "reverie",
     }
@@ -321,14 +388,39 @@ def resolve(claims, segments) -> dict[str, str]:
         and segment.speaker_status != "unknown"
     }
 
-    # label -> name -> how many separate turns said so
-    support: dict[str, dict[str, int]] = {}
+    # Step one: which names are worth considering for whom. A claim earns a
+    # name a place on the ballot; it does not cast a vote.
+    #
+    # Candidates stay bound to the speaker the claim named. Letting a name
+    # claimed for one speaker be weighed against every other would have this
+    # function reading names out of the transcript on its own, which is the
+    # "decide whether Faith is a person" problem the whole module avoids.
+    #
+    # Keyed by casefold, so "Cindy" and "cindy" are one candidate rather than
+    # two splitting the same evidence between them -- which on its own could
+    # hand the meeting to a third spelling that never split.
+    candidates: dict[str, dict[str, str]] = {}
+    introduced: dict[str, dict[str, set[int]]] = {}
     for claim in claims:
-        checked = _check(claim, turns, runs, open_now)
-        if checked is None:
+        verified = _verified(claim, turns, runs, open_now)
+        if verified is None:
             continue
-        label, name = checked
-        support.setdefault(label, {})[name] = support.setdefault(label, {}).get(name, 0) + 1
+        label, name, index, basis = verified
+        key = name.casefold()
+        spellings = candidates.setdefault(label, {})
+        spellings[key] = _better_spelling(spellings.get(key), name)
+        if basis == "introduced":
+            introduced.setdefault(label, {}).setdefault(key, set()).add(index)
+
+    # Step two: weigh each candidate over the whole meeting. This is the step
+    # the old tally skipped -- it counted the claims it was handed and never
+    # went looking for the turns.
+    support: dict[str, dict[str, int]] = {}
+    for label, spellings in candidates.items():
+        for key, name in spellings.items():
+            weight = _weigh(label, key, name, turns, runs, introduced)
+            if weight:
+                support.setdefault(label, {})[name] = weight
 
     resolved: dict[str, str] = {}
     for label, names in support.items():
@@ -341,7 +433,15 @@ def resolve(claims, segments) -> dict[str, str]:
             continue
         resolved[label] = best
 
-    return _drop_collisions(resolved)
+    # Phase one is over: who can be named, and who the name refers to, is now
+    # settled and is not revisited. Phase two only ever rewrites the *spelling*
+    # of what phase one decided.
+    attributed = _drop_collisions(resolved)
+    spoken_for = {
+        label for label, name in attributed.items()
+        if name.casefold() in introduced.get(label, {})
+    }
+    return _drop_collisions(_arbitrate(attributed, turns, taken, spoken_for))
 
 
 def apply(segments, names: dict[str, str]) -> list[str]:
@@ -413,8 +513,274 @@ def apply(segments, names: dict[str, str]) -> list[str]:
 # --- the checks -----------------------------------------------------------
 
 
-def _check(claim, turns, runs, open_now) -> tuple[str, str] | None:
-    """One claim, or None. Every rejection is a rule, never a judgement."""
+def _arbitrate(attributed, turns, taken, spoken_for) -> dict[str, str]:
+    """Phase two. The spelling of an attributed name, and nothing else.
+
+    <h2>What this is allowed to change</h2>
+
+    One thing: the string shown for a speaker **phase one already named**. It
+    iterates over the result of attribution, so it cannot name a speaker who
+    was not named, cannot un-name one who was, and cannot move a name from one
+    canonical speaker to another — every key in the mapping it returns was
+    already a key in the mapping it received.
+
+    <h2>Why it is needed at all</h2>
+
+    Attribution asks *who is being addressed*, and answers it with adjacency:
+    you are addressed by somebody you are in the conversation with. That is
+    right for attribution and wrong for spelling. Somebody addressed at one
+    point who does not speak again for two minutes fails the adjacency test, so
+    a correctly transcribed vocative can contribute nothing, while a single
+    mistranscription of the same person's name that happens to land beside them
+    contributes everything.
+
+    Spelling does not need adjacency, direction, or reach. *"Cindy's comment"*
+    is useless for deciding whose turn it is — it is somebody being talked
+    about — and it is excellent for deciding how that person's name is spelled.
+    Phase two is where that evidence is allowed to count, and it is kept out of
+    phase one so it can never decide who anybody is.
+
+    <h2>Self-introduction is final</h2>
+
+    A speaker named because they said their own name is not arbitrated. Nobody
+    else's pronunciation of a name outranks the person whose name it is.
+    """
+    out = dict(attributed)
+    for label, incumbent in attributed.items():
+        if label in spoken_for:
+            continue
+
+        # Nobody else's name, and nothing a person typed. Guard against the
+        # case the whole exercise is shaped around in reverse: two real
+        # participants called Michael and Michelle must not collapse into one.
+        barred = {name.casefold() for other, name in attributed.items() if other != label}
+        barred |= set(taken)
+        barred.add(incumbent.casefold())
+
+        standing = _occurrence_turns(incumbent, turns)
+        rivals: dict[str, int] = {}
+        for key, name in _nominated_spellings(label, turns).items():
+            if key in barred or not _one_name_two_spellings(incumbent, name):
+                continue
+            rivals[name] = len(_occurrence_turns(name, turns))
+
+        if not rivals:
+            continue
+        best = _clear_winner(rivals)
+        if best is None:
+            continue                      # two rivals, no clear answer: leave it
+        if rivals[best] < max(1, len(standing)) * WINNING_MULTIPLE:
+            continue                      # ahead, but not clearly enough
+        logger.info(
+            "Speaker naming: a spelling was replaced on meeting-wide evidence "
+            "(%d turns against %d).", rivals[best], len(standing))
+        out[label] = best
+    return out
+
+
+def _one_name_two_spellings(incumbent: str, candidate: str) -> bool:
+    """Whether these could be one name written two ways.
+
+    <h2>Why this exists, and what it is not for</h2>
+
+    Phase two arbitrates **spellings**. Without a test of what counts as a
+    respelling it is not arbitration at all — it is "replace this speaker's
+    name with whatever capitalised word the meeting says most", and on real
+    transcripts that is a product name. Measured, not supposed: on the meeting
+    this was built against, the strongest rival to the attributed name was a
+    chat tool mentioned throughout, and it won until this test was added.
+
+    **This is not what keeps two real people apart.** Michael and Michelle,
+    Brian and Bryan, Cindy and Sandy all pass it — they are near-identical
+    strings — and every one of them is kept separate by the attributed-elsewhere
+    guard instead. Do not read a similarity score here as a judgement that two
+    participants are the same person; it is only a filter that keeps phase two
+    inside its own job.
+
+    <h2>The measure</h2>
+
+    Consonants, as a set, sharing at least half of the larger name. Consonants
+    because vowels are what transcription mangles, as a set because the failure
+    is transposition — *Cindy* and *Sydney* are the same consonants in a
+    different order — and half because the alternative is a distance threshold
+    tuned against one pair of names, which would be worth less than it looked.
+    """
+    here, there = _skeleton(incumbent), _skeleton(candidate)
+    if not here or not there:
+        return False
+    return len(here & there) * 2 >= max(len(here), len(there))
+
+
+def _skeleton(name: str) -> frozenset:
+    """The consonants of a name. `y` counts as a vowel: it is a spelling of one."""
+    return frozenset(letter for letter in name.casefold()
+                     if letter.isalpha() and letter not in "aeiouy")
+
+
+def _nominated_spellings(label, turns) -> dict[str, str]:
+    """Alternative spellings entitled to compete for this speaker's name.
+
+    A spelling earns a place only by appearing in a **name-like vocative
+    position** somewhere in the meeting, in a turn this speaker does not hold.
+    Corroboration alone never nominates: *"Cindy's comment"* can support a name
+    that a vocative already put forward and can never introduce one, because a
+    possessive is a reference to somebody and carries no claim that they are in
+    the room.
+    """
+    found: dict[str, str] = {}
+    for turn in turns:
+        if (turn.speaker or "").strip() == label:
+            continue
+        for name in _vocatives_in(turn.text):
+            found.setdefault(name.casefold(), name)
+    return found
+
+
+def _occurrence_turns(name, turns) -> list[int]:
+    """Every turn using this name at all — addressed, mentioned or possessive.
+
+    Counted per **turn**, so a speaker who says a name three times in one
+    breath has said it once. This is the corroboration measure, and it is
+    deliberately indifferent to grammar: what is being counted is how much of
+    the meeting uses this spelling for somebody, not who they are.
+    """
+    return [index for index, turn in enumerate(turns)
+            if _locate(name, turn.text) is not None]
+
+
+def _vocatives_in(text: str) -> list[str]:
+    """Name-shaped words standing where a person is spoken to.
+
+    Read off the **raw** text, because the signal is punctuation and
+    `app.quotes.normalise` removes it. A vocative is parenthetical — set off
+    from the clause around it — which is what separates *"...end up, Cindy,
+    being..."* from *"we use Salesforce, which is great"*: the second is not
+    set off before, it is the object of a verb.
+
+    Three requirements, all orthographic or grammatical, none of them an
+    opinion about whether a word is a person:
+
+    1. **Set off before** — the previous character is a comma or a colon, or
+       the previous word is one of the discourse markers a vocative follows
+       ("Hi Michael,", "Thanks Michael,"). A word at the *start* of a sentence
+       does not qualify: capitalisation there is automatic and carries no
+       information, and the slot is full of open-ended discourse markers
+       ("Anyway, ...") that no closed list will ever finish covering. The cost
+       is that *"Michael, can you take this?"* does not nominate; it is a cost
+       worth paying, and such a meeting almost always says the name elsewhere.
+    2. **Closed after** — a comma, or the end of the sentence.
+    3. **Capitalised**, and passing the same `_clean_name` checks a claimed
+       name passes.
+
+    Together these are strict enough that a possessive, a reporting verb, a
+    product name in object position and a lowercase discourse marker all fail,
+    without this function ever deciding whether "Faith" is a person.
+    """
+    found: list[str] = []
+    for match in _WORD.finditer(text):
+        word = match.group(0)
+        if not word[:1].isupper():
+            continue
+        name = _clean_name(word)
+        if not name:
+            continue
+        if not _set_off_before(text[:match.start()]):
+            continue
+        if not _closed_after(text[match.end():]):
+            continue
+        found.append(name)
+    return found
+
+
+def _set_off_before(before: str) -> bool:
+    trimmed = before.rstrip()
+    if not trimmed:
+        return False                      # start of the turn: no information
+    if trimmed[-1] in ",;:":
+        return True
+    if trimmed[-1] in ".?!":
+        return False                      # start of a sentence: no information
+    words = _WORD.findall(trimmed)
+    return bool(words) and words[-1].strip(".,'’").casefold() in _NOT_A_NAME
+
+
+def _closed_after(after: str) -> bool:
+    trimmed = after.lstrip()
+    return not trimmed or trimmed[0] in ",.?!;:"
+
+
+def _weigh(label, key, name, turns, runs, introduced) -> int:
+    """How strongly the whole meeting supports calling ``label`` this name.
+
+    Every turn is asked the same structural questions the claim checks ask, so
+    a name is supported by the conversation rather than by how often a model
+    chose to mention it. Each distinct turn counts once.
+    """
+    weight = 0
+    for index in introduced.get(label, {}).get(key, ()):
+        weight += INTRODUCTION_WEIGHT if _ownership_is_sound(turns[index]) \
+            else UNVERIFIED_WEIGHT
+    for index in _addressed_turns(name, label, turns, runs):
+        weight += ADDRESS_WEIGHT if _ownership_is_sound(turns[index]) \
+            else UNVERIFIED_WEIGHT
+    return weight
+
+
+def _addressed_turns(name, label, turns, runs) -> list[int]:
+    """Every turn in the meeting that addresses ``label`` by ``name``.
+
+    The same four rules `_verified` applies to a claim's own turn, applied to
+    all of them: said by somebody else, containing the name as whole words,
+    not talking *about* that person, and close enough that they are who was
+    being spoken to.
+
+    Scanning the meeting is what makes repeated evidence count. It cannot
+    invent a name — the candidate had to be quoted by a verified claim naming
+    *this* speaker before it gets here — so this widens the *support* for a
+    name without widening the set of names anybody can be given.
+
+    Turns the speaker holds themselves are skipped, which also keeps a
+    self-introduction from being counted twice: *"Hi, I'm Sarah"* is already
+    weighed as an introduction, and matching the bare name in it again would
+    read it as somebody being called Sarah.
+    """
+    found: list[int] = []
+    for index, turn in enumerate(turns):
+        if (turn.speaker or "").strip() == label:
+            continue                      # nobody is addressed by themselves
+        at = _locate(name, turn.text)
+        if at is None:
+            continue
+        if _is_mention(name, turn.text, at):
+            continue
+        if not _within_reach(label, index, runs):
+            continue
+        found.append(index)
+    return found
+
+
+def _better_spelling(current: str | None, candidate: str) -> str:
+    """One spelling to show for a candidate whose case varies across claims.
+
+    Only about presentation — the candidates were already merged by casefold
+    before this is consulted. A capitalised spelling wins because it is the one
+    a reader expects on a name; otherwise the first one seen stands, so the
+    choice is stable rather than dependent on claim order.
+    """
+    if current is None:
+        return candidate
+    if not current[:1].isupper() and candidate[:1].isupper():
+        return candidate
+    return current
+
+
+def _verified(claim, turns, runs, open_now) -> tuple[str, str, int, str] | None:
+    """One claim, or None. Every rejection is a rule, never a judgement.
+
+    Returns the turn index and basis as well as the name, because `resolve`
+    counts *distinct turns* of evidence: without the index it cannot tell two
+    claims about one sentence from two independent mentions.
+    """
     label = (getattr(claim, "speaker", "") or "").strip()
     name = _clean_name(getattr(claim, "name", ""))
     basis = (getattr(claim, "basis", "") or "").strip().lower()
@@ -442,14 +808,16 @@ def _check(claim, turns, runs, open_now) -> tuple[str, str] | None:
     spoken_by = (evidence.speaker or "").strip()
     if basis == "introduced":
         # "I'm Michael." Only the person saying it can be named by it.
-        return (label, name) if spoken_by == label else None
+        return (label, name, index - 1, basis) if spoken_by == label else None
 
     # "How are you, Michael?" — said by somebody else, about somebody near.
     if spoken_by == label:
         return None
     if _is_mention(name, quote, at):
         return None
-    return (label, name) if _within_reach(label, index - 1, runs) else None
+    if not _within_reach(label, index - 1, runs):
+        return None
+    return (label, name, index - 1, basis)
 
 
 def _locate(name: str, quote: str) -> int | None:
@@ -501,14 +869,20 @@ def _within_reach(label: str, turn_index: int, runs) -> bool:
 def _clear_winner(names: dict[str, int]) -> str | None:
     """The best-supported name, or None when it is not distinctly the best.
 
-    "Michael" five times beside "Mike" once is a nickname and resolves. One
-    each is a contradiction and does not — the same refusal, and the same
-    reasoning, as the margin check on voice matching.
+    "Michael" five times beside "Mike" once is a nickname and resolves. Three
+    against two is a transcript contradicting itself and does not — the same
+    refusal, and the same reasoning, as the margin check on voice matching.
+
+    The bar is a *multiple* rather than a difference because the evidence is
+    weighted: a fixed gap would mean something different for a meeting where
+    somebody is named twice than for one where they are named twenty times.
     """
     if not names:
         return None
-    ranked = sorted(names.items(), key=lambda kv: -kv[1])
-    if len(ranked) > 1 and ranked[0][1] == ranked[1][1]:
+    # Name breaks the tie in the sort only to keep the ordering deterministic;
+    # a genuine tie is refused two lines later regardless.
+    ranked = sorted(names.items(), key=lambda kv: (-kv[1], kv[0]))
+    if len(ranked) > 1 and ranked[0][1] < ranked[1][1] * WINNING_MULTIPLE:
         return None
     return ranked[0][0]
 
