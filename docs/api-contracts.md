@@ -187,8 +187,33 @@ the talk-time stats (derived on read, so they follow for free). The summary is
 marked stale rather than regenerated.
 
 `speakerKey`, not a display name: names are not unique — two people can both be
-called Chris — and the key is what survives a rename. The destination must
-already exist in the meeting; this endpoint cannot create a participant.
+called Chris — and the key is what survives a rename.
+
+**New speaker** — the same endpoint, `{"newSpeaker": true}` instead of a
+`speakerKey`. "This was somebody the transcript does not have." A voice
+diarization never separated out — a fifth participant folded into Speaker 1 —
+cannot be repaired by choosing from a list that does not contain them, so the
+destination is described rather than named.
+
+Exactly one of `speakerKey` and `newSpeaker`. Both is ambiguous and is refused;
+neither leaves the server guessing. It is one endpoint rather than two because
+everything after the destination is decided is identical — the same word range,
+the same split, the same re-index, the same stale summary.
+
+The server allocates `spk_`(highest + 1) from the keys the meeting currently
+holds, with a matching `Speaker N` name. **Never the first gap:** a meeting
+holding spk_1, spk_2 and spk_4 yields spk_5, because spk_3 is missing only
+because it *was* somebody — merged away or corrected out — and reusing that
+identity would change what an old export or a cached retrieval passage refers
+to. Keys that are not `spk_<digits>` are ignored rather than refused.
+
+Allocation is serialised on the meeting row (`FOR NO KEY UPDATE`, the same lock
+and order as erasure and reprocess), so two people correcting different lines at
+the same moment cannot both mint the same key for two different people.
+
+The identity is **meeting-local**. Reverie holds no cross-meeting speaker
+record, and this does not create one. Afterwards it is an ordinary canonical
+speaker: rename it, merge it, or move turns to it, with no special case.
 
 Returns the whole `TranscriptResponse`, because a partial move turns one segment
 into three and a client cannot patch its cache without reimplementing the

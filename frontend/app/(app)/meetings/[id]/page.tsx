@@ -2207,6 +2207,8 @@ function TranscriptPanel({
   const [noteFor, setNoteFor] = React.useState<Passage | null>(null);
   const [actionFor, setActionFor] = React.useState<Passage | null>(null);
   const [reassignFor, setReassignFor] = React.useState<ReassignTarget | null>(null);
+  /** Why the last correction failed, shown in the dialog rather than only as a toast. */
+  const [reassignError, setReassignError] = React.useState<string | null>(null);
   const [setSegmentSpeaker, { isLoading: reassigning }] = useSetSegmentSpeakerMutation();
   const bodyRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -2280,24 +2282,53 @@ function TranscriptPanel({
   }
 
   async function confirmReassign(speakerKey: string) {
-    if (!reassignFor) return;
+    await applyReassign({ speakerKey }, "Speaker corrected for that line.");
+  }
+
+  /**
+   * The words belong to somebody this meeting does not have yet.
+   *
+   * <p>The server allocates the identity, so the name is not known until it
+   * answers — which is why the toast reads it back off the response rather than
+   * guessing "Speaker 5" from what the client can see.
+   */
+  async function confirmReassignToNew() {
+    const speaker = await applyReassign({ newSpeaker: true }, null);
+    if (speaker) toast.success(`Assigned to ${speaker}.`);
+  }
+
+  async function applyReassign(
+    target: { speakerKey?: string; newSpeaker?: boolean },
+    message: string | null,
+  ): Promise<string | null> {
+    if (!reassignFor) return null;
+    setReassignError(null);
     try {
-      await setSegmentSpeaker({
+      const updated = await setSegmentSpeaker({
         id: meetingId,
         segmentId: reassignFor.segmentId,
-        speakerKey,
+        ...target,
         fromWord: reassignFor.fromWord,
         toWord: reassignFor.toWord,
       }).unwrap();
       setReassignFor(null);
       clearSelection();
-      toast.success("Speaker corrected for that line.");
+      if (message) toast.success(message);
+      // Whoever holds the corrected line now. A split makes new rows, so this
+      // is read back rather than remembered.
+      const moved = updated.segments?.find((s) => s.id === reassignFor.segmentId);
+      return moved?.speaker ?? updated.speakers?.at(-1)?.speaker ?? null;
     } catch (err) {
       // The server can still refuse a correction, and its sentence is worth
       // showing: "try again in a moment" is different advice from "that did
       // not save", and only the server knows which one applies.
-      const message = (err as { data?: { message?: string } })?.data?.message;
-      toast.error(message || "Could not change the speaker on that line.");
+      const detail = (err as { data?: { message?: string } })?.data?.message;
+      // Shown in the dialog as well as a toast, and the dialog stays open: the
+      // selection is still there and the next attempt should not need making it
+      // again.
+      setReassignError(detail || "Could not change the speaker on that line.");
+      toast.error(detail || "Could not change the speaker on that line.");
+      return null;
     }
   }
 
@@ -2958,8 +2989,13 @@ function TranscriptPanel({
         target={reassignFor}
         speakers={speakerStats ?? []}
         busy={reassigning}
-        onClose={() => setReassignFor(null)}
+        error={reassignError}
+        onClose={() => {
+          setReassignFor(null);
+          setReassignError(null);
+        }}
         onConfirm={confirmReassign}
+        onConfirmNew={() => void confirmReassignToNew()}
       />
       <NoteDialog meetingId={meetingId} passage={noteFor} onClose={() => setNoteFor(null)} />
       <ActionItemDialog

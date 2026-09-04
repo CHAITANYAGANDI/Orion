@@ -146,15 +146,23 @@ public class MeetingController {
     }
 
     /**
-     * Move one turn, or part of one, to a different speaker.
+     * Move one turn, or part of one, to a different speaker — existing or new.
      *
      * <p>Separate from {@code PATCH /speakers}, which renames a voice
      * everywhere it appears. This corrects an attribution and changes nothing
      * else, including nothing about any other turn.
      *
+     * <p>The destination is either {@code speakerKey} — somebody already in
+     * this meeting — or {@code newSpeaker: true}, for a person diarization never
+     * separated out at all. Exactly one; see {@link SegmentSpeakerRequest}. The
+     * second allocates the next canonical key for this meeting and a matching
+     * {@code Speaker N} name, and that identity is meeting-local: Reverie holds
+     * no cross-meeting speaker record and this does not create one.
+     *
      * <p>Returns the whole transcript rather than the changed line: a partial
      * move splits one segment into three, so the client cannot patch its cache
-     * from the response without reimplementing the split.
+     * from the response without reimplementing the split. A new speaker also
+     * changes the meeting's speaker list, which the response carries.
      */
     @PatchMapping("/{id}/segments/{segmentId}/speaker")
     public TranscriptResponse setSegmentSpeaker(@PathVariable String id,

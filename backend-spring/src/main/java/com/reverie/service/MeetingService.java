@@ -703,6 +703,29 @@ public class MeetingService {
     public TranscriptResponse setSegmentSpeaker(String userId, String meetingId,
                                                 String segmentId, SegmentSpeakerRequest req) {
         require(userId, meetingId);
+
+        String problem = req.targetProblem();
+        if (problem != null) {
+            throw ApiException.badRequest(problem);
+        }
+
+        // Allocating an identity is the one thing here that reads the meeting to
+        // decide what to write, so it is the one thing two requests can get
+        // wrong at once: both read the same highest key and both mint it, and
+        // two different people end up sharing one canonical speaker.
+        //
+        // The meeting row serialises them. Taken before the segments are read,
+        // because the read is what the decision is made from -- afterwards would
+        // lock the row and then act on a snapshot taken before the wait. Same
+        // row, same `FOR NO KEY UPDATE`, same order as erasure and reprocess, so
+        // this queues behind them rather than deadlocking against them.
+        //
+        // Only for the allocating path: moving words to a speaker who already
+        // exists decides nothing and needs no turn in the queue.
+        if (req.isNewSpeaker()) {
+            meetings.lockForWrite(meetingId);
+        }
+
         var segs = segments.findByMeetingIdOrderByStartTimeAsc(meetingId);
 
         var target = segs.stream()
@@ -711,16 +734,24 @@ public class MeetingService {
                 .orElseThrow(() -> ApiException.badRequest(
                         "That line is not part of this meeting; reload the transcript and try again"));
 
-        // The destination has to be a speaker this meeting already has. Anything
-        // else would invent a participant from a typo in a request body.
-        String key = req.speakerKey().trim();
-        String name = segs.stream()
-                .filter(x -> key.equals(x.getSpeakerKey()))
-                .map(TranscriptSegment::getSpeaker)
-                .filter(n -> n != null && !n.isBlank())
-                .findFirst()
-                .orElseThrow(() -> ApiException.badRequest(
-                        "There is no such speaker in this meeting"));
+        final String key;
+        final String name;
+        if (req.isNewSpeaker()) {
+            key = nextSpeakerKey(segs);
+            name = "Speaker " + key.substring("spk_".length());
+        } else {
+            // The destination has to be a speaker this meeting already has.
+            // Anything else would invent a participant from a typo in a request
+            // body -- which is what `newSpeaker` is for, said deliberately.
+            key = req.trimmedKey();
+            name = segs.stream()
+                    .filter(x -> key.equals(x.getSpeakerKey()))
+                    .map(TranscriptSegment::getSpeaker)
+                    .filter(n -> n != null && !n.isBlank())
+                    .findFirst()
+                    .orElseThrow(() -> ApiException.badRequest(
+                            "There is no such speaker in this meeting"));
+        }
 
         // Asked before anything is touched, because the invalidation below has
         // to come first and must not be spent on a request that changes nothing
@@ -847,6 +878,47 @@ public class MeetingService {
         markSummaryStale(meetingId);
         audit.record(userId, "SPEAKERS_MERGED", "meeting", meetingId);
         return getTranscript(userId, meetingId);
+    }
+
+    /**
+     * The next canonical speaker for this meeting: {@code spk_}(highest + 1).
+     *
+     * <p><b>Highest plus one, never the first gap.</b> Keys are read from the
+     * segments rather than counted, so a meeting holding spk_1, spk_2 and spk_4
+     * yields spk_5. spk_3 is missing because it *was* somebody — merged away, or
+     * corrected out of existence — and handing that identity to a different
+     * person would quietly change what an old export, a cached retrieval passage
+     * or somebody's memory of the transcript refers to. Numbers are cheap;
+     * reused identities are not.
+     *
+     * <p>Anything that is not {@code spk_<digits>} is ignored rather than
+     * refused. The column is a string, older rows may hold null, and a single
+     * unparseable value must not be able to stop a correction — skipping it can
+     * only make the allocated number lower than it might have been, and the
+     * uniqueness that matters is checked against the keys that did parse.
+     *
+     * <p>Deterministic: the same segments always produce the same answer, with
+     * no clock, no random and no dependence on row order.
+     */
+    private static String nextSpeakerKey(List<TranscriptSegment> segs) {
+        int highest = 0;
+        for (var seg : segs) {
+            String key = seg.getSpeakerKey();
+            if (key == null || !key.startsWith("spk_")) {
+                continue;
+            }
+            String digits = key.substring("spk_".length());
+            if (digits.isEmpty() || !digits.chars().allMatch(Character::isDigit)) {
+                continue;
+            }
+            try {
+                highest = Math.max(highest, Integer.parseInt(digits));
+            } catch (NumberFormatException ignored) {
+                // A number too long for an int. Not a key this application
+                // wrote, and not a reason to refuse the correction.
+            }
+        }
+        return "spk_" + (highest + 1);
     }
 
     /**

@@ -358,6 +358,24 @@ because the same suspicion will arise again.
 
 **Three identities travel with every segment and only one of them is mutable:**
 
+### The five speaker repairs, and which question each answers
+
+They are easy to confuse, and picking the wrong one is how a transcript ends up
+worse than it started.
+
+| You noticed | Use | What changes |
+|---|---|---|
+| This speaker's **name** is wrong | **Rename** | The display name, everywhere that speaker appears. The key does not move, so colour and talk time stay attached. |
+| These words were **another person already here** | **Change speaker** | Who owns that turn, or a word range of it. Nobody else is touched. |
+| These words were **somebody not in the list** | **New speaker** | A new canonical identity for this meeting (`spk_`highest+1, `Speaker N`), and the turn moves to it. |
+| These **two speakers are one person** | **Merge** | Every turn of one takes the other's identity; the folded label stops existing. |
+| The notes now disagree with the transcript | **Re-summarize** | Regenerates the notes from the corrected transcript and current speakers. Never automatic. |
+| The diarization is wrong throughout | **Reprocess** | Re-transcribes and re-diarizes the original audio. **Destructive** — it can replace manual speaker corrections. |
+
+None of these reaches another recording. `speaker_raw` is untouched by all of
+them: it records what the provider said, and a human correcting Reverie's
+reading of that is not a correction to the record of it.
+
 | Field | Example | Written by |
 |---|---|---|
 | `speaker_raw` | `"A"` | the provider, once. Never displayed, never rewritten. |

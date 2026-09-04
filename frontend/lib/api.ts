@@ -941,15 +941,24 @@ export const api = createApi({
       {
         id: string;
         segmentId: string;
-        speakerKey: string;
+        /** Somebody already in this meeting. Omit when `newSpeaker` is set. */
+        speakerKey?: string;
+        /**
+         * The words belong to a person diarization never separated out.
+         *
+         * The server allocates the next canonical key for this meeting and a
+         * matching `Speaker N`. Exactly one of this and `speakerKey`; sending
+         * both is refused rather than resolved by precedence.
+         */
+        newSpeaker?: boolean;
         fromWord?: number;
         toWord?: number;
       }
     >({
-      query: ({ id, segmentId, speakerKey, fromWord, toWord }) => ({
+      query: ({ id, segmentId, speakerKey, newSpeaker, fromWord, toWord }) => ({
         url: `/meetings/${id}/segments/${segmentId}/speaker`,
         method: "PATCH",
-        body: { speakerKey, fromWord, toWord },
+        body: { speakerKey, newSpeaker, fromWord, toWord },
       }),
       invalidatesTags: (_r, _e, arg) => [
         { type: "Transcript", id: arg.id },
