@@ -709,6 +709,12 @@ export default function MeetingDetailPage() {
       // so RTK Query serves these from the same request.
       segments={transcript.data?.segments ?? []}
       moments={moments.data ?? []}
+      // `audioUrl` is presigned and lasts fifteen minutes. This page is often
+      // open for longer — reading the transcript is the point — and nothing
+      // refreshes it, so the link the player is holding eventually stops
+      // working. Refetching the meeting mints a new one; the player remembers
+      // where the listener was and puts them back.
+      onSourceExpired={() => void meeting.refetch()}
     />
   );
   // Only offered when there is something to erase. A YouTube import holds no

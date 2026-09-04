@@ -151,9 +151,28 @@ export function AudioPlayer({
   durationSeconds,
   segments = [],
   moments = [],
+  onSourceExpired,
 }: {
   src: string;
   controller: AudioController;
+  /**
+   * Ask the owner for a fresh `src`, because this one stopped working.
+   *
+   * `src` is a **presigned URL and it expires** — fifteen minutes, set by
+   * `s3.presign-expiry-seconds`. Nothing refreshes it, so a page left open
+   * longer than that holds a link the object store will refuse.
+   *
+   * What that looks like is not "an error": the recording plays perfectly from
+   * whatever is already buffered and fails the moment it needs bytes it does
+   * not have. Pausing, waiting, and pressing play again needs bytes. Clicking a
+   * word further along needs bytes. Both went dead silently, because the two
+   * `play()` calls in this file discard their rejection and the element had no
+   * error listener at all.
+   *
+   * Optional: without it the player behaves as before, which is what the tests
+   * that construct it directly rely on.
+   */
+  onSourceExpired?: () => void;
   /** MIME type of the stored media. Absent (older meetings) means audio. */
   contentType?: string | null;
   /**
@@ -226,12 +245,76 @@ export function AudioPlayer({
     };
   }, [src, el]);
 
+  /**
+   * Where to come back to once a fresh `src` arrives, and whether to resume.
+   *
+   * Held in a ref rather than state because changing `src` remounts the source:
+   * the element resets `currentTime` to zero and forgets it was playing, and
+   * this is the only record of where the listener actually was.
+   */
+  const resumeAt = React.useRef<{ at: number; playing: boolean } | null>(null);
+  /**
+   * The `src` a recovery has already been asked for.
+   *
+   * One attempt per URL. A recording whose object is genuinely gone would
+   * otherwise error, refetch, error, refetch — a network loop that looks like a
+   * hang and is worse than the silence it replaced.
+   */
+  const recovering = React.useRef<string | null>(null);
+  const [failed, setFailed] = React.useState(false);
+
+  const recover = React.useCallback(() => {
+    const media = el();
+    if (!media) return;
+    if (!onSourceExpired || recovering.current === src) {
+      setFailed(true);
+      return;
+    }
+    recovering.current = src;
+    resumeAt.current = {
+      // The element's own clock, falling back to the published one: a failed
+      // seek can leave `currentTime` at the old position while the controller
+      // already moved.
+      at: Number.isFinite(media.currentTime) ? media.currentTime : controller.currentTime,
+      playing: !media.paused && !media.ended,
+    };
+    onSourceExpired();
+  }, [el, src, controller, onSourceExpired]);
+
+  // A media element reports a dead URL through `error`, and only through it —
+  // there is no rejected promise to catch when playback stalls mid-stream.
+  React.useEffect(() => {
+    const media = el();
+    if (!media) return;
+    const onError = () => recover();
+    media.addEventListener("error", onError);
+    return () => media.removeEventListener("error", onError);
+  }, [el, recover]);
+
+  // A fresh `src` landed. Put the listener back where they were.
+  React.useEffect(() => {
+    const media = el();
+    const pending = resumeAt.current;
+    if (!media || !pending) return;
+    resumeAt.current = null;
+    setFailed(false);
+    const restore = () => {
+      media.currentTime = pending.at;
+      controller.setCurrentTime(pending.at);
+      if (pending.playing) void media.play().catch(() => setFailed(true));
+    };
+    // Seeking before metadata lands is dropped by the browser, which would
+    // silently restart an hour-long recording from the beginning.
+    if (media.readyState >= 1) restore();
+    else media.addEventListener("loadedmetadata", restore, { once: true });
+  }, [src, el, controller]);
+
   const toggle = React.useCallback(() => {
     const media = el();
     if (!media) return;
-    if (media.paused) void media.play().catch(() => {});
+    if (media.paused) void media.play().catch(() => recover());
     else media.pause();
-  }, [el]);
+  }, [el, recover]);
 
   const jumpTo = React.useCallback(
     (seconds: number) => {
@@ -433,6 +516,15 @@ export function AudioPlayer({
             style={{ left: `${fraction * 100}%` }}
           />
         </div>
+
+        {/* Said out loud rather than left as a dead play button. This is only
+            reached when a refreshed link failed too, so "try again" is honest
+            advice and "reload the page" is the thing that actually works. */}
+        {failed && (
+          <p role="status" className="text-xs text-destructive">
+            The recording could not be loaded. Reload the page to try again.
+          </p>
+        )}
 
         <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
           <IconButton

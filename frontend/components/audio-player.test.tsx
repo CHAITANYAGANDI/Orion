@@ -504,3 +504,150 @@ describe("the playhead's cost", () => {
     expect(reads()).toBeGreaterThanOrEqual(8);
   });
 });
+
+/**
+ * A presigned link that stopped working.
+ *
+ * `src` is signed and lasts fifteen minutes. A meeting page is routinely open
+ * for longer than that, and nothing refreshed it — so the recording played from
+ * whatever was already buffered and died the moment it needed more bytes.
+ *
+ * The two symptoms are the same failure seen from two angles. Pause, wait, press
+ * play: needs bytes. Click a word further along: needs bytes. Both were silent,
+ * because the element had no error listener and both `play()` calls threw their
+ * rejection away.
+ */
+describe("recovering a media source that expired", () => {
+  function Recoverable({ onSourceExpired }: { onSourceExpired: () => void }) {
+    const [src, setSrc] = React.useState("http://example.test/a.mp3?sig=old");
+    const controller = useAudioController();
+    return (
+      <>
+        <button onClick={() => setSrc("http://example.test/a.mp3?sig=fresh")}>
+          refresh
+        </button>
+        <AudioPlayer
+          src={src}
+          controller={controller}
+          segments={SEGMENTS}
+          onSourceExpired={onSourceExpired}
+        />
+      </>
+    );
+  }
+
+  function fail(el: HTMLMediaElement) {
+    act(() => {
+      el.dispatchEvent(new Event("error"));
+    });
+  }
+
+  it("asks for a fresh link when the element reports an error", () => {
+    const expired = vi.fn();
+    render(<Recoverable onSourceExpired={expired} />);
+
+    fail(media());
+
+    expect(expired).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks once per link, so a dead recording cannot loop", () => {
+    // Error, refetch, error, refetch is a network loop that reads as a hang and
+    // is worse than the silence it replaced.
+    const expired = vi.fn();
+    render(<Recoverable onSourceExpired={expired} />);
+
+    fail(media());
+    fail(media());
+    fail(media());
+
+    expect(expired).toHaveBeenCalledTimes(1);
+  });
+
+  it("puts the listener back where they were, still playing", async () => {
+    const play = vi
+      .spyOn(HTMLMediaElement.prototype, "play")
+      .mockImplementation(function (this: HTMLMediaElement) {
+        Object.defineProperty(this, "paused", { configurable: true, value: false });
+        return Promise.resolve();
+      });
+    try {
+      const user = userEvent.setup();
+      render(<Recoverable onSourceExpired={() => {}} />);
+      const el = withDuration(600);
+      act(() => {
+        void el.play();
+      });
+      setTime(431);
+
+      fail(el);
+      play.mockClear();
+      await user.click(screen.getByText("refresh"));
+
+      // jsdom never fires `loadedmetadata`, and readyState is 0, so the restore
+      // is queued exactly as it would be against a real element still loading.
+      act(() => {
+        Object.defineProperty(el, "readyState", { configurable: true, value: 1 });
+        el.dispatchEvent(new Event("loadedmetadata"));
+      });
+
+      expect(el.currentTime).toBe(431);
+      expect(play).toHaveBeenCalled();
+    } finally {
+      play.mockRestore();
+    }
+  });
+
+  it("does not resume something the listener had paused", async () => {
+    const play = vi
+      .spyOn(HTMLMediaElement.prototype, "play")
+      .mockResolvedValue(undefined);
+    try {
+      const user = userEvent.setup();
+      render(<Recoverable onSourceExpired={() => {}} />);
+      const el = withDuration(600);
+      setTime(120);
+
+      fail(el);
+      play.mockClear();
+      await user.click(screen.getByText("refresh"));
+      act(() => {
+        Object.defineProperty(el, "readyState", { configurable: true, value: 1 });
+        el.dispatchEvent(new Event("loadedmetadata"));
+      });
+
+      expect(el.currentTime).toBe(120);
+      expect(play).not.toHaveBeenCalled();
+    } finally {
+      play.mockRestore();
+    }
+  });
+
+  it("says so when there is nobody to ask for a fresh link", () => {
+    // The player is constructed without the callback in a few places. Silence
+    // was the old behaviour and it is the thing being fixed.
+    render(<Harness />);
+
+    fail(media());
+
+    expect(screen.getByRole("status")).toHaveTextContent(/could not be loaded/i);
+  });
+
+  it("clears the message once a fresh link works", async () => {
+    const user = userEvent.setup();
+    render(<Recoverable onSourceExpired={() => {}} />);
+    const el = media();
+
+    fail(el);
+    fail(el);        // second failure, with recovery already asked for
+    expect(screen.getByRole("status")).toBeInTheDocument();
+
+    await user.click(screen.getByText("refresh"));
+    act(() => {
+      Object.defineProperty(el, "readyState", { configurable: true, value: 1 });
+      el.dispatchEvent(new Event("loadedmetadata"));
+    });
+
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+});
