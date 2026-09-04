@@ -208,3 +208,95 @@ describe("assigning to a speaker who is not in the meeting", () => {
     expect(onConfirm).toHaveBeenCalledWith("spk_1");
   });
 });
+
+/**
+ * What it says while it is working.
+ *
+ * The correction is not instant: the server rebuilds the flat transcript and
+ * re-indexes chat before it answers, so there are seconds in which the dialog
+ * is doing something and the user cannot see it. Dimming alone does not say
+ * "working" — it says "dead", which is how the first version was reported.
+ */
+describe("ReassignSpeakerDialog, mid-correction", () => {
+  const THREE: SpeakerStats[] = [
+    ...SPEAKERS,
+    { speaker: "Speaker 3", speakerKey: "spk_3", speakingSeconds: 10, percentage: 20, segmentCount: 2, wordCount: 20 },
+  ];
+
+  function mount(over: Partial<React.ComponentProps<typeof ReassignSpeakerDialog>> = {}) {
+    const props = {
+      target: TARGET,
+      speakers: THREE,
+      onClose: vi.fn(),
+      onConfirm: vi.fn(),
+      onConfirmNew: vi.fn(),
+      ...over,
+    };
+    const { rerender } = render(<ReassignSpeakerDialog {...props} />);
+    return {
+      props,
+      working: () => rerender(<ReassignSpeakerDialog {...props} busy />),
+      done: () => rerender(<ReassignSpeakerDialog {...props} />),
+    };
+  }
+
+  it("says what it is doing, not just that it is doing something", async () => {
+    const { working } = mount();
+
+    await userEvent.click(screen.getByRole("button", { name: /Speaker 1/ }));
+    working();
+
+    expect(screen.getByRole("status")).toHaveTextContent(/Moving the words/i);
+  });
+
+  it("names the extra work when a speaker is being created", async () => {
+    const { working } = mount();
+
+    await userEvent.click(screen.getByRole("button", { name: "New speaker" }));
+    await userEvent.click(screen.getByRole("button", { name: /create & assign/i }));
+    working();
+
+    // Creating an identity is the part worth naming: it is the half of this
+    // the user was asked to confirm.
+    expect(screen.getByRole("status")).toHaveTextContent(/Creating the speaker/i);
+  });
+
+  it("marks the speaker that was chosen, not all of them", async () => {
+    const { working } = mount();
+
+    await userEvent.click(screen.getByRole("button", { name: /Speaker 1/ }));
+    working();
+
+    expect(screen.getByRole("button", { name: /Speaker 1/ })).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("button", { name: /Speaker 3/ })).toHaveAttribute("aria-busy", "false");
+  });
+
+  it("cannot be dismissed while the correction is in flight", async () => {
+    // Cancel is already disabled here. Leaving Escape and the X live would
+    // contradict it and hide a request that is still going to land.
+    const { props, working } = mount();
+
+    await userEvent.click(screen.getByRole("button", { name: /Speaker 1/ }));
+    working();
+    await userEvent.keyboard("{Escape}");
+
+    expect(props.onClose).not.toHaveBeenCalled();
+  });
+
+  it("stops claiming to be working once the request ends", async () => {
+    // A failure leaves the dialog open, and a spinner still turning above the
+    // error would contradict it.
+    const { working, done } = mount();
+
+    await userEvent.click(screen.getByRole("button", { name: /Speaker 1/ }));
+    working();
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    done();
+
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Speaker 1/ })).not.toHaveAttribute(
+      "aria-busy",
+      "true",
+    );
+  });
+});

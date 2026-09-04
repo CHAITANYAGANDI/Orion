@@ -39,7 +39,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Plus } from "lucide-react";
+import { Plus, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SpeakerAvatar } from "@/components/speaker-avatar";
 import { cn } from "@/lib/utils";
@@ -79,9 +79,19 @@ export function ReassignSpeakerDialog({
   // dialog opens on a different selection: a confirm left standing from the
   // last line would be a click away from creating a speaker for this one.
   const [confirmingNew, setConfirmingNew] = React.useState(false);
+  // Which answer is in flight. `busy` says a request is running; this says
+  // which one, so the spinner appears on the row the user actually pressed
+  // rather than on all of them or on the dialog as a whole.
+  const [pendingKey, setPendingKey] = React.useState<string | null>(null);
   React.useEffect(() => {
     setConfirmingNew(false);
   }, [target?.segmentId, target?.fromWord, target?.toWord]);
+  React.useEffect(() => {
+    // Cleared when the request ends. On success the dialog closes anyway; on
+    // failure it stays open, and a spinner left running on a row that already
+    // failed would contradict the error printed beneath it.
+    if (!busy) setPendingKey(null);
+  }, [busy]);
   // Anyone but whoever already has these words: "move it to where it already
   // is" is not an action, and offering it invites a click that does nothing.
   const options = React.useMemo(
@@ -93,8 +103,12 @@ export function ReassignSpeakerDialog({
   );
 
   return (
-    <Dialog open={target !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-md">
+    // Not dismissable while a correction is running. Cancel is already disabled
+    // then, and leaving the X and Escape live would contradict it — closing
+    // would hide a request that is still going to land, leaving the user unsure
+    // whether the words moved.
+    <Dialog open={target !== null} onOpenChange={(open) => !open && !busy && onClose()}>
+      <DialogContent className="sm:max-w-md" aria-busy={busy}>
         <DialogHeader>
           <DialogTitle>Who said this?</DialogTitle>
           <DialogDescription>
@@ -105,6 +119,21 @@ export function ReassignSpeakerDialog({
         {target?.quote ? (
           <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm italic">
             “{target.quote.length > 180 ? `${target.quote.slice(0, 180)}…` : target.quote}”
+          </p>
+        ) : null}
+
+        {/* Named work, not a bare spinner. The correction rebuilds the flat
+            transcript and re-indexes chat before the server answers, so this
+            can run for several seconds — long enough that "something is
+            happening" is not enough to stop it reading as stuck. `role=status`
+            announces it without stealing focus from the button just pressed. */}
+        {busy ? (
+          <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+            {confirmingNew
+              ? "Creating the speaker and moving the words."
+              : "Moving the words."}{" "}
+            The transcript and chat update with them.
           </p>
         ) : null}
 
@@ -130,8 +159,14 @@ export function ReassignSpeakerDialog({
                 Cancel
               </Button>
               {/* Disabled while the request is in flight, so a second press
-                  cannot allocate a second identity for one correction. */}
+                  cannot allocate a second identity for one correction. The
+                  label does not change with it: this is the button they were
+                  told to press, and renaming it mid-press reads as a different
+                  button. The spinner carries the state instead. */}
               <Button onClick={onConfirmNew} disabled={busy}>
+                {busy ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                ) : null}
                 Create &amp; assign
               </Button>
             </div>
@@ -150,15 +185,29 @@ export function ReassignSpeakerDialog({
                     key={s.speakerKey}
                     type="button"
                     disabled={busy}
-                    onClick={() => onConfirm(s.speakerKey as string)}
+                    aria-busy={busy && pendingKey === s.speakerKey}
+                    onClick={() => {
+                      setPendingKey(s.speakerKey as string);
+                      onConfirm(s.speakerKey as string);
+                    }}
                     className={cn(
                       "flex items-center gap-3 rounded-md px-3 py-2 text-left text-sm",
                       "hover:bg-accent focus-visible:bg-accent focus-visible:outline-none",
-                      "disabled:pointer-events-none disabled:opacity-50",
+                      "disabled:pointer-events-none",
+                      // The chosen row stays legible while it works; the ones
+                      // not chosen fade, so the dimming reads as "not this one"
+                      // rather than as the whole dialog going dead.
+                      busy && pendingKey !== s.speakerKey && "opacity-50",
                     )}
                   >
                     <SpeakerAvatar name={s.speaker} speakerKey={s.speakerKey} />
                     <span className="font-medium">{s.speaker}</span>
+                    {busy && pendingKey === s.speakerKey ? (
+                      <Loader2
+                        className="ml-auto h-4 w-4 shrink-0 animate-spin text-muted-foreground"
+                        aria-hidden
+                      />
+                    ) : null}
                   </button>
                 ))}
               </div>
