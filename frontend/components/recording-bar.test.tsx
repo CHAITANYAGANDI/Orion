@@ -702,3 +702,86 @@ describe("RecordingBar clearance", () => {
     expect(document.documentElement.style.getPropertyValue("--recording-bar")).toBe("");
   });
 });
+
+/**
+ * Getting back to the recording.
+ *
+ * The bar already followed the reader from page to page with a clock, a pause
+ * and a stop — everything except a way *back*. Somebody who left mid-meeting to
+ * look something up had the controls but no route to the note they were taking,
+ * and the only thing on screen that led to /record was the header's Record
+ * button, which reads like starting a second recording rather than returning to
+ * the first.
+ */
+describe("returning to the recording page", () => {
+  beforeEach(() => {
+    pathname.current = "/home";
+    push.mockClear();
+  });
+
+  it("offers a way back while recording from another page", async () => {
+    const user = userEvent.setup();
+    renderBar({ state: "recording" }, { title: "Launch planning" });
+
+    await user.click(screen.getByRole("button", { name: /open recording/i }));
+
+    expect(push).toHaveBeenCalledWith("/record?r=%2Fhome");
+  });
+
+  it("names the note, so the dock says what is being recorded", () => {
+    renderBar({ state: "recording" }, { title: "Launch planning" });
+
+    expect(
+      screen.getByRole("button", { name: "Open recording: Launch planning" }),
+    ).toBeInTheDocument();
+  });
+
+  it("says something rather than nothing when the note is unnamed", () => {
+    // The title field is offered rather than demanded, so blank is the common
+    // case: a dock labelled with an empty string is a dock nobody can aim at.
+    renderBar({ state: "recording" }, { title: "   " });
+
+    expect(screen.getByText("Untitled recording")).toBeInTheDocument();
+  });
+
+  it("carries the folder Record was pressed in, for a reload", () => {
+    // `?r=` and the in-memory session hold the same value on purpose: a reload
+    // of /record loses the session, and the URL is what still knows which
+    // folder the meeting files into.
+    renderBar({ state: "recording" }, { returnTo: "/folder/prj_7" });
+
+    expect(
+      screen.getByRole("button", { name: /open recording/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("pushes that folder through as the return path", async () => {
+    const user = userEvent.setup();
+    renderBar({ state: "recording" }, { returnTo: "/folder/prj_7" });
+
+    await user.click(screen.getByRole("button", { name: /open recording/i }));
+
+    expect(push).toHaveBeenCalledWith("/record?r=%2Ffolder%2Fprj_7");
+  });
+
+  it("is not offered on the recording page itself", () => {
+    // It would link to the page it is already on, and the title is in an
+    // editable field at the top of it — said twice, one of them dead.
+    pathname.current = "/record";
+    renderBar({ state: "recording" }, { title: "Launch planning" });
+
+    expect(screen.queryByRole("button", { name: /open recording/i })).toBeNull();
+  });
+
+  it("still offers the way back once the recording is stopped and unsaved", () => {
+    // This is the state where it matters most: the audio is in hand and Save
+    // lives on /record. Without a route back, the only way to reach the button
+    // that keeps the recording is the one that looks like starting a new one.
+    pathname.current = "/home";
+    renderBar({ state: "stopped", result: aResult() }, { title: "Launch planning" });
+
+    expect(
+      screen.getByRole("button", { name: /open recording/i }),
+    ).toBeInTheDocument();
+  });
+});

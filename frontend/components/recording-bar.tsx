@@ -30,6 +30,7 @@ import {
   X,
   Check,
   AlertTriangle,
+  Maximize2,
 } from "lucide-react";
 import {
   useRecording,
@@ -37,7 +38,7 @@ import {
   useRecordingJob,
 } from "@/lib/recording-context";
 import { stopwatch } from "@/lib/format";
-import { folderIdFrom, returnPath } from "@/lib/routes";
+import { folderIdFrom, isRecordPath, recordHref, returnPath } from "@/lib/routes";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -107,6 +108,20 @@ export function RecordingBar() {
     if (pathname === "/record") router.push(returnPath(session.returnTo));
   }
 
+
+  /**
+   * Where this recording lives, and how to get back to it.
+   *
+   * <p>`returnTo` is where Record was pressed, so it is also what `?r=` should
+   * carry: a reload of /record has no session left in memory and the URL is the
+   * only thing that still knows which folder the meeting files into.
+   */
+  const onRecordPage = isRecordPath(pathname ?? "");
+  const noteTitle = session.title.trim() || "Untitled recording";
+
+  function openRecordPage() {
+    router.push(recordHref(returnPath(session.returnTo)));
+  }
 
   const shell = React.useRef<HTMLDivElement>(null);
   usePublishedHeight(shell, recorder.state !== "idle" && !busy);
@@ -181,6 +196,44 @@ export function RecordingBar() {
             finished minutes ago -- advice about a thing already done. The bar
             no longer outlives the recording by so much as an upload, so every
             state that reaches this line is one the advice still applies to. */}
+        {/*
+         * The way back to the page this recording belongs to.
+         *
+         * The bar was already the whole of the recording's presence off
+         * /record: it pauses, it stops, it shows the clock. What it had no way
+         * of doing was returning — somebody who left to look something up mid
+         * meeting had the controls but no route back to the note they were
+         * taking, and the only way was the Record button in the header, which
+         * reads like starting a second one.
+         *
+         * Only when there is somewhere to go. On /record this row would be a
+         * link to the page it is already on, and the title is already at the
+         * top of it in an editable field, said twice.
+         */}
+        {!onRecordPage && (
+          <button
+            type="button"
+            onClick={openRecordPage}
+            aria-label={`Open recording: ${noteTitle}`}
+            className="mb-2 flex w-full items-center gap-2 rounded-lg px-1 py-0.5 text-left transition-colors hover:bg-accent"
+          >
+            {/* Red and only while the microphone is open, so the dot means
+                "capturing" rather than "a recording exists". Paused and stopped
+                both reach this row and neither is capturing. */}
+            <span
+              aria-hidden
+              className={cn(
+                "h-2 w-2 shrink-0 rounded-full",
+                recorder.state === "recording"
+                  ? "animate-pulse bg-destructive"
+                  : "bg-muted-foreground/40",
+              )}
+            />
+            <span className="min-w-0 flex-1 truncate text-sm font-medium">{noteTitle}</span>
+            <Maximize2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          </button>
+        )}
+
         <p className="mb-2 text-center text-[11px] text-muted-foreground">
           Always ask permission before recording
         </p>
