@@ -147,7 +147,11 @@ import { usePendingTurn, announceAnswer } from "@/lib/pending-turn";
 import { useThreadScroll } from "@/lib/use-thread-scroll";
 import { MEETING_PROMPTS, toPrompts } from "@/lib/chat-prompts";
 import { useRotatingPrompts } from "@/lib/use-rotating-prompts";
-import { SelectionMenu, type SelectionAction } from "@/components/selection-menu";
+import {
+  SelectionMenu,
+  isInsideSelectionMenu,
+  type SelectionAction,
+} from "@/components/selection-menu";
 import {
   ReassignSpeakerDialog,
   type ReassignTarget,
@@ -2246,18 +2250,30 @@ function TranscriptPanel({
     function dismiss() {
       setPicked(null);
     }
+    /**
+     * Any press outside the menu closes it — but a press *on* the menu must
+     * not, and the menu cannot stop this event to say so: React's listeners
+     * live on `document` here, the same node as this one, so its
+     * `stopPropagation` runs alongside rather than before. Dismissing on a
+     * press inside would unmount the button between mousedown and mouseup,
+     * and the click would never happen.
+     */
+    function onMouseDown(e: MouseEvent) {
+      if (isInsideSelectionMenu(e.target)) return;
+      dismiss();
+    }
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") dismiss();
     }
 
     document.addEventListener("mouseup", capture);
     document.addEventListener("keyup", capture);
-    document.addEventListener("mousedown", dismiss);
+    document.addEventListener("mousedown", onMouseDown);
     document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("mouseup", capture);
       document.removeEventListener("keyup", capture);
-      document.removeEventListener("mousedown", dismiss);
+      document.removeEventListener("mousedown", onMouseDown);
       document.removeEventListener("keydown", onKeyDown);
     };
   }, []);

@@ -1,7 +1,8 @@
+import * as React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { SelectionMenu } from "@/components/selection-menu";
+import { SelectionMenu, isInsideSelectionMenu } from "@/components/selection-menu";
 
 /**
  * The menu over a transcript selection.
@@ -67,20 +68,68 @@ describe("SelectionMenu", () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
-  it("keeps its mousedown away from the page's dismiss handler", () => {
-    // The transcript closes the menu on any mousedown outside it. Without
-    // stopPropagation that fires for clicks *inside* it too, closing the menu
-    // before the click completes.
-    const onDocument = vi.fn();
-    document.addEventListener("mousedown", onDocument);
+  it("is recognisable to the page's dismiss handler", () => {
+    // How the transcript tells "clicked an action" from "clicked away". It
+    // cannot be told by stopping the event: React's listeners sit on the same
+    // node as the page's, so stopPropagation never gets there first. Dismissing
+    // on a press inside unmounts the button before mouseup, and no click
+    // follows -- the menu looks open and every action does nothing.
     render(<SelectionMenu anchor={anchor} onAction={vi.fn()} />);
 
-    screen
-      .getByRole("menu")
-      .dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    expect(isInsideSelectionMenu(screen.getByText("Highlight"))).toBe(true);
+    expect(isInsideSelectionMenu(screen.getByRole("menu"))).toBe(true);
+  });
 
-    expect(onDocument).not.toHaveBeenCalled();
-    document.removeEventListener("mousedown", onDocument);
+  it("does not claim presses outside it", () => {
+    render(
+      <>
+        <p>Elsewhere</p>
+        <SelectionMenu anchor={anchor} onAction={vi.fn()} />
+      </>,
+    );
+
+    expect(isInsideSelectionMenu(screen.getByText("Elsewhere"))).toBe(false);
+    expect(isInsideSelectionMenu(document.body)).toBe(false);
+    expect(isInsideSelectionMenu(null)).toBe(false);
+  });
+
+  it("survives its own mousedown when the page dismisses on document", () => {
+    // The transcript, in miniature: the menu is held open by state, and a
+    // document-level mousedown closes it. This is the arrangement that shipped
+    // broken -- the menu unmounted under the pointer, so mouseup landed on
+    // nothing and the browser never dispatched a click on the button.
+    function Harness({ onAction }: { onAction: (a: string) => void }) {
+      const [open, setOpen] = React.useState(true);
+      React.useEffect(() => {
+        function onDown(e: MouseEvent) {
+          if (isInsideSelectionMenu(e.target)) return;
+          setOpen(false);
+        }
+        document.addEventListener("mousedown", onDown);
+        return () => document.removeEventListener("mousedown", onDown);
+      }, []);
+      return <SelectionMenu anchor={open ? anchor : null} onAction={onAction} />;
+    }
+
+    const onAction = vi.fn();
+    render(<Harness onAction={onAction} />);
+
+    fireEvent.mouseDown(screen.getByText("Wrong speaker"));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Wrong speaker"));
+    expect(onAction).toHaveBeenCalledWith("reassign");
+  });
+
+  it("reads a press that landed on text inside it", () => {
+    // mousedown reports an element, but a selection endpoint or a synthetic
+    // event can report the text node itself, and a text node has no `closest`.
+    render(<SelectionMenu anchor={anchor} onAction={vi.fn()} />);
+
+    // The icon is the first child; the label text follows it.
+    const text = screen.getByText("Copy").lastChild;
+    expect(text?.nodeType).toBe(Node.TEXT_NODE);
+    expect(isInsideSelectionMenu(text)).toBe(true);
   });
 
   it("sits below a selection with room under it", () => {

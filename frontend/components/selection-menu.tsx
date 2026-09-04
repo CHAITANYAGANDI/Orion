@@ -73,6 +73,35 @@ export interface SelectionMenuProps {
   busy?: boolean;
 }
 
+/**
+ * Marks the menu in the DOM.
+ *
+ * The page dismisses the menu on any mousedown outside it, and "outside" has to
+ * be answered by asking where the press landed. Stopping the event was tried
+ * and does not work: React attaches its listeners to the hydration container,
+ * which under the App Router is `document` itself — the same node the page's
+ * dismiss handler is on — and `stopPropagation` never stops a listener sharing
+ * a node with the one that called it.
+ */
+export const SELECTION_MENU_ATTR = "data-selection-menu";
+
+/**
+ * Did this press land inside the menu?
+ *
+ * Used by whoever closes the menu on an outside click. Getting it wrong is not
+ * a cosmetic bug: unmounting the menu on mousedown removes the button before
+ * mouseup, and a button that is gone by mouseup is never clicked at all — the
+ * menu still looks open and every action silently does nothing.
+ */
+export function isInsideSelectionMenu(target: EventTarget | null): boolean {
+  const node = target as Node | null;
+  const el =
+    node && node.nodeType === Node.TEXT_NODE
+      ? node.parentElement
+      : (node as Element | null);
+  return Boolean(el?.closest?.(`[${SELECTION_MENU_ATTR}]`));
+}
+
 /** Roughly the menu's own size, used only to keep it inside the viewport. */
 const MENU_WIDTH = 210;
 const MENU_HEIGHT = 300;
@@ -94,20 +123,18 @@ export function SelectionMenu({ anchor, onAction, busy }: SelectionMenuProps) {
     <div
       role="menu"
       aria-label="Selection actions"
+      {...{ [SELECTION_MENU_ATTR]: "" }}
       style={{ top, left, width: MENU_WIDTH }}
       className={cn(
         "fixed z-50 overflow-hidden rounded-md border bg-popover p-1 shadow-md",
         busy && "pointer-events-none opacity-60",
       )}
-      // Two things, both load-bearing. Preventing the default stops focus
-      // moving, which is what would otherwise drop the selection before the
-      // click lands. Stopping propagation keeps this mousedown away from the
-      // document listener that dismisses the menu — without it, clicking an
-      // item closes the menu and the action never runs.
-      onMouseDown={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      }}
+      // Preventing the default stops focus moving, which is what would
+      // otherwise drop the selection before the click lands. That is the whole
+      // job here: keeping the menu open is not, because stopping propagation
+      // cannot reach a dismiss handler on `document` (see SELECTION_MENU_ATTR),
+      // so the page recognises the menu by attribute instead.
+      onMouseDown={(e) => e.preventDefault()}
     >
       {ITEMS.map(({ action, label, icon: Icon }) => (
         <button
