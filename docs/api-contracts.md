@@ -84,6 +84,7 @@ again in the worker.
 | GET  | `/api/v1/meetings/{id}/summary` | — | `SummaryResponse` |
 | GET  | `/api/v1/meetings/{id}/action-items` | — | `ActionItemResponse[]` |
 | PATCH | `/api/v1/meetings/{id}/speakers` | `{ "mapping": { "Speaker 1": "Ana" } }` | `TranscriptResponse` |
+| POST | `/api/v1/meetings/{id}/speakers/merge` | `{ "fromSpeakerKey", "intoSpeakerKey" }` | `TranscriptResponse` |
 | POST | `/api/v1/meetings/{id}/reprocess` | — | `202 { "meetingId","status" }` |
 | DELETE | `/api/v1/meetings/{id}` | — | `204` |
 
@@ -153,12 +154,11 @@ derived from the segments on every read. The percentage is a share of total
 **speaking** time, not of the meeting's wall-clock duration — the two differ
 whenever there is silence, and percentages that do not sum to 100 read as a bug.
 
-### Two operations on a speaker, and one on the whole meeting
+### Three operations on a speaker, and one on the whole meeting
 
-They are easy to confuse and they answer different questions. Two others have
-been removed: `PATCH /speakers/rematch`, which merged one label into another or
-moved selected turns, and `POST /speakers/rematch`, which compared unresolved
-speakers acoustically against remembered voices. Neither exists.
+They are easy to confuse and they answer different questions. One other has been
+removed: `POST /speakers/rematch`, which compared unresolved speakers
+acoustically against remembered voices. That feature is gone.
 
 **Rename** — `PATCH /speakers`. "Who is Speaker 2?" Send
 `{"mapping": {"Speaker 2": "Sarah"}}`. The mapping is keyed by display name
@@ -194,8 +194,37 @@ Returns the whole `TranscriptResponse`, because a partial move turns one segment
 into three and a client cannot patch its cache without reimplementing the
 split.
 
-Both speaker operations re-index the meeting and rebuild the flat transcript,
-because each carries the speaker prefix and chat and the export read them.
+**Merge** — `POST /speakers/merge`, `{"fromSpeakerKey": "spk_3", "intoSpeakerKey": "spk_1"}`.
+"Speaker 3 is also Priya." Diarization split one voice across two labels, usually
+across a long pause or a change in mic level, and the transcript shows somebody
+interrupting themselves.
+
+A rename cannot repair this and the difference is the reason the endpoint
+exists: naming both labels "Priya" leaves two canonical speakers wearing one
+name, so she keeps two colours, two talk-time rows, and — because `app.naming`
+refuses a name two speakers hold — stops being nameable automatically at all.
+This moves *ownership*: every turn owned by `fromSpeakerKey` takes the other
+speaker's key, display name and word-level attribution, and the folded label
+stops existing.
+
+Both sides are `speaker_key`s rather than names, for the reason
+`PATCH /segments/{id}/speaker` takes one: names are not unique, and the key is
+what survives a rename. The merged turns take the **target's** name.
+
+`speaker_raw` is untouched on every moved turn. It records what the provider
+said; a merge is Reverie's decision rather than a correction to that record, and
+keeping it is what makes a mistaken merge diagnosable. There is no un-merge —
+the boundary between the two labels is not stored, so the way back is
+**Reprocess meeting**.
+
+Refused with a 400 when the two keys are the same, when either is not in this
+meeting, or when the source owns no turns — that last one means the client is
+working from a transcript that has moved on, and reporting success would leave
+somebody believing two speakers were joined when both are still there.
+
+All three speaker operations re-index the meeting and rebuild the flat
+transcript, because each carries the speaker prefix and chat and the export read
+them.
 
 ### Voice profiles (V53)
 

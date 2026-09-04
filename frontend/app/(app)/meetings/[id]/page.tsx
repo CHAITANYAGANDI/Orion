@@ -42,6 +42,7 @@ import {
   useGetTranslationsQuery,
   useGetLanguagesQuery,
   useRenameSpeakersMutation,
+  useMergeSpeakersMutation,
   useReprocessMeetingMutation,
   useEditSegmentsMutation,
   useSetSegmentSpeakerMutation,
@@ -130,6 +131,7 @@ import { languageName } from "@/lib/language";
 // where the paragraphs are and the page does not reflow when you switch modes.
 import { groupIntoTurns, type Turn } from "@/lib/turns";
 import { SpeakerAvatar } from "@/components/speaker-avatar";
+import { SpeakerEditor } from "@/components/speaker-editor";
 import { TurnActions, TurnReactions } from "@/components/turn-actions";
 import {
   TranscriptEditor,
@@ -2117,8 +2119,8 @@ function TranscriptPanel({
   onAskAbout: (text: string, send: boolean) => void;
 }) {
   const [renameSpeakers, { isLoading: renaming }] = useRenameSpeakersMutation();
+  const [mergeSpeakers, { isLoading: merging }] = useMergeSpeakersMutation();
   const [editing, setEditing] = React.useState(false);
-  const [draft, setDraft] = React.useState<Record<string, string>>({});
 
   // Names this user has used before. Offered as autocomplete rather than a
   // forced choice: a new person in the meeting must not be harder to name than
@@ -2564,11 +2566,7 @@ function TranscriptPanel({
     return segments.filter((s) => s.text.toLowerCase().includes(needle)).length;
   }, [segments, needle]);
 
-  async function saveNames() {
-    const mapping: Record<string, string> = {};
-    for (const [oldName, newName] of Object.entries(draft)) {
-      if (newName && newName.trim() && newName.trim() !== oldName) mapping[oldName] = newName.trim();
-    }
+  async function saveNames(mapping: Record<string, string>) {
     if (Object.keys(mapping).length === 0) {
       setEditing(false);
       return;
@@ -2577,9 +2575,27 @@ function TranscriptPanel({
       await renameSpeakers({ id: meetingId, mapping }).unwrap();
       toast.success("Speakers renamed.");
       setEditing(false);
-      setDraft({});
     } catch {
       toast.error("Rename failed.");
+    }
+  }
+
+  /**
+   * Fold one speaker into another.
+   *
+   * <p>The server's message is shown rather than a generic failure: the two
+   * refusals a user can actually hit — a speaker that is no longer in this
+   * meeting, and a transcript that has moved on since the panel was opened —
+   * both mean "reload", and "Merge failed" would not say so.
+   */
+  async function mergeTwoSpeakers(fromSpeakerKey: string, intoSpeakerKey: string) {
+    try {
+      await mergeSpeakers({ id: meetingId, fromSpeakerKey, intoSpeakerKey }).unwrap();
+      toast.success("Speakers merged.");
+      setEditing(false);
+    } catch (err) {
+      const message = (err as { data?: { message?: string } })?.data?.message;
+      toast.error(message || "Could not merge those speakers.");
     }
   }
 
@@ -2651,28 +2667,32 @@ function TranscriptPanel({
                 <Users className="h-4 w-4" /> Talk time
               </h3>
               <Button variant="ghost" size="sm" onClick={() => setEditing((v) => !v)}>
-                {editing ? "Cancel" : "Rename speakers"}
+                {editing ? "Cancel" : "Edit speakers"}
               </Button>
             </div>
             {editing ? (
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  {speakers.map((sp) => (
-                    <div key={sp} className="flex items-center gap-2">
-                      <span className="w-16 shrink-0 text-sm text-muted-foreground">{sp}</span>
-                      <Input
-                        className="h-8"
-                        placeholder="New name"
-                        value={draft[sp] ?? ""}
-                        onChange={(e) => setDraft((d) => ({ ...d, [sp]: e.target.value }))}
-                      />
-                    </div>
-                  ))}
-                  <Button size="sm" onClick={saveNames} disabled={renaming}>
-                    {renaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save
-                  </Button>
-                </div>
-              </div>
+              <SpeakerEditor
+                // Server stats where they exist, because only those carry the
+                // canonical key a merge needs. The local fallback below is for
+                // a transcript cached before the server sent them, and it can
+                // still be renamed.
+                speakers={
+                  speakerStats.length > 0
+                    ? speakerStats
+                    : speakers.map((sp) => ({
+                        speaker: sp,
+                        speakerKey: null,
+                        speakingSeconds: talk.map.get(sp) ?? 0,
+                        percentage: 0,
+                        segmentCount: 0,
+                        wordCount: 0,
+                      }))
+                }
+                renaming={renaming}
+                merging={merging}
+                onRename={saveNames}
+                onMerge={mergeTwoSpeakers}
+              />
             ) : (
               <div className="space-y-1.5">
                 {/* One-line roll-call, ordered by who spoke most. The bars

@@ -12,6 +12,7 @@ import com.reverie.dto.MeetingCreateRequest;
 import com.reverie.dto.MeetingResponse;
 import com.reverie.dto.MeetingUpdateRequest;
 import com.reverie.dto.PageResponse;
+import com.reverie.dto.SpeakerMergeRequest;
 import com.reverie.dto.callback.AiInsight;
 import com.reverie.dto.ReprocessResponse;
 import com.reverie.dto.SegmentDto;
@@ -765,6 +766,86 @@ public class MeetingService {
         reindex(userId, meetingId, rows);
         markSummaryStale(meetingId);
         audit.record(userId, "SEGMENT_SPEAKER_CORRECTED", "meeting", meetingId);
+        return getTranscript(userId, meetingId);
+    }
+
+    /**
+     * Two labels the provider gave one person, folded into one speaker.
+     *
+     * <p>The failure this exists for is over-diarization: a long pause, a change
+     * in mic level, or somebody leaning away from the microphone, and one voice
+     * comes back as a second speaker. The transcript then reads as though the
+     * person interrupted themselves, and every derived thing agrees with it —
+     * two colours, two talk-time rows, two names to type.
+     *
+     * <p><b>Why renaming cannot do this.</b> {@code renameSpeakers} changes what
+     * a speaker is called. Renaming both labels to "Priya" produces two
+     * canonical speakers wearing one name, which is worse than the state it was
+     * meant to fix: the turns stay separate, talk time still double-counts, and
+     * `app.naming` refuses a name claimed by two speakers, so automatic naming
+     * stops working on that person entirely. Ownership is what has to move.
+     *
+     * <p><b>What moves.</b> Every turn owned by {@code fromSpeakerKey} takes the
+     * other speaker's key, display name and word-level attribution — the same
+     * mutation {@link #moveWholeSegment} performs for a single turn, applied to
+     * all of them. {@code speaker_raw} is deliberately left alone on every one:
+     * it records what the provider said, a merge is Reverie's decision rather
+     * than a correction to that record, and keeping it is what makes a mistaken
+     * merge visible afterwards.
+     *
+     * <p><b>It does not learn anything.</b> There is no cross-meeting speaker
+     * identity in Reverie and this does not reintroduce one — a merge is a
+     * statement about two labels in one transcript and reaches nothing else.
+     *
+     * <p>Like a rename and a per-turn correction, this re-indexes and marks the
+     * summary stale: retrieval passages carry the speaker prefix, and the
+     * outline names speakers, so both now describe labels the transcript no
+     * longer has.
+     */
+    @Transactional
+    public TranscriptResponse mergeSpeakers(String userId, String meetingId,
+                                            SpeakerMergeRequest req) {
+        require(userId, meetingId);
+
+        if (req.isSelfMerge()) {
+            throw ApiException.badRequest("Choose two different speakers to merge");
+        }
+
+        var segs = segments.findByMeetingIdOrderByStartTimeAsc(meetingId);
+        String from = req.from();
+        String into = req.into();
+
+        // The destination must be a speaker this meeting already has, and must
+        // have a name to give -- the same guard `setSegmentSpeaker` applies, for
+        // the same reason: anything else invents a participant out of a typo in
+        // a request body.
+        String name = segs.stream()
+                .filter(s -> into.equals(s.getSpeakerKey()))
+                .map(TranscriptSegment::getSpeaker)
+                .filter(n -> n != null && !n.isBlank())
+                .findFirst()
+                .orElseThrow(() -> ApiException.badRequest(
+                        "There is no such speaker in this meeting"));
+
+        var moving = segs.stream().filter(s -> from.equals(s.getSpeakerKey())).toList();
+        if (moving.isEmpty()) {
+            // Refused rather than reported as a success. An empty merge means
+            // the client is working from a transcript that has since changed,
+            // and telling them it worked would leave them believing two
+            // speakers were joined when both are still there.
+            throw ApiException.badRequest(
+                    "That speaker is not in this meeting; reload the transcript and try again");
+        }
+
+        for (var seg : moving) {
+            moveWholeSegment(seg, into, name);
+        }
+
+        transcripts.findFirstByMeetingIdOrderByCreatedAtDesc(meetingId)
+                .ifPresent(t -> t.setTranscriptText(joinSegments(segs)));
+        reindex(userId, meetingId, segs);
+        markSummaryStale(meetingId);
+        audit.record(userId, "SPEAKERS_MERGED", "meeting", meetingId);
         return getTranscript(userId, meetingId);
     }
 

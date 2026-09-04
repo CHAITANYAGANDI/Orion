@@ -970,6 +970,34 @@ export const api = createApi({
       invalidatesTags: (_r, _e, arg) => [{ type: "Transcript", id: arg.id }],
     }),
 
+    /**
+     * Fold one speaker into another: two labels the provider gave one person.
+     *
+     * <p>Not a rename. Renaming both labels to "Priya" leaves two canonical
+     * speakers wearing one name — she still interrupts herself, talk time still
+     * counts her twice, and automatic naming refuses a name two speakers hold.
+     * This moves who owns the turns, so the second label stops existing.
+     *
+     * <p>Invalidates the chat as well as the transcript: retrieval passages
+     * carry the speaker prefix, so answers already given cite a label the
+     * transcript no longer has. The summary is marked stale server-side, and
+     * the meeting is refetched because its speaker list is now shorter.
+     */
+    mergeSpeakers: builder.mutation<
+      TranscriptResponse,
+      { id: string; fromSpeakerKey: string; intoSpeakerKey: string }
+    >({
+      query: ({ id, fromSpeakerKey, intoSpeakerKey }) => ({
+        url: `/meetings/${id}/speakers/merge`,
+        method: "POST",
+        body: { fromSpeakerKey, intoSpeakerKey },
+      }),
+      invalidatesTags: (_r, _e, arg) => [
+        { type: "Transcript", id: arg.id },
+        { type: "Chat", id: arg.id },
+        { type: "Meeting", id: arg.id },
+      ],
+    }),
 
     deleteMeeting: builder.mutation<void, string>({
       query: (id) => ({ url: `/meetings/${id}`, method: "DELETE" }),
@@ -1219,6 +1247,7 @@ export const {
   useUpdateRetentionMutation,
   useCloseAccountMutation,
   useRenameSpeakersMutation,
+  useMergeSpeakersMutation,
   useEditSegmentsMutation,
   useSetSegmentSpeakerMutation,
   useGetActionItemsQuery,

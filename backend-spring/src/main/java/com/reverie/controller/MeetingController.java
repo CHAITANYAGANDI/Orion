@@ -9,6 +9,7 @@ import com.reverie.dto.MeetingUpdateRequest;
 import com.reverie.dto.PageResponse;
 import com.reverie.dto.ReprocessResponse;
 import com.reverie.dto.ResummarizeRequest;
+import com.reverie.dto.SpeakerMergeRequest;
 import com.reverie.dto.SpeakerRenameRequest;
 import com.reverie.dto.SummaryResponse;
 import com.reverie.dto.TranscriptEditRequest;
@@ -160,6 +161,27 @@ public class MeetingController {
                                                 @PathVariable String segmentId,
                                                 @Valid @RequestBody SegmentSpeakerRequest req) {
         return meetings.setSegmentSpeaker(SecurityUtils.currentUserId(), id, segmentId, req);
+    }
+
+    /**
+     * Fold one speaker into another: two labels the provider gave one person.
+     *
+     * <p>Separate from {@code PATCH /speakers}, which renames a voice, and from
+     * {@code PATCH /segments/{id}/speaker}, which moves one turn. This changes
+     * who owns every turn of a whole label, which is the only one of the three
+     * that can fix over-diarization.
+     *
+     * <p>POST rather than PATCH: the body does not describe a new state of a
+     * speaker, it names an operation performed on two of them, and the result is
+     * that one of them stops existing.
+     *
+     * <p>Returns the whole transcript, because a merge can touch any number of
+     * turns anywhere in it.
+     */
+    @PostMapping("/{id}/speakers/merge")
+    public TranscriptResponse mergeSpeakers(@PathVariable String id,
+                                            @Valid @RequestBody SpeakerMergeRequest req) {
+        return meetings.mergeSpeakers(SecurityUtils.currentUserId(), id, req);
     }
 
     @PostMapping("/{id}/reprocess")
