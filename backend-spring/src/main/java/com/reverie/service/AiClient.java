@@ -30,6 +30,30 @@ public class AiClient {
 
     private final RestClient client;
 
+    /** Bounded, for the one call a user waits on synchronously. */
+    private final RestClient indexClient;
+
+    /**
+     * How long re-indexing may take before the edit that triggered it gives up.
+     *
+     * <p>The JDK's {@code HttpClient} has no read timeout unless one is set, so
+     * an unbounded call waits forever — and {@link #reindex} is made inside a
+     * user's own request, in a transaction, in one case while the meeting row is
+     * locked. An ai-service that is cold, restarting or wedged then hangs the
+     * correction with no error and nothing on screen but a disabled button, and
+     * every retry queues behind the first.
+     *
+     * <p>Generous, because embedding a long transcript is real work and giving
+     * up early would leave chat stale on every edit. Finite, because indexing is
+     * already best-effort — losing it means chat may quote the old text until
+     * the next edit, which is a far smaller failure than never answering at all.
+     *
+     * <p>Only this call is bounded here. Summarizing and chatting spend a model
+     * call whose honest worst case is minutes, and one timeout that suited both
+     * would be too short for those or too long to be worth having.
+     */
+    private static final Duration INDEX_TIMEOUT = Duration.ofSeconds(30);
+
     public AiClient(@Value("${app.ai-service-url:http://localhost:8000}") String aiServiceUrl) {
         String baseUrl = withScheme(aiServiceUrl);
         // Pin HTTP/1.1. RestClient's default JDK HttpClient negotiates HTTP/2 over
@@ -42,6 +66,15 @@ public class AiClient {
                 .build();
         this.client = RestClient.builder()
                 .requestFactory(new JdkClientHttpRequestFactory(jdkClient))
+                .baseUrl(baseUrl)
+                .build();
+
+        // Same connection, different patience. The timeout belongs to the
+        // factory rather than the request, so the bounded call needs its own.
+        var indexFactory = new JdkClientHttpRequestFactory(jdkClient);
+        indexFactory.setReadTimeout(INDEX_TIMEOUT);
+        this.indexClient = RestClient.builder()
+                .requestFactory(indexFactory)
                 .baseUrl(baseUrl)
                 .build();
     }
@@ -419,6 +452,9 @@ public class AiClient {
      *
      * <p>The owner is sent because row-level security checks it; the ai-service
      * has no privilege to look one up.
+     *
+     * <p>Bounded by {@link #INDEX_TIMEOUT}: a user is waiting on this, so it
+     * gives up rather than holding their edit open indefinitely.
      */
     public void reindex(String userId, String meetingId, int processingAttempt,
                         String transcript, List<SegmentDto> segments) {
@@ -441,7 +477,7 @@ public class AiClient {
                 })
                 .toList());
 
-        client.post()
+        indexClient.post()
                 .uri("/ai/index")
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(payload)

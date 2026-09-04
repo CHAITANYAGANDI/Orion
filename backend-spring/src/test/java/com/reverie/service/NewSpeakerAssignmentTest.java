@@ -36,6 +36,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -466,6 +467,23 @@ class NewSpeakerAssignmentTest {
             // transcription and diarization from the audio, which would discard
             // the very correction that caused it.
             verify(outbox, never()).enqueue(anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("an ai-service that never answers still leaves the speaker assigned")
+        void reindexFailureKeepsTheAssignment() {
+            // What a timed-out index arrives as. It has to be survivable: the
+            // call is made inside the user's own request while the meeting row
+            // is locked, so an ai-service that is cold or wedged would otherwise
+            // hold the correction open with nothing on screen to explain it.
+            // Chat quoting the old text until the next edit is the smaller loss.
+            doThrow(new RuntimeException("ai-service did not respond"))
+                    .when(ai).reindex(anyString(), anyString(), anyInt(), anyString(), any());
+
+            assignToNewSpeaker("seg_3", null, null);
+
+            assertThat(row("seg_3").getSpeakerKey()).isEqualTo("spk_3");
+            assertThat(row("seg_3").getSpeaker()).isEqualTo("Speaker 3");
         }
     }
 
