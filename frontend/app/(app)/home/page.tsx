@@ -13,25 +13,39 @@
  * <p>The list is grouped by day and the day is a heading, not a column, because
  * a meeting archive is read as a diary.
  *
- * <h2>The scope picker is gone, and the list it hid is a page now</h2>
+ * <h2>Recent means recent, and nothing else narrows it</h2>
  *
- * <p>There were two options: <i>Recent Conversations</i> (everything outside
- * your folders) and <i>All Conversations</i> (everything in this workspace).
- * They are not two filters. They are two questions — "what is happening" and
- * "what do I have" — and answering both with one screen is why this page needed
- * three different empty states to explain which of them you were looking at.
+ * <p>There was a scope picker above the list with two options: <i>Recent
+ * Conversations</i> and <i>All Conversations</i>. <i>Recent</i> sent
+ * `unfiled=true` — a folder filter under a name about time — and it was the
+ * default, so filing a meeting into a folder made it vanish from the page
+ * called Recent. That is most of why this screen needed a probe and three
+ * different empty states: they existed to explain a list that was hiding rows
+ * for a reason its own label did not mention.
  *
- * <p>So <i>All</i> became <b>Library</b>, a place in the band, and this page is
- * <i>Recent</i> with no picker above it. Which makes the label under the
- * heading load-bearing rather than decorative: it is the only thing on screen
- * that explains why a meeting recorded ten minutes ago inside a folder is
- * missing from a list called Recent, and it is what connects that heading to
- * the "Everything is in a folder" empty state behind it. It used to be a hint
- * inside the picker's menu. <b>Do not drop it.</b>
+ * <p>Both are gone. This list is <b>the newest {@link RECENT_SIZE} conversations
+ * in the window, wherever they are filed</b>, and Library is the complete
+ * archive with the folders. The two pages differ by how much they show rather
+ * than by a hidden predicate, which is a difference a person can see.
  *
- * <p>The stored preference key is left where it is rather than cleared. Nothing
- * reads `home.scope.v2` any more, and clearing it would mean a write on load
- * from a page whose whole problem once was doing something surprising on load.
+ * <p>Two consequences, both deliberate:
+ *
+ * <ul>
+ *   <li><b>"Everything is in a folder" cannot happen.</b> No filter here can
+ *       hide a meeting, so an empty list means the window is empty or the
+ *       account is. The probe that told those apart is gone with the third
+ *       case it existed for. What survives untouched is the harder rule it was
+ *       built on: never read a failed or unresolved request as an empty
+ *       account.</li>
+ *   <li><b>There is no longer a view of "meetings not in a folder".</b> That
+ *       was only ever reachable as this page's default, never as a filter
+ *       somebody chose. It is a real capability lost and it is recorded as one
+ *       — see docs/v2-implementation/feature-parity.md §3b.</li>
+ * </ul>
+ *
+ * <p>The stored `home.scope.v2` preference is left where it is rather than
+ * cleared. Nothing reads it, and clearing it would mean a write on load from a
+ * page whose whole problem once was doing something surprising on load.
  */
 
 import * as React from "react";
@@ -39,15 +53,13 @@ import Link from "next/link";
 import {
   Sparkles,
   ListChecks,
-  ChevronDown,
   FileAudio,
-  FolderOpen,
   Download,
   Mic,
   CalendarDays,
   RotateCw,
 } from "lucide-react";
-import { useGetMeetingsQuery, useGetPreferencesQuery, useGetProjectsQuery } from "@/lib/api";
+import { useGetMeetingsQuery, useGetPreferencesQuery } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -70,6 +82,21 @@ import { cn } from "@/lib/utils";
 import { LIBRARY, recordHref } from "@/lib/routes";
 
 type Panel = "chat" | "actions";
+
+/**
+ * How many conversations "recent" is.
+ *
+ * <p>A bound rather than a filter, and it is what separates this page from
+ * Library. Both ask the same question of the same endpoint; this one asks for
+ * the top of the answer. Twenty is four or five days for somebody in meetings
+ * all week, and it is short enough that the list is still a glance rather than
+ * an archive — which is the whole distinction being drawn.
+ *
+ * <p>When there are more, the page says so and points at Library. A truncated
+ * list that does not admit it is the same lie as a filtered one that does not
+ * name its filter.
+ */
+const RECENT_SIZE = 20;
 
 const WHEN_CODEC: PreferenceCodec<DateWindow> = {
   // The choice, not the window. Storing the instants would pin "Last 7 days" to
@@ -108,15 +135,14 @@ export default function HomePage() {
   const meetings = useGetMeetingsQuery(
     {
       page: 0,
-      size: 50,
+      size: RECENT_SIZE,
       from: when.from ?? undefined,
       to: when.to ?? undefined,
-      // Fixed now that the picker is gone. The screen says Recent and the wire
-      // says unfiled, and each is right where it is: the label is the product's
-      // word for this list, the parameter is what the query actually does to
-      // it. Everything, filed included, is Library — a page rather than a value
-      // this line used to take.
-      unfiled: true,
+      // NO `unfiled`. It is the parameter this page used to send and the reason
+      // its name was a lie: a meeting recorded inside a folder was filed there
+      // and disappeared from Recent, which is not what recent means. The only
+      // thing narrowing this list now is the window above it and the size
+      // above that, and both are stated on screen.
     },
     {
       skip: !restored,
@@ -130,9 +156,9 @@ export default function HomePage() {
        * row's socket only carries *changes*, so subscribing after the fact
        * hears nothing at all.
        *
-       * One request per visit, against a page of fifty rows. The docked
-       * watcher covers meetings this tab started or opened; this covers the
-       * rest, including one processed on another device.
+       * One request per visit, against a short page. The docked watcher covers
+       * meetings this tab started or opened; this covers the rest, including
+       * one processed on another device.
        */
       refetchOnMountOrArgChange: true,
     },
@@ -176,18 +202,14 @@ export default function HomePage() {
           <div className="mb-3 mt-8 flex items-end justify-between gap-3">
             <div className="min-w-0">
               <h2 className="text-title-3 font-headline text-ink">Recent</h2>
-              {/* LOAD-BEARING. It is the only thing on screen that explains
-                  why a meeting recorded ten minutes ago inside a folder is not
-                  in a list called Recent, and it is what connects this heading
-                  to the "Everything is in a folder" screen behind it. It was
-                  the hint inside the scope picker's menu; the picker is gone
-                  and this is now the whole of the explanation. */}
+              {/* The label used to carry the whole explanation for a list that
+                  hid filed meetings. It has nothing to explain away now, so it
+                  says the one thing left that is not obvious: that being in a
+                  folder does not keep a conversation off this page. The line
+                  that admits the list is short is under the list, where the
+                  shortness becomes apparent. */}
               <p className="mt-0.5 text-foot text-ink-3">
-                Everything outside your folders. The rest is in{" "}
-                <Link href={LIBRARY} className="underline underline-offset-2 hover:text-ink-2">
-                  Library
-                </Link>
-                .
+                Your newest conversations, wherever they are filed.
               </p>
             </div>
             {/* The one question the list cannot answer about itself. */}
@@ -203,22 +225,39 @@ export default function HomePage() {
           ) : listState === "error" ? (
             <HomeLoadError onRetry={() => void meetings.refetch()} />
           ) : listState === "empty" ? (
-            <EmptyState
-              when={when}
-              onClearDate={() => setWhen(ANY_TIME)}
-              onRetry={() => void meetings.refetch()}
-            />
+            <EmptyState when={when} onClearDate={() => setWhen(ANY_TIME)} />
           ) : (
-            groups.map((group) => (
-              <div key={group.key} className="mb-6">
-                <h3 className="v2-label mb-2">{group.label}</h3>
-                <ul className="space-y-2">
-                  {group.items.map((meeting) => (
-                    <ConversationRow key={meeting.id} meeting={meeting} />
-                  ))}
-                </ul>
-              </div>
-            ))
+            <>
+              {groups.map((group) => (
+                <div key={group.key} className="mb-6">
+                  <h3 className="v2-label mb-2">{group.label}</h3>
+                  <ul className="space-y-2">
+                    {group.items.map((meeting) => (
+                      <ConversationRow key={meeting.id} meeting={meeting} />
+                    ))}
+                  </ul>
+                </div>
+              ))}
+
+              {/* Said only when it is true, and said where the list runs out.
+                  A page showing twenty of two hundred conversations with
+                  nothing at the bottom is a list somebody scrolls to the end of
+                  and believes. `totalElements` is on the response already, so
+                  this costs no request. */}
+              {data && data.totalElements > data.content.length && (
+                <p className="pt-1 text-foot text-ink-3">
+                  Showing the {data.content.length} most recent of{" "}
+                  <span className="tabular">{data.totalElements}</span>.{" "}
+                  <Link
+                    href={LIBRARY}
+                    className="underline underline-offset-2 hover:text-ink-2"
+                  >
+                    All of them are in Library
+                  </Link>
+                  .
+                </p>
+              )}
+            </>
           )}
         </div>
       </section>
@@ -259,7 +298,7 @@ export default function HomePage() {
 /* ------------------------------- the masthead ------------------------------ */
 
 /**
- * Where you are in the day, and whether anything needs a person.
+ * Where you are in the day, and the two things the list underneath is doing.
  *
  * <h2>What is NOT here, and why</h2>
  *
@@ -284,11 +323,22 @@ export default function HomePage() {
  *       carry no due date, so an "overdue" figure would be a permanent zero.</li>
  * </ul>
  *
- * <p>So what is here instead is derived from the page's own list, costs no
- * request, and cannot be wrong: how many conversations are still being made,
- * and how many could not be. A failed transcription is the one thing on this
- * screen that genuinely needs a human, and it was previously findable only by
- * scrolling for a red badge.
+ * <p>And nothing here is <em>invented</em> to fill the space. Both lines below
+ * are counted from the rows already on screen, so they cost no request and
+ * cannot disagree with the list under them.
+ *
+ * <h2>Two lines, because they are two different things</h2>
+ *
+ * <p>This is the correction that matters. A meeting still transcribing is the
+ * product working; a meeting that failed is a job that needs a person. Putting
+ * them in one sentence — or under one heading called "Needs you" — teaches
+ * people that the loud line is usually nothing, which is exactly how a real
+ * failure gets scrolled past.
+ *
+ * <p>So a failure is stated first, in the danger colour, at body size. Normal
+ * processing is a second line, quieter and smaller, and it is phrased as
+ * activity rather than as a demand. Neither is a heading, and neither claims to
+ * be a to-do list.
  */
 function Masthead({ meetings }: { meetings?: MeetingResponse[] }) {
   const { mode, userId, profile } = useAuth();
@@ -318,8 +368,13 @@ function Masthead({ meetings }: { meetings?: MeetingResponse[] }) {
   const greeting =
     hour < 5 ? "Good evening" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 
-  // From the list already on screen. `undefined` means it has not arrived, and
-  // nothing is claimed until it has.
+  /*
+   * From the list already on screen. `undefined` means it has not arrived, and
+   * nothing is claimed until it has.
+   *
+   * FAILED is terminal, so it is not in `making` -- the two counts name
+   * disjoint sets of rows and the numbers can be read independently.
+   */
   const making = meetings?.filter((m) => !isTerminal(m.status)).length ?? 0;
   const failed = meetings?.filter((m) => m.status === "FAILED").length ?? 0;
 
@@ -340,27 +395,28 @@ function Masthead({ meetings }: { meetings?: MeetingResponse[] }) {
         {now ? (first ? `${greeting}, ${first}` : greeting) : ""}
       </h1>
 
-      {(failed > 0 || making > 0) && (
-        <p className="mt-2 space-x-1.5 text-body">
-          {/* Two sentences rather than one clause-joined one. A failed
-              transcription and a job still running are different amounts of
-              your problem, and the reader should be able to stop after the
-              first. No link on either: both are rows in the list four
-              centimetres below, carrying the stage and the percentage. */}
-          {failed > 0 && (
-            <span className="text-danger">
-              {failed === 1
-                ? "One conversation could not be transcribed."
-                : `${failed} conversations could not be transcribed.`}
-            </span>
-          )}
-          {making > 0 && (
-            <span className="text-ink-2">
-              {making === 1
-                ? "One conversation is still being made."
-                : `${making} conversations are still being made.`}
-            </span>
-          )}
+      {/* The one thing on this page that needs a person. Stated on its own, in
+          the danger colour, at reading size -- and never merged into a sentence
+          with the line below it. A failed transcription was previously findable
+          only by scrolling for a red badge. */}
+      {failed > 0 && (
+        <p className="mt-2 text-body text-danger">
+          {failed === 1
+            ? "One conversation could not be transcribed."
+            : `${failed} conversations could not be transcribed.`}
+        </p>
+      )}
+
+      {/* Activity, not a demand. Quieter and smaller than the line above,
+          because a meeting still being made is the product working normally and
+          the reader has nothing to do about it. It says what is happening so
+          that a row further down carrying a progress bar is expected rather
+          than surprising. */}
+      {making > 0 && (
+        <p className="mt-1 text-foot text-ink-3">
+          {making === 1
+            ? "One conversation is still being made."
+            : `${making} conversations are still being made.`}
         </p>
       )}
     </header>
@@ -405,111 +461,39 @@ function HomeLoadError({ onRetry }: { onRetry: () => void }) {
 }
 
 /**
- * Nothing to show, and why.
+ * Nothing to show, and which of the two reasons it is.
  *
- * <p>A filter that empties the list has to say so, and offer the way back.
- * Without it the page offers Record and Import to somebody with a hundred
- * meetings, which reads as an archive that lost them rather than as a filter
- * doing its job — and the way out is a control they have to remember they
- * touched.
+ * <h2>There used to be four screens here, and a request to choose between them</h2>
  *
- * <p>Two things can do it. The date window is checked first because it is the
- * likelier cause and the one somebody has just used; the filing is checked
- * second, and it is the one most likely to be misread, since a folder is
- * exactly where a meeting goes when it stops appearing where you left it.
+ * <p>This list sent `unfiled=true`, so an empty one meant one of three things:
+ * the window is empty, everything is filed into a folder, or the account has
+ * nothing at all. Those want different screens and the page could not tell them
+ * apart from what it had — so it asked the server for one more row and read the
+ * folder list, and drew "Everything is in a folder", or a first-recording
+ * screen, or an "I cannot explain this" screen when the two answers
+ * contradicted each other.
  *
- * <p>Which makes one question worth a request of its own: an empty Recent means
- * either that everything is filed or that there is nothing at all, and those
- * two want opposite screens — the way to Library, or the way to a first
- * recording. One row is enough to tell them apart, and it is only ever asked
- * for when there is nothing to show.
+ * <p>All of that existed to explain a filter. The filter is gone: nothing here
+ * hides a meeting, so an empty list has two causes and both are already known
+ * without asking anything. The probe, the folder read and two screens went with
+ * the third case.
  *
- * <p><b>The probe is not optional.</b> This list is narrowed by default and
- * always has been, so an account that had filed everything opened Home to
- * nothing and was told "No conversations" with an offer to help with a first
- * recording — the archive-lost screen, over a full archive, reached by doing
- * nothing at all. That is the common path rather than a corner, which is
- * exactly why this exists.
- *
- * <p>What changed when the scope picker became a page: the way out is a
- * navigation rather than a control somebody has to remember they never touched.
- * The `scope !== "recent"` guard that used to skip the probe is gone with the
- * other scope, because there is only one list here now.
+ * <p><b>What did not go</b> is the rule underneath them, which was the actual
+ * production bug: an empty list is a <em>claim about the account</em>, and only
+ * a settled, successful, genuinely empty response may make it. That lives in
+ * {@link homeListState} and is why this component is only ever reached for one.
+ * Home showed "No conversations — Record / Import" to accounts with hundreds of
+ * meetings because `data?.content ?? []` read *no answer* as *the answer is
+ * none*; nothing in this change goes near that.
  */
 function EmptyState({
   when,
   onClearDate,
-  onRetry,
 }: {
   when: DateWindow;
   onClearDate: () => void;
-  /** Fetch the list again, for the one state below that cannot explain itself. */
-  onRetry: () => void;
 }) {
-  const { userId } = useAuth();
-  const filtered = when.from !== null || when.to !== null;
-
-  // Skipped unless it is the question being asked. `size: 1` because the count
-  // is the whole answer.
-  const workspace = useGetMeetingsQuery({ page: 0, size: 1 }, { skip: filtered });
-  /*
-   * The same truthfulness rule as the main list, on the probe behind it.
-   *
-   * `workspace.data?.totalElements ?? 0` would read a FAILED probe as "the
-   * workspace contains zero meetings" -- which is the screen that says the
-   * account is empty and offers a first recording. A request that never
-   * answered proves nothing, so `null` is kept distinct from `0` here too.
-   */
-  const total = workspace.isSuccess && workspace.data ? workspace.data.totalElements : null;
-
-  /*
-   * The folders, because "everything is in a folder" is a claim about them.
-   *
-   * <p>Usually already in the cache — Library and the import dialog both ask
-   * for it — so this is a cache read rather than a request on most arrivals.
-   * Three-state for the same reason
-   * everything else on this screen is -- a folder list that has not arrived is
-   * not a folder list with nothing in it.
-   */
-  const folders = useGetProjectsQuery();
-  const folderCount = folders.isSuccess && folders.data ? folders.data.length : null;
-
-  /*
-   * The message below says these meetings are in folders. It may only say so
-   * when there are folders for them to be in.
-   *
-   * <p>Production produced the screen this guards against: "Everything is in a
-   * folder" over a sidebar with no folders in it. Those two cannot both be
-   * true, and the app had every fact needed to know that and said it anyway --
-   * the same failure as an empty state over a failed request, one level up. An
-   * empty state explains itself, and an explanation that contradicts the rest
-   * of the screen is worse than no explanation at all.
-   */
-  const filedElsewhere = total !== null && total > 0 && folderCount !== null && folderCount > 0;
-
-  /**
-   * The workspace has meetings, this list has none, and there is no folder that
-   * could be holding them.
-   *
-   * <p>Nothing about that is a state the product has: with no folders, "outside
-   * your folders" and "everything" are the same list, so one of these two
-   * answers is wrong. Which one is not knowable from here, so this claims
-   * neither -- it says the list could not be shown and offers the two things
-   * that recover it.
-   */
-  const unexplained = !filtered && total !== null && total > 0 && folderCount === 0;
-  /**
-   * The probe was asked and did not answer, so neither screen below is known.
-   *
-   * <p>Keyed off `total` rather than off `isSuccess`, so the one expression
-   * decides it. `isSuccess` with no body is not a state RTK Query produces, but
-   * splitting the question across two lines is how the pair drifts apart -- and
-   * the drift would land on the screen that tells somebody their account is
-   * empty.
-   */
-  const probeUnresolved = !filtered && (total === null || folderCount === null);
-
-  if (filtered) {
+  if (when.from !== null || when.to !== null) {
     return (
       <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center">
         <CalendarDays className="h-8 w-8 text-muted-foreground" />
@@ -519,69 +503,12 @@ function EmptyState({
             "thu, 13 aug". */}
         <p className="mt-3 font-medium">Nothing from {when.label}</p>
         <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-          There are no conversations in this stretch of time. Your other meetings
-          are still here.
-        </p>
-        <Button variant="outline" className="mt-4" onClick={onClearDate}>
-          Show any time
-        </Button>
-      </div>
-    );
-  }
-
-  // Nothing rather than a guess, for the moment between the two answers. It is
-  // one row over a warm connection, and a sentence that turns out to be wrong
-  // is worse than a blank half-second.
-  if (workspace.isLoading || workspace.isFetching || folders.isLoading || folders.isFetching) {
-    return null;
-  }
-
-  /*
-   * The probe failed. Both screens below make a claim it was supposed to
-   * settle -- "everything is filed" or "you have nothing" -- and neither is
-   * known now, so this says only what is certainly true: this list is empty,
-   * and the wider list is one click away. It never tells somebody their
-   * account is empty on the strength of a request that failed.
-   */
-  if (probeUnresolved) {
-    return (
-      <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center">
-        <FolderOpen className="h-8 w-8 text-muted-foreground" />
-        <p className="mt-3 font-medium">Nothing outside your folders</p>
-        <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-          This list leaves out anything filed into a folder. Your other
-          conversations may be in one.
-        </p>
-        <LibraryButton />
-      </div>
-    );
-  }
-
-  /*
-   * The workspace has meetings and there is no folder that could be holding
-   * them, so one of the two answers is wrong and this claims neither.
-   *
-   * <p>It is a distinct screen rather than a fallback because the two things it
-   * offers are different: try the request again, and go and look at the whole
-   * list. Telling somebody their account is empty here would be the worst
-   * available reading of a state where we know it is not.
-   */
-  if (unexplained) {
-    return (
-      <div
-        role="alert"
-        className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center"
-      >
-        <RotateCw className="h-8 w-8 text-muted-foreground" />
-        <p className="mt-3 font-medium">Couldn&apos;t show your conversations</p>
-        <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-          This list is the conversations outside your folders, and there are no
-          folders — so it should be showing all of them. Your conversations are
-          still here.
+          There are no conversations in this stretch of time. Your other
+          conversations are still here.
         </p>
         <div className="mt-4 flex gap-2">
-          <Button variant="outline" onClick={onRetry}>
-            Try again
+          <Button variant="outline" onClick={onClearDate}>
+            Show any time
           </Button>
           <Button variant="outline" asChild>
             <Link href={LIBRARY}>Go to Library</Link>
@@ -591,27 +518,14 @@ function EmptyState({
     );
   }
 
-  if (filedElsewhere) {
-    return (
-      <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center">
-        <FolderOpen className="h-8 w-8 text-muted-foreground" />
-        <p className="mt-3 font-medium">Everything is in a folder</p>
-        <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-          A conversation recorded or imported inside a folder is filed there.
-          Nothing has been lost — this list is the ones that were not.
-        </p>
-        <LibraryButton />
-      </div>
-    );
-  }
-
+  // No window, no filter, and a settled empty answer. There is nothing left for
+  // it to mean: the account has no conversations yet.
   return (
     <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center">
       <FileAudio className="h-8 w-8 text-muted-foreground" />
       <p className="mt-3 font-medium">No conversations</p>
       <p className="mt-1 max-w-sm text-sm text-muted-foreground">
         Record a meeting from your browser, or bring in a file you already have.
-        {userId ? "" : ""}
       </p>
       <div className="mt-4 flex gap-2">
         <Button asChild>
@@ -626,23 +540,6 @@ function EmptyState({
         </Button>
       </div>
     </div>
-  );
-}
-
-/**
- * The way to the whole list.
- *
- * <p>A link, not a button that flips a filter. That is the substance of the
- * change: "Show all conversations" used to set a scope on this page, so the way
- * out of an empty list was a control somebody had to remember they had never
- * touched. Library is a place in the band, reachable whether or not this screen
- * ever appeared.
- */
-function LibraryButton() {
-  return (
-    <Button variant="outline" className="mt-4" asChild>
-      <Link href={LIBRARY}>Go to Library</Link>
-    </Button>
   );
 }
 

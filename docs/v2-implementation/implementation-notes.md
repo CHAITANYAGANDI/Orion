@@ -249,3 +249,64 @@ would mean inventing something to fill it.
 `npm run typecheck` clean · `npm run lint` clean (same two pre-existing warnings)
 · `npx vitest run` 118 files, 2184 tests, all passing · `npm run build` succeeds,
 `/folders` down to 143 B of redirect.
+
+
+---
+
+## Phase 4a — two parity corrections, on review
+
+Both were raised against the phase 3 result and both were right.
+
+### 1 · Normal processing is not "Needs you"
+
+The masthead had no such heading, but it did put both counts in one sentence
+with the failure in the danger colour — which reads as one urgent block, most of
+which is the product working normally. That is how a real failure gets scrolled
+past.
+
+They are two lines now with different weight: the failure first, `text-danger`
+at body size, because it is the one thing on the page a person can act on; the
+processing count second, `text-ink-3` at foot size, phrased as activity rather
+than as a demand. `FAILED` is terminal so the two counts name disjoint sets of
+rows. Nothing was invented to fill the space — no action-item assignment, no due
+dates — and the V2 treatment (position, colours, type scale) is unchanged.
+
+### 2 · Recent now means recent
+
+`unfiled=true` was still on the query. That made the page's name a lie in a way
+nobody reports as a bug: record a meeting inside a folder, and it is filed there
+and gone from the list called Recent. Removed.
+
+**Now** = the newest `RECENT_SIZE` (20) conversations *wherever they are filed*.
+**Library** = the complete archive, paged, with the folders. The two differ by
+how much they show — visible — rather than by a hidden predicate.
+
+Both bounds are stated on screen. Under the heading: "Your newest conversations,
+wherever they are filed." Under the list, only when `totalElements` exceeds the
+page: "Showing the 20 most recent of 214 — all of them are in Library." The
+count is already on the response, so this costs no request.
+
+**What that deleted, and what it did not.** Three empty-state screens are now
+unreachable — *Everything is in a folder*, *Nothing outside your folders*, and
+the *Couldn't show your conversations* contradiction screen — along with the
+one-row workspace probe and the folder read behind them. All three existed to
+explain the filter. The rule they were built on is untouched and has its own
+describe block: only a settled, successful, genuinely empty response may claim
+an empty account. That is `homeListState`, and it is what the production bug was
+actually about.
+
+**What it costs.** There is no longer any view of "meetings not in a folder".
+Recorded as a real loss in [`feature-parity.md` §3b](./feature-parity.md), not
+waved away. It was only ever reachable as a default rather than as a filter
+anybody chose, which is precisely what made the default a trap; if it is wanted
+back, the honest home for it is a folder filter on Library.
+
+The `unfiled` assertion in `home/page.test.tsx` was **inverted, not deleted** —
+it pins that Now never sends the parameter. That is the guard which makes the
+removed screens unnecessary, so it is the test that has to fail first if the
+parameter ever returns.
+
+### Verified
+
+`npm run typecheck` clean · `npm run lint` clean · `npx vitest run` 118 files,
+2179 tests, all passing.

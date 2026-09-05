@@ -1,51 +1,53 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { MeetingResponse, MeetingListQuery, Page, Project } from "@/lib/types";
+import type { MeetingResponse, MeetingListQuery, Page } from "@/lib/types";
 
 /**
- * Now — the greeting, the list, and the screens an empty list can be.
+ * Now — the greeting, the list, and the two screens an empty list can be.
  *
  * <h2>What left this file, and what it left behind</h2>
  *
  * <p>There was a scope picker above the list with two options: <i>Recent
  * Conversations</i> (`unfiled=true` — everything outside your folders) and
- * <i>All Conversations</i> (everything in the workspace). It is gone, and
- * <i>All</i> is a page now: **Library**, in the band. Roughly a third of the
- * tests below used to drive that control.
+ * <i>All Conversations</i>. It is gone, and so is the parameter: <i>All</i> is
+ * a page now (**Library**), and <i>Recent</i> asks for the newest twenty
+ * <em>wherever they are filed</em>. Roughly half the tests below used to drive
+ * that control or explain what it hid.
  *
- * <p>None of the rules they held has been dropped. Each was one of three
- * things, and each has gone somewhere:
+ * <p>Three groups went, and each is accounted for:
  *
  * <ul>
- *   <li><b>"the wire says unfiled"</b> — still asserted, now unconditionally.
- *       A label reading Recent over a query that says otherwise is still the
- *       version of this that looks right and is wrong.</li>
- *   <li><b>"the choice survives a visit and not a sign-in"</b> — re-asked of
- *       the date window, which is the other preference on this page and goes
- *       through the identical `useStickyPreference` machinery. The production
- *       defect was a stored value from session 1 being reported as ready under
- *       session 2; that is a property of the store, not of the scope.</li>
- *   <li><b>"an empty Recent must say which filter emptied it"</b> — unchanged
- *       and, if anything, more load-bearing: there is no picker to notice any
- *       more, so the label under the heading and the empty screens are the
- *       whole of the explanation.</li>
+ *   <li><b>"the wire says unfiled"</b> — <b>inverted</b>, not dropped. The
+ *       assertion now is that this page never sends the parameter, which is the
+ *       guard that makes every screen below unnecessary: with no filter, no
+ *       filed meeting can be missing from Now.</li>
+ *   <li><b>"a stored choice survives a visit and not a sign-in"</b> — re-asked
+ *       of the date window. The production defect was a value stored under
+ *       session 1 still being reported as ready under session 2, which is a
+ *       property of `useStickyPreference` and not of the scope. The window goes
+ *       through the identical machinery.</li>
+ *   <li><b>"an empty Recent must say which filter emptied it"</b> — the three
+ *       screens that answered this (everything-is-filed, the contradiction, the
+ *       unresolved probe) are <b>unreachable</b>, because the filter they
+ *       explained does not exist. The probe that fed them is gone with them.
+ *       The rule underneath — <i>only a settled, successful, genuinely empty
+ *       response may claim an empty account</i> — is untouched and has a whole
+ *       describe block of its own below. That is the rule the production bug
+ *       was about.</li>
  * </ul>
  *
- * <p>What can no longer be tested here is what happens when All is chosen,
- * because there is no All. It is `app/(app)/library/page.test.tsx`, which pins
- * the thing that matters about it: that Library asks for everything, and that
- * an inherited `unfiled` would make it a second copy of this page.
+ * <p>What can no longer be asked here is what happens when All is chosen. That
+ * is `app/(app)/library/page.test.tsx`.
  */
 const query = vi.hoisted(() => ({ last: null as MeetingListQuery | null }));
 /** The retry button is wired to this. */
 const refetch = vi.hoisted(() => vi.fn());
 
 let rows: MeetingResponse[];
+/** How many exist behind the page. Drives the "showing the newest N" line. */
+let total: number | null;
 let loading: boolean;
-/** How many meetings exist at all, filed or not. Only the empty states ask. */
-let workspaceTotal: number;
-
 /* ---------------------------------------------------------------------------
  * The states a naive mock cannot express.
  *
@@ -61,22 +63,6 @@ let fetching: boolean;
 let errored: boolean;
 /** Nothing usable is cached -- `data` is undefined, not an empty page. */
 let noData: boolean;
-/** The one-row probe behind the empty states failed. */
-let probeErrored: boolean;
-/** The one-row probe has not answered yet. */
-let probeLoading: boolean;
-
-/*
- * The folders, which the empty state reads as well.
- *
- * "Everything is in a folder" is a claim about these, and production showed it
- * over a sidebar with none -- so the folder list is part of what decides that
- * screen, and part of what these tests can move.
- */
-let folderRows: Project[];
-let foldersLoading: boolean;
-let foldersErrored: boolean;
-
 /** What Settings knows about the person. The masthead greets from it. */
 let displayName: string | null;
 
@@ -126,14 +112,6 @@ vi.mock("@/lib/api", () => ({
         refetch,
       };
     }
-    // The one-row probe behind the empty state: is anything filed elsewhere, or
-    // is this account new? It asks for a count, not for rows.
-    if (q.size === 1) {
-      if (probeErrored) return result<Page<MeetingResponse>>(undefined, { isError: true });
-      if (probeLoading) return result<Page<MeetingResponse>>(undefined, { isLoading: true });
-      return result(aPage([], workspaceTotal));
-    }
-
     query.last = q;
     // Filtering happens in the query, so the mock returns what it was asked
     // for. Asserting on the request is the point: a client-side filter would
@@ -142,13 +120,8 @@ vi.mock("@/lib/api", () => ({
     // An error keeps whatever was cached -- RTK does not throw the last good
     // page away -- so `noData` is what separates "failed with nothing" from
     // "failed over meetings already on screen".
-    const data = noData ? undefined : aPage(rows);
+    const data = noData ? undefined : aPage(rows, total ?? rows.length);
     return result(data, { isFetching: fetching, isError: errored });
-  },
-  useGetProjectsQuery: () => {
-    if (foldersLoading) return result<Project[]>(undefined, { isLoading: true });
-    if (foldersErrored) return result<Project[]>(undefined, { isError: true });
-    return result(folderRows);
   },
   // The masthead's greeting. Settings first, then the identity provider, then
   // nothing -- never the user id.
@@ -209,15 +182,8 @@ beforeEach(() => {
   fetching = false;
   errored = false;
   noData = false;
-  probeErrored = false;
-  probeLoading = false;
-  // One folder by default, so "everything is filed" is an explanation the rest
-  // of the screen can support. The tests that remove it are the point.
-  folderRows = [{ id: "prj_1", name: "Client ABC" } as Project];
-  foldersLoading = false;
-  foldersErrored = false;
   rows = [aMeeting()];
-  workspaceTotal = rows.length;
+  total = null;
   displayName = null;
   // The window outlives a page now, so without this it would outlive a test and
   // the order the suite happened to run in would decide what Home opened on.
@@ -227,43 +193,50 @@ beforeEach(() => {
 });
 
 /**
- * The list this page shows, and the one it does not.
+ * The list this page shows, and the parameter it must never send again.
  *
- * <p>`unfiled=true` is the whole of it, and it is asserted on the wire rather
- * than on the label. Both halves have been wrong at different times: a label
- * reading Recent over a query that fetched everything, and a query narrowed in
- * the browser over fifty rows that had already come back — which answered
- * "conversations outside a folder" with whichever of the fifty most recent
- * happened to be outside one, and looked right until somebody had more than
- * fifty meetings.
+ * <p>`unfiled=true` is what Recent used to mean: a folder filter under a name
+ * about time. It made this page lie in a way nobody would report as a bug —
+ * record a meeting inside a folder, and it is filed there and gone from Recent,
+ * which is not what recent means.
+ *
+ * <p>So the assertion is inverted rather than deleted, and it is on the wire
+ * rather than on the label. Both halves have been wrong at different times: a
+ * label reading Recent over a query that fetched everything, and a query
+ * narrowed in the browser over rows that had already come back.
+ *
+ * <p>This test is load-bearing for the whole file. Three empty-state screens
+ * were deleted along with the filter, on the grounds that nothing here can hide
+ * a meeting any more. If the parameter ever comes back, that stops being true
+ * and the screens are needed again — so this is the guard that has to fail
+ * first.
  */
 describe("what Home asks for", () => {
-  it("asks the server for what is outside a folder", () => {
+  it("never asks the server to hide filed conversations", () => {
     render(<HomePage />);
 
-    expect(lastQuery()?.unfiled).toBe(true);
+    expect(lastQuery()?.unfiled).toBeUndefined();
   });
 
-  it("asks for it on the very first query, not after a correction", () => {
-    // Storage cannot be read while rendering, so the first render necessarily
-    // holds the defaults. Asking then and again once the window is restored is
-    // two requests and a list that changes under the reader; the query waits.
-    render(<HomePage />);
-
-    expect(lastQuery()?.size).toBe(50);
-    expect(lastQuery()?.page).toBe(0);
-    expect(lastQuery()?.unfiled).toBe(true);
-  });
-
-  it("keeps asking for it once a date window is chosen", async () => {
-    // Two narrowings over one list. Losing one when the other moves is the bug
-    // that follows from rebuilding the query object per control.
+  it("still does not, once a date window is chosen", async () => {
+    // Two narrowings over one list, and rebuilding the query object per control
+    // is how the other one comes back.
     render(<HomePage />);
 
     await pickWindow(/Last 7 days/);
 
-    expect(lastQuery()?.unfiled).toBe(true);
+    expect(lastQuery()?.unfiled).toBeUndefined();
     expect(lastQuery()?.from).toBeTruthy();
+  });
+
+  it("asks for a short page, which is what makes it recent", () => {
+    // The bound is the difference between this page and Library — both ask the
+    // same question of the same endpoint, and this one asks for the top of the
+    // answer. A page of fifty here would make the two lists the same list.
+    render(<HomePage />);
+
+    expect(lastQuery()?.size).toBe(20);
+    expect(lastQuery()?.page).toBe(0);
   });
 
   it("does not offer a way to widen it to the whole workspace", () => {
@@ -277,32 +250,53 @@ describe("what Home asks for", () => {
 });
 
 /**
- * The label under the heading.
+ * The label under the heading, and the line under the list.
  *
- * <p>"Recent" is the product's word for this list and the filter is about
- * folders, so the label is the only thing on screen that explains it. That was
- * true when it was a hint inside the picker's menu, and it is more true now
- * that there is no menu to open: a meeting recorded ten minutes ago inside a
- * folder is simply absent from a list called Recent, and the "Everything is in
- * a folder" screen behind it arrives with nothing to connect it to.
+ * <p>The label used to carry the whole explanation for a list that hid filed
+ * meetings, and the file it lived in said in as many words: <i>do not drop
+ * this line</i>. It has nothing to explain away now — so what it says instead
+ * is the one thing about this list that is not obvious, which is that filing a
+ * conversation does not take it off the page.
  *
- * <p><b>Do not drop this line.</b> Renaming the heading to "Unfiled" carries it
- * in the label instead; that was tried and reverted.
+ * <p>The truncation line is the new load-bearing one. A page showing twenty of
+ * two hundred conversations, with nothing at the bottom saying so, is a list
+ * somebody scrolls to the end of and believes — the same lie as a filter that
+ * does not name itself, one level along.
  */
-describe("the label that explains the list", () => {
-  it("says the list is what is outside your folders", () => {
+describe("the lines that explain the list", () => {
+  it("says that filing a conversation does not hide it from here", () => {
     render(<HomePage />);
 
-    expect(screen.getByText(/outside your folders/i)).toBeInTheDocument();
+    expect(screen.getByText(/wherever they are filed/i)).toBeInTheDocument();
   });
 
-  it("says where the rest of it is", () => {
-    // The two read as a pair -- everything outside your folders, and everything
-    // else. Said that way round they describe two lists rather than one list
-    // and a property a meeting either has or does not.
+  it("no longer claims the list is what is outside your folders", () => {
+    // It was true and is not. Leaving it would describe a filter that was
+    // removed precisely because the description was the only thing carrying it.
     render(<HomePage />);
 
-    expect(screen.getByRole("link", { name: "Library" })).toHaveAttribute("href", "/library");
+    expect(screen.queryByText(/outside your folders/i)).not.toBeInTheDocument();
+  });
+
+  it("admits when it is showing only the newest of many", () => {
+    rows = Array.from({ length: 20 }, (_, i) => aMeeting({ id: `mtg_${i}`, title: `Meeting ${i}` }));
+    total = 214;
+    render(<HomePage />);
+
+    expect(screen.getByText(/Showing the 20 most recent of/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /All of them are in Library/ })).toHaveAttribute(
+      "href",
+      "/library",
+    );
+  });
+
+  it("says nothing about truncation when nothing is truncated", () => {
+    // A page that always claims to be a subset is as uninformative as one that
+    // never does.
+    rows = [aMeeting()];
+    render(<HomePage />);
+
+    expect(screen.queryByText(/most recent of/)).not.toBeInTheDocument();
   });
 });
 
@@ -389,58 +383,78 @@ describe("the masthead", () => {
   });
 });
 
+/**
+ * Nothing to show, and which of the two reasons it is.
+ *
+ * <p>There were four screens here. Three of them existed to explain
+ * `unfiled=true` — that the meetings were in folders, or that they could not
+ * be because there are none, or that the probe deciding between those had not
+ * answered. The filter is gone and so are they: nothing on this page hides a
+ * conversation, so an empty list means the window is empty or the account is,
+ * and both are known from the response already on screen.
+ *
+ * <p>The rule those screens were built on is a different thing and is not
+ * touched. It has its own block further down: an empty list is a *claim about
+ * the account*, and only a settled, successful, genuinely empty response may
+ * make it.
+ */
 describe("when there is nothing to show", () => {
-  it("says the rest is filed, and offers the way to it", () => {
-    rows = [];
-    workspaceTotal = 11;
-
-    render(<HomePage />);
-
-    // Without this the page offers Record and Import to somebody with a
-    // hundred meetings, which reads as an archive that lost them.
-    expect(screen.getByText("Everything is in a folder")).toBeInTheDocument();
-    // A navigation now, not a control that flips a filter. The way out of an
-    // empty list used to be a switch somebody had to remember never touching.
-    expect(screen.getByRole("link", { name: "Go to Library" })).toHaveAttribute(
-      "href",
-      "/library",
-    );
-  });
-
-  it("offers a first recording to an account with nothing in it", () => {
-    rows = [];
-    workspaceTotal = 0;
-
-    render(<HomePage />);
-
-    // The same empty list meaning the opposite thing. Home opens here, so this
-    // is the first screen of a new account: answering it with "everything is in
-    // a folder" and a button to another empty list would be the worst possible
-    // first impression.
-    expect(screen.getByText("No conversations")).toBeInTheDocument();
-    expect(screen.queryByText("Everything is in a folder")).not.toBeInTheDocument();
-  });
-
-  it("still blames the date window first, since that is the likelier cause", async () => {
+  it("blames the date window when there is one", async () => {
     rows = [];
 
     render(<HomePage />);
     await pickWindow(/^Today/);
 
     expect(screen.getByText(/Nothing from Today/)).toBeInTheDocument();
+    // Not the first-recording screen. A filter that empties the list has to say
+    // so, or an archive that is merely narrowed reads as one that lost
+    // everything.
+    expect(screen.queryByText("No conversations")).not.toBeInTheDocument();
   });
 
-  it("points a genuinely empty account at the two ways to start", () => {
+  it("offers both ways out of a narrowed list", async () => {
     rows = [];
-    workspaceTotal = 0;
+
+    render(<HomePage />);
+    await pickWindow(/^Today/);
+
+    expect(screen.getByRole("button", { name: "Show any time" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Go to Library" })).toHaveAttribute(
+      "href",
+      "/library",
+    );
+  });
+
+  it("says the account is empty only when nothing is narrowing the list", () => {
+    rows = [];
 
     render(<HomePage />);
 
     expect(screen.getByText("No conversations")).toBeInTheDocument();
+  });
+
+  it("never claims a folder is hiding anything", () => {
+    // The screen this replaces. It was correct while Recent meant unfiled;
+    // saying it now would send somebody hunting through folders for meetings
+    // that are already on this page.
+    rows = [];
+
+    render(<HomePage />);
+
+    expect(screen.queryByText("Everything is in a folder")).not.toBeInTheDocument();
+    expect(screen.queryByText("Nothing outside your folders")).not.toBeInTheDocument();
+  });
+
+  it("points a genuinely empty account at the two ways to start", () => {
+    rows = [];
+
+    render(<HomePage />);
+
     expect(screen.getByRole("link", { name: /Record/ })).toHaveAttribute(
       "href",
       "/record?r=%2Fhome",
     );
+    expect(screen.getByRole("link", { name: /Import/ })).toHaveAttribute("href", "/upload");
   });
 });
 
@@ -541,149 +555,19 @@ describe("filters that stay where you left them", () => {
   });
 
   it("does not drift when you leave for a meeting and return", () => {
+    // The page is left and returned to all day. Whatever it asks for on the way
+    // in, it has to ask for the same thing on the way back -- including the
+    // parameter it must never send.
     const visit = render(<HomePage />);
-    expect(lastQuery()?.unfiled).toBe(true);
+    expect(lastQuery()?.size).toBe(20);
     visit.unmount();
 
     query.last = null;
     render(<HomePage />);
 
-    expect(lastQuery()?.unfiled).toBe(true);
-  });
-});
-
-/**
- * An empty Recent, and the request that tells the two meanings apart.
- *
- * <h2>The bug this list's default once caused</h2>
- *
- * <p>Recent is `unfiled=true` on the wire — conversations that were never put
- * in a folder — so an account that had filed everything opened Home to a list
- * with nothing in it, and the page said "No conversations" and offered to help
- * with a first recording. The archive-lost screen, over a full archive, reached
- * by doing nothing.
- *
- * <p>What made it unrecoverable is that an empty list never said <em>which
- * filter had emptied it</em> — the same screen appeared whether the workspace
- * was empty or merely tidy. Home tells those apart now: an empty Recent asks the
- * server whether the workspace holds anything at all, and the answers get
- * opposite screens.
- *
- * <p>This is the common path rather than a corner, which is exactly why the
- * probe exists. Anybody narrowing this list further should move the probe with
- * it rather than through it.
- */
-describe("the two things an empty list can mean", () => {
-  it("says the meetings are filed rather than that there are none", () => {
-    rows = [];
-    workspaceTotal = 40;
-
-    render(<HomePage />);
-
-    expect(screen.getByText("Everything is in a folder")).toBeInTheDocument();
-    expect(screen.queryByText("No conversations")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Go to Library" })).toBeInTheDocument();
-  });
-
-  it("offers a first recording, not a folder hint, to an account with nothing in it", () => {
-    rows = [];
-    workspaceTotal = 0;
-
-    render(<HomePage />);
-
-    expect(screen.getByText("No conversations")).toBeInTheDocument();
-    expect(screen.queryByText("Everything is in a folder")).not.toBeInTheDocument();
-  });
-
-  it("will not say the meetings are filed when there is no folder to file them in", () => {
-    /*
-     * THE production screen, as an assertion: "Everything is in a folder" over
-     * a sidebar with no folders in it.
-     *
-     * Those two cannot both be true -- with no folders, "outside your folders"
-     * and "everything" are the same list -- and Home had every fact needed to
-     * know that and said it anyway. Which one of the two answers is wrong is
-     * not knowable from here, so the screen claims neither.
-     */
-    rows = [];
-    workspaceTotal = 40;
-    folderRows = [];
-
-    render(<HomePage />);
-
-    expect(screen.queryByText("Everything is in a folder")).not.toBeInTheDocument();
-    expect(screen.getByText(/couldn't show your conversations/i)).toBeInTheDocument();
-  });
-
-  it("offers a retry and the whole list when it cannot explain itself", async () => {
-    rows = [];
-    workspaceTotal = 40;
-    folderRows = [];
-
-    render(<HomePage />);
-    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
-
-    expect(refetch).toHaveBeenCalled();
-    expect(screen.getByRole("link", { name: "Go to Library" })).toBeInTheDocument();
-  });
-
-  it("says nothing at all while the folder list is still on its way", () => {
-    /*
-     * Every screen this component can draw for an empty Recent makes a claim
-     * about folders -- that the meetings are in one, that there is none to be
-     * in, or that some may be. All three need the folder list, so until it
-     * arrives the honest output is nothing: a sentence that turns out to be
-     * wrong is worse than a blank half-second.
-     */
-    rows = [];
-    workspaceTotal = 40;
-    foldersLoading = true;
-
-    render(<HomePage />);
-
-    expect(screen.queryByText("Everything is in a folder")).not.toBeInTheDocument();
-    expect(screen.queryByText(/couldn't show your conversations/i)).not.toBeInTheDocument();
-    expect(screen.queryByText("Nothing outside your folders")).not.toBeInTheDocument();
-    expect(screen.queryByText("No conversations")).not.toBeInTheDocument();
-  });
-
-  it("does not claim the meetings are filed when the folder list failed", () => {
-    // A failed folder request proves nothing about where the meetings are. The
-    // screen falls back to the one thing still certainly true: this list leaves
-    // filed conversations out, and the whole list is one navigation away.
-    rows = [];
-    workspaceTotal = 40;
-    foldersErrored = true;
-
-    render(<HomePage />);
-
-    expect(screen.queryByText("Everything is in a folder")).not.toBeInTheDocument();
-    expect(screen.getByText("Nothing outside your folders")).toBeInTheDocument();
-  });
-
-  it("says nothing at all while the workspace probe is still in flight", () => {
-    rows = [];
-    probeLoading = true;
-
-    render(<HomePage />);
-
-    expect(screen.queryByText("Everything is in a folder")).not.toBeInTheDocument();
-    expect(screen.queryByText("No conversations")).not.toBeInTheDocument();
-  });
-
-  it("does not treat a failed workspace probe as proof the account is empty", () => {
-    /*
-     * The same rule, one layer down. The probe answers "is anything filed
-     * elsewhere?", and reading a failed probe as zero produces the
-     * first-recording screen for somebody whose meetings are all in folders.
-     */
-    rows = [];
-    probeErrored = true;
-
-    render(<HomePage />);
-
-    expect(screen.queryByText("No conversations")).not.toBeInTheDocument();
-    expect(screen.getByText("Nothing outside your folders")).toBeInTheDocument();
+    expect(lastQuery()?.size).toBe(20);
+    expect(lastQuery()?.unfiled).toBeUndefined();
+    expect(lastQuery()?.from).toBeFalsy();
   });
 });
 
@@ -781,7 +665,6 @@ describe("what Home shows when the request does not simply succeed", () => {
     // The cached page says zero, but a request that may replace it is running.
     // Announcing an empty account now is a guess that is about to be checked.
     rows = [];
-    workspaceTotal = 0;
     fetching = true;
 
     render(<HomePage />);
@@ -817,7 +700,6 @@ describe("what Home shows when the request does not simply succeed", () => {
     // The fix must not make the empty state unreachable -- that would trade a
     // false negative for a permanent skeleton on a genuinely new account.
     rows = [];
-    workspaceTotal = 0;
 
     render(<HomePage />);
 

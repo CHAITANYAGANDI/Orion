@@ -93,20 +93,46 @@ V2's Now had a memory-derived "Needs you". That is removed. What replaces it is 
 | Side pane: chat \| action items | KEEP | `HomeChatPanel`, `ActionItemsPanel` — becomes the V2 margin |
 | Empty states (5 variants) | KEEP | `homeListState` already distinguishes them |
 
-### 3a · What "Needs you" actually became — done in phase 3
+### 3a · What "Needs you" actually became
 
 The remap above proposed action items: `{ mine: true, status: "OPEN" }`, overdue first, with *open* and *overdue* tallies. That was written before two facts about the production data made it dishonest on this screen:
 
 - **`mine` matches against the display name in Settings**, which is empty until somebody sets one. A tally reading "0 open" over an account with a dozen open items is worse than no tally.
 - **The panel in the margin is `standalone: true` only** — items somebody typed for themselves, not what a transcript produced. A workspace-wide count above a three-row list contradicts the thing under it. And a standalone item is created from a title alone, so it carries no `dueOn`: an *overdue* figure there would be a permanent zero.
 
-What ships instead is derived from the page's own list, costs no extra request, and cannot be wrong: **how many conversations are still being made, and how many could not be**. A failed transcription is the one thing on Now that genuinely needs a human, and it was previously findable only by scrolling for a red badge. `Masthead` in `app/(app)/home/page.tsx`.
+What ships instead is derived from the page's own list, costs no extra request, and cannot be wrong.
+
+**And it is not called "Needs you", because most of it is not.** A meeting still transcribing is the product working; a meeting that failed is a job that needs a person. Merging them under one urgent-sounding heading teaches people that the loud line is usually nothing, which is exactly how a real failure gets scrolled past. So there is no section heading at all, and the two are separate lines with different weight:
+
+| Line | Kind | Treatment |
+|---|---|---|
+| *N conversations could not be transcribed.* | **actionable** | `text-danger`, body size, stated first |
+| *N conversations are still being made.* | normal activity | `text-ink-3`, foot size, phrased as activity |
+
+`FAILED` is terminal, so the two counts name disjoint sets of rows and can be read independently. `Masthead` in `app/(app)/home/page.tsx`.
 
 The Ask entry field from the V2 concept is **not** built. The workspace chat is already in this page's margin with its own composer; a second field on the page opening a *different* thread on `/ask` — which deliberately does not resume the margin's conversation — is two chats a centimetre apart. Ask stays a place in the band.
 
-### 3b · The scope picker, relocated
+### 3b · Recent means recent
 
-`All Conversations` is `/library`. `Recent` has no picker above it any more, which makes the line under the heading the whole of the explanation for why a meeting recorded inside a folder is not in a list called Recent — it was the hint inside the picker's menu. `home/page.test.tsx` keeps every rule those tests held: `unfiled=true` is still asserted on the wire, the sticky-preference session defect is re-asked of the date window (identical `useStickyPreference` machinery), and the probe behind the empty states is unchanged. "Show all conversations" is a **link to Library**, not a control that flips a filter.
+`All Conversations` is `/library`. `Recent` has no picker above it — and, after review, **no `unfiled` parameter either**.
+
+That parameter was the real problem. Recent was `unfiled=true`: a folder filter under a name about time. Record a meeting inside a folder and it is filed there and gone from the page called Recent, which is not what recent means — and nobody reports that as a bug, they report it as a meeting that disappeared. Three of this page's four empty states existed only to explain it.
+
+| | Asks for | Bounded by |
+|---|---|---|
+| **Now** | the newest conversations, **wherever they are filed** | `size: 20` + the date window |
+| **Library** | the complete archive | `size: 50` + paging + the date window + the folders |
+
+So the two pages differ by *how much they show*, which a person can see, rather than by a hidden predicate, which they cannot. Now says both bounds on screen: "Your newest conversations, wherever they are filed" under the heading, and "Showing the 20 most recent of 214 — all of them are in Library" under the list when `totalElements` exceeds the page.
+
+**Consequences, both accepted deliberately:**
+
+1. **Three empty-state screens are unreachable and were removed** — *Everything is in a folder*, *Nothing outside your folders*, and the *Couldn't show your conversations* contradiction screen — along with the one-row workspace probe and the folder read that fed them. Nothing on Now can hide a conversation, so an empty list means the window is empty or the account is, and both are known from the response already on screen. The rule those screens were built on is **untouched**: only a settled, successful, genuinely empty response may claim an empty account. That is `homeListState`, it has its own describe block, and it is what the production bug was actually about.
+
+2. **There is no longer any view of "meetings not in a folder".** This is a real capability lost and is recorded as one. It was only ever reachable as this page's *default* — never as a filter anybody chose — and it is what made the default a trap. If it is wanted back, the honest place is a folder filter on **Library**, not a hidden default on Now. `MeetingListQuery.unfiled` remains in `lib/api.ts` and on the server; it simply has no caller.
+
+`home/page.test.tsx` keeps every rule it held. The `unfiled` assertion is **inverted rather than deleted** — the test now pins that Now never sends the parameter, which is the guard that makes the removed screens unnecessary; if it ever comes back, that test fails first. The sticky-preference session defect is re-asked of the date window (identical `useStickyPreference` machinery).
 
 `home.scope.v2` is left in storage rather than cleared. Nothing reads it, and clearing it would mean a write on load from a page whose whole problem once was doing something surprising on load.
 
