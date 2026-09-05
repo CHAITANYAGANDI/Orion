@@ -2,80 +2,240 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Warm ink on dark paper, with amber reserved for emphasis.
+/*
+ * REVERIE V2 — FOUNDATIONS
+ * ============================================================================
  *
- * The neutrals are warm rather than the blue-grey shadcn ships with, because
- * this app is mostly long passages of read text and warm greys are easier to
- * sit in front of. `--primary` is near-white ink, not a brand hue: a transcript
- * screen carries a lot of chrome, and a saturated primary on every button
- * competes with the words. Amber (`--highlight`) is the one loud colour, spent
- * only where attention is genuinely being asked for — an open commitment, a
- * contradicted decision, the active row.
+ * Cool midnight surfaces, one spectral accent, and a hard border between three
+ * typefaces. The design and the reasoning behind every number are in
+ * docs/ui-redesign/ (the V2 review PDF, section 07); what follows is the
+ * production implementation of it.
  *
- * ONE THEME, ON PURPOSE
- *   There was a light palette here too, and a toggle for it. Both are gone.
- *   Two themes is two of everything to keep true: every contrast ratio checked
- *   twice, every amber warning tuned twice, and every new surface silently
- *   correct in one of them and wrong in the other — which is how a light-mode
- *   bug survives for months in a team that runs dark. This is a tool for
- *   reading transcripts for an hour at a time, and picking the palette that
- *   suits that is a decision worth making once rather than delegating to
- *   whoever last touched their OS settings.
+ * TWO NAMING SYSTEMS, ON PURPOSE, AND THIS IS THE MIGRATION STRATEGY
  *
- *   The variables live on `:root` rather than on a `.dark` class because there
- *   is nothing to switch between. Nothing needs to add a class for the app to
- *   render correctly, so nothing can forget to.
+ *   The shadcn names (--background, --card, --border, --primary…) are KEPT and
+ *   repointed at V2 values. Every component in the app already reads them, so
+ *   the whole product inherits the palette without being touched, and a screen
+ *   that has not been rebuilt yet still looks like it belongs.
+ *
+ *   The V2 names (--surface-*, --ink-*, --brand-*, --measure…) are ADDED. New
+ *   and rebuilt components use those, because they say what a value is for
+ *   rather than which shadcn slot it happens to occupy.
+ *
+ *   Both sets are one set of values. There is no second palette to keep true.
+ *
+ * ONE THEME, STILL ON PURPOSE
+ *   The previous file argued this and it is still right: two themes is two of
+ *   everything to keep correct, and this is a tool for reading transcripts for
+ *   an hour at a time. The variables live on :root because there is nothing to
+ *   switch between, so nothing can forget to add a class.
+ *
+ * EVERY CONTRAST FIGURE IN A COMMENT WAS MEASURED, not estimated, with the
+ * WCAG relative-luminance formula against --g-1.
  */
+
 @layer base {
   :root {
-    /* Tells the browser to render its own furniture — scrollbars, form
-     * controls, the canvas behind a rubber-band scroll — to match. Without it
-     * a native <select> drop-down and the scrollbar gutter stay light against
-     * everything else. */
+    /* Native furniture — scrollbars, form controls, the canvas behind a
+     * rubber-band scroll — renders dark to match. */
     color-scheme: dark;
 
-    --background: 24 10% 8%;
-    --foreground: 40 25% 95%;
+    /* ======================================================================
+       1 · SURFACE — six steps, and only six
+       ======================================================================
+       Each step is roughly 1.06x the contrast of the one below; the ink tiers
+       jump by 1.7x. Small steps between surfaces and large steps between text
+       tiers is what stops a dark interface reading as a stack of grey boxes.
+       The hue drifts cool and desaturates as it lightens — a literal
+       #111/#222/#333 ramp reads as printed and cheap, because light does not
+       behave that way. */
+    --g-0: 220 17% 4%;      /* #08090b  window ground */
+    --g-1: 225 14% 6%;      /* #0d0e11  CANVAS — the ground content is read on */
+    --g-2: 225 13% 9%;      /* #13151a  raised: grouped rows, inputs, quiet fills */
+    --g-3: 222 15% 12%;     /* #191c22  overlay: menus, popovers, dialogs */
+    --g-4: 219 15% 15%;     /* #21252c  interactive raised: hover, pressed */
+    --g-5: 218 13% 20%;     /* #2b3038  selected */
 
-    --card: 24 9% 11%;
-    --card-foreground: 40 25% 95%;
+    /* Semantic aliases. New code uses these. */
+    --surface: var(--g-1);
+    --surface-raised: var(--g-2);
+    --surface-overlay: var(--g-3);
+    --surface-hover: var(--g-4);
+    --surface-selected: var(--g-5);
 
-    --popover: 24 9% 11%;
-    --popover-foreground: 40 25% 95%;
+    /* ======================================================================
+       2 · LINES — translucent white, so one token works over every surface
+       ====================================================================== */
+    --line: 255 255 255 / 0.06;         /* hairline between rows.  1.14:1 */
+    --line-strong: 255 255 255 / 0.1;   /* group boundary.         1.28:1 */
+    /* CONTROL BOUNDARY. WCAG 1.4.11 asks 3:1 for the visible edge of anything
+     * operable. Measured 3.30:1 on canvas, 3.12 on raised, 3.32 on a panel.
+     * This is the floor, not a style choice. */
+    --edge: 255 255 255 / 0.36;
+    --edge-hover: 255 255 255 / 0.5;
+    --scrim: 4 5 7 / 0.66;
 
-    --primary: 40 25% 95%;
-    --primary-foreground: 24 10% 10%;
+    /* ======================================================================
+       3 · INK — four usable tiers and a fifth that may not carry meaning
+       ======================================================================
+       All four clear their target on canvas, on raised AND on a glass panel,
+       so no tier is ever swapped when a component changes surface. The whites
+       are very slightly warm against cool surfaces, which costs nothing and is
+       the oldest trick in a premium dark interface. */
+    --ink: 40 8% 96%;       /* #f5f6f7  17.8:1 — titles, the sentence being read */
+    --ink-2: 218 15% 75%;   /* #b7bdc7  10.2:1 — body, anything sustained */
+    --ink-3: 218 9% 56%;    /* #878e99   5.8:1 — metadata, labels, timecodes */
+    --ink-4: 218 8% 43%;    /* #666d78   3.7:1 — placeholders, disabled, >=16px */
+    --ink-5: 219 10% 34%;   /* #4e545e   2.5:1 — DECORATIVE ONLY. Never a word. */
 
-    --secondary: 24 8% 17%;
-    --secondary-foreground: 40 25% 95%;
+    /* ======================================================================
+       4 · COLOUR
+       ======================================================================
+       ONE ACCENT, AND IT DOES NOT MEAN "PRIMARY".
 
-    --muted: 24 8% 16%;
-    --muted-foreground: 35 10% 64%;
+       Iris means: Reverie noticed this, or Reverie is doing this. The mark, an
+       AI surface, a citation, the focus ring, and the one filled Ask button.
+       Which is why the primary button in this product is INK — a Save button
+       is not an observation, and an accent spent on every button is an accent
+       that means nothing.
 
-    --accent: 24 8% 18%;
-    --accent-foreground: 40 25% 95%;
+       The hue sits at the blue edge of iris rather than in violet, where the
+       whole category already is. */
+    --brand: 236 89% 66%;         /* #5b67f5  4.32:1 — the mark, a filled affordance */
+    --brand-text: 235 100% 74%;   /* #7c86ff  6.17:1 — iris ANYWHERE it is a word */
+    --brand-fill: 234 77% 60%;    /* #4a5ae8  white on it 5.36:1 */
+    --brand-hover: 235 84% 64%;
+    --brand-deep: 236 54% 37%;
 
-    /* The single emphasis colour. Dark text on it, which clears 4.5:1 where
-     * white would not. */
-    --highlight: 35 92% 55%;
-    --highlight-foreground: 24 10% 10%;
+    /* Three semantic hues. Not four, not six. Each is paired with a word and a
+     * glyph everywhere it appears, so the colour is confirmation and never the
+     * message. Recording is deliberately the same red as danger: they never
+     * appear in one control, and a second red would only teach people that red
+     * is ambiguous. */
+    --success: 157 57% 49%;   /* #35c68a  8.82:1 — kept, resolved, done */
+    --warning: 36 80% 57%;    /* #e9a13b  8.85:1 — overdue, changed, needs a human */
+    --danger: 4 100% 63%;     /* #ff4e42  5.90:1 — failed, destructive, recording */
+    --info: 235 100% 74%;
 
-    --destructive: 0 62% 47%;
-    --destructive-foreground: 40 25% 95%;
+    /* ======================================================================
+       5 · SHADCN COMPATIBILITY
+       ======================================================================
+       The same values under the names the existing components already read.
+       Nothing here is a second palette — every line points at section 1-4. */
+    --background: var(--g-1);
+    --foreground: var(--ink);
 
-    --success: 152 40% 45%;
-    --success-foreground: 24 10% 10%;
+    --card: var(--g-2);
+    --card-foreground: var(--ink);
 
-    --warning: 35 92% 55%;
-    --warning-foreground: 24 10% 10%;
+    --popover: var(--g-3);
+    --popover-foreground: var(--ink);
 
-    --border: 24 8% 20%;
-    --input: 24 8% 24%;
-    --ring: 35 92% 55%;
+    /* Ink, not the brand. See the note in section 4. */
+    --primary: var(--ink);
+    --primary-foreground: var(--g-1);
 
-    /* Tighter than the shadcn default: this is a dense reading tool, and a
-     * large radius reads soft at the sizes these rows actually render. */
-    --radius: 0.375rem;
+    --secondary: var(--g-3);
+    --secondary-foreground: var(--ink);
+
+    --muted: var(--g-2);
+    --muted-foreground: var(--ink-3);
+
+    --accent: var(--g-4);
+    --accent-foreground: var(--ink);
+
+    /* Kept because a hundred call sites read it. It is now the brand rather
+     * than amber: the thing it marks is "this is the active/considered one",
+     * and amber in V2 means "needs a human", which is a different claim. */
+    --highlight: var(--brand);
+    --highlight-foreground: 0 0% 100%;
+
+    --destructive: var(--danger);
+    --destructive-foreground: 0 0% 100%;
+
+    --success-foreground: 160 60% 6%;
+    --warning-foreground: 30 40% 8%;
+
+    --border: 222 12% 16%;   /* opaque equivalent of --line-strong on canvas */
+    --input: 220 11% 22%;
+    --ring: var(--brand-text);
+
+    /* ======================================================================
+       6 · TYPE
+       ======================================================================
+       Three faces, three jobs, and the border between them is absolute:
+
+         SANS   every word that is part of the interface
+         SERIF  only inside a reading column
+         MONO   only quantities — timecodes, durations, counts, keycaps
+
+       A serif outside a reading column is a bug. The one sanctioned exception
+       is a summary fragment in a list row, and it is sanctioned because that
+       fragment IS reading. */
+    --t-display: 2.5rem;      /* 40 — the landing hero, once per product */
+    --t-title-l: 1.875rem;    /* 30 — a page, a meeting */
+    --t-title-1: 1.375rem;    /* 22 — a region that owns part of a page */
+    --t-title-2: 1.0625rem;   /* 17 — a group inside a region */
+    --t-title-3: 0.9375rem;   /* 15 — a row title, an inline heading */
+    --t-body: 0.84375rem;     /* 13.5 — interface body, and headline at 560 */
+    --t-callout: 0.78125rem;  /* 12.5 — secondary interface */
+    --t-foot: 0.71875rem;     /* 11.5 — metadata, and labels at 560 */
+    --t-cap: 0.65625rem;      /* 10.5 — badges, keycaps */
+
+    /* THE READING MEASURE. 16.5px at 1.62 in a 680px column is ~74 characters.
+     * Below 62 the eye returns too often; above 80 it loses the line. A
+     * ninety-minute transcript is the longest thing anybody reads here, and
+     * nothing in the shell is allowed to take width from it — which is why
+     * there is no navigation column. */
+    --t-read: 1.03125rem;     /* 16.5 */
+    --lh-read: 1.62;
+    --measure: 680px;
+    --margin-col: 400px;
+    --col-gap: 40px;
+    --doc: 1120px;            /* measure + gap + margin */
+
+    /* ======================================================================
+       7 · SPACE, RADIUS, DEPTH
+       ======================================================================
+       Radius communicates how far a thing is from the page — and content
+       groups get none at all. A transcript, a settings list and a table are
+       PART of the page rather than objects on it, and rounding everything is
+       the most reliable way to make a product look like a deck of cards. */
+    --radius: 0.375rem;       /* --r-sm: button, input, menu item */
+    --r-xs: 0.25rem;          /* badge, keycap */
+    --r-md: 0.625rem;         /* a grouped surface that genuinely is one object */
+    --r-lg: 0.875rem;         /* sheet, dialog, popover */
+    --r-xl: 1.25rem;          /* the floating dock */
+
+    --band: 48px;             /* the whole of the permanent chrome */
+
+    /* Short and dark. The half-pixel white inset is what actually separates a
+     * floating layer from content: it reads as the lit top edge of a physical
+     * thing and it survives at any zoom, which a blurred shadow does not. */
+    --e-1: inset 0 0 0 0.5px rgb(var(--line));
+    --e-2: 0 1px 2px rgb(0 0 0 / 0.4), 0 0 0 0.5px rgb(255 255 255 / 0.07);
+    --e-3: 0 10px 28px -10px rgb(0 0 0 / 0.66), 0 2px 6px rgb(0 0 0 / 0.3),
+      0 0 0 0.5px rgb(255 255 255 / 0.08);
+    --e-4: 0 18px 50px -14px rgb(0 0 0 / 0.74), 0 4px 12px rgb(0 0 0 / 0.34),
+      0 0 0 0.5px rgb(255 255 255 / 0.09);
+
+    /* GLASS — the functional layer, and only the functional layer. The band,
+     * the dock, the command palette, a summoned sheet, menus. Never the
+     * content layer, and never inside another glass surface. The saturate() is
+     * what stops a translucent dark panel going muddy over dark content. */
+    --glass: 19 21 26 / 0.72;
+    --glass-panel: 28 32 40 / 0.93;  /* a summoned panel is LIGHTER than the page */
+    --glass-filter: saturate(1.6) blur(28px);
+
+    /* ======================================================================
+       8 · MOTION — four durations, two curves
+       ====================================================================== */
+    --m-press: 90ms;   /* a control changing state */
+    --m-pop: 140ms;    /* a menu, a popover, a tooltip */
+    --m-panel: 200ms;  /* a sheet, a panel, a reading mode */
+    --m-modal: 260ms;  /* a dialog — the largest thing that moves */
+    --ease: cubic-bezier(0.32, 0.72, 0, 1);
+    --ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
   }
 }
 
@@ -86,9 +246,146 @@
   body {
     @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
+    font-size: var(--t-body);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
   ::selection {
-    background-color: hsl(var(--highlight) / 0.28);
+    background-color: hsl(var(--brand) / 0.32);
+    color: hsl(var(--ink));
+  }
+
+  /* ONE FOCUS TREATMENT, everywhere, never suppressed.
+   * Two rings: the inner is the canvas colour so the outer reads cleanly even
+   * on a light fill, and the outer is brand-as-text at 6.17:1 — comfortably
+   * past the 3:1 WCAG 2.4.11 asks of a focus indicator. Applied on
+   * :focus-visible only, so a pointer never sees it and a keyboard always
+   * does. */
+  :focus-visible {
+    outline: none;
+    box-shadow:
+      0 0 0 2px hsl(var(--g-1)),
+      0 0 0 4px hsl(var(--brand-text));
+    border-radius: var(--radius);
+  }
+}
+
+@layer components {
+  /* ==========================================================================
+     THE BAND — the whole of the permanent chrome
+     ==========================================================================
+     48px. Glass, because it is the functional layer sitting above content,
+     which is the only thing glass is for here. */
+  .v2-band {
+    background: rgb(var(--glass));
+    -webkit-backdrop-filter: var(--glass-filter);
+    backdrop-filter: var(--glass-filter);
+    box-shadow:
+      0 1px 0 rgb(var(--line)),
+      inset 0 0.5px 0 rgb(255 255 255 / 0.1);
+  }
+  /* While recording, the band IS the state — it turns rather than gaining a
+     pill beside everything else. */
+  .v2-band[data-recording="true"] {
+    background: rgb(28 12 11 / 0.72);
+    box-shadow:
+      0 1px 0 hsl(var(--danger) / 0.2),
+      inset 0 0.5px 0 rgb(255 255 255 / 0.1);
+  }
+
+  /* A summoned surface: menu, palette, sheet, dock. Lighter than the page,
+     because a thing above content has more light on it. */
+  .v2-glass {
+    background: rgb(var(--glass-panel));
+    -webkit-backdrop-filter: var(--glass-filter);
+    backdrop-filter: var(--glass-filter);
+    box-shadow: var(--e-4), inset 0 0.5px 0 rgb(255 255 255 / 0.1);
+  }
+
+  /* ==========================================================================
+     THE SPREAD — the measure and its margin
+     ==========================================================================
+     680 + 40 + 400 = 1120. At 1440 that leaves 160px gutters; at 1280, 80.
+     Below 1160 the margin cannot hold a citation without wrapping a speaker's
+     name and the measure is not negotiable, so the margin stops being a column
+     and its contents interleave — the same adaptation the phone makes, which
+     means there is one fallback in the product rather than two. */
+  .v2-spread {
+    display: grid;
+    grid-template-columns: minmax(0, var(--measure));
+    justify-content: center;
+    column-gap: var(--col-gap);
+    width: 100%;
+    max-width: var(--doc);
+    margin-inline: auto;
+  }
+  @media (min-width: 1160px) {
+    .v2-spread {
+      grid-template-columns: var(--measure) var(--margin-col);
+      justify-content: start;
+    }
+  }
+  /* Where a page has nothing to put in the margin, the measure centres rather
+     than sitting left of an empty column. */
+  .v2-spread[data-margin="empty"] {
+    grid-template-columns: minmax(0, var(--measure));
+    justify-content: center;
+    max-width: var(--measure);
+  }
+
+  /* ==========================================================================
+     THE READING COLUMN
+     ==========================================================================
+     The one place the serif is allowed. */
+  .v2-read {
+    font-family: var(--font-serif), ui-serif, Georgia, serif;
+    font-size: var(--t-read);
+    line-height: var(--lh-read);
+    font-weight: 400;
+    color: hsl(var(--ink-2));
+    font-variation-settings: "opsz" 16;
+  }
+  @media (max-width: 640px) {
+    /* Up, not down: a phone is held closer and read in worse light. */
+    .v2-read {
+      font-size: 1.0625rem;
+    }
+  }
+
+  /* A group label. Sentence case, sans, no rule, no uppercase mono — the
+     convention every well-made grouped list has used for fifteen years, and
+     quiet enough to use often. */
+  .v2-label {
+    font-size: var(--t-foot);
+    line-height: 1.35;
+    font-weight: 560;
+    letter-spacing: 0.02em;
+    color: hsl(var(--ink-3));
+  }
+
+  /* ==========================================================================
+     MARGIN NOTE — the signature component
+     ==========================================================================
+     Not a card: no fill, no border, no radius. One 1px rule on the left edge
+     and text. The rule does the work a card would do at a fraction of the
+     visual cost.
+
+     In production it carries only anchored data that actually exists — a
+     moment (highlight, bookmark, note) at its timestamp, or an action item at
+     its source second. The cross-meeting relationships the V2 concept put here
+     are not implemented; see docs/v2-implementation/feature-parity.md. */
+  .v2-note {
+    padding: 1px 0 1px 0.75rem;
+    border-left: 1px solid hsl(var(--brand-text) / 0.34);
+  }
+  .v2-note[data-tone="warning"] {
+    border-left-color: hsl(var(--warning) / 0.42);
+  }
+  .v2-note[data-tone="success"] {
+    border-left-color: hsl(var(--success) / 0.4);
+  }
+  .v2-note[data-tone="quiet"] {
+    border-left-color: rgb(var(--line-strong));
   }
 }
 
@@ -100,116 +397,59 @@
     font-feature-settings: "tnum" 1;
   }
 
+  /* Content that runs under a floating dock fades rather than being cut by a
+   * hard edge. */
+  .fade-b {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 7rem), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 7rem), transparent);
+  }
+
   /*
    * Scrolls, shows no scrollbar.
    *
-   * Two places, for two versions of the same reason.
-   *
    * The composer, where the box is a few lines tall and a permanent bar down
-   * its right-hand side is more furniture than the thing it is measuring. The
-   * caret is the position indicator there, and the browser keeps it in view.
+   * its right-hand side is more furniture than the thing it is measuring —
+   * the caret is the position indicator there and the browser keeps it in
+   * view. And the band's own overflow on a narrow window.
    *
-   * The meeting list on Home, where the bar sits on the seam between the
-   * middle column and the chat pane — a second vertical line a few pixels from
-   * the border, drawn by the OS in a style the app has no say in. The list
-   * cannot hide the fact that it continues: it is grouped under dated
-   * headings and the fold falls across a card, which says "more below" more
-   * plainly than a thumb does.
-   *
-   * Not on a transcript or a conversation. There the scrollbar is the only
-   * thing saying how much of it there is, and the thumb is how somebody gets
-   * to the end of an hour of talk in one throw; taking it away hides the
-   * extent of the content rather than tidying it.
+   * Never on a transcript or a conversation. There the scrollbar is the only
+   * thing saying how much of it there is.
    */
-  .scrollbar-none {
+  .no-scrollbar {
     scrollbar-width: none;
     -ms-overflow-style: none;
   }
-
-  .scrollbar-none::-webkit-scrollbar {
+  .no-scrollbar::-webkit-scrollbar {
     display: none;
-  }
-}
-
-/* The design system runs at motion 2/10 — transitions are there to show
- * causality, not to perform. Honour the OS setting regardless. */
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
-}
-
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
-  }
-  .hero-grid {
-    background-image:
-      linear-gradient(to right, hsl(var(--border) / 0.5) 1px, transparent 1px),
-      linear-gradient(to bottom, hsl(var(--border) / 0.5) 1px, transparent 1px);
-    background-size: 40px 40px;
-    -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, #000 60%, transparent 100%);
-    mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, #000 60%, transparent 100%);
-  }
-}
-
-/* Paper is white whatever the screen is.
- *
- * This used to be one line — force a white background — and it worked only
- * because the screen palette was light and the ink was already dark. With one
- * dark theme, that line alone prints near-white text onto white paper: a blank
- * page, and one nobody discovers until they need the printout. So the palette
- * is inverted back for print rather than the background alone, which also
- * covers every card, border and muted caption that would otherwise carry its
- * dark surface into the PDF and eat a cartridge doing it.
- */
-@media print {
-  :root {
-    color-scheme: light;
-
-    --background: 0 0% 100%;
-    --foreground: 24 10% 10%;
-
-    --card: 0 0% 100%;
-    --card-foreground: 24 10% 10%;
-
-    --popover: 0 0% 100%;
-    --popover-foreground: 24 10% 10%;
-
-    --primary: 24 10% 10%;
-    --primary-foreground: 0 0% 100%;
-
-    --secondary: 40 18% 94%;
-    --secondary-foreground: 24 10% 10%;
-
-    --muted: 0 0% 100%;
-    --muted-foreground: 25 6% 35%;
-
-    --accent: 40 22% 93%;
-    --accent-foreground: 24 10% 10%;
-
-    /* Darker than on screen: amber that reads as emphasis on a dark surface is
-     * barely there on paper, and greyscale printers flatten it further. */
-    --highlight: 32 95% 38%;
-    --highlight-foreground: 0 0% 100%;
-
-    --destructive: 0 72% 40%;
-    --success: 152 45% 28%;
-    --warning: 32 95% 38%;
-
-    --border: 24 6% 75%;
-    --input: 24 6% 75%;
   }
 
   .no-print {
-    display: none !important;
+    @media print {
+      display: none !important;
+    }
   }
-  body {
-    background: #fff;
+}
+
+/*
+ * REDUCED MOTION — removed, not slowed.
+ *
+ * A 0.01ms transition still fires a paint and still animates; what somebody
+ * who sets this preference is asking for is for things to be where they are
+ * going to be. Transforms are dropped entirely and opacity is instant.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --m-press: 0ms;
+    --m-pop: 0ms;
+    --m-panel: 0ms;
+    --m-modal: 0ms;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0ms !important;
+    scroll-behavior: auto !important;
   }
 }
