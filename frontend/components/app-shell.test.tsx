@@ -357,3 +357,63 @@ describe("the search shortcut", () => {
     added.mockRestore();
   });
 });
+
+/**
+ * The pane, and the control that puts it away.
+ *
+ * <p>`open` defaults to **true**, so a shell with no toggle is a shell whose
+ * side pane cannot be closed — a 26rem column beside every meeting with nothing
+ * to dismiss it. The V2 rewrite dropped this button and nothing failed: the
+ * pane still rendered, the chat still worked, and the only thing missing was
+ * the way out.
+ *
+ * <p>It matters more below `lg`, where the pane is a block stacked under the
+ * page rather than a column beside it. There the button is what says the chat
+ * is down there at all.
+ */
+describe("the side pane's toggle", () => {
+  it("is offered once a page has filled the pane", () => {
+    shell(<SidePane><p>Ask this meeting</p></SidePane>);
+
+    expect(screen.getByRole("button", { name: "Hide the side panel" })).toBeInTheDocument();
+  });
+
+  it("is not offered on a page that has not", () => {
+    // A control for a thing that is not there.
+    shell();
+
+    expect(screen.queryByRole("button", { name: /side panel/ })).not.toBeInTheDocument();
+  });
+
+  it("closes the pane, and says so", async () => {
+    const { container } = shell(<SidePane><p>Ask this meeting</p></SidePane>);
+    expect(container.querySelector("aside")).not.toHaveClass("hidden");
+
+    await userEvent.click(screen.getByRole("button", { name: "Hide the side panel" }));
+
+    expect(container.querySelector("aside")).toHaveClass("hidden");
+    expect(screen.getByRole("button", { name: "Show the side panel" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+  });
+
+  it("opens it again", async () => {
+    const { container } = shell(<SidePane><p>Ask this meeting</p></SidePane>);
+    await userEvent.click(screen.getByRole("button", { name: "Hide the side panel" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "Show the side panel" }));
+
+    expect(container.querySelector("aside")).not.toHaveClass("hidden");
+  });
+
+  it("keeps the pane mounted while it is closed", async () => {
+    // Destroying it would throw away a half-typed question and leave `SidePane`
+    // with nowhere to render. Hidden, never unmounted.
+    shell(<SidePane><p>Ask this meeting</p></SidePane>);
+
+    await userEvent.click(screen.getByRole("button", { name: "Hide the side panel" }));
+
+    expect(document.getElementById(SIDE_PANE_ID)).toHaveTextContent("Ask this meeting");
+  });
+});

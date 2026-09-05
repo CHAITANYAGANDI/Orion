@@ -44,13 +44,24 @@ const DialogContent = React.forwardRef<
         // `truncate` and `min-w-0` inside a dialog starts working again. Here
         // rather than in each dialog, because every one of them is one long
         // filename, URL or meeting title away from the same bug.
-        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg grid-cols-[minmax(0,1fr)] translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 sm:rounded-lg",
+        //
+        // `max-h` and `overflow-y-auto` are the phone half of the same problem.
+        // A dialog centred on a 844px-tall viewport with more content than fits
+        // has its top and bottom outside the window, and the close button goes
+        // with them -- so the way out of a dialog is off screen. Capping it at
+        // the viewport minus a margin and scrolling the inside keeps every
+        // dialog dismissible at every height, without any of them having to
+        // know how tall they are.
+        "fixed left-[50%] top-[50%] z-50 grid max-h-[calc(100dvh-2rem)] w-[calc(100vw-1.5rem)] max-w-lg grid-cols-[minmax(0,1fr)] translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto rounded-lg border bg-background p-5 shadow-lg duration-200 sm:w-full sm:p-6",
         className
       )}
       {...props}
     >
       {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:outline-none">
+      {/* 44px of tap target around a 16px glyph. The close button is the
+          one control in a dialog somebody reaches for in a hurry, and on a
+          phone it was a 16px square in the corner. */}
+      <DialogPrimitive.Close className="absolute right-2 top-2 flex h-10 w-10 items-center justify-center rounded-md opacity-70 transition-opacity hover:opacity-100 focus:outline-none">
         <X className="h-4 w-4" />
         <span className="sr-only">Close</span>
       </DialogPrimitive.Close>

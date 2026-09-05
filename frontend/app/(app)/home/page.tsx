@@ -195,7 +195,12 @@ export default function HomePage() {
           page — the chat and the action items — is a pane of the shell, so it
           runs the full height of the window and this page does not state its
           width. See components/side-pane.tsx. */}
-      <section className="scrollbar-none h-[calc(100vh-var(--band))] overflow-y-auto px-4 py-6 lg:px-6">
+      {/* A column of its own from `lg` up, where the chat sits beside it and
+          each scrolls independently. Below that the pane is stacked underneath,
+          so a list that consumed exactly the viewport put it precisely one
+          screen down with nothing to say so — the page scrolls as one document
+          instead, and the pane is simply the next thing on it. */}
+      <section className="scrollbar-none px-4 py-6 lg:h-[calc(100vh-var(--band))] lg:overflow-y-auto lg:px-6">
         <div className="mx-auto max-w-3xl">
           <Masthead meetings={data?.content} />
 

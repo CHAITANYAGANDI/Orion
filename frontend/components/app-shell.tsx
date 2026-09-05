@@ -45,7 +45,8 @@ import * as React from "react";
 import { usePathname } from "next/navigation";
 import { bandChrome } from "@/lib/chrome";
 import { ASK, HOME } from "@/lib/routes";
-import { SIDE_PANE_ID, useSidePane } from "@/components/side-pane";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import { SIDE_PANE_ID, toggleSidePane, useSidePane } from "@/components/side-pane";
 import { RecordingProvider, useRecording } from "@/lib/recording-context";
 import { SearchCommand } from "@/components/search-command";
 import { closeSearch, openSearch, useSearchOverlay } from "@/lib/search-overlay";
@@ -201,6 +202,39 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
               </div>
             )}
             <div id={HEADER_SLOT_ID} className="flex items-center gap-2 py-3 empty:hidden" />
+
+            {/*
+             * The way to the pane, and the way out of it.
+             *
+             * <p>Only when a page has filled it. It is the one control in this
+             * row that is about the window rather than about the document, and
+             * without it the pane cannot be closed at all — it opens by default,
+             * so a rewrite that dropped this button left a 26rem column nobody
+             * could put away.
+             *
+             * <p>It matters more below `lg`, where the pane is a block stacked
+             * under the page rather than a column beside it: there the button
+             * is what says the chat is down there, on a screen where "scroll to
+             * the bottom of a conversation list" is not a discoverable
+             * instruction.
+             */}
+            {pane.occupied && (
+              <div className="flex items-center py-3">
+                <button
+                  type="button"
+                  onClick={toggleSidePane}
+                  aria-label={pane.open ? "Hide the side panel" : "Show the side panel"}
+                  aria-pressed={pane.open}
+                  className="flex h-9 w-9 items-center justify-center rounded-md text-ink-3 transition-colors duration-press ease-soft hover:bg-surface-hover hover:text-ink"
+                >
+                  {pane.open ? (
+                    <PanelRightClose className="h-4 w-4" />
+                  ) : (
+                    <PanelRightOpen className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+            )}
           </div>
 
           {/*

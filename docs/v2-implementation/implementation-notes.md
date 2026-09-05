@@ -973,3 +973,72 @@ and furniture.
 `npm run typecheck` clean · `npm run lint` clean (same two pre-existing warnings)
 · `npx vitest run` 120 files, 2271 tests, all passing · `npm run build`
 succeeds.
+
+---
+
+## Phase 14 — responsive web
+
+Web browser widths only. No React Native, Expo, Flutter, Swift, Kotlin, iOS or
+Android project, and no native configuration of any kind — this is the same
+Next.js app at 1440, 1280, 1024, 768 and 390.
+
+### The regression this phase found
+
+**The side pane could not be closed.** `open` defaults to `true`, and the phase 2
+shell rewrite dropped the toggle the old header carried. Nothing failed: the
+pane rendered, the chat worked, and the only thing missing was the way out — a
+26rem column beside every meeting with nothing to dismiss it.
+
+It is back, in the page-action row beside the folder actions and the header
+slot, with five tests. It matters more below `lg`, where the pane is a block
+stacked under the page rather than a column beside it: there the button is what
+says the chat is down there at all.
+
+### Narrow-width destinations
+
+**The side surface stays one surface.** No second Ask composer, no separate
+mobile chat, no duplicate state. From `lg` up it is a column that scrolls
+independently; below that it is a stacked section, reached by the toggle or by
+scrolling.
+
+**Home scrolls as one document below `lg`.** It was `h-[calc(100vh-var(--band))]
+overflow-y-auto` at every width, which put the pane *precisely* one screen down
+with nothing to say so. The fixed height is now `lg:` only.
+
+**Navigation below `md`** is the bottom tabs from phase 2 — Now, Library, Ask
+and Record, 56px tall, lifting above the recording bar via `--recording-bar`.
+The band keeps Search, Import, notifications and account, so all eight required
+destinations are reachable and none is duplicated.
+
+### Dialogs on a phone
+
+`DialogContent` gained `max-h-[calc(100dvh-2rem)]` + `overflow-y-auto` and
+`w-[calc(100vw-1.5rem)]`. A dialog centred on an 844px viewport with more
+content than fits had its top and bottom outside the window — **and the close
+button went with them**, so the way out of a dialog was off screen. Fixed once,
+here, rather than in each of the nine dialogs.
+
+The close button is a 40px target around a 16px glyph; it was a 16px square in
+the corner, and it is the one control in a dialog somebody reaches for in a
+hurry.
+
+### What already contracted correctly
+
+`.v2-spread` is `minmax(0, var(--measure))` below 1160px, and `max-w-measure` is
+a maximum — so the reading column is already `width: 100%; max-width: 680px`
+with page padding, never a forced minimum. The transport, the recording bar, the
+meeting spec line, the talk-time rows and `ActionItemDetails` all wrap or stack
+at their own breakpoints already.
+
+### Testing
+
+Five new tests, all for **structural React logic** — the toggle's presence,
+absence, both directions, and that the pane stays mounted while closed. No tests
+were written against Tailwind class strings to inflate coverage; CSS layout
+behaviour is browser QA and is listed as such in the final report.
+
+### Verified at the end of the phase
+
+`npm run typecheck` clean · `npm run lint` clean (same two pre-existing warnings)
+· `npx vitest run` 120 files, 2276 tests, all passing · `npm run build`
+succeeds.
