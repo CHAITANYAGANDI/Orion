@@ -449,3 +449,81 @@ that the suite fails to collect with an error naming `sonner`.
 
 `npm run typecheck` clean · `npm run lint` clean (same two pre-existing warnings)
 · `npx vitest run` 119 files, 2209 tests, all passing · `npm run build` succeeds.
+
+
+---
+
+## Phase 7 — the brief
+
+Presentation only. Every capability below was enumerated from the production
+code **before** a line changed, and every one still works.
+
+### The inventory, and where each one ended up
+
+| Capability | Kept | Now |
+|---|---|---|
+| Structured sections, switched on `kind` | yes | headings in sans at `title-3`, prose in the reading serif |
+| `prose` / `bullets` / outline-group shapes | yes | unchanged logic; one bullet glyph across all three, where `list-disc` used to draw a different one in the legacy path |
+| **Empty section keeps its heading** | yes | "Not discussed." in `ink-4` italic — a finding, not a gap |
+| Outline heading → seek, only when `startSeconds != null` | yes | timecode in mono/tabular, brand on hover |
+| Unanchored heading stays plain text | yes | no link to a guess |
+| Topics discussed, read from `key === "outline"` | yes | quietened to a hairline and a raised surface |
+| Verified quotations, playable, speaker + timecode | yes | `.v2-note` — the same 1px rule a chat citation gets |
+| "Unknown speaker" fallback | yes | unchanged |
+| Quotations hidden while translated | yes | unchanged |
+| Pre-template summaries (`shortSummary`, `keyPoints`, `detailedSummary`) | yes | lead one step above body; the rest in the reading serif |
+| Stale banner + "Rewrite it" | yes | `.v2-note[data-tone="warning"]` instead of a tinted box |
+| Stale banner shows the refusal instead of the button on a spent account | yes | unchanged |
+| Template picker, "Rewriting…", refusal title | yes | untouched — it is on the mode row, styled in phase 6 |
+| Translation (`view = translation ?? summary`, sections from the translation) | yes | unchanged |
+| RTL from `translated.rightToLeft` | yes | `dir` moved onto the new wrapper |
+| `loading` / `error` + retry / `empty` / `waiting` / `generating` | yes | error and empty unchanged in wording; loading is now brief-shaped rather than one grey block |
+| `onSeek` shared with transcript and chat | yes | unchanged |
+
+Nothing was added. There are no sample sections, no placeholder boxes, and
+nothing renders a heading over data the API did not return.
+
+### The one structural change: it is a document, not a card
+
+`<Card><CardContent>` is gone. A brief is what the page is *about* — part of the
+page rather than an object on it — and a fill with a 10px radius around a body
+of text is what makes a product look like a deck of cards. What separates one
+section from the next is space and a heavier heading, which is what has
+separated sections in printed documents for four hundred years.
+
+The prose is in the reading serif; the headings are not. A heading is interface
+— something you scan past to find the part you want — and that border is
+absolute.
+
+### Two things the tests found
+
+Both are pre-existing behaviour that my first draft of the tests got wrong, and
+both are worth writing down:
+
+1. **A blank summary body renders as an empty brief, not as "No summary
+   available."** `view = translation ?? summary` is truthy for a row with every
+   field empty, so content wins. That is correct — saying there is no summary
+   over a row that exists is the same class of lie as saying it over a full one
+   — and "No summary available." is reachable only from a settled **404**, which
+   is how `getSummary` reports absence.
+2. **Following an anchored outline heading switches to the transcript.**
+   `playFrom` changes tab when it is not already there. Seeking under a brief,
+   where the reader cannot see the timeline, would be a control acting off
+   screen.
+
+### Coverage
+
+`app/(app)/meetings/[id]/page.test.tsx` grew from 21 to **44** — the same
+harness extended, not a second one. The summary query now goes through a switch
+(`ok` / `loading` / `error` / `absent` / `stale-over-error`) because it is the
+one query with more than one interesting state, and three of those states used
+to render as the same screen.
+
+`SummaryPanel` is a local function rather than an exported component, so the page
+is the only place it can be exercised at all.
+
+### Verified at the end of the phase
+
+`npm run typecheck` clean · `npm run lint` clean (same two pre-existing warnings)
+· `npx vitest run` 119 files, 2232 tests, all passing · `npm run build`
+succeeds.

@@ -1502,10 +1502,22 @@ function TemplatePicker({ meetingId, current }: { meetingId: string; current: st
 /**
  * One section, drawn by its `kind`.
  *
- * The switch is on `kind` rather than on which arrays are non-empty, so an
+ * <p>The switch is on `kind` rather than on which arrays are non-empty, so an
  * empty section still renders its heading. That is the point: "Budget" with
  * nothing under it tells the reader budget never came up, which is a finding.
  * Inferring the shape from the data would silently hide it.
+ *
+ * <h2>Set as a document, not as a card</h2>
+ *
+ * <p>A brief is part of the page rather than an object on it, so it has no
+ * fill, no border and no radius — rounding a body of text is the most reliable
+ * way to make a product look like a deck of cards. What separates one section
+ * from the next is space and a heading in a heavier weight, which is what has
+ * separated sections in printed documents for four hundred years.
+ *
+ * <p>The prose is in the reading serif. The headings are not: a heading is
+ * interface — a thing you scan past to find the part you want — and the border
+ * between the two faces is absolute. See the note at the top of app/layout.tsx.
  */
 function SummarySectionView({
   section,
@@ -1521,25 +1533,28 @@ function SummarySectionView({
 
   return (
     <section>
-      <h3 className="mb-2 text-sm font-semibold tracking-tight">{section.title}</h3>
+      <h3 className="mb-2 text-title-3 font-headline text-ink">{section.title}</h3>
 
       {empty ? (
-        <p className="text-sm italic text-muted-foreground">Not discussed.</p>
+        // A finding, not a gap. Said in the quietest tier that still carries
+        // meaning, because it IS meaning.
+        <p className="v2-read italic text-ink-4">Not discussed.</p>
       ) : section.kind === "prose" ? (
-        <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
-          {section.text}
-        </p>
+        <p className="v2-read whitespace-pre-wrap">{section.text}</p>
       ) : section.kind === "bullets" ? (
-        <ul className="space-y-1.5 text-sm text-muted-foreground">
+        <ul className="space-y-2">
           {section.bullets.map((b, i) => (
-            <li key={i} className="flex gap-2">
-              <span aria-hidden className="mt-[0.45rem] h-1 w-1 shrink-0 rounded-full bg-muted-foreground/60" />
+            <li key={i} className="v2-read flex gap-2.5">
+              <span
+                aria-hidden
+                className="mt-[0.6em] h-1 w-1 shrink-0 rounded-full bg-ink-4"
+              />
               <span>{b}</span>
             </li>
           ))}
         </ul>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-5">
           {section.groups.map((g, i) => (
             <div key={i}>
               {/*
@@ -1558,20 +1573,28 @@ function SummarySectionView({
                   type="button"
                   onClick={() => onSeek(g.startSeconds as number)}
                   title={`Play from ${timecode(g.startSeconds)}`}
-                  className="group mb-1.5 flex items-baseline gap-2 text-left"
+                  className="group mb-2 flex items-baseline gap-2 text-left"
                 >
-                  <span className="text-sm font-medium group-hover:underline">{g.heading}</span>
-                  <span className="tabular font-mono text-xs text-muted-foreground">
+                  <span className="text-callout font-headline text-ink group-hover:underline">
+                    {g.heading}
+                  </span>
+                  {/* Mono and tabular, like every other quantity in the
+                      product. Brand on hover, because following it is Reverie
+                      taking you somewhere. */}
+                  <span className="tabular font-mono text-cap text-ink-4 transition-colors group-hover:text-brand-text">
                     {timecode(g.startSeconds)}
                   </span>
                 </button>
               ) : (
-                <h4 className="mb-1.5 text-sm font-medium">{g.heading}</h4>
+                <h4 className="mb-2 text-callout font-headline text-ink">{g.heading}</h4>
               )}
-              <ul className="space-y-1.5 text-sm text-muted-foreground">
+              <ul className="space-y-2">
                 {g.bullets.map((b, j) => (
-                  <li key={j} className="flex gap-2">
-                    <span aria-hidden className="mt-[0.45rem] h-1 w-1 shrink-0 rounded-full bg-muted-foreground/60" />
+                  <li key={j} className="v2-read flex gap-2.5">
+                    <span
+                      aria-hidden
+                      className="mt-[0.6em] h-1 w-1 shrink-0 rounded-full bg-ink-4"
+                    />
                     <span>{b}</span>
                   </li>
                 ))}
@@ -1680,14 +1703,20 @@ function SummaryPanel({
   const current = summary?.templateSlug ?? "general";
 
   return (
-    <Card>
-      <CardContent
-        className="space-y-6 pt-6"
-        // Set from the language rather than sniffed from the characters:
-        // Arabic and Hebrew laid out left-to-right are not merely ugly, they
-        // are hard to read.
-        dir={translated?.rightToLeft ? "rtl" : undefined}
-      >
+    /*
+     * A document, not a card.
+     *
+     * <p>This was `<Card><CardContent>`. A brief is the thing the page is
+     * about: it is PART of the page rather than an object on it, and a fill and
+     * a 10px radius around a body of text are what make a product look like a
+     * deck of cards. What is left is the measure it is set in and the space
+     * between its sections.
+     *
+     * <p>`dir` moved with it, unchanged. Set from the language rather than
+     * sniffed from the characters: Arabic and Hebrew laid out left-to-right are
+     * not merely ugly, they are hard to read.
+     */
+    <div className="space-y-7" dir={translated?.rightToLeft ? "rtl" : undefined}>
         {/* What we have beats any news about the request that fetched it: a
             refetch that fails must not blank a summary somebody is reading. */}
         {view ? (
@@ -1699,9 +1728,15 @@ function SummaryPanel({
                 instead of made. Hidden while a translation is showing: it
                 describes the original, which isn't what's on screen. */}
             {summary?.stale && !translated && (
-              <div className="no-print flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
-                <span className="flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
+              <div
+                className="no-print v2-note flex flex-wrap items-center justify-between gap-3 py-1 text-callout"
+                data-tone="warning"
+              >
+                {/* A margin note, not a tinted box. The 1px rule in the warning
+                    hue does the work a filled panel would do, and it does not
+                    put a coloured slab above the first line of the brief. */}
+                <span className="flex items-center gap-2 text-ink-2">
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-warning" />
                   The transcript changed after this summary was written.
                 </span>
                 {/* On a spent account the offer is withdrawn rather than
@@ -1711,7 +1746,7 @@ function SummaryPanel({
                     the summary and the transcript below it disagree, but the
                     reader needs the reason instead of the button. */}
                 {refusal ? (
-                  <span className="text-xs text-muted-foreground">{refusal}</span>
+                  <span className="text-foot text-ink-3">{refusal}</span>
                 ) : (
                   <Button
                     variant="outline"
@@ -1738,14 +1773,17 @@ function SummaryPanel({
                     walkthrough. */}
                 {topics.length > 0 && (
                   <div>
-                    <h3 className="mb-2 text-sm font-semibold text-muted-foreground">
-                      Topics discussed
-                    </h3>
+                    <h3 className="v2-label mb-2">Topics discussed</h3>
+                    {/* Still labels rather than a sentence: they are scanned,
+                        not read. Quietened to a hairline and a raised surface —
+                        these are not operable, and an edge at 3:1 on something
+                        that cannot be pressed is a promise the page does not
+                        keep. */}
                     <div className="flex flex-wrap gap-1.5">
                       {topics.map((t, i) => (
                         <span
                           key={i}
-                          className="rounded-full border bg-muted/50 px-2.5 py-1 text-xs"
+                          className="rounded-full border border-line bg-surface-raised px-2.5 py-1 text-cap text-ink-2"
                         >
                           {t}
                         </span>
@@ -1764,20 +1802,33 @@ function SummaryPanel({
                     verified, which is a normal outcome rather than a failure. */}
                 {quotes.length > 0 && (
                   <div>
-                    <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
-                      <Quote className="h-4 w-4" /> Key quotations
+                    <h3 className="v2-label mb-3 flex items-center gap-1.5">
+                      <Quote className="h-3.5 w-3.5" /> Key quotations
                     </h3>
-                    <div className="space-y-2">
+                    {/* The signature V2 treatment for evidence: one 1px stroke
+                        on the left edge and text. No fill, no border, no
+                        radius. The stroke does the work a card would do at a
+                        fraction of the visual cost, and it is the same device
+                        a citation gets under a chat answer — so the two read as
+                        one idea rather than two.
+
+                        The quotation itself is in the reading serif because it
+                        is the one part of a brief that is verbatim speech. */}
+                    <div className="space-y-3">
                       {quotes.map((q, i) => (
                         <button
                           key={i}
                           onClick={() => onSeek(q.start)}
-                          className="block w-full rounded-md border-l-2 border-primary/40 bg-muted/40 px-3 py-2 text-left transition-colors hover:bg-muted"
+                          className="v2-note block w-full text-left transition-colors hover:border-l-brand-text"
                           title={`Play from ${timecode(q.start)}`}
                         >
-                          <span className="block text-sm italic">“{q.text}”</span>
-                          <span className="mt-1 block text-xs text-muted-foreground">
-                            {q.speaker || "Unknown speaker"} · {timecode(q.start)}
+                          <span className="v2-read block italic">“{q.text}”</span>
+                          <span className="mt-1 block font-mono text-cap uppercase text-ink-4">
+                            {q.speaker || "Unknown speaker"}{" "}
+                            <span className="text-ink-5" aria-hidden>
+                              ·
+                            </span>{" "}
+                            <span className="tabular">{timecode(q.start)}</span>
                           </span>
                         </button>
                       ))}
@@ -1790,19 +1841,34 @@ function SummaryPanel({
                  sections to lay out. A translation carries them, so it takes
                  the branch above. */
               <>
-                <p className="text-base">{view.shortSummary}</p>
+                {/* The lead. One step up from the body, which is the whole of
+                    the hierarchy a first paragraph needs. */}
+                <p className="v2-read text-[1.1875rem] leading-[1.55] text-ink">
+                  {view.shortSummary}
+                </p>
                 {view.keyPoints.length > 0 && (
                   <div>
-                    <h3 className="mb-2 text-sm font-semibold text-muted-foreground">Key points</h3>
-                    <ul className="list-inside list-disc space-y-1 text-sm">
-                      {view.keyPoints.map((k, i) => <li key={i}>{k}</li>)}
+                    <h3 className="mb-2 text-title-3 font-headline text-ink">Key points</h3>
+                    {/* A hang, not a tab stop, and the same bullet as every
+                        other list in a brief -- `list-disc` drew a different
+                        one here from the sections above. */}
+                    <ul className="space-y-2">
+                      {view.keyPoints.map((k, i) => (
+                        <li key={i} className="v2-read flex gap-2.5">
+                          <span
+                            aria-hidden
+                            className="mt-[0.6em] h-1 w-1 shrink-0 rounded-full bg-ink-4"
+                          />
+                          <span>{k}</span>
+                        </li>
+                      ))}
                     </ul>
                   </div>
                 )}
                 {view.detailedSummary && (
                   <div>
-                    <h3 className="mb-2 text-sm font-semibold text-muted-foreground">Detailed summary</h3>
-                    <p className="whitespace-pre-wrap text-sm text-muted-foreground">{view.detailedSummary}</p>
+                    <h3 className="mb-2 text-title-3 font-headline text-ink">Detailed summary</h3>
+                    <p className="v2-read whitespace-pre-wrap">{view.detailedSummary}</p>
                   </div>
                 )}
               </>
@@ -1811,7 +1877,13 @@ function SummaryPanel({
         ) : state === "waiting" || state === "generating" ? (
           <ProcessingSummary stage={state} />
         ) : state === "loading" ? (
-          <Skeleton className="h-24 w-full" />
+          // The shape of a brief rather than one grey block, so the column does
+          // not collapse and then jump when the real one lands.
+          <div className="space-y-3" aria-busy>
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-11/12" />
+            <Skeleton className="h-4 w-4/5" />
+          </div>
         ) : state === "error" ? (
           <ResourceLoadError
             title="Couldn't load the summary"
@@ -1825,8 +1897,7 @@ function SummaryPanel({
              `!summary.data`, which is also what a 500 looks like. */
           <EmptyText>No summary available.</EmptyText>
         )}
-      </CardContent>
-    </Card>
+    </div>
   );
 }
 
@@ -3237,6 +3308,13 @@ const SpokenWords = React.memo(function SpokenWords({
   );
 });
 
+/**
+ * An absence that was settled rather than assumed.
+ *
+ * <p>Every caller is gated on a settled, successful, genuinely empty response —
+ * never on `!data`, which is also what a 500 looks like. See
+ * lib/resource-state.
+ */
 function EmptyText({ children }: { children: React.ReactNode }) {
-  return <p className="py-6 text-center text-sm text-muted-foreground">{children}</p>;
+  return <p className="py-8 text-center text-callout text-ink-4">{children}</p>;
 }

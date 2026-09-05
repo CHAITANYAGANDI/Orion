@@ -29,17 +29,17 @@ export function ProcessingSummary({ stage }: { stage: "waiting" | "generating" }
       <Skeleton className="h-4 w-full" />
       <Skeleton className="h-4 w-11/12" />
       <Skeleton className="h-4 w-4/5" />
-      <p className="pt-1 text-sm text-muted-foreground">
+      <p className="pt-1 text-callout text-ink-3">
         {stage === "waiting" ? (
           <>
-            <span className="font-medium text-foreground">
+            <span className="font-headline text-ink">
               Summary is waiting for the transcript.
             </span>{" "}
             We&rsquo;ll generate it once transcription finishes.
           </>
         ) : (
           <>
-            <span className="font-medium text-foreground">Generating summary…</span> The
+            <span className="font-headline text-ink">Generating summary…</span> The
             transcript is ready and can be read now.
           </>
         )}
