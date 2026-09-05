@@ -918,3 +918,58 @@ narrowing what it reads. The result count is mono and tabular.
 `npm run typecheck` clean · `npm run lint` clean (same two pre-existing warnings)
 · `npx vitest run` 120 files, 2271 tests, all passing · `npm run build`
 succeeds.
+
+---
+
+## Phase 13 — notifications, account, settings
+
+### The audit
+
+**Notifications.** `NotificationBell` was restyled for the band in phase 2 (32px,
+`align="end"`, brand badge). Everything else is untouched: the unread count and
+its `9+` cap, the socket-driven refresh, Inbox/Unread filtering, mark-one-read,
+mark-all-read, delete-one, clear-all, day grouping, `ago()` timestamps, the
+`skip: !open` fetch, and `<Link href={n.link}>` navigation. The kinds are
+whatever the server writes — nothing was added, and there is no commitment,
+decision-reversal, memory-changed or promise-lifecycle notification anywhere,
+because production generates none.
+
+**Account menu.** Rebuilt in phase 2 and unchanged here: the avatar trigger with
+its accessible name, the identity block (name / address / "Development
+session"), the allowance card linking to `/settings/plans`, Account Settings,
+and Logout. Radix keyboard behaviour is untouched. Nothing was added.
+
+**Settings.** Two tabs — General and Plans — reached through a catch-all route,
+with `/privacy` and `/billing` still landing on the right one because
+notifications written months ago carry those links. All preserved: profile
+(name, photo, email, password), `LanguageRow`, the training statement, the email
+switches, retention with its `DELETE_PHRASE` confirmation, close-account, plan,
+usage, what-is-included, `settingsError` unwrapping the server's own sentence,
+every loading and save state. No route, contract or form changed.
+
+### What changed: it reads as a document now
+
+Settings was already sections rather than cards — the V2 work was width, type
+and furniture.
+
+- **896px → the measure.** `max-w-4xl` is a dashboard width, and every section
+  here is single-column prose and switches; the extra 216px was spent making
+  each line harder to read.
+- **The tab strip is the third underline in the product** — the same device the
+  band uses for its places and the meeting uses for its reading modes. One idea,
+  three surfaces.
+- **`ToggleRow` lost its border.** Six stacked toggles were six outlines and
+  five double-borders where they met: the classic settings page that reads as a
+  stack of cards. A hairline between them says the same thing. The whole row is
+  still the `<label>`, so the tap target is the width of the page.
+- **The Plans tab keeps exactly one grouped surface** — the plan itself, which
+  genuinely *is* one object, and that is what a radius and a fill are for. Usage
+  and "what is included" became sections; five boxed feature groups turned a
+  list of what the product does into a comparison table for a comparison that
+  does not exist, since there is one plan.
+
+### Verified at the end of the phase
+
+`npm run typecheck` clean · `npm run lint` clean (same two pre-existing warnings)
+· `npx vitest run` 120 files, 2271 tests, all passing · `npm run build`
+succeeds.

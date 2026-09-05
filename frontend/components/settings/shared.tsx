@@ -22,13 +22,18 @@ export function ToggleRow({
   onChange: (value: boolean) => void;
 }) {
   return (
-    <label className="flex cursor-pointer items-center justify-between gap-3 rounded-md border p-3">
-      <span className="text-sm">{label}</span>
+    /* A row, not a bordered box. Six of these stacked is six outlines and
+       five double-borders where they meet — the classic settings page that
+       reads as a stack of cards. A hairline between them and generous height
+       says the same thing with none of the furniture, and the whole row stays
+       the label so the tap target is the width of the page. */
+    <label className="flex cursor-pointer items-center justify-between gap-3 border-b border-line py-3 last:border-b-0">
+      <span className="text-callout text-ink-2">{label}</span>
       <input
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
-        className="h-4 w-4 accent-[hsl(var(--primary))]"
+        className="h-4 w-4 shrink-0 accent-[hsl(var(--brand))]"
       />
     </label>
   );

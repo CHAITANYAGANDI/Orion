@@ -208,7 +208,7 @@ export function NotificationBell({ onNavigate }: { onNavigate?: () => void } = {
         className="w-[min(24rem,calc(100vw-2rem))] p-0"
       >
         <div className="flex items-center justify-between gap-2 px-3 pb-1 pt-2.5">
-          <span className="text-base font-semibold">Notifications</span>
+          <span className="text-title-3 font-headline text-ink">Notifications</span>
           {/* Disabled rather than hidden when there is nothing unread. A control
               that vanishes teaches nobody it exists; one that is greyed out
               says both what it does and that there is nothing to do. */}

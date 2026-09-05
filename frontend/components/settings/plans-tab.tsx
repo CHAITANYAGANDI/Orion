@@ -21,7 +21,6 @@
 import * as React from "react";
 import { Check, Gauge } from "lucide-react";
 import { useGetUsageQuery } from "@/lib/api";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -50,35 +49,38 @@ function PlanCard() {
   return (
     <section aria-labelledby="plan-heading" className="space-y-3">
       <div>
-        <h2 id="plan-heading" className="text-lg font-semibold">
+        <h2 id="plan-heading" className="text-title-3 font-headline text-ink">
           Plans
         </h2>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-callout text-ink-3">
           Reverie has one plan. Everything the product does is in it.
         </p>
       </div>
 
-      <Card>
-        <CardContent className="pt-6">
+      {/* The one grouped surface on this page, and it earns it: a plan IS one
+          object, which is exactly what a radius and a fill are for. Everything
+          else here is a section of a document and has neither. */}
+      <div className="rounded-lg border border-line bg-surface-raised p-5">
+        <div>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <h3 className="text-xl font-semibold">{PLAN_NAME}</h3>
-              <p className="mt-0.5 text-sm text-muted-foreground">
+              <h3 className="text-title-2 font-headline text-ink">{PLAN_NAME}</h3>
+              <p className="mt-0.5 text-callout text-ink-3">
                 For everyone. There is no other tier.
               </p>
-              <p className="mt-3 text-3xl font-bold">Free</p>
+              <p className="mt-3 text-display font-headline text-ink">Free</p>
             </div>
             <Badge variant="success">Your current plan</Badge>
           </div>
 
-          <p className="mt-4 border-t pt-4 text-sm text-muted-foreground">
+          <p className="mt-4 border-t border-line pt-4 text-callout text-ink-3">
             Nothing on this page is a trial and nothing expires. Two numbers
             bind — 100 transcribed minutes and 3 imports, for the life of the
             account rather than per month — and both are shown below against
             what you have used.
           </p>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </section>
   );
 }
@@ -99,20 +101,23 @@ function UsageSection() {
 
   return (
     <section aria-labelledby="usage-heading" className="space-y-3">
-      <h2 id="usage-heading" className="flex items-center gap-2 text-lg font-semibold">
-        <Gauge className="h-4 w-4 text-muted-foreground" /> This account
+      <h2 id="usage-heading" className="flex items-center gap-2 text-title-3 font-headline text-ink">
+        <Gauge className="h-4 w-4 text-ink-3" /> This account
       </h2>
 
-      <Card>
-        <CardContent className="space-y-5 pt-6">
+      {/* A section, not a card. Two figures and two bars are a reading of the
+          account, and boxing them turns a preferences document into a
+          dashboard. */}
+      <div>
+        <div className="space-y-5">
           {isLoading || !data ? (
             <Skeleton className="h-24 w-full" />
           ) : (
             <>
               <div>
-                <div className="mb-1.5 flex items-baseline justify-between gap-4 text-sm">
-                  <span className="font-medium">Minutes transcribed</span>
-                  <span className="text-muted-foreground">
+                <div className="mb-1.5 flex items-baseline justify-between gap-4 text-callout">
+                  <span className="text-ink-2">Minutes transcribed</span>
+                  <span className="tabular font-mono text-cap text-ink-4">
                     {usageLabel(data.minutesUsed, data.minutesLimit)}
                   </span>
                 </div>
@@ -147,8 +152,8 @@ function UsageSection() {
               </div>
             </>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </section>
   );
 }
@@ -157,29 +162,31 @@ function UsageSection() {
 function IncludedSection() {
   return (
     <section aria-labelledby="included-heading" className="space-y-4">
-      <h2 id="included-heading" className="text-lg font-semibold">
+      <h2 id="included-heading" className="text-title-3 font-headline text-ink">
         What is included
       </h2>
 
+      {/* Sub-sections of one document, not five cards. This is a list of what
+          the product does; boxing each heading turns reading it into scanning
+          a comparison table for a comparison that does not exist -- there is
+          one plan. */}
       {INCLUDED.map((group) => (
-        <Card key={group.heading}>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">{group.heading}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
+        <div key={group.heading} className="border-b border-line pb-4 last:border-b-0">
+          <h3 className="v2-label mb-2">{group.heading}</h3>
+          <div className="space-y-2.5">
             {group.features.map((feature) => (
-              <div key={feature.label} className="flex items-start gap-3 text-sm">
-                <Check className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-hidden />
-                <span>
-                  <span className="block">{feature.label}</span>
+              <div key={feature.label} className="flex items-start gap-3 text-callout">
+                <Check className="mt-1 h-3.5 w-3.5 shrink-0 text-success" aria-hidden />
+                <span className="min-w-0">
+                  <span className="block text-ink-2">{feature.label}</span>
                   {feature.detail && (
-                    <span className="block text-muted-foreground">{feature.detail}</span>
+                    <span className="block text-foot text-ink-4">{feature.detail}</span>
                   )}
                 </span>
               </div>
             ))}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       ))}
     </section>
   );

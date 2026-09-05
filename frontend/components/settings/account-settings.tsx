@@ -35,15 +35,26 @@ export function AccountSettings() {
   const active = tabFromPath(pathname ?? "/settings");
 
   return (
-    <div className="mx-auto w-full max-w-4xl">
-      <h1 className="text-2xl font-semibold tracking-tight">Account Settings</h1>
+    /* A preferences document, set in the measure like every other document
+       in the product. It was 4xl (896px), which is a dashboard width — and
+       these are single-column sections of prose and switches, so the extra
+       216px was spent making each line harder to read. */
+    <div className="mx-auto w-full max-w-measure">
+      <h1 className="text-title-l font-headline text-ink">Account Settings</h1>
 
       {/* Scrolls sideways rather than wrapping. Tabs wrapped onto two rows on
           a narrow window read as two groups, and the grouping would be an
           accident of the viewport width. */}
+      {/* The same device the meeting's reading modes use and the band uses
+          for its places: a word, and a 2px ink rule on a boundary the layout
+          already has. Three underlines in the product, one idea.
+
+          Scrolls sideways rather than wrapping. Tabs wrapped onto two rows on
+          a narrow window read as two groups, and the grouping would be an
+          accident of the viewport width. */}
       <nav
         aria-label="Account settings"
-        className="mt-4 flex gap-1 overflow-x-auto border-b"
+        className="no-scrollbar mt-5 flex gap-6 overflow-x-auto border-b border-line"
       >
         {SETTINGS_TABS.map((tab) => (
           <Link
@@ -51,10 +62,10 @@ export function AccountSettings() {
             href={pathForTab(tab.id)}
             aria-current={tab.id === active ? "page" : undefined}
             className={cn(
-              "shrink-0 border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
+              "-mb-px shrink-0 border-b-2 px-0 pb-2.5 pt-1 text-callout transition-colors",
               tab.id === active
-                ? "border-primary text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground",
+                ? "border-ink font-headline text-ink"
+                : "border-transparent text-ink-3 hover:text-ink-2",
             )}
           >
             {tab.label}
@@ -62,7 +73,7 @@ export function AccountSettings() {
         ))}
       </nav>
 
-      <div className="py-6">
+      <div className="py-7">
         <TabBody tab={active} />
       </div>
     </div>

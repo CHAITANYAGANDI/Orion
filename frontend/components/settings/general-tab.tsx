@@ -281,10 +281,10 @@ function LanguageRow() {
 function TrainingSection() {
   return (
     <section aria-labelledby="training-heading" className="space-y-1 pt-6">
-      <h2 id="training-heading" className="flex items-center gap-2 text-lg font-semibold">
-        <Lightbulb className="h-4 w-4 text-muted-foreground" /> Feedback and training
+      <h2 id="training-heading" className="flex items-center gap-2 text-title-3 font-headline text-ink">
+        <Lightbulb className="h-4 w-4 text-ink-3" /> Feedback and training
       </h2>
-      <div className="space-y-2 border-b py-4 text-sm text-muted-foreground">
+      <div className="space-y-2 border-b border-line py-4 text-callout text-ink-3">
         <p>
           <strong className="text-foreground">
             Reverie does not train on your meetings.
@@ -364,11 +364,11 @@ function EmailSection() {
 
   return (
     <section id="email" aria-labelledby="email-heading" className="space-y-1 pt-6">
-      <h2 id="email-heading" className="flex items-center gap-2 text-lg font-semibold">
-        <Mail className="h-4 w-4 text-muted-foreground" /> Email notifications
+      <h2 id="email-heading" className="flex items-center gap-2 text-title-3 font-headline text-ink">
+        <Mail className="h-4 w-4 text-ink-3" /> Email notifications
       </h2>
-      <div className="space-y-3 border-b py-4">
-        <p className="text-sm text-muted-foreground">
+      <div className="space-y-3 border-b border-line py-4">
+        <p className="text-callout text-ink-3">
           All off unless you turn them on. Reverie does not email you about
           things you can see by opening it.
         </p>
@@ -498,7 +498,7 @@ function RetentionSection() {
 
   return (
     <section id="data" aria-labelledby="retention-heading" className="space-y-1 pt-6">
-      <h2 id="retention-heading" className="flex items-center gap-2 text-lg font-semibold">
+      <h2 id="retention-heading" className="flex items-center gap-2 text-title-3 font-headline text-ink">
         <Clock className="h-4 w-4 text-muted-foreground" /> How long things are kept
       </h2>
       <p className="pb-2 text-sm text-muted-foreground">
