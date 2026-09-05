@@ -101,7 +101,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { FOLDERS } from "@/lib/routes";
+import { LIBRARY } from "@/lib/routes";
 import { useAllowance, spentNote } from "@/lib/allowance";
 
 export interface MeetingMenuProps {
@@ -342,7 +342,7 @@ function MoveDialog({
               You have no projects yet, so there is nowhere to move this to.
             </p>
             <Button variant="outline" size="sm" asChild>
-              <Link href={FOLDERS}>Create one →</Link>
+              <Link href={LIBRARY}>Create one →</Link>
             </Button>
           </div>
         ) : (

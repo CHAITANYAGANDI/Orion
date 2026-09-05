@@ -43,7 +43,17 @@ export const ASK = "/ask";
  */
 export const LIBRARY = "/library";
 
-/** Every folder. */
+/**
+ * Where the folder list used to be.
+ *
+ * <p>It is part of Library now — a folder groups what you have, so it belongs
+ * on the page called what you have — and this route redirects there. Kept as a
+ * constant rather than deleted because the redirect page names it, and because
+ * `isFolderListPath` still has to recognise the URL on the way through so the
+ * band underlines Library rather than nothing.
+ *
+ * <p>Nothing in the app links here any more. See app/(app)/folders/page.tsx.
+ */
 export const FOLDERS = "/folders";
 
 /** One folder. */

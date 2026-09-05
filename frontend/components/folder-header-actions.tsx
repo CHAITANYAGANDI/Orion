@@ -25,7 +25,7 @@ import { toast } from "sonner";
 import { MoreHorizontal, Pencil, Trash2, Search as SearchIcon } from "lucide-react";
 import { useGetProjectQuery, useDeleteProjectMutation } from "@/lib/api";
 import { FolderDialog } from "@/components/folder-dialog";
-import { FOLDERS } from "@/lib/routes";
+import { LIBRARY } from "@/lib/routes";
 import { openSearch } from "@/lib/search-overlay";
 import {
   DropdownMenu,
@@ -63,7 +63,7 @@ export function FolderHeaderActions({ folderId }: { folderId: string }) {
           : "Folder deleted.",
       );
       // The page behind this is now a folder that does not exist.
-      router.push(FOLDERS);
+      router.push(LIBRARY);
     } catch {
       toast.error("Couldn't delete that folder.");
     }

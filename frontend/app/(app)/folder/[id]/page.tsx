@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { formatDateTime, formatDuration } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { FOLDERS } from "@/lib/routes";
+import { LIBRARY } from "@/lib/routes";
 import type { MeetingResponse } from "@/lib/types";
 
 /**
@@ -76,7 +76,7 @@ export default function FolderPage() {
       <Card>
         <CardContent className="py-12 text-center text-sm text-muted-foreground">
           That folder no longer exists.{" "}
-          <Link href={FOLDERS} className="underline">
+          <Link href={LIBRARY} className="underline">
             Back to folders
           </Link>
         </CardContent>
@@ -89,7 +89,7 @@ export default function FolderPage() {
   return (
     <div className="space-y-6">
       <Link
-        href={FOLDERS}
+        href={LIBRARY}
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="h-3.5 w-3.5" /> Folders

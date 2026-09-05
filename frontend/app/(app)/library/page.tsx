@@ -17,26 +17,34 @@
  * answer two questions with one screen, which is why that screen needed three
  * different empty states to explain which of the two you were looking at.
  *
- * <p><b>Home keeps its picker for now.</b> Relocating the scope is Home's own
- * rebuild, not this one, and shipping a Library while Home still offers the
- * same list is a duplicate for one phase rather than a page with nothing in it.
- * See docs/v2-implementation/feature-parity.md §4.
+ * <p>Home has no picker any more. The one seam between the two pages is a query
+ * parameter: Home sends `unfiled=true`, this sends nothing. A Library that
+ * inherited that flag would be a second copy of Home under another name, and it
+ * would look completely right until somebody opened a folder and found meetings
+ * the "everything" list had never shown them — which is why the test for it is
+ * an assertion about the request rather than about the rows.
  *
- * <h2>Folders live here too, and are still at their own URL</h2>
+ * <h2>Folders live here</h2>
  *
- * <p>The navigation rail that used to hold the folder tree is gone, so this is
- * now the way to them. For this phase that is a link to the folder list rather
- * than the list itself; the two pages merge when Library is rebuilt around the
- * measure. Nothing about the folders themselves changes.
+ * <p>They were `/folders`, reached from a section in the navigation rail. Both
+ * are gone. A folder is a way of grouping what you have, so it belongs on the
+ * page called what you have — and with the rail gone, a separate route for them
+ * would be a destination with no entrance. `/folders` redirects here, so old
+ * links and bookmarks land somewhere sensible.
+ *
+ * <p>Folders above conversations, and not in a sidebar beside them. A folder is
+ * a smaller, slower-moving list that people scan first and then leave; the
+ * archive underneath is what they scroll. Putting the folders in a column would
+ * take width from the only thing on this page that needs it.
  */
 
 import * as React from "react";
-import Link from "next/link";
-import { FolderOpen, RotateCw } from "lucide-react";
-import { useGetMeetingsQuery, useGetProjectsQuery } from "@/lib/api";
+import { RotateCw } from "lucide-react";
+import { useGetMeetingsQuery } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ConversationRow } from "@/components/conversation-row";
+import { FolderTable } from "@/components/folder-table";
 import {
   DateFilter,
   ANY_TIME,
@@ -46,7 +54,6 @@ import {
 import { useStickyPreference, type PreferenceCodec } from "@/lib/preferences";
 import { groupByDay } from "@/lib/days";
 import { homeListState } from "@/lib/home-list-state";
-import { FOLDERS } from "@/lib/routes";
 
 /** The choice, not the window. See the identical codec on Home for why. */
 const WHEN_CODEC: PreferenceCodec<DateWindow> = {
@@ -105,9 +112,9 @@ export default function LibraryPage() {
         <DateFilter value={when} onChange={setWhen} />
       </div>
 
-      <FoldersLink />
+      <FolderTable />
 
-      <h2 className="v2-label mb-3 mt-7">Conversations</h2>
+      <h2 className="mb-3 mt-10 text-title-3 font-headline text-ink">Conversations</h2>
 
       {state === "skeleton" ? (
         <div className="space-y-3">
@@ -132,44 +139,6 @@ export default function LibraryPage() {
         ))
       )}
     </div>
-  );
-}
-
-/**
- * The way to the folders, now that the rail is not.
- *
- * <p>It states the count rather than only naming the destination, because the
- * question somebody has on this page is whether their folders are worth opening
- * — and a row that says "3 folders" answers it without a navigation.
- *
- * <p>Three-state, like everything else that reads a list here: a folder count
- * that has not arrived is not a folder count of zero. An unresolved query gets
- * the name and no number rather than a confident "0 folders", which is the
- * claim that sends somebody looking for folders they still have.
- */
-function FoldersLink() {
-  const folders = useGetProjectsQuery();
-  const count = folders.isSuccess && folders.data ? folders.data.length : null;
-
-  return (
-    <Link
-      href={FOLDERS}
-      className="flex items-center gap-3 rounded-lg border p-3 transition-colors hover:bg-accent/40"
-    >
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-        <FolderOpen className="h-4 w-4" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block font-medium">Folders</span>
-        <span className="block text-xs text-muted-foreground">
-          {count === null
-            ? "The work you have grouped together"
-            : count === 0
-              ? "Nothing grouped yet"
-              : `${count} folder${count === 1 ? "" : "s"}`}
-        </span>
-      </span>
-    </Link>
   );
 }
 

@@ -135,8 +135,11 @@ describe("deleting", () => {
 
     await userEvent.click(screen.getByRole("menuitem", { name: /Delete folder/ }));
 
-    // Otherwise the page underneath is a folder that no longer exists.
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/folders"));
+    // Otherwise the page underneath is a folder that no longer exists. Library
+    // rather than /folders: the folder list is part of that page now, and the
+    // old route is a redirect -- landing on it would be one navigation to reach
+    // the same screen.
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/library"));
   });
 
   it("does nothing when the confirm is dismissed", async () => {

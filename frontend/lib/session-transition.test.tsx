@@ -17,16 +17,20 @@ import { configureStore, type Middleware } from "@reduxjs/toolkit";
  *
  * <p>So this renders the production nesting: the real store, the real `api`
  * with the real `fetchBaseQuery`, the real `AuthGate` and `SessionCacheGuard`,
- * and the components that failed in production — the real sidebar folder tree,
- * plus hooks standing in for Home's meeting list and the usage badge that kept
+ * and the components that failed in production — the real folder list, plus
+ * hooks standing in for Home's meeting list and the usage badge that kept
  * working while the other two did not.
  *
- * <p>The folder tree is the real one rather than a stand-in because it is the
- * component the screenshot was of, and because it has since acquired opinions
- * of its own about what an empty answer is: `undefined` is a skeleton, a
- * failure is an error with a retry, and only a settled empty list draws the
- * blank section. A stand-in doing `data ?? []` would assert the fix out of the
- * test.
+ * <p>The folder list is the real one rather than a stand-in because it is the
+ * component the screenshot was of, and because it has opinions of its own about
+ * what an empty answer is: `undefined` is a skeleton, a failure is an error with
+ * a retry, and only a settled empty list draws the blank section. A stand-in
+ * doing `data ?? []` would assert the fix out of the test.
+ *
+ * <p>It used to be `FolderTree`, in the navigation rail. The rail is gone and
+ * the tree with it; the list is `FolderTable`, at the top of Library, and it
+ * carries the same three-state rule — which is exactly why this test follows it
+ * there rather than being retired with the component it was written against.
  *
  * <p>Only `fetch`, Clerk and the router are stubbed.
  */
@@ -43,7 +47,7 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("next/navigation", () => ({ usePathname: () => "/home" }));
 
 import { api } from "@/lib/api";
-import { FolderTree } from "@/components/folder-tree";
+import { FolderTable } from "@/components/folder-table";
 import { AuthGate } from "@/components/auth-gate";
 import { SessionCacheGuard } from "@/components/session-cache-guard";
 import {
@@ -70,7 +74,23 @@ function jwtFor(sessionId: string): string {
 }
 
 function bodyFor(url: string): unknown {
-  if (url.includes("/projects")) return [{ id: "prj_1", name: "Design" }];
+  // A whole row, not two fields. The list renders the count and the date, and
+  // a fixture missing them draws "undefined conversations" -- which fails the
+  // assertion below for a reason that has nothing to do with what is under test.
+  if (url.includes("/projects")) {
+    return [
+      {
+        id: "prj_1",
+        name: "Design",
+        description: "",
+        color: "",
+        favorite: false,
+        meetingCount: 2,
+        createdAt: "2026-07-01T09:00:00Z",
+        updatedAt: "2026-08-01T09:00:00Z",
+      },
+    ];
+  }
   if (url.includes("/usage")) return { aiCallsUsed: 1, aiCallsLimit: 100 };
   return { content: [{ id: "mtg_1", title: "A meeting" }], page: 0, size: 50, totalElements: 1, totalPages: 1 };
 }
@@ -128,12 +148,12 @@ const firstQueryAt = () => actions.findIndex((t) => t === "api/executeQuery/pend
 
 const mounts = { folders: 0, meetings: 0, usage: 0 };
 
-/** The real sidebar, with a counter around it so remounts stay visible. */
+/** The real folder list, with a counter around it so remounts stay visible. */
 function Folders() {
   React.useEffect(() => {
     mounts.folders += 1;
   }, []);
-  return <FolderTree onNavigate={() => {}} />;
+  return <FolderTable />;
 }
 
 function Meetings() {
@@ -193,16 +213,16 @@ async function loaded(id: string) {
 }
 
 /**
- * The rail has the folder the server sent, and is not saying anything else
- * about it — no skeleton left running, no "couldn't load folders", and above
- * all not the blank section that a killed query used to produce here.
+ * The page has the folder the server sent, and is not saying anything else
+ * about it — no skeleton left running, no "couldn't load your folders", and
+ * above all not the blank list that a killed query used to produce here.
  */
 async function foldersLoaded() {
-  await waitFor(() => expect(screen.getByRole("link", { name: "Design" })).toBeInTheDocument(), {
+  await waitFor(() => expect(screen.getByRole("link", { name: /Design/ })).toBeInTheDocument(), {
     timeout: 3000,
   });
-  expect(screen.queryByText("Couldn't load folders")).not.toBeInTheDocument();
-  expect(screen.queryByText("Loading folders")).not.toBeInTheDocument();
+  expect(screen.queryByText(/Couldn't load your folders/)).not.toBeInTheDocument();
+  expect(screen.queryByText("No folders yet")).not.toBeInTheDocument();
 }
 
 async function settled(expected = 3) {
@@ -363,7 +383,7 @@ describe("signing into a new session while the Redux root survives", () => {
       screen.getByTestId("usage").textContent,
       screen.getByTestId("meetings").textContent,
     ]).toEqual(["usage-loaded", "meetings-loaded"]);
-    expect(screen.getByRole("link", { name: "Design" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Design/ })).toBeInTheDocument();
   });
 
   it("mounts each query hook exactly once for the new session", async () => {

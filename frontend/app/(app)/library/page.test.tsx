@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { MeetingResponse, MeetingListQuery, Page, Project } from "@/lib/types";
+import type { MeetingResponse, MeetingListQuery, Page } from "@/lib/types";
 
 /**
  * Library — everything you have.
@@ -28,8 +28,6 @@ let rows: MeetingResponse[];
 let noData: boolean;
 let loading: boolean;
 let errored: boolean;
-let folderRows: Project[];
-let foldersLoading: boolean;
 
 function aPage(content: MeetingResponse[], total = content.length): Page<MeetingResponse> {
   return { content, page: 0, size: 50, totalElements: total, totalPages: 1 };
@@ -65,10 +63,17 @@ vi.mock("@/lib/api", () => ({
     if (loading) return result<Page<MeetingResponse>>(undefined, { isLoading: true });
     return result(noData ? undefined : aPage(rows), { isError: errored });
   },
-  useGetProjectsQuery: () => {
-    if (foldersLoading) return result<Project[]>(undefined, { isLoading: true });
-    return result(folderRows);
-  },
+}));
+
+/*
+ * The folder list has its own file — components/folder-table.test.tsx — which
+ * carries every assertion the old /folders page had plus the three-state rules
+ * it inherited from the rail's version. Rendering the real one here would drag
+ * four mutation hooks and two dialogs into a test about a meeting list, and
+ * would test the same rows twice.
+ */
+vi.mock("@/components/folder-table", () => ({
+  FolderTable: () => <section data-testid="folders" />,
 }));
 
 // Both the date window and anything else remembered per sign-in wait on this.
@@ -89,20 +94,6 @@ function aMeeting(overrides: Partial<MeetingResponse> = {}): MeetingResponse {
   };
 }
 
-function aFolder(overrides: Partial<Project> = {}): Project {
-  return {
-    id: "prj_1",
-    name: "Meetings",
-    description: "",
-    color: "",
-    favorite: false,
-    meetingCount: 1,
-    createdAt: "2026-07-01T09:00:00Z",
-    updatedAt: "2026-08-01T09:00:00Z",
-    ...overrides,
-  };
-}
-
 beforeEach(() => {
   vi.clearAllMocks();
   query.last = null;
@@ -110,8 +101,6 @@ beforeEach(() => {
   noData = false;
   loading = false;
   errored = false;
-  folderRows = [aFolder()];
-  foldersLoading = false;
   window.sessionStorage.clear();
 });
 
@@ -200,45 +189,21 @@ describe("when there is genuinely nothing", () => {
   });
 });
 
-describe("the way to the folders", () => {
-  it("is here, because the rail that used to hold them is gone", async () => {
+describe("the folders", () => {
+  it("are on this page, above the conversations", async () => {
+    // They were /folders, reached from a section in the navigation rail. Both
+    // are gone: a folder is a way of grouping what you have, so it belongs on
+    // the page called what you have — and with the rail gone, a separate route
+    // for them would be a destination with no entrance.
     render(<LibraryPage />);
 
-    expect(await screen.findByRole("link", { name: /Folders/ })).toHaveAttribute(
-      "href",
-      "/folders",
+    const folders = screen.getByTestId("folders");
+    expect(folders).toBeInTheDocument();
+    // Order matters. The folders are the smaller, slower list people scan
+    // first; the archive is what they scroll.
+    const conversations = await screen.findByRole("heading", { name: "Conversations" });
+    expect(folders.compareDocumentPosition(conversations)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
     );
-  });
-
-  it("says how many there are", async () => {
-    folderRows = [aFolder(), aFolder({ id: "prj_2", name: "Hiring" })];
-    render(<LibraryPage />);
-
-    expect(await screen.findByText("2 folders")).toBeInTheDocument();
-  });
-
-  it("counts one in the singular", async () => {
-    render(<LibraryPage />);
-
-    expect(await screen.findByText("1 folder")).toBeInTheDocument();
-  });
-
-  it("claims no number until one has arrived", async () => {
-    // A folder count that has not arrived is not a folder count of zero, and
-    // "Nothing grouped yet" over an account with folders is the claim that
-    // sends somebody looking for the ones they still have.
-    foldersLoading = true;
-    render(<LibraryPage />);
-
-    expect(await screen.findByRole("link", { name: /Folders/ })).toBeInTheDocument();
-    expect(screen.queryByText(/folders?$/)).not.toBeInTheDocument();
-    expect(screen.queryByText("Nothing grouped yet")).not.toBeInTheDocument();
-  });
-
-  it("says so plainly when there are none", async () => {
-    folderRows = [];
-    render(<LibraryPage />);
-
-    expect(await screen.findByText("Nothing grouped yet")).toBeInTheDocument();
   });
 });

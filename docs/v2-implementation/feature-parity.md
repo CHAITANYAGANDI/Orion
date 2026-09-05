@@ -255,7 +255,7 @@ Nine of the twelve carried over unchanged. Three did not survive in the form wri
 | Was in the rail | Now |
 |---|---|
 | Home / AI Chat links | Now / Library / Ask, in the band |
-| `FolderTree` | **unused as of phase 2.** Library links to `/folders`; the tree's rail shape (collapsible section, uppercase heading, hover-reveal plus) has no home in V2. Retired in phase 4 when Library absorbs the folder list. |
+| `FolderTree` | **deleted in phase 4.** Library absorbed the folder list and `/folders` is a redirect; the tree's rail shape (collapsible section, uppercase heading, hover-reveal plus) has no home in V2. Its three-state rule — `undefined` is a skeleton, not an empty account — was carried into `components/folder-table.tsx`, which did not have it. See implementation-notes, phase 4. |
 | `NotificationBell` | band, right group — 32px, `align="end"` so a 24rem panel does not hang off the right edge |
 | `PlanUsage` | **inside the account menu.** An allowance nobody sees until they have run out of it is not a meter |
 | `AccountMenu` | band, far right. The trigger is the avatar alone; the name, the address and "Development session" are the first two lines of the menu, so nothing was dropped in the move |

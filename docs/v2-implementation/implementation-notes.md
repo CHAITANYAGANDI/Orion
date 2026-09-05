@@ -188,3 +188,64 @@ underneath does not move when it arrives.
 
 `npm run typecheck` clean · `npm run lint` clean (same two pre-existing warnings)
 · `npx vitest run` 119 files, 2202 tests, all passing · `npm run build` succeeds.
+
+
+---
+
+## Phase 4 — Library and folders
+
+### `/folders` is a redirect, and the tree is gone
+
+A folder is a way of grouping what you have, so it belongs on the page called
+what you have. With the rail gone, a separate route for folders would have been
+a destination with no entrance.
+
+- `components/folder-table.tsx` — the old `/folders` page body, moved.
+- `app/(app)/folders/page.tsx` — `redirect(LIBRARY)`. Not deleted: that URL is
+  bookmarks, a link on the meeting menu somebody may have open, and the
+  destination of a folder deletion in a tab that has not been reloaded. A 404 for
+  any of those is a worse answer than the page they were going to.
+- `components/folder-tree.tsx` and its test — **deleted**. It was the rail's
+  folder section: collapsible, uppercase heading, hover-reveal plus. There is no
+  rail.
+
+Every link that pointed at `/folders` now points at `/library` —
+`folder/[id]/page.tsx` (two), `folder-header-actions.tsx` (the destination after
+a delete), `meeting-menu.tsx` ("Create one →"). `lib/routes.ts` keeps the
+`FOLDERS` constant, because the redirect page names it and `isFolderListPath`
+still has to recognise the URL on the way through so the band underlines Library
+rather than nothing.
+
+### The tree's tests outlived the tree, and fixed a bug on the way
+
+`FolderTree` had a rule the `/folders` page did not: `projects ?? []` reads *no
+answer* as *the answer is none*, so an unresolved request, a dropped connection
+and a 500 all drew "No folders yet" — an explanation of what folders are for,
+shown to somebody who has twenty. The tree was fixed for that; the table never
+was.
+
+So `FolderTable` decides with `resourceState` + `presenceOfList` first and turns
+data into rows second, and `components/folder-table.test.tsx` carries **both**
+sets: every assertion from `folders/page.test.tsx` unchanged, plus nine new ones
+covering skeleton / error+retry / stale-rows-beat-a-failed-refetch / genuinely
+empty. Deleting the tree's tests with the tree would have quietly un-fixed this.
+
+`lib/session-transition.test.tsx` — the integration test that mounts the real
+production nesting — followed the component. It rendered `FolderTree` because
+that was what the production screenshot showed and because it held the
+three-state opinions; it renders `FolderTable` now, for the same two reasons. Its
+`/projects` fixture grew from two fields to a whole row, since the list renders
+the count and the date.
+
+### Still deferred
+
+Library is a document page in the shell's container, not the 680 + 40 + 400
+spread. The spread lands with the meeting page (phase 6), which is where the
+margin has real anchored content to put in it; giving Library a margin first
+would mean inventing something to fill it.
+
+### Verified at the end of the phase
+
+`npm run typecheck` clean · `npm run lint` clean (same two pre-existing warnings)
+· `npx vitest run` 118 files, 2184 tests, all passing · `npm run build` succeeds,
+`/folders` down to 143 B of redirect.
