@@ -52,7 +52,12 @@ describe("what it promises", () => {
 
     for (const real of [
       /speakers, separated/i,
-      /decisions and commitments/i,
+      // "Action items", which is the product's own word for these everywhere
+      // else in the app. "Commitments" was English rather than a claim about a
+      // feature -- but it is also the name of a V2 concept this product does
+      // not have, and a landing page is exactly where a reader would take it
+      // for one. See the final parity audit, section B.
+      /decisions and action items/i,
       /chat across everything/i,
       /PDF, Word, Markdown or plain text/i,
     ]) {

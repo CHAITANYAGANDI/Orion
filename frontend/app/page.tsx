@@ -56,7 +56,11 @@ const STEPS = [
   },
   {
     title: "Watch it come apart",
-    body: "Transcription, then the summary, then the commitments — each appearing as it lands, over a socket.",
+    // "Action items", which is the product's own word for these everywhere
+    // else. "Commitments" was English rather than a claim about a feature, but
+    // it is also the name of a V2 concept this product does not have -- and a
+    // landing page is exactly where a reader would take it for one.
+    body: "Transcription, then the summary, then the action items — each appearing as it lands, over a socket.",
   },
   {
     title: "Ask it anything",
@@ -72,7 +76,7 @@ const FEATURES = [
   },
   {
     icon: ListChecks,
-    title: "Decisions and commitments",
+    title: "Decisions and action items",
     body: "Every action item with an owner, a due date and comments — and quotations matched back to the transcript before they are stored.",
   },
   {
