@@ -6,9 +6,18 @@ import { cn } from "@/lib/utils";
 
 const Tabs = TabsPrimitive.Root;
 
-/** `pill` is the shadcn default. `underline` reads as a document's section rule
- *  rather than a control, which suits full-page views where the tabs are the
- *  primary navigation instead of a widget inside a card. */
+/**
+ * `pill` is the shadcn default. `underline` reads as a document's section rule
+ * rather than a control, which suits full-page views where the tabs are the
+ * primary navigation instead of a widget inside a card.
+ *
+ * <p>`underline` is the V2 <b>reading mode</b> switch: Summary or Transcript on
+ * a meeting, chat or outline in a rail. It is deliberately the same device the
+ * band uses for its three places — a word, and a 2px rule on a boundary the
+ * layout already has — so "which of these am I looking at" is one idea in the
+ * product rather than two. Set in ink, not in the accent: choosing a reading
+ * mode is not something Reverie noticed.
+ */
 type TabsVariant = "pill" | "underline";
 
 const TabsVariantContext = React.createContext<TabsVariant>("pill");
@@ -22,7 +31,7 @@ const TabsList = React.forwardRef<
       ref={ref}
       className={cn(
         variant === "underline"
-          ? "inline-flex items-center gap-6 border-b border-border text-muted-foreground"
+          ? "inline-flex items-center gap-6 border-b border-line text-ink-3"
           : "inline-flex h-9 items-center justify-center rounded-lg bg-muted p-1 text-muted-foreground",
         className
       )}
@@ -45,7 +54,7 @@ const TabsTrigger = React.forwardRef<
         variant === "underline"
           ? // -1px pulls the active rule over the list's own border so they read
             // as one line rather than two stacked.
-            "relative -mb-px border-b-2 border-transparent px-0 py-2 hover:text-foreground data-[state=active]:border-highlight data-[state=active]:text-foreground"
+            "relative -mb-px border-b-2 border-transparent px-0 pb-2.5 pt-1 text-callout hover:text-ink-2 data-[state=active]:border-ink data-[state=active]:font-headline data-[state=active]:text-ink"
           : "rounded-md px-3 py-1 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow",
         className
       )}

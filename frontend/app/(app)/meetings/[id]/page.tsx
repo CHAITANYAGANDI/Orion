@@ -734,14 +734,18 @@ export default function MeetingDetailPage() {
       {/* Masthead. The metadata sits in a monospaced rule under the title
           rather than as a row of loose badges: these are facts about one
           document, and setting them as a spec line keeps the title the only
-          thing competing for first read. */}
+          thing competing for first read.
+
+          The separators are ink-5 — decorative only, never a word anybody has
+          to read — which is the one tier of the ink scale that may not carry
+          meaning. See app/globals.css §3. */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          {/* No "All meetings" link. The rail is always there and already says
-              where everything is; a second way back, drawn above the title,
-              pushed the one thing this page is about down the screen. */}
+          {/* No "All meetings" link. The band always says where everything is;
+              a second way back, drawn above the title, pushed the one thing
+              this page is about down the screen. */}
           <MeetingTitle id={id} title={m.title} />
-          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 font-mono text-xs uppercase tracking-wide text-muted-foreground">
+          <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-2 font-mono text-cap uppercase text-ink-3">
             {/* No status here. Anything other than READY is already announced
                 below, and far louder — a progress card while it works, a
                 destructive card with the provider's own message when it
@@ -753,7 +757,7 @@ export default function MeetingDetailPage() {
                 <span className="tabular inline-flex items-center gap-1.5">
                   <Clock className="h-3.5 w-3.5" /> {formatDuration(m.durationSeconds)}
                 </span>
-                <span className="text-border" aria-hidden>/</span>
+                <span className="text-ink-5" aria-hidden>/</span>
               </>
             )}
             <span className="tabular">{formatDateTime(m.createdAt)}</span>
@@ -761,24 +765,24 @@ export default function MeetingDetailPage() {
                 badge on every meeting is noise. */}
             {m.language && m.language.slice(0, 2).toLowerCase() !== "en" && (
               <>
-                <span className="text-border" aria-hidden>/</span>
+                <span className="text-ink-5" aria-hidden>/</span>
                 <span>{languageName(m.language)}</span>
               </>
             )}
             {isDocument && (
               <>
-                <span className="text-border" aria-hidden>/</span>
+                <span className="text-ink-5" aria-hidden>/</span>
                 <span>Document</span>
               </>
             )}
             {m.sourceType === "YOUTUBE" && m.sourceUrl && (
               <>
-                <span className="text-border" aria-hidden>/</span>
+                <span className="text-ink-5" aria-hidden>/</span>
                 <a
                   href={m.sourceUrl}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="inline-flex items-center gap-1.5 underline underline-offset-2 hover:text-foreground"
+                  className="inline-flex items-center gap-1.5 underline underline-offset-2 transition-colors hover:text-ink"
                 >
                   <Youtube className="h-3.5 w-3.5" /> YouTube
                 </a>
@@ -797,11 +801,11 @@ export default function MeetingDetailPage() {
                 already knows where it is. */}
             {ready && (
               <>
-                <span className="text-border" aria-hidden>/</span>
+                <span className="text-ink-5" aria-hidden>/</span>
                 <button
                   type="button"
                   onClick={() => void onCopySummary()}
-                  className="no-print inline-flex items-center gap-1.5 uppercase tracking-wide hover:text-foreground"
+                  className="no-print inline-flex items-center gap-1.5 uppercase transition-colors hover:text-ink"
                 >
                   <ClipboardCopy className="h-3.5 w-3.5" /> Copy summary
                 </button>
@@ -932,8 +936,13 @@ export default function MeetingDetailPage() {
              cover the thing it is meant to be read alongside. */
           <div className="no-print">{player}</div>
         ) : (
-          <div className="no-print pointer-events-none fixed inset-x-0 bottom-0 z-20 p-3 sm:p-4 lg:left-[var(--rail-w,16rem)] lg:right-[var(--side-pane-w,0px)]">
-            <div className="pointer-events-auto mx-auto max-w-3xl">{player}</div>
+          <div className="no-print pointer-events-none fixed inset-x-0 bottom-0 z-20 p-3 sm:p-4 lg:right-[var(--side-pane-w,0px)]">
+            {/* Held to the measure, so the transport sits under the column it
+                is scrubbing rather than under the window. `--rail-w` is gone
+                from this line with the rail it named — the shell has no left
+                column any more, so the bar starts at the left edge and stops
+                where the side pane begins. */}
+            <div className="pointer-events-auto mx-auto w-full max-w-measure">{player}</div>
           </div>
         )
       )}
@@ -1004,7 +1013,19 @@ export default function MeetingDetailPage() {
          */
         <>
         <Tabs value={tab} onValueChange={changeTab} className="min-w-0">
-          <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b">
+          {/*
+           * THE READING MODE, and the row of controls that belong to it.
+           *
+           * <p>Two modes rather than four tabs. Ask and Action items are not
+           * places, and making them tabs meant the two things you do *while*
+           * reading were both somewhere the reading was not.
+           *
+           * <p>The row is full width and the document under it is not. That is
+           * deliberate: a switch and the controls that govern the whole
+           * document are chrome, and chrome that is indented to the measure
+           * reads as part of the text. The measure begins at the content.
+           */}
+          <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-line">
             <TabsList variant="underline" className="flex gap-x-6 border-b-0">
               <TabsTrigger value="summary">Summary</TabsTrigger>
               <TabsTrigger value="transcript">Transcript</TabsTrigger>
@@ -1063,8 +1084,24 @@ export default function MeetingDetailPage() {
             )}
           </div>
 
-          {/* Summary + translation */}
-          <TabsContent value="summary" className="space-y-4 pt-4">
+          {/*
+           * THE MEASURE.
+           *
+           * <p>680px, which is about 74 characters at the reading size, and the
+           * measurement the whole V2 layout is built to protect. It is applied
+           * here rather than inside each panel so a brief and a transcript are
+           * set in the *same* column — moving between the two reading modes is
+           * a change of content, not of reading posture, and two panels each
+           * choosing their own width is how that stops being true.
+           *
+           * <p>`data-margin="empty"` centres the measure rather than sitting it
+           * left of a column with nothing in it. The margin fills with real
+           * anchored content — moments at their timestamp, action items at
+           * their source second — when the transcript is rebuilt; see
+           * docs/v2-implementation/feature-parity.md §4.
+           */}
+          <TabsContent value="summary" className="pt-6">
+            <div className="v2-spread space-y-4" data-margin="empty">
             <SummaryPanel
               meetingId={id}
               // One value rather than `loading` + `pending`, because the two of
@@ -1159,9 +1196,11 @@ export default function MeetingDetailPage() {
                 rows are read out of the brief, and putting them first would
                 suggest they were the source rather than the reading. */}
             <InsightsPanel meetingId={id} />
+            </div>
           </TabsContent>
 
-          <TabsContent value="transcript" className="pt-4">
+          <TabsContent value="transcript" className="pt-6">
+            <div className="v2-spread" data-margin="empty">
             {showing ? (
               showing.hasTranscript ? (
                 <Card>
@@ -1252,6 +1291,7 @@ export default function MeetingDetailPage() {
               onAskAbout={askAbout}
             />
             )}
+            </div>
           </TabsContent>
         </Tabs>
 

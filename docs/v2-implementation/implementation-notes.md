@@ -371,3 +371,81 @@ and the Home rail inherit it — deliberately. One chat, three surfaces.
 
 `npm run typecheck` clean · `npm run lint` clean (same two pre-existing warnings)
 · `npx vitest run` 118 files, 2188 tests, all passing · `npm run build` succeeds.
+
+
+---
+
+## Phase 6 — the meeting shell, masthead and player
+
+Deliberately **only** the shell. The brief, the transcript and the action items
+are phases 7, 8 and 9, and each gets its own commit — a single refactor across
+all four would be untestable and unreviewable.
+
+### The measure is applied by the page, not by the panels
+
+Both reading modes are wrapped in `.v2-spread`, at the page level. That is the
+whole point: a brief and a transcript have to be set in the *same* 680px column,
+because moving between the two modes is a change of content and not a change of
+reading posture — and two panels each choosing their own width is exactly how
+that stops being true. There is a test for it on the page, where it can be
+wrong, rather than in either panel, where it cannot be seen.
+
+`data-margin="empty"` for now, which centres the measure rather than sitting the
+text left of a 400px gutter with nothing in it. The margin fills with real
+anchored content — moments at their `startSeconds`, action items at their
+`sourceStartSeconds` — when the transcript is rebuilt in phase 8.
+
+The reading-mode switch and the controls beside it (the template picker, Edit
+transcript) stay **outside** the measure. They are chrome that governs the whole
+document, and chrome indented to the measure reads as part of the text.
+
+### The transport is glass, and it is the only glass on the page
+
+`AudioPlayer` was a `<Card>`. It floats over the transcript it is scrubbing,
+which makes it the functional layer — the one thing translucency is for here —
+so it is `.v2-glass` with the half-pixel white inset that actually separates a
+floating layer from the words under it. Nothing else on the page is glass, so
+the "never nested" rule holds by construction. A video stays inline (a video is
+watched, not scrubbed past) and renders the same markup; only its position
+differs.
+
+The dock lost `lg:left-[var(--rail-w,16rem)]`. That was right while the shell
+had a 256px column; the `16rem` **fallback** in it is what would have shifted
+the bar right the moment the variable stopped being published. It is held to the
+measure now, so the transport sits under the column it is scrubbing rather than
+under the window. Tested.
+
+`--rail-w` still has one consumer left (`components/recording-bar.tsx`, phase
+10), so the shell still publishes `0px`.
+
+### The reading-mode switch
+
+`TabsList variant="underline"` is now the V2 device: a word, and a 2px ink rule
+on a boundary the layout already has. Deliberately the same treatment the band
+uses for its three places, so "which of these am I looking at" is one idea in
+the product rather than two. Ink, not the accent — choosing a reading mode is
+not something Reverie noticed. This is a shared primitive, so the meeting rail's
+chat/outline switch inherits it.
+
+### The largest screen in the product now has tests
+
+`app/(app)/meetings/[id]/page.test.tsx` — 21, and none existed before. Every
+panel under this page has its own file, and **every one of those passes just as
+well when the page renders them at the wrong width, in the wrong tab, or not at
+all**. So this covers what only the page can be wrong about: which facts are in
+the masthead (and which are deliberately absent — no READY badge, no "English"
+on an English meeting, no duration on a document), which reading mode is
+showing, what column the document is in, and where the transport is docked.
+
+The panels are mocked by name. Pulling them in would make this a test of forty
+components that fails for thirty-nine reasons that are not this page's fault.
+Phases 7–9 extend these mocks rather than standing up a second harness.
+
+One thing worth knowing for later: `vi.mock` factories hoist above every `const`
+in the file, so the RTK-Query result helpers live inside `vi.hoisted`. Without
+that the suite fails to collect with an error naming `sonner`.
+
+### Verified at the end of the phase
+
+`npm run typecheck` clean · `npm run lint` clean (same two pre-existing warnings)
+· `npx vitest run` 119 files, 2209 tests, all passing · `npm run build` succeeds.

@@ -28,7 +28,6 @@ import {
   AudioLines,
   Highlighter,
 } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -438,8 +437,21 @@ export function AudioPlayer({
   const fraction = progressFraction(controller.currentTime, duration);
 
   return (
-    <Card>
-      <CardContent className="space-y-2 py-3">
+    /*
+     * A summoned surface, not a content card.
+     *
+     * <p>This floats over the transcript it is scrubbing, which makes it the
+     * functional layer — the one place translucency is for in this product. It
+     * is `.v2-glass`: lighter than the page, because a thing above content has
+     * more light on it, with the half-pixel white inset that is what actually
+     * separates a floating layer from the words underneath. Never nested inside
+     * another glass surface; nothing else here is one.
+     *
+     * <p>A video is the exception and stays inline (see the caller), so this
+     * renders the same markup in both places and only its position differs.
+     */
+    <div className="v2-glass rounded-xl">
+      <div className="space-y-2 px-3 py-2.5">
         {isVideo ? (
           <video
             ref={controller.ref as React.MutableRefObject<HTMLVideoElement | null>}
@@ -487,7 +499,7 @@ export function AudioPlayer({
           }}
           className="group relative h-6 cursor-pointer"
         >
-          <div className="absolute inset-x-0 top-1/2 h-2 -translate-y-1/2 overflow-hidden rounded-full bg-secondary">
+          <div className="absolute inset-x-0 top-1/2 h-2 -translate-y-1/2 overflow-hidden rounded-full bg-surface-hover">
             {duration > 0 &&
               turns.map((turn, i) => (
                 <span
@@ -506,13 +518,13 @@ export function AudioPlayer({
                 speaker layout stays readable ahead of and behind the playhead. */}
             <span
               aria-hidden
-              className="absolute inset-y-0 left-0 bg-foreground/25"
+              className="absolute inset-y-0 left-0 bg-ink/25"
               style={{ width: `${fraction * 100}%` }}
             />
           </div>
           <span
             aria-hidden
-            className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary shadow ring-2 ring-background transition-transform group-hover:scale-125"
+            className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-ink shadow-e2 ring-2 ring-surface-overlay transition-transform duration-press ease-out group-hover:scale-125"
             style={{ left: `${fraction * 100}%` }}
           />
         </div>
@@ -521,7 +533,7 @@ export function AudioPlayer({
             reached when a refreshed link failed too, so "try again" is honest
             advice and "reload the page" is the thing that actually works. */}
         {failed && (
-          <p role="status" className="text-xs text-destructive">
+          <p role="status" className="text-foot text-danger">
             The recording could not be loaded. Reload the page to try again.
           </p>
         )}
@@ -544,7 +556,7 @@ export function AudioPlayer({
           <button
             onClick={toggle}
             aria-label={playing ? "Pause" : "Play"}
-            className="mx-1 flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground transition-transform hover:scale-105"
+            className="mx-1 flex h-9 w-9 items-center justify-center rounded-full bg-ink text-surface transition-transform duration-press ease-out hover:scale-105"
           >
             {playing ? <Pause className="h-4 w-4" /> : <Play className="ml-0.5 h-4 w-4" />}
           </button>
@@ -595,7 +607,7 @@ export function AudioPlayer({
               <DropdownMenuTrigger asChild>
                 <button
                   aria-label="Playback speed"
-                  className="flex h-8 items-center gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  className="flex h-8 items-center gap-1 rounded-md px-2 text-foot font-medium text-ink-3 transition-colors hover:bg-surface-hover hover:text-ink"
                 >
                   <Gauge className="h-4 w-4" />
                   {rate}×
@@ -649,8 +661,8 @@ export function AudioPlayer({
             />
           </div>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
@@ -671,7 +683,7 @@ function IconButton({
       disabled={disabled}
       aria-label={label}
       title={label}
-      className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+      className="flex h-8 w-8 items-center justify-center rounded-md text-ink-3 transition-colors duration-press ease-soft hover:bg-surface-hover hover:text-ink disabled:pointer-events-none disabled:opacity-40"
     >
       {children}
     </button>

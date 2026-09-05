@@ -56,7 +56,10 @@ export function MeetingTitle({ id, title }: { id: string; title: string }) {
   if (!editing) {
     return (
       <div className="group flex items-start gap-2">
-        <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
+        {/* The one thing on the page competing for first read, so it is set at
+            the title-l step rather than at an interface size. Sans, not serif:
+            it is the document's name, not the document. */}
+        <h1 className="text-title-l font-headline text-ink">{title}</h1>
         <Button
           variant="ghost"
           size="icon"
