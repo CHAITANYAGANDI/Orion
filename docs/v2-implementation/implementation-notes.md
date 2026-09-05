@@ -862,3 +862,59 @@ test still asserts both ways in are offered.
 `npm run typecheck` clean · `npm run lint` clean (same two pre-existing warnings)
 · `npx vitest run` 120 files, 2267 tests, all passing · `npm run build`
 succeeds.
+
+---
+
+## Phase 12 — search
+
+### The audit came back clean
+
+`components/search-command.tsx` already says it in its own header: *"Still
+deliberately absent: semantic search. `POST /search/semantic` is untouched and
+unused."* Nothing on the forbidden list is anywhere near this surface — no
+Memory results, no similarity scores, no Decision History, no Commitment or
+Promise results, no embedding terminology. Nothing had to be removed.
+
+What is preserved, all of it untouched functionally: the `SETTLE_MS` debounce
+(and the deliberate exception — `tag:` is a local string operation and does not
+wait), conversation results, transcript-mention results with their timestamp
+context, jumping straight to a matching transcript position, the four operators
+(`when:` `type:` `tag:` `in:`) with completion from the real workspace, recent
+searches and clearing them, keyboard navigation, and the loading / error /
+no-result states.
+
+### The two verifications the brief asked for
+
+Both are now tests in `components/app-shell.test.tsx`.
+
+**⌘K works from every route.** The shortcut is bound on the **window** by the
+shell — not on the search button, not on any page — so it fires while the focus
+is in a transcript, a chat box, a folder name being renamed, or nothing at all.
+A rewrite that moved the binding into the band would have broken it on exactly
+the screens where somebody is deep in something. Asserted by walking `/home`,
+`/library`, `/ask`, `/meetings/:id`, `/folder/:id`, `/record`, `/settings/plans`
+and `/upload`, opening the box on each.
+
+**It is registered exactly once.** This is the one the shell refactor could have
+broken invisibly: `openSearch()` is idempotent, so two listeners open one box and
+nothing looks wrong — it surfaces later as a handler outliving its component.
+There is no behaviour to observe, so it is counted directly:
+
+- one `keydown` listener added on mount,
+- one removed on unmount,
+- **none added on a route change** — the effect has an empty dependency list and
+  has to keep one, because a navigation is not a reason to tear down a window
+  listener.
+
+### The presentation
+
+The palette is `.v2-glass` — it is summoned over the whole app, which makes it
+the functional layer. The query is set at `title-3`, which is what you are
+looking at while you type. Filter chips are brand, because a filter is Reverie
+narrowing what it reads. The result count is mono and tabular.
+
+### Verified at the end of the phase
+
+`npm run typecheck` clean · `npm run lint` clean (same two pre-existing warnings)
+· `npx vitest run` 120 files, 2271 tests, all passing · `npm run build`
+succeeds.

@@ -270,7 +270,7 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px]"
+      className="fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px]"
       onMouseDown={() => onOpenChange(false)}
       role="presentation"
     >
@@ -278,9 +278,12 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
         className="mx-auto mt-[10vh] w-full max-w-2xl px-4"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="overflow-hidden rounded-xl border bg-popover shadow-2xl">
-          <div className="flex items-center gap-2 border-b px-4">
-            <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+        {/* Glass. This is summoned over the whole app, which makes it the
+            functional layer — the one thing translucency is for here. Never
+            nested: nothing inside it is glass. */}
+        <div className="v2-glass overflow-hidden rounded-lg">
+          <div className="flex items-center gap-2 border-b border-line px-4">
+            <Search className="h-4 w-4 shrink-0 text-ink-4" />
             <input
               ref={inputRef}
               value={text}
@@ -293,7 +296,7 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
               onKeyDown={onKeyDown}
               placeholder="Search conversations, transcripts, folders, tags"
               aria-label="Search"
-              className="h-14 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground"
+              className="h-14 flex-1 bg-transparent text-title-3 text-ink outline-none placeholder:text-ink-4"
             />
             {text && (
               <button
@@ -304,7 +307,7 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
                   inputRef.current?.focus();
                 }}
                 aria-label="Clear search"
-                className="text-muted-foreground hover:text-foreground"
+                className="text-ink-4 transition-colors hover:text-ink"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -312,11 +315,11 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
           </div>
 
           {chips.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 border-b px-4 py-2">
+            <div className="flex flex-wrap gap-1.5 border-b border-line px-4 py-2">
               {chips.map((chip, i) => (
                 <span
                   key={`${chip.label}-${i}`}
-                  className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary"
+                  className="rounded-full border border-brand/40 bg-brand/10 px-2 py-0.5 text-cap text-brand-text"
                 >
                   {chip.label}: {chip.value}
                 </span>
@@ -333,7 +336,7 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
           {suggestions.length === 0 && text.trim() === "" && recent.length > 0 && (
             <div className="py-2">
               <div className="flex items-center justify-between px-4 py-1">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <p className="v2-label uppercase">
                   Recent searches
                 </p>
                 <button
@@ -343,7 +346,7 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
                     setRecent([]);
                     inputRef.current?.focus();
                   }}
-                  className="text-xs text-muted-foreground hover:text-foreground"
+                  className="text-cap text-ink-4 transition-colors hover:text-ink"
                 >
                   Clear
                 </button>
@@ -354,9 +357,9 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
                     <button
                       type="button"
                       onClick={() => recall(q)}
-                      className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm hover:bg-accent/60"
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left text-callout text-ink-2 transition-colors hover:bg-surface-hover hover:text-ink"
                     >
-                      <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <Clock className="h-3.5 w-3.5 shrink-0 text-ink-4" />
                       <span className="truncate">{q}</span>
                     </button>
                   </li>
@@ -370,12 +373,12 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
               tell a screen reader there are two lists of options for one input
               and leave the arrow keys unable to keep the promise. */}
           {term !== "" && (
-            <div className="border-t">
+            <div className="border-t border-line">
               <div className="flex items-center justify-between px-4 py-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <p className="v2-label uppercase">
                   Results
                 </p>
-                <p className="text-xs tabular-nums text-muted-foreground" aria-live="polite">
+                <p className="tabular font-mono text-cap text-ink-4" aria-live="polite">
                   {searching
                     ? "Searching…"
                     : `${total} result${total === 1 ? "" : "s"}`}
@@ -389,7 +392,7 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
                   ))}
                 </div>
               ) : rows.length === 0 ? (
-                <p className="px-4 pb-4 text-sm text-muted-foreground">
+                <p className="px-4 pb-4 text-callout text-ink-3">
                   Nothing in your conversations or their transcripts contains those
                   words. Fewer of them usually helps — <code>tag:</code>,{" "}
                   <code>type:</code>, <code>in:</code> and <code>when:</code> narrow a
@@ -410,12 +413,12 @@ export function SearchCommand({ open, onOpenChange, initial = "" }: SearchComman
                       >
                         {row.kind === "meeting" ? (
                           <>
-                            <Search className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                            <Search className="mt-0.5 h-4 w-4 shrink-0 text-ink-4" />
                             <span className="min-w-0 flex-1">
-                              <span className="block truncate text-sm font-medium">
+                              <span className="block truncate text-callout font-headline text-ink">
                                 <Marked text={row.hit.title} query={searchState.q} />
                               </span>
-                              <span className="block text-xs text-muted-foreground">
+                              <span className="block text-cap text-ink-4">
                                 {formatDateTime(row.hit.createdAt)} ·{" "}
                                 {formatDuration(row.hit.durationSeconds)}
                                 {/* Why a title with none of the words in it is here. */}

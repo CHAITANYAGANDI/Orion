@@ -278,3 +278,82 @@ describe("the side pane", () => {
     expect(document.getElementById(SIDE_PANE_ID)).toHaveTextContent("Ask this meeting");
   });
 });
+
+/**
+ * ⌘K, from everywhere, exactly once.
+ *
+ * <h2>Two things the shell rewrite could have broken silently</h2>
+ *
+ * <p><b>The shortcut is bound on the window, by the shell.</b> Not on the search
+ * button and not on any page, so it works while the focus is in a transcript, a
+ * chat box, a folder name being renamed, or nothing at all. A rewrite that moved
+ * the binding onto the band would have made it stop working on exactly the
+ * screens where somebody is deep in something — which is every screen where it
+ * matters.
+ *
+ * <p><b>And it must be bound once.</b> A duplicate registration is invisible in
+ * use: `openSearch()` is idempotent, so two listeners open one box and nothing
+ * looks wrong. It surfaces later, as a handler that outlives its component or a
+ * second box that will not close. Counted directly, because there is no
+ * behaviour to observe.
+ */
+describe("the search shortcut", () => {
+  /** Every route the band is drawn on, including two with no page chrome. */
+  const ROUTES = [
+    "/home",
+    "/library",
+    "/ask",
+    "/meetings/mtg_1",
+    "/folder/prj_1",
+    "/record",
+    "/settings/plans",
+    "/upload",
+  ];
+
+  it("opens search from every route in the app", async () => {
+    for (const route of ROUTES) {
+      pathname = route;
+      const view = shell();
+
+      await userEvent.keyboard("{Control>}k{/Control}");
+
+      expect(screen.getByTestId("search"), route).toHaveAttribute("data-open", "true");
+      view.unmount();
+      resetSearchOverlay();
+    }
+  });
+
+  it("registers exactly one keydown listener", () => {
+    const added = vi.spyOn(window, "addEventListener");
+    shell();
+
+    const keydowns = added.mock.calls.filter(([type]) => type === "keydown");
+    expect(keydowns).toHaveLength(1);
+    added.mockRestore();
+  });
+
+  it("takes that listener away again on unmount", () => {
+    // The other half of the same rule. A listener left behind by a shell that
+    // has gone is what turns "bound once" into "bound n times" over a session.
+    const removed = vi.spyOn(window, "removeEventListener");
+    shell().unmount();
+
+    expect(removed.mock.calls.filter(([type]) => type === "keydown")).toHaveLength(1);
+    removed.mockRestore();
+  });
+
+  it("does not rebind it on a route change", () => {
+    // The effect has an empty dependency list, and it has to keep one: a
+    // navigation is not a reason to tear down a window listener.
+    const view = shell();
+    const added = vi.spyOn(window, "addEventListener");
+
+    act(() => {
+      pathname = "/library";
+    });
+    view.rerender(<AppShell><p>the page</p></AppShell>);
+
+    expect(added.mock.calls.filter(([type]) => type === "keydown")).toHaveLength(0);
+    added.mockRestore();
+  });
+});
