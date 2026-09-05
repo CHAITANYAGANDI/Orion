@@ -9,12 +9,16 @@ import type { MeetingResponse, MeetingListQuery, Page } from "@/lib/types";
  * <p>This was an option in a dropdown on Home called "All Conversations". The
  * two things worth pinning are the two ways that move could have gone wrong.
  *
- * <p><b>It must ask for everything.</b> The whole distinction between this page
- * and Home is one query parameter: Home sends `unfiled=true` and gets the
- * meetings that were never filed, this sends nothing and gets the archive. A
- * Library that inherited the flag would be a second copy of Home under a
- * different name, and it would look completely right until somebody opened a
- * folder and found meetings the "everything" list had never shown them.
+ * <p><b>It must ask for everything.</b> `unfiled=true` is gone from Home too —
+ * it made that page's name a lie, since filing a meeting took it off a list
+ * called Recent — so what separates the two pages now is how much they show:
+ * Home asks for the newest twenty, this asks for fifty and pages, and it puts
+ * the folders above them.
+ *
+ * <p>The assertion is still on the request rather than on the rows. A Library
+ * that ever inherited that flag would look completely right until somebody
+ * opened a folder and found meetings the "everything" list had never shown
+ * them.
  *
  * <p><b>It must not read a failure as an empty archive.</b> The screen that
  * says you have nothing is the screen a person with two hundred meetings should

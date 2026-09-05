@@ -17,12 +17,17 @@
  * answer two questions with one screen, which is why that screen needed three
  * different empty states to explain which of the two you were looking at.
  *
- * <p>Home has no picker any more. The one seam between the two pages is a query
- * parameter: Home sends `unfiled=true`, this sends nothing. A Library that
- * inherited that flag would be a second copy of Home under another name, and it
- * would look completely right until somebody opened a folder and found meetings
- * the "everything" list had never shown them — which is why the test for it is
- * an assertion about the request rather than about the rows.
+ * <p><b>Neither page filters by folder.</b> Home used to send `unfiled=true`
+ * and this page never did, which made that parameter the seam between them —
+ * and made Home's name a lie, since filing a meeting took it off a page called
+ * Recent. It is gone from both. What separates them now is <em>how much they
+ * show</em>: Home asks for the newest twenty, this asks for fifty and pages.
+ * A difference in quantity is one a person can see; a hidden predicate is not.
+ *
+ * <p>Both still assert on the request rather than on the rows, because a
+ * Library that ever inherited that flag would look completely right until
+ * somebody opened a folder and found meetings the "everything" list had never
+ * shown them.
  *
  * <h2>Folders live here</h2>
  *
