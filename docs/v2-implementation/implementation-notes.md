@@ -310,3 +310,64 @@ parameter ever returns.
 
 `npm run typecheck` clean · `npm run lint` clean · `npx vitest run` 118 files,
 2179 tests, all passing.
+
+
+---
+
+## Phase 5 — Ask
+
+Everything on this page is KEEP in the parity matrix. `useWorkspaceChat`,
+`ChatComposer`, `ChatHistory`, `ChatDock`, `SourceList`, the thread picker, the
+rotating prompts, delete-an-exchange — all preserved, none touched
+functionally. This phase is the V2 treatment and nothing else.
+
+### The measure, and the serif
+
+The thread was `max-w-3xl` (768px); it is `--measure` (680px) now, and so is the
+composer under it. Not a rounder number: 680 at the reading size is about 74
+characters, which is the measurement the whole layout protects — and it is the
+same column a transcript and a brief are set in, so moving between them is not a
+change of reading posture. Both regions are pinned by a test, because they have
+drifted apart before and a composer a step wider than the answer above it reads
+as a rendering fault.
+
+**Answers are set in the reading serif.** `Markdown` gained a `reading` boolean
+rather than taking a className, because the reading face has to *replace* the
+interface size and leading rather than sit beside them — two font-size utilities
+in one class list are resolved by whichever the stylesheet emits last, which is
+not something a caller can reason about. The tests check that `text-sm` is
+actually gone, not merely that a class was added.
+
+### The question got quieter, and it had to
+
+`PROMPT_BUBBLE` was `bg-primary text-primary-foreground`. Under the V2 palette
+`--primary` is **ink** — near-white — because an accent spent on every button is
+an accent that means nothing. That left the question a white slab beside the
+answer somebody actually came for: the loudest object on the page was the
+sentence they had just typed themselves.
+
+It is `border-line bg-surface-raised text-ink` now. Still a bubble, still capped
+at 85%, still right-aligned — the two things that say whose turn it is survive,
+and there is a test for each so "quieter" cannot become "gone".
+
+### Sources became a margin note
+
+`SourceList` had a horizontal rule, an uppercase "SOURCES" label and a row of
+filled chips: three devices to say one thing, stacked under every answer. It is
+`.v2-note` now — one 1px stroke on the left edge and text — which is the same
+treatment a citation gets in the transcript margin, so the two read as one idea.
+The label is gone; a meeting title and a timecode under a rule are self-evidently
+where the answer came from, and a word repeated under every answer is a word
+nobody reads. Timecodes are mono and tabular.
+
+### The composer's accent is brand, not ink
+
+`focus-within:ring-primary/20` and the context chips were ink-tinted. They are
+`brand` now, which is the one meaning the accent carries: *what Reverie will
+read*. This is the composer shared by all four chat surfaces, so the meeting rail
+and the Home rail inherit it — deliberately. One chat, three surfaces.
+
+### Verified at the end of the phase
+
+`npm run typecheck` clean · `npm run lint` clean (same two pre-existing warnings)
+· `npx vitest run` 118 files, 2188 tests, all passing · `npm run build` succeeds.

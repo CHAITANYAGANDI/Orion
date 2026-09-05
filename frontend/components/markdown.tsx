@@ -60,14 +60,37 @@ import { cn } from "@/lib/utils";
 /** Elements an answer has no reason to produce. See the note on images above. */
 const DISALLOWED = ["img", "script", "style", "iframe", "form", "input"];
 
-export function Markdown({ children, className }: { children: string; className?: string }) {
+/**
+ * @param reading set on prose somebody came here to READ — an answer, a brief,
+ *   a transcript — as opposed to prose that happens to be in a panel.
+ *
+ *   <p>It swaps the interface sans for the serif at the reading size and
+ *   leading. That border is absolute in this product: a serif outside a reading
+ *   column is a bug, and interface text set in it is the classic way an app
+ *   ends up looking like a blog. See the note at the top of app/layout.tsx.
+ *
+ *   <p>A boolean rather than a className, because it has to REPLACE the size and
+ *   leading below rather than sit beside them. Two font-size utilities in one
+ *   class list are resolved by whichever the stylesheet emits last, which is not
+ *   a thing a caller can reason about.
+ */
+export function Markdown({
+  children,
+  className,
+  reading = false,
+}: {
+  children: string;
+  className?: string;
+  reading?: boolean;
+}) {
   return (
     <div
       className={cn(
         // `break-words` and `min-w-0` are what keep a long URL or an unbroken
         // token inside the rail instead of widening it and giving the whole
         // thread a horizontal scrollbar.
-        "min-w-0 space-y-2 break-words text-sm leading-relaxed",
+        "min-w-0 space-y-2 break-words",
+        reading ? "v2-read space-y-3" : "text-sm leading-relaxed",
         className,
       )}
     >

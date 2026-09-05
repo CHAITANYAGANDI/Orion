@@ -165,3 +165,46 @@ describe("ChatMessageBubble", () => {
     expect(errorToast).toHaveBeenCalled();
   });
 });
+
+/**
+ * The order of loudness.
+ *
+ * <p>A question is the reader's own words; an answer is what they came for. The
+ * question used to be a filled pill in the primary colour, and under the V2
+ * palette `--primary` is ink — near-white — which made the loudest thing on the
+ * screen the sentence somebody had just typed themselves.
+ */
+describe("how the two sides are set", () => {
+  it("sets an answer in the reading face", () => {
+    // The same face as a transcript and a brief, because it is the same act.
+    const { container } = render(<ChatMessageBubble message={message()} />);
+
+    expect(container.querySelector(".v2-read")).toBeInTheDocument();
+  });
+
+  it("leaves a question in the interface face", () => {
+    // It is not prose anybody is settling in to read, and a serif on both sides
+    // removes the one distinction that is free.
+    const { container } = render(<ChatMessageBubble message={prompt()} />);
+
+    expect(container.querySelector(".v2-read")).not.toBeInTheDocument();
+  });
+
+  it("does not fill the question with the primary colour", () => {
+    // `bg-primary` is ink now. A near-white slab beside the answer is the wrong
+    // thing to be the brightest object on the page.
+    const { container } = render(<ChatMessageBubble message={prompt()} />);
+
+    expect(container.innerHTML).not.toContain("bg-primary");
+  });
+
+  it("keeps the question a bubble, capped and on the right", () => {
+    // Quieter, not gone. The alignment and the tint are what say whose turn
+    // this is, and both survive.
+    const { container } = render(<ChatMessageBubble message={prompt()} />);
+
+    expect(container.innerHTML).toContain("rounded-2xl");
+    expect(container.innerHTML).toContain("max-w-[85%]");
+    expect(container.innerHTML).toContain("justify-end");
+  });
+});

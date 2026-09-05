@@ -14,8 +14,17 @@
  * Laid out as a document rather than as a chat client. There is no avatar, no
  * bubble tail and no left-and-right alternation, because a grounded answer is
  * something you read and quote from, and the two-column messaging metaphor
- * halves the width available to do that in. The question sits above its answer
- * in a lighter weight, which is all the distinction the eye needs.
+ * halves the width available to do that in.
+ *
+ * <p>The thread is held to the <b>measure</b> — 680px, the same column a
+ * transcript and a brief are set in — rather than to a generic `max-w-3xl`. Not
+ * a rounder number for its own sake: 680 at the reading size is about 74
+ * characters, which is the measurement the whole V2 layout is built to protect.
+ * The answers are set in the reading serif for the same reason.
+ *
+ * <p>The header is deliberately NOT in that column. Its two jobs are "which
+ * conversation am I in" and "start another", and those belong in the corners the
+ * eye already goes to rather than boxed in with the prose.
  */
 
 import * as React from "react";
@@ -87,7 +96,7 @@ export default function AskPage() {
       </header>
 
       <div ref={threadRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 lg:px-6">
-        <div className="mx-auto max-w-3xl space-y-5">
+        <div className="mx-auto w-full max-w-measure space-y-7">
           {chat.isLoading ? (
             <>
               <Skeleton className="h-20 w-3/4" />
@@ -110,7 +119,7 @@ export default function AskPage() {
       </div>
 
       <div className="shrink-0 pt-3 lg:px-2">
-        <div className="mx-auto max-w-3xl">
+        <div className="mx-auto w-full max-w-measure">
           <ChatDock
             prompts={prompts}
             showPrompts={chat.showPrompts}

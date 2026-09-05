@@ -200,16 +200,27 @@ export function SourceList({ citations }: { citations?: Citation[] }) {
 
   if (byMeeting.size === 0) return null;
 
+  /*
+   * A margin note, not a footer.
+   *
+   * <p>This was a horizontal rule, an uppercase "SOURCES" label and a row of
+   * filled chips — three separate devices to say "this text came from
+   * somewhere", stacked under every answer. The V2 rule for evidence is one
+   * 1px stroke on the left edge and text: the stroke does the work a box would
+   * do at a fraction of the visual cost, and it is the same treatment a
+   * citation gets in the transcript margin, so the two read as one idea.
+   *
+   * <p>The label goes. What is under a rule beside a meeting title and a
+   * timecode is self-evidently where the answer came from, and a word repeated
+   * under every answer is a word nobody reads.
+   */
   return (
-    <div className="mt-2 space-y-1.5 border-t border-border/50 pt-2">
-      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-        Sources
-      </p>
+    <div className="v2-note mt-3 space-y-1">
       {Array.from(byMeeting.entries()).map(([meetingId, { title, stamps }]) => (
-        <div key={meetingId} className="flex flex-wrap items-center gap-1.5">
+        <div key={meetingId} className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
           <Link
             href={`/meetings/${meetingId}`}
-            className="text-[11px] font-medium underline underline-offset-2 hover:text-primary"
+            className="text-foot font-headline text-ink-2 underline-offset-2 hover:text-ink hover:underline"
           >
             {title}
           </Link>
@@ -218,9 +229,9 @@ export function SourceList({ citations }: { citations?: Citation[] }) {
               key={i}
               href={`/meetings/${meetingId}?t=${s.start}`}
               title={s.text}
-              className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/60 px-2 py-0.5 text-[11px] text-foreground transition-colors hover:bg-muted"
+              className="tabular inline-flex items-center gap-1 font-mono text-cap text-ink-3 transition-colors hover:text-brand-text"
             >
-              <Quote className="h-3 w-3" /> {timecode(s.start)}
+              <Quote className="h-3 w-3" aria-hidden /> {timecode(s.start)}
             </Link>
           ))}
         </div>

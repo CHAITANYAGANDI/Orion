@@ -34,10 +34,24 @@
  * the height of the rail, with the reading measure squeezed by a bubble that
  * exists to say "not yours".
  *
- * So an answer is set as a document: left-aligned, full width, no fill. The
- * distinction the eye needs is already carried by the alignment and the tint on
- * the other side. Its text goes through `Markdown`; the question stays plain,
- * for the reasons in that file.
+ * So an answer is set as a document: left-aligned, full width, no fill, and in
+ * the reading serif — the same face as a transcript and a brief, because it is
+ * the same act. The distinction the eye needs is already carried by the
+ * alignment and the tint on the other side. Its text goes through `Markdown`;
+ * the question stays plain, for the reasons in that file.
+ *
+ * ## The question is quiet, and that is a change
+ *
+ * <p>It used to be a filled pill in the primary colour. Under the V2 palette
+ * `--primary` is INK — near-white — because an accent spent on every button is
+ * an accent that means nothing, and a Save button is not an observation. Which
+ * left this bubble a white slab beside the answer somebody actually came for,
+ * with the loudest thing on the screen being the words they had just typed
+ * themselves.
+ *
+ * <p>So the question is a raised surface with an edge: still plainly a bubble,
+ * still right-aligned, still capped at 85% — and quieter than the answer, which
+ * is the correct order.
  */
 
 import * as React from "react";
@@ -57,7 +71,7 @@ import { cn } from "@/lib/utils";
  * it.
  */
 export const PROMPT_BUBBLE =
-  "rounded-2xl bg-primary px-3 py-2 text-sm text-primary-foreground";
+  "rounded-2xl border border-line bg-surface-raised px-3.5 py-2 text-sm text-ink";
 
 export function ChatMessageBubble({
   message,
@@ -111,7 +125,9 @@ export function ChatMessageBubble({
           {isUser ? (
             <p className="whitespace-pre-wrap">{message.content}</p>
           ) : (
-            <Markdown>{message.content}</Markdown>
+            // `reading`: the serif, at the reading size. An answer is something
+            // to quote from, which is the same act as reading a transcript.
+            <Markdown reading>{message.content}</Markdown>
           )}
           {children}
         </div>

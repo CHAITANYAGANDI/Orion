@@ -185,3 +185,36 @@ describe("the narrow rail", () => {
     expect(container.querySelector("ul")?.className).toContain("ml-4");
   });
 });
+
+/**
+ * Which face prose is set in.
+ *
+ * <p>The border is absolute in this product: the serif appears only inside a
+ * reading column — a transcript, a brief, an answer — and the interface is sans
+ * everywhere else. A serif outside a reading column is a bug, and it is the
+ * classic way an app ends up looking like a blog.
+ *
+ * <p>`reading` is a boolean rather than a className because it has to REPLACE
+ * the interface size and leading rather than sit beside them. Two font-size
+ * utilities in one class list are resolved by whichever the stylesheet emits
+ * last, which is not something a caller can reason about — so these check that
+ * the interface size is actually gone, not merely that a class was added.
+ */
+describe("the reading face", () => {
+  it("is off by default, because most prose is interface prose", () => {
+    const { container } = render(<Markdown>a note in a panel</Markdown>);
+
+    expect(container.firstElementChild?.className).toContain("text-sm");
+    expect(container.firstElementChild?.className).not.toContain("v2-read");
+  });
+
+  it("replaces the interface size when the prose is something to read", () => {
+    const { container } = render(<Markdown reading>an answer</Markdown>);
+
+    expect(container.firstElementChild?.className).toContain("v2-read");
+    // The half that is easy to get wrong: adding the class and leaving the
+    // override under it renders the serif at 13.5px.
+    expect(container.firstElementChild?.className).not.toContain("text-sm");
+    expect(container.firstElementChild?.className).not.toContain("leading-relaxed");
+  });
+});

@@ -370,3 +370,42 @@ describe("a starter chip that is an opening rather than a question", () => {
     expect(askChat.mock.calls[0][0].question).toMatch(/^Do any decisions/);
   });
 });
+
+/**
+ * The column the thread is set in.
+ *
+ * <p>Not a rounder number for its own sake. 680px at the reading size is about
+ * 74 characters, which is the measurement the whole V2 layout is built to
+ * protect — and it is the same column a transcript and a brief are set in, so
+ * moving between them is not a change of reading posture.
+ *
+ * <p>Both regions are pinned, because they have drifted apart before: the
+ * thread at one width and the composer at another gives the box a visible step
+ * relative to the answer above it, which reads as a rendering fault.
+ */
+describe("the measure", () => {
+  it("holds the thread and the composer to the same column", () => {
+    const { container } = render(<AskPage />);
+
+    const columns = container.querySelectorAll(".max-w-measure");
+    expect(columns).toHaveLength(2);
+  });
+
+  it("does not hold the thread picker to it", () => {
+    // Deliberate. Its two jobs are "which conversation am I in" and "start
+    // another", and those belong in the corners the eye already goes to rather
+    // than boxed in with the prose.
+    const { container } = render(<AskPage />);
+
+    const header = container.querySelector("header");
+    expect(header?.querySelector(".max-w-measure")).toBeNull();
+  });
+
+  it("sizes itself against the band rather than a hardcoded header", () => {
+    // The chrome above is 48px and is published as `--band`. A page that
+    // hardcodes the old 4rem scrolls its own composer off the bottom.
+    const { container } = render(<AskPage />);
+
+    expect(container.innerHTML).toContain("100vh-var(--band)");
+  });
+});

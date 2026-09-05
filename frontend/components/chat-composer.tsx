@@ -221,7 +221,7 @@ export function ChatComposer({
      * now put nothing in its place: tabbing into the chat gave no indication of
      * having arrived anywhere.
      */
-    <div className="relative rounded-2xl border bg-card shadow-sm transition-colors focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/20">
+    <div className="relative rounded-xl border border-edge bg-surface-raised shadow-e2 transition-colors focus-within:border-brand/60 focus-within:ring-2 focus-within:ring-brand/25">
       {picking && !scope && (
         <ContextPicker
           meetings={meetings}
@@ -239,7 +239,7 @@ export function ChatComposer({
           // the chip onto three lines and pushes the box off the panel.
           <span
             title={scope}
-            className="flex max-w-[240px] items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary"
+            className="flex max-w-[240px] items-center gap-1.5 rounded-full border border-brand/40 bg-brand/10 px-2.5 py-1 text-xs font-medium text-brand-text"
           >
             <AtSign className="h-3.5 w-3.5 shrink-0" />
             <span className="truncate">{scope}</span>
@@ -251,9 +251,11 @@ export function ChatComposer({
             aria-expanded={picking}
             className={cn(
               "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+              // Brand, not ink: what is in the context chip is what Reverie
+              // will read, which is the one meaning the accent carries here.
               selectedCount > 0
-                ? "border-primary bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-accent",
+                ? "border-brand/60 bg-brand/10 text-brand-text"
+                : "border-line text-ink-3 hover:border-edge hover:text-ink-2",
             )}
           >
             <AtSign className="h-3.5 w-3.5" />
