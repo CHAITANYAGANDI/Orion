@@ -70,6 +70,10 @@ let summary: SummaryResponse | undefined;
 let summaryQuery: "ok" | "loading" | "error" | "absent" | "stale-over-error";
 /** Templates the picker offers. Empty by default; one test needs two. */
 let templates: { slug: string; name: string }[];
+/** How the transcript request is going. */
+let transcriptQuery: "ok" | "error" | "absent";
+/** The flat body a document import has instead of utterances. */
+let transcriptText: string | undefined;
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ id: "mtg_1" }),
@@ -103,7 +107,18 @@ vi.mock("@/lib/api", () => ({
     }
     return ok(summary);
   },
-  useGetTranscriptQuery: () => ok({ segments, speakers: [] }),
+  useGetTranscriptQuery: () => {
+    if (transcriptQuery === "error") {
+      return {
+        ...ok(undefined),
+        isError: true,
+        isSuccess: false,
+        error: { status: 500, data: { message: "boom" } },
+      };
+    }
+    if (transcriptQuery === "absent") return { ...ok(undefined), isSuccess: false };
+    return ok({ segments, speakers: [], transcript: transcriptText });
+  },
   // A bare array here, not a page: this endpoint answers one meeting.
   useGetMeetingActionItemsQuery: () => ok([]),
   useGetChatQuery: () => ok({ messages: [] }),
@@ -159,17 +174,31 @@ vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock("@/components/insights-panel", () => ({ InsightsPanel: () => null }));
 vi.mock("@/components/export-dialog", () => ({ ExportDialog: () => null }));
 vi.mock("@/components/meeting-menu", () => ({ MeetingMenu: () => null }));
-vi.mock("@/components/transcript-editor", () => ({ TranscriptEditor: () => null }));
+vi.mock("@/components/transcript-editor", () => ({
+  TranscriptEditor: () => <div data-testid="transcript-editor" />,
+}));
+vi.mock("@/components/selection-menu", () => ({
+  SelectionMenu: () => <div data-testid="selection-menu" />,
+  isInsideSelectionMenu: () => false,
+}));
+vi.mock("@/components/turn-actions", () => ({
+  TurnActions: () => <div data-testid="turn-actions" />,
+  TurnReactions: () => null,
+}));
 vi.mock("@/components/moments-panel", () => ({ MomentsPanel: () => null }));
 vi.mock("@/components/outline-nav", () => ({ OutlineNav: () => null }));
 vi.mock("@/components/translated-transcript", () => ({ TranslatedTranscript: () => null }));
 vi.mock("@/components/new-action-item-dialog", () => ({ NewActionItemDialog: () => null }));
 vi.mock("@/components/moment-composer", () => ({
-  ActionItemDialog: () => null,
-  NoteDialog: () => null,
+  ActionItemDialog: () => <div data-testid="action-item-dialog" />,
+  NoteDialog: () => <div data-testid="note-dialog" />,
 }));
-vi.mock("@/components/reassign-speaker-dialog", () => ({ ReassignSpeakerDialog: () => null }));
-vi.mock("@/components/speaker-editor", () => ({ SpeakerEditor: () => null }));
+vi.mock("@/components/reassign-speaker-dialog", () => ({
+  ReassignSpeakerDialog: () => <div data-testid="reassign-dialog" />,
+}));
+vi.mock("@/components/speaker-editor", () => ({
+  SpeakerEditor: () => <div data-testid="speaker-editor" />,
+}));
 
 // The side pane is the shell's, and its portal target does not exist here.
 vi.mock("@/components/side-pane", () => ({
@@ -206,10 +235,13 @@ function aSegment(over: Partial<TranscriptSegment> = {}): TranscriptSegment {
     id: "seg_1",
     speaker: "Speaker 1",
     text: "We agreed to ship on the ninth.",
-    startTime: 0,
-    endTime: 6,
+    // `start`/`end`, which is what the type says. Naming them `startTime` here
+    // typechecked through the `as` cast and produced a transcript with every
+    // utterance at 0:00 -- silently, and only the timecode assertions noticed.
+    start: 0,
+    end: 6,
     ...over,
-  } as TranscriptSegment;
+  };
 }
 
 function aSection(over: Partial<SummarySection> = {}): SummarySection {
@@ -235,6 +267,8 @@ beforeEach(() => {
   summary = aSummary();
   summaryQuery = "ok";
   templates = [];
+  transcriptQuery = "ok";
+  transcriptText = undefined;
 });
 
 /**
@@ -791,5 +825,238 @@ describe("rewriting the brief", () => {
     render(<MeetingDetailPage />);
 
     expect(screen.queryByText(/transcript changed/)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * The transcript — the highest-risk surface in the redesign.
+ *
+ * <h2>What is asserted here, and what is not</h2>
+ *
+ * <p>`SelectionMenu`, `TurnActions`, `SpeakerEditor`, `ReassignSpeakerDialog`,
+ * `TranscriptEditor`, `TranslatedTranscript` and `MomentsPanel` each have their
+ * own test file, and they are mocked out above. What none of those can catch is
+ * the page failing to *mount* one of them, mounting it in the wrong reading
+ * mode, or severing the wires between them: the `data-seg` and `data-speaker`
+ * attributes a selection is recovered from, the per-word seek, the
+ * active-utterance tint that follows the audio.
+ *
+ * <p>Those wires are the whole reason this phase was risky. A transcript that
+ * renders beautifully and no longer plays from the word you clicked is a
+ * regression no component test would see, because every component involved is
+ * still perfect on its own.
+ */
+describe("the transcript", () => {
+  /** Get to the transcript, which is not the mode the page opens in. */
+  async function readTranscript() {
+    const view = render(<MeetingDetailPage />);
+    await userEvent.click(screen.getByRole("tab", { name: "Transcript" }));
+    return view;
+  }
+
+  it("draws a turn with its speaker, its timecode and its words", async () => {
+    segments = [aSegment({ speaker: "Priya", text: "We agreed to ship on the ninth.", start: 754, end: 760 })];
+    await readTranscript();
+
+    // Twice on purpose: the talk-time roll-call above names them too, and the
+    // two must agree. `getAllBy` rather than a scoped query, because "the name
+    // appears exactly where it should and nowhere else" is the assertion.
+    expect(screen.getAllByText("Priya")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Play from 12:34" })).toBeInTheDocument();
+    expect(screen.getByText("agreed")).toBeInTheDocument();
+  });
+
+  it("gives every word its own seek target, not just the playing one", async () => {
+    // Any word in the transcript can be clicked to play from it. The memo that
+    // keeps inactive utterances from re-rendering per frame is what makes that
+    // affordable, and it is easy to lose while restyling the span it hangs on.
+    segments = [aSegment({ text: "We agreed to ship." })];
+    await readTranscript();
+
+    const word = screen.getByText("agreed");
+    expect(word).toHaveAttribute("data-word");
+    expect(word).toHaveAttribute("data-start");
+    expect(word).toHaveAttribute("role", "button");
+  });
+
+  it("keeps the attributes a selection is recovered from", async () => {
+    // `readSelection` walks up from the selection with `closest("[data-seg]")`
+    // to find which utterance and which speaker a passage belongs to. Drop
+    // either attribute and highlighting, quoting, noting and "ask about this"
+    // all stop working at once — silently, since the menu still opens.
+    segments = [aSegment({ id: "seg_9", speaker: "Priya" })];
+    const { container } = await readTranscript();
+
+    const utterance = container.querySelector('[data-seg="seg_9"]');
+    expect(utterance).not.toBeNull();
+    expect(utterance).toHaveAttribute("data-speaker", "Priya");
+  });
+
+  it("groups consecutive utterances by one speaker into a single turn", async () => {
+    // Diarization emits an utterance per pause, so a minute of one person
+    // arrives as several segments. One row each reads as a stack of fragments
+    // with the same name repeated down the page.
+    segments = [
+      aSegment({ id: "a", speaker: "Priya", text: "First part.", start: 0, end: 3 }),
+      aSegment({ id: "b", speaker: "Priya", text: "Second part.", start: 3, end: 6 }),
+    ];
+    await readTranscript();
+
+    // One turn, so one timecode: the heading of a turn is where its
+    // playback starts, and two here would mean the grouping did not happen.
+    expect(screen.getAllByRole("button", { name: /^Play from/ })).toHaveLength(1);
+    expect(screen.getByText("First")).toBeInTheDocument();
+    expect(screen.getByText("Second")).toBeInTheDocument();
+  });
+
+  it("still seeks each utterance separately inside that turn", async () => {
+    segments = [
+      aSegment({ id: "a", speaker: "Priya", text: "First.", start: 0, end: 3 }),
+      aSegment({ id: "b", speaker: "Priya", text: "Second.", start: 30, end: 33 }),
+    ];
+    const { container } = await readTranscript();
+
+    // Two utterances under one name; nothing was merged away.
+    expect(container.querySelectorAll("[data-seg]")).toHaveLength(2);
+  });
+
+  it("mounts the selection menu, which every marking gesture goes through", async () => {
+    await readTranscript();
+
+    expect(screen.getByTestId("selection-menu")).toBeInTheDocument();
+  });
+
+  it("mounts the note and action-item composers a selection opens", async () => {
+    await readTranscript();
+
+    expect(screen.getByTestId("note-dialog")).toBeInTheDocument();
+    expect(screen.getByTestId("action-item-dialog")).toBeInTheDocument();
+  });
+
+  it("mounts the speaker correction dialog", async () => {
+    await readTranscript();
+
+    expect(screen.getByTestId("reassign-dialog")).toBeInTheDocument();
+  });
+
+  it("offers a per-turn toolbar for reactions, notes, copying and links", async () => {
+    await readTranscript();
+
+    expect(screen.getByTestId("turn-actions")).toBeInTheDocument();
+  });
+
+  it("offers Find in transcript, and says how many matched", async () => {
+    segments = [
+      aSegment({ id: "a", text: "We agreed to ship." }),
+      aSegment({ id: "b", speaker: "Dev", text: "Nothing about that here." }),
+    ];
+    await readTranscript();
+
+    await userEvent.type(screen.getByLabelText("Find in transcript"), "agreed");
+
+    expect(screen.getByText(/1 match in 1 turn/)).toBeInTheDocument();
+  });
+
+  it("says a search matched nothing rather than emptying the page", async () => {
+    // Without this the panel just empties, which reads as a transcript that
+    // failed to load.
+    await readTranscript();
+
+    await userEvent.type(screen.getByLabelText("Find in transcript"), "zzzz");
+
+    expect(screen.getByText(/Nothing in this transcript matches/)).toBeInTheDocument();
+  });
+
+  it("shows talk time and the way into speaker editing", async () => {
+    segments = [
+      aSegment({ id: "a", speaker: "Priya", start: 0, end: 60 }),
+      aSegment({ id: "b", speaker: "Dev", start: 60, end: 90 }),
+    ];
+    await readTranscript();
+
+    expect(screen.getByText("Talk time")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Edit speakers" }));
+    expect(screen.getByTestId("speaker-editor")).toBeInTheDocument();
+  });
+
+  it("offers a per-line correction without leaving the reading mode", async () => {
+    // The line editor replaces one line so the rest of the turn stays readable
+    // and still seekable while a correction is being typed. Distinct from the
+    // whole-transcript editor, which is a mode.
+    segments = [aSegment({ id: "seg_9", text: "We agreed." })];
+    await readTranscript();
+
+    await userEvent.click(screen.getByRole("button", { name: "Correct this line" }));
+
+    // Not `getByRole("textbox")`: the find box is one too, and the whole point
+    // of the line editor is that it opens *inside* a transcript that is still
+    // searchable and still seekable around it.
+    const editors = screen.getAllByRole("textbox").filter((el) => el.tagName === "TEXTAREA");
+    expect(editors).toHaveLength(1);
+    expect(editors[0]).toHaveValue("We agreed.");
+  });
+
+  it("hands the whole transcript to the editor when that mode is chosen", async () => {
+    await readTranscript();
+
+    await userEvent.click(screen.getByRole("button", { name: /Edit Transcript/ }));
+
+    expect(screen.getByTestId("transcript-editor")).toBeInTheDocument();
+  });
+});
+
+/**
+ * The transcript when it is not simply there.
+ *
+ * <p>The same rule as the brief, and the same production screenshot behind it:
+ * "Transcript unavailable." printed over a transcript that was in the database
+ * the whole time.
+ */
+describe("the transcript's states", () => {
+  async function readTranscript() {
+    const view = render(<MeetingDetailPage />);
+    await userEvent.click(screen.getByRole("tab", { name: "Transcript" }));
+    return view;
+  }
+
+  it("says the request failed rather than that there is no transcript", async () => {
+    transcriptQuery = "error";
+    await readTranscript();
+
+    expect(screen.getByText("Couldn't load the transcript")).toBeInTheDocument();
+    expect(screen.queryByText("Transcript unavailable.")).not.toBeInTheDocument();
+  });
+
+  it("offers a retry on the failure, wired to refetch", async () => {
+    transcriptQuery = "error";
+    await readTranscript();
+
+    await userEvent.click(screen.getByRole("button", { name: /Try again/ }));
+
+    expect(refetch).toHaveBeenCalled();
+  });
+
+  it("says a transcript is being prepared rather than missing, while the meeting runs", async () => {
+    // An empty transcript looks like a recording that captured nothing, which
+    // is the one conclusion that must not be drawn from a meeting still being
+    // transcribed.
+    meeting = aMeeting({ status: "TRANSCRIBING" });
+    segments = [];
+    transcriptQuery = "absent";
+    await readTranscript();
+
+    expect(screen.queryByText("Transcript unavailable.")).not.toBeInTheDocument();
+  });
+
+  it("renders a document's body, which has no utterances at all", async () => {
+    // A PDF import and a transcript from before segments existed are both real
+    // transcripts, and counting only segments would call them missing.
+    meeting = aMeeting({ sourceType: "DOCUMENT", audioUrl: null });
+    segments = [];
+    transcriptText = "The whole document, as one body of text.";
+    await readTranscript();
+
+    expect(screen.getByText(/The whole document/)).toBeInTheDocument();
+    expect(screen.queryByText("Transcript unavailable.")).not.toBeInTheDocument();
   });
 });

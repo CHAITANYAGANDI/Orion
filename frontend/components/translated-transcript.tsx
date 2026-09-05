@@ -59,33 +59,33 @@ export function TranslatedTranscript({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-line bg-surface-raised px-3 py-2 text-callout text-ink-2">
         <span>
           Reading in {translation.languageName}. Corrections and highlights work
           on the original.
         </span>
         <button
           onClick={onShowOriginal}
-          className="text-primary underline-offset-2 hover:underline"
+          className="text-brand-text underline-offset-2 hover:underline"
         >
           Show the original
         </button>
       </div>
 
       <div className="relative max-w-sm">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-4" />
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={`Search the ${translation.languageName} transcript`}
           aria-label="Search the translated transcript"
-          className="pl-9"
+          className="border-edge bg-surface-raised pl-9"
         />
         {query && (
           <button
             onClick={() => setQuery("")}
             aria-label="Clear search"
-            className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground"
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-ink-4 transition-colors hover:text-ink"
           >
             <X className="h-4 w-4" />
           </button>
@@ -93,7 +93,7 @@ export function TranslatedTranscript({
       </div>
 
       {lines.length === 0 ? (
-        <p className="py-6 text-center text-sm text-muted-foreground">
+        <p className="py-8 text-center text-callout text-ink-4">
           Nothing matches “{query}”.
         </p>
       ) : (
@@ -101,7 +101,7 @@ export function TranslatedTranscript({
           // Set from the language rather than the content: Arabic and Hebrew
           // rendered left-to-right are not merely ugly, they are hard to read.
           dir={translation.rightToLeft ? "rtl" : "ltr"}
-          className="space-y-3"
+          className="space-y-5"
         >
           {lines.map(({ segment, text: line }) => {
             const active =
@@ -111,14 +111,18 @@ export function TranslatedTranscript({
                 <button
                   onClick={() => onSeek(segment.start || 0)}
                   dir="ltr"
-                  className="shrink-0 font-mono text-xs text-muted-foreground hover:text-primary"
+                  className="tabular shrink-0 font-mono text-cap text-ink-4 transition-colors hover:text-brand-text"
                   aria-label={`Play from ${timecode(segment.start || 0)}`}
                 >
                   {timecode(segment.start || 0)}
                 </button>
-                <div className={cn("min-w-0", active && "rounded-sm bg-primary/5")}>
-                  <p className="text-xs font-medium text-muted-foreground">{segment.speaker}</p>
-                  <p className="leading-relaxed">{line}</p>
+                <div className={cn("min-w-0 rounded-sm px-1", active && "bg-brand/10")}>
+                  {/* Sans for the name, serif for the words. The same rule
+                      as the original transcript, because this is the same
+                      document in another language rather than a different
+                      kind of thing. */}
+                  <p className="text-cap font-headline uppercase text-ink-3">{segment.speaker}</p>
+                  <p className="v2-read">{line}</p>
                 </div>
               </li>
             );

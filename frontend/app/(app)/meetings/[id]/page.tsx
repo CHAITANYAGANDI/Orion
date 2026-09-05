@@ -1203,46 +1203,43 @@ export default function MeetingDetailPage() {
             <div className="v2-spread" data-margin="empty">
             {showing ? (
               showing.hasTranscript ? (
-                <Card>
-                  <CardContent className="pt-6">
-                    <TranslatedTranscript
-                      segments={transcript.data?.segments ?? []}
-                      translation={showing}
-                      currentTime={audio.currentTime}
-                      onSeek={audio.seekTo}
-                      onShowOriginal={() => void onReadIn(ORIGINAL)}
-                    />
-                  </CardContent>
-                </Card>
+                /* No card. A translated transcript is the same document in
+                   another language, so it is set in the same column with the
+                   same absence of furniture around it. */
+                <TranslatedTranscript
+                  segments={transcript.data?.segments ?? []}
+                  translation={showing}
+                  currentTime={audio.currentTime}
+                  onSeek={audio.seekTo}
+                  onShowOriginal={() => void onReadIn(ORIGINAL)}
+                />
               ) : (
                 /* Asked for rather than done automatically. An hour of speech
                    is thousands of words: doing it for everyone who switched
                    language to read the summary would spend their money and
                    half a minute of their time on a tab they never opened. */
-                <Card>
-                  <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
-                    <p className="font-medium">
-                      The transcript is still in its original language.
-                    </p>
-                    <p className="max-w-md text-sm text-muted-foreground">
-                      Translating every utterance takes longer than the summary
-                      did, so it is done on request.
-                    </p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={translating}
-                      onClick={() => void onReadIn(readingIn, true)}
-                    >
-                      {translating ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Languages className="h-4 w-4" />
-                      )}
-                      Translate the transcript into {showing.languageName}
-                    </Button>
-                  </CardContent>
-                </Card>
+                <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-line py-12 text-center">
+                  <p className="text-callout font-headline text-ink">
+                    The transcript is still in its original language.
+                  </p>
+                  <p className="max-w-md text-callout text-ink-3">
+                    Translating every utterance takes longer than the summary
+                    did, so it is done on request.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={translating}
+                    onClick={() => void onReadIn(readingIn, true)}
+                  >
+                    {translating ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Languages className="h-4 w-4" />
+                    )}
+                    Translate the transcript into {showing.languageName}
+                  </Button>
+                </div>
               )
             ) : transcriptState === "preparing" ? (
               /* Not an empty TranscriptPanel. An empty transcript looks like a
@@ -1253,16 +1250,12 @@ export default function MeetingDetailPage() {
               /* The other conclusion that must not be drawn from a request that
                  failed. This is the screenshot: "Transcript unavailable." over a
                  transcript that was in the database the whole time. */
-              <Card>
-                <CardContent className="pt-6">
-                  <ResourceLoadError
-                    title="Couldn't load the transcript"
-                    detail="Your transcript is still here. Something went wrong loading it."
-                    onRetry={() => void transcript.refetch()}
-                    retrying={transcript.isFetching}
-                  />
-                </CardContent>
-              </Card>
+              <ResourceLoadError
+                title="Couldn't load the transcript"
+                detail="Your transcript is still here. Something went wrong loading it."
+                onRetry={() => void transcript.refetch()}
+                retrying={transcript.isFetching}
+              />
             ) : editingTranscript ? (
               <TranscriptEditor
                 ref={transcriptEditor}
@@ -2757,19 +2750,49 @@ function TranscriptPanel({
     }
   }
 
-  if (loading) return <Card><CardContent className="pt-6"><Skeleton className="h-40 w-full" /></CardContent></Card>;
+  if (loading) {
+    // The shape of a transcript rather than one grey block: a name, a line, a
+    // line. The column does not collapse and then jump when the real one lands.
+    return (
+      <div className="space-y-5" aria-busy>
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="flex gap-3">
+            <Skeleton className="h-8 w-8 shrink-0 rounded-full" />
+            <div className="min-w-0 flex-1 space-y-2">
+              <Skeleton className="h-3.5 w-32" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-4/5" />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
-    <Card>
-      <CardContent className="space-y-5 pt-6">
+    /*
+     * A document, not a card.
+     *
+     * <p>The transcript is the longest thing anybody reads in this product, and
+     * a fill with a radius around an hour of speech is the clearest possible
+     * case of a content group pretending to be an object. What is left is the
+     * measure, the space between turns, and the words.
+     *
+     * <p>Everything that made this panel work is untouched: `data-seg` and
+     * `data-speaker` are what `readSelection` recovers a passage from with
+     * `closest`, the active-utterance computation still drives the playback
+     * tint per frame, and `onSeek` is still the same stable callback so the
+     * per-word memo keeps holding.
+     */
+    <div className="space-y-6">
         {/* Find in transcript. Above everything else because it changes what
             the rest of the panel shows. */}
         {segments.length > 0 && (
           <div className="space-y-2">
             <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-4" />
               <Input
-                className="h-9 pl-8 pr-8"
+                className="h-9 border-edge bg-surface-raised pl-8 pr-8"
                 placeholder="Find in transcript…"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -2781,7 +2804,7 @@ function TranscriptPanel({
               {query && (
                 <button
                   onClick={() => setQuery("")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-ink-4 transition-colors hover:text-ink"
                   aria-label="Clear search"
                 >
                   <X className="h-4 w-4" />
@@ -2789,7 +2812,7 @@ function TranscriptPanel({
               )}
             </div>
             {needle && (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-foot text-ink-3">
                 {matchCount === 0
                   ? "No matches."
                   : `${matchCount} ${matchCount === 1 ? "match" : "matches"} in ${turns.length} ${
@@ -2797,7 +2820,7 @@ function TranscriptPanel({
                     }. Click any word to play from there.`}
               </p>
             )}
-            <p className="text-xs text-muted-foreground">
+            <p className="text-foot text-ink-4">
               Select any part of the transcript to highlight, quote, note or act
               on it. Point at a turn for reactions, notes, copying and links.
             </p>
@@ -2821,8 +2844,8 @@ function TranscriptPanel({
         {speakers.length > 0 && talk.total > 0 && (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <h3 className="flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
-                <Users className="h-4 w-4" /> Talk time
+              <h3 className="v2-label flex items-center gap-1.5">
+                <Users className="h-3.5 w-3.5" /> Talk time
               </h3>
               <Button variant="ghost" size="sm" onClick={() => setEditing((v) => !v)}>
                 {editing ? "Cancel" : "Edit speakers"}
@@ -2856,7 +2879,7 @@ function TranscriptPanel({
                 {/* One-line roll-call, ordered by who spoke most. The bars
                     below give the detail; this answers "who was in this and
                     who dominated it" at a glance. */}
-                <p className="pb-1 text-sm text-muted-foreground">
+                <p className="pb-1 text-callout text-ink-3">
                   {speakers
                     .map((sp) => ({ sp, pct: Math.round(((talk.map.get(sp) || 0) / talk.total) * 100) }))
                     .sort((a, b) => b.pct - a.pct)
@@ -2867,13 +2890,17 @@ function TranscriptPanel({
                   const secs = talk.map.get(sp) || 0;
                   const pct = Math.round((secs / talk.total) * 100);
                   return (
-                    <div key={sp} className="flex items-center gap-3 text-sm">
-                      <span className="w-20 shrink-0 truncate font-medium">{sp}</span>
-                      <div className="h-2 flex-1 overflow-hidden rounded-full bg-secondary">
-                        <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
+                    <div key={sp} className="flex items-center gap-3 text-callout">
+                      <span className="w-20 shrink-0 truncate text-ink-2">{sp}</span>
+                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-hover">
+                        <div className="h-full bg-ink-3" style={{ width: `${pct}%` }} />
                       </div>
-                      <span className="w-16 shrink-0 text-right text-xs text-muted-foreground">
-                        {pct}% · {formatDuration(Math.round(secs))}
+                      {/* Two quantities, so mono and tabular: a column of
+                          percentages that does not line up is a column nobody
+                          can compare down. */}
+                      <span className="tabular w-20 shrink-0 text-right font-mono text-cap text-ink-4">
+                        {pct}% <span className="text-ink-5" aria-hidden>·</span>{" "}
+                        {formatDuration(Math.round(secs))}
                       </span>
                     </div>
                   );
@@ -2928,10 +2955,13 @@ function TranscriptPanel({
                 <SpeakerAvatar name={turn.speaker} speakerKey={turn.speakerKey} />
                 <div className="min-w-0 flex-1 space-y-1">
                   <div className="flex items-baseline gap-2">
-                    <span className="text-sm font-semibold">{turn.speaker}</span>
+                    {/* Sans, because a name is interface — it is what you scan
+                        down the page to find who said something. The words
+                        underneath are the serif. */}
+                    <span className="text-callout font-headline text-ink">{turn.speaker}</span>
                     <button
                       onClick={() => onSeek(turn.start)}
-                      className="font-mono text-xs text-muted-foreground hover:text-foreground hover:underline"
+                      className="tabular font-mono text-cap text-ink-4 transition-colors hover:text-brand-text hover:underline"
                       aria-label={`Play from ${timecode(turn.start)}`}
                     >
                       {timecode(turn.start)}
@@ -2947,13 +2977,15 @@ function TranscriptPanel({
                         aria-label="Remove bookmark"
                         aria-pressed
                         title="Remove bookmark"
-                        className="rounded p-0.5 text-primary hover:text-foreground"
+                        className="rounded p-0.5 text-brand-text transition-colors hover:text-ink"
                       >
                         <Bookmark className="h-3.5 w-3.5 fill-current" />
                       </button>
                     )}
                   </div>
-                  <p className="text-sm leading-relaxed">
+                  {/* THE READING COLUMN. The one place the serif is allowed,
+                      and the reason the whole layout protects 680px. */}
+                  <p className="v2-read">
                     {turn.segments.map((s, j) => {
                       const active = currentTime >= s.start && currentTime < s.end;
                       // Editing one line replaces just that line, so the rest
@@ -2978,7 +3010,7 @@ function TranscriptPanel({
                                   setOpenLine(null);
                                 }
                               }}
-                              className="w-full resize-y rounded-md border bg-background p-2 text-sm leading-relaxed outline-none focus:ring-2 focus:ring-ring"
+                              className="v2-read w-full resize-y rounded-md border border-edge bg-surface-raised p-2 outline-none focus:border-brand/60 focus:ring-2 focus:ring-brand/25"
                             />
                             <span className="mt-1 flex items-center gap-2">
                               <Button size="sm" onClick={() => void saveLine(s.text)} disabled={savingText}>
@@ -2988,8 +3020,9 @@ function TranscriptPanel({
                               <Button size="sm" variant="ghost" onClick={() => setOpenLine(null)}>
                                 Cancel
                               </Button>
-                              <span className="text-xs text-muted-foreground">
-                                Enter to save · Esc to cancel
+                              <span className="text-foot text-ink-4">
+                                Enter to save <span className="text-ink-5" aria-hidden>·</span> Esc
+                                to cancel
                               </span>
                             </span>
                           </span>
@@ -3006,7 +3039,10 @@ function TranscriptPanel({
                           data-speaker={turn.speaker}
                           className={cn(
                             "group/line rounded px-0.5 transition-colors",
-                            active && "bg-primary/10"
+                            // The utterance being spoken. Brand, because this
+                            // is Reverie telling you where the audio is — which
+                            // is the one thing the accent means.
+                            active && "bg-brand/10"
                           )}
                         >
                           {/* Every utterance renders its words, not just the
@@ -3029,7 +3065,7 @@ function TranscriptPanel({
                               meeting nothing renders here at all. */}
                           {s.language && (
                             <span
-                              className="ml-1 rounded bg-muted px-1 py-0.5 align-middle text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+                              className="ml-1 rounded-xs border border-line px-1 py-0.5 align-middle font-mono text-[10px] uppercase text-ink-4"
                               title={`Spoken in ${languageName(s.language)}`}
                             >
                               {s.language}
@@ -3042,7 +3078,7 @@ function TranscriptPanel({
                               onClick={() => beginEdit(s)}
                               aria-label="Correct this line"
                               title="Correct this line"
-                              className="ml-0.5 rounded p-0.5 align-middle text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus:opacity-100 group-hover/line:opacity-100"
+                              className="ml-0.5 rounded p-0.5 align-middle text-ink-4 opacity-0 transition-opacity hover:text-ink focus:opacity-100 group-hover/line:opacity-100"
                             >
                               <Pencil className="h-3 w-3" />
                             </button>
@@ -3069,15 +3105,17 @@ function TranscriptPanel({
                   {notes.map((note) => (
                     <div
                       key={note.id}
-                      className="mt-1 flex items-start gap-2 rounded-md border-l-2 border-primary/50 bg-muted/50 px-2 py-1.5"
+                      className="v2-note mt-2 flex items-start gap-2"
                     >
-                      <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      <p className="min-w-0 flex-1 whitespace-pre-wrap text-sm">{note.body}</p>
+                      <MessageSquare className="mt-1 h-3.5 w-3.5 shrink-0 text-ink-4" />
+                      <p className="min-w-0 flex-1 whitespace-pre-wrap text-callout text-ink-2">
+                        {note.body}
+                      </p>
                       <button
                         onClick={() => void deleteMoment({ id: note.id, meetingId })}
                         aria-label="Delete this note"
                         title="Delete this note"
-                        className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus:opacity-100 group-hover:opacity-100"
+                        className="rounded p-0.5 text-ink-4 opacity-0 transition-opacity hover:text-ink focus:opacity-100 group-hover:opacity-100"
                       >
                         <X className="h-3.5 w-3.5" />
                       </button>
@@ -3090,26 +3128,19 @@ function TranscriptPanel({
             {/* Searched, matched nothing. Without this the panel just empties,
                 which reads as a transcript that failed to load. */}
             {needle && turns.length === 0 && (
-              <p className="py-6 text-center text-sm text-muted-foreground">
-                Nothing in this transcript matches “{query.trim()}”.
-              </p>
+              <EmptyText>Nothing in this transcript matches “{query.trim()}”.</EmptyText>
             )}
             {!needle && onlyMarked && turns.length === 0 && (
-              <p className="py-6 text-center text-sm text-muted-foreground">
-                Nothing is marked in this transcript yet.
-              </p>
+              <EmptyText>Nothing is marked in this transcript yet.</EmptyText>
             )}
           </div>
         ) : empty ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">
-            Transcript unavailable.
-          </p>
+          <EmptyText>Transcript unavailable.</EmptyText>
         ) : (
           /* No segments, but text -- a document import, or a transcript from
              before segments existed. Both are real transcripts. */
-          <p className="whitespace-pre-wrap text-sm">{fallbackText}</p>
+          <p className="v2-read whitespace-pre-wrap">{fallbackText}</p>
         )}
-      </CardContent>
 
       <SelectionMenu anchor={picked?.anchor ?? null} onAction={onSelectionAction} busy={marking} />
       <ReassignSpeakerDialog
@@ -3130,7 +3161,7 @@ function TranscriptPanel({
         passage={actionFor}
         onClose={() => setActionFor(null)}
       />
-    </Card>
+    </div>
   );
 }
 
@@ -3166,15 +3197,15 @@ function MarksSection({
   }, [segments]);
 
   return (
-    <div className="rounded-md border">
+    <div className="rounded-md border border-line bg-surface-raised">
       <div className="flex flex-wrap items-center gap-2 px-3 py-2">
         <button
           onClick={() => setOpen((v) => !v)}
-          className="flex items-center gap-1.5 text-sm font-medium"
+          className="flex items-center gap-1.5 text-callout text-ink"
           aria-expanded={open}
         >
           {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-          <Highlighter className="h-4 w-4 text-amber-500" />
+          <Highlighter className="h-4 w-4 text-warning" />
           {moments.length} {moments.length === 1 ? "mark" : "marks"}
         </button>
         <Button
@@ -3286,7 +3317,7 @@ const SpokenWords = React.memo(function SpokenWords({
             }}
             title={marked?.moment.body || undefined}
             className={cn(
-              "cursor-pointer rounded transition-colors duration-75 hover:bg-primary/20",
+              "cursor-pointer rounded transition-colors duration-75 hover:bg-ink/15",
               // A saved mark and a search hit share a hue — a highlighter is
               // yellow, and pretending otherwise to avoid the collision would
               // make saved highlights unrecognisable. They are told apart by
@@ -3294,10 +3325,14 @@ const SpokenWords = React.memo(function SpokenWords({
               // is momentary anyway: a search tint lasts as long as the find
               // box has text in it.
               marked &&
-                "rounded-none border-b-2 border-amber-500 bg-amber-400/25",
+                "rounded-none border-b-2 border-warning bg-warning/25",
               match && w.text.toLowerCase().includes(match) &&
-                "bg-amber-400/30 text-foreground",
-              at >= w.start && at < w.end && "bg-primary/40 text-foreground"
+                "bg-warning/30 text-ink",
+              // The word being spoken, right now. Brand at a strength that
+              // reads over the serif without turning the line into a block --
+              // this repaints every frame while the audio runs, so it is the
+              // one tint in the product that is genuinely animated.
+              at >= w.start && at < w.end && "bg-brand/35 text-ink"
             )}
           >
             {w.text}

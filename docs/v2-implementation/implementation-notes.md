@@ -527,3 +527,85 @@ is the only place it can be exercised at all.
 `npm run typecheck` clean · `npm run lint` clean (same two pre-existing warnings)
 · `npx vitest run` 119 files, 2232 tests, all passing · `npm run build`
 succeeds.
+
+
+---
+
+## Phase 8 — the transcript
+
+The highest-risk migration in the redesign, and the one where a beautiful result
+can be silently broken: a transcript that renders perfectly and no longer plays
+from the word you clicked is a regression **no component test would see**,
+because every component involved is still correct on its own.
+
+So the inventory came first, and the wires were treated as load-bearing.
+
+### The inventory, and where each one ended up
+
+| Interaction / state | Kept | Now |
+|---|---|---|
+| Turns, grouped from consecutive same-speaker utterances | yes | unchanged grouping; each utterance still individually seekable inside the turn |
+| Speaker name | yes | sans at `callout`/headline — a name is scanned, not read |
+| Speaker avatar (`SpeakerAvatar`, colour from `speakerKey`) | yes | untouched |
+| Turn timecode → seek | yes | mono, tabular, brand on hover |
+| **Per-word seek** (`data-word`, `data-from/to/start/end`) | yes | untouched; tested |
+| **Active-utterance tint**, recomputed per frame | yes | `bg-brand/10` — Reverie telling you where the audio is |
+| **Active-word tint** | yes | `bg-brand/35` |
+| Search-hit tint, saved-mark underline (shared hue, told apart by the underline) | yes | `warning` tokens instead of raw amber |
+| `data-seg` / `data-speaker`, which `readSelection` recovers a passage from | yes | untouched; tested explicitly |
+| Selection menu | yes | mounted; tested |
+| Highlights, bookmarks, notes (`createMoment` / `deleteMoment`) | yes | unchanged |
+| Bookmark pinned on the row once set | yes | `brand-text` |
+| Reactions (`TurnReactions`, `toggleReaction`) | yes | unchanged |
+| Turn-level notes | yes | `.v2-note` instead of a tinted box |
+| Per-line correction (`openLine`, Enter saves, Esc cancels) | yes | reading-face textarea on a raised surface |
+| Whole-transcript editor mode (`TranscriptEditor`) | yes | unchanged |
+| Speaker rename (`renameSpeakers`) and merge (`mergeSpeakers`, server message shown) | yes | unchanged |
+| Speaker reassignment (`ReassignSpeakerDialog`, incl. to a new speaker) | yes | mounted; tested |
+| Find in transcript, match count, clear, Esc | yes | V2 input treatment |
+| "Only marked" filter and the marks index | yes | quieter surface |
+| Talk time, roll-call, per-speaker bars | yes | ink bars; figures mono/tabular so a column can be compared down |
+| Per-line language chip | yes | hairline + mono, still only on lines that differ |
+| Translated transcript + "translate on request" prompt | yes | same rule — sans name, serif words |
+| `loading` / `preparing` / `error` + retry / `empty` | yes | loading is now transcript-shaped |
+| Document body with no utterances (`fallbackText`) | yes | reading serif; tested |
+
+Nothing was simplified away, nothing became read-only, and no data model or
+endpoint was touched.
+
+### The one structural change
+
+`<Card><CardContent>` is gone, here and on the three wrappers around it (the
+translated transcript, the translate prompt, the load error). An hour of speech
+inside a fill with a 10px radius is the clearest possible case of a content
+group pretending to be an object.
+
+**The words are in the reading serif.** This is what the 680px measure exists
+for — it is about 74 characters at the reading size — and it is the difference
+between a transcript you can read and a transcript you can only search.
+
+### Tests
+
+`app/(app)/meetings/[id]/page.test.tsx` grew from 44 to **62**, same harness.
+The transcript query joined the summary in going through a state switch
+(`ok` / `error` / `absent`), and the transcript's collaborators are now mocked
+*identifiably* rather than as `null`, so the page can be asserted to have
+mounted each one.
+
+Three tests earned their place immediately by failing:
+
+1. **The fixture was inventing field names.** `aSegment` set `startTime`/
+   `endTime`; `TranscriptSegment` is `start`/`end`. It typechecked through an
+   `as` cast and produced a transcript with every utterance at 0:00. Only the
+   timecode assertion noticed. The cast is gone.
+2. **A speaker's name appears twice** — the turn heading and the talk-time
+   roll-call — and they must agree. Asserted as such rather than scoped away.
+3. **The find box is a `textbox` too.** The line editor is asserted as the only
+   `<textarea>`, which is also the point of it: it opens *inside* a transcript
+   that is still searchable and still seekable around it.
+
+### Verified at the end of the phase
+
+`npm run typecheck` clean · `npm run lint` clean (same two pre-existing warnings)
+· `npx vitest run` 119 files, 2250 tests, all passing · `npm run build`
+succeeds.
