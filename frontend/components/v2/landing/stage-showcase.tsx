@@ -28,7 +28,7 @@
  */
 
 import * as React from "react";
-import { motion, useInView, AnimatePresence } from "framer-motion";
+import { m, useInView, AnimatePresence } from "framer-motion";
 import { Mic, Check } from "lucide-react";
 import { BrandMark } from "@/components/v2/brand-mark";
 import { LANDING_EASE, useMotionAllowed } from "@/components/v2/landing/reveal";
@@ -165,7 +165,7 @@ function StageCopy({
       ref={ref}
       className="flex min-h-[42vh] flex-col justify-center py-10 lg:min-h-screen lg:py-0"
     >
-      <motion.div
+      <m.div
         animate={moving ? { opacity: active ? 1 : 0.32 } : undefined}
         transition={{ duration: 0.45, ease: LANDING_EASE }}
         className={cn("max-w-[46ch]", !moving && "opacity-100")}
@@ -178,7 +178,7 @@ function StageCopy({
           {stage.title}
         </h3>
         <p className="mt-4 text-[1.0625rem] leading-[1.6] text-ink-2">{stage.body}</p>
-      </motion.div>
+      </m.div>
     </div>
   );
 }
@@ -249,7 +249,7 @@ function Window({ stage, moving }: { stage: number; moving: boolean }) {
           scroll is the thing that makes a sticky visual feel unstable. */}
       <div className="relative h-[360px] overflow-hidden p-5 sm:h-[400px] sm:p-6">
         <AnimatePresence mode="wait" initial={false}>
-          <motion.div
+          <m.div
             key={stage}
             initial={moving ? { opacity: 0, y: 10 } : false}
             animate={{ opacity: 1, y: 0 }}
@@ -264,7 +264,7 @@ function Window({ stage, moving }: { stage: number; moving: boolean }) {
             ) : (
               <Brief />
             )}
-          </motion.div>
+          </m.div>
         </AnimatePresence>
       </div>
     </div>
@@ -291,7 +291,7 @@ function Capturing({ moving }: { moving: boolean }) {
 
       <div className="mt-5 space-y-4">
         {LINES.slice(0, shown).map((line, i) => (
-          <motion.div
+          <m.div
             key={line.at}
             initial={moving ? { opacity: 0, y: 6 } : false}
             animate={{ opacity: 1, y: 0 }}
@@ -303,7 +303,7 @@ function Capturing({ moving }: { moving: boolean }) {
               <span className="tabular font-mono">{line.at}</span>
             </span>
             <p className="v2-read mt-0.5">{line.text}</p>
-          </motion.div>
+          </m.div>
         ))}
       </div>
 

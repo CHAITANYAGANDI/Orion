@@ -15,7 +15,7 @@
  * things arrive in sequence. Anything beyond that — parallax, looping
  * backgrounds, carousels — is the page performing for itself.
  *
- * <h2>Three rules every animation on this page obeys</h2>
+ * <h2>Four rules every animation on this page obeys</h2>
  *
  * <ol>
  *   <li><b>Reduced motion is absence, not slowness.</b> `useReducedMotion`
@@ -30,11 +30,17 @@
  *       carries a `<noscript>` override that forces everything visible. A
  *       marketing page whose copy depends on JavaScript is a marketing page
  *       with no copy for anybody whose JavaScript failed.</li>
+ *   <li><b>`m`, never `motion`.</b> Every animated element on this page is an
+ *       `m` component drawing its features from `LandingMotion`. A `motion`
+ *       component would pull the whole library — drag, layout projection and
+ *       all — onto the one route where a stranger pays for it before they have
+ *       decided anything. The provider runs `strict`, so this rule fails loudly
+ *       in development rather than quietly in the bundle.</li>
  * </ol>
  */
 
 import * as React from "react";
-import { motion, useReducedMotion, type Variants } from "framer-motion";
+import { m, useReducedMotion, type Variants } from "framer-motion";
 
 /** The one curve. Decelerate: fast away, settling rather than stopping. */
 const EASE = [0.32, 0.72, 0, 1] as const;
@@ -61,7 +67,7 @@ export function Reveal({
   as?: "div" | "section" | "li" | "p";
 }) {
   const still = useReducedMotion();
-  const Tag = motion[as];
+  const Tag = m[as];
 
   if (still) {
     const Plain = as;
@@ -120,7 +126,7 @@ export function Stagger({
     return <Plain className={className}>{children}</Plain>;
   }
 
-  const Tag = motion[as];
+  const Tag = m[as];
   return (
     <Tag
       className={className}
@@ -130,9 +136,9 @@ export function Stagger({
       viewport={{ once: true, margin: "0px 0px -10% 0px" }}
     >
       {React.Children.map(children, (child, i) => (
-        <motion.div key={i} data-reveal variants={ITEM}>
+        <m.div key={i} data-reveal variants={ITEM}>
           {child}
-        </motion.div>
+        </m.div>
       ))}
     </Tag>
   );

@@ -22,7 +22,7 @@
  */
 
 import * as React from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import { LANDING_EASE, useMotionAllowed } from "@/components/v2/landing/reveal";
 
 /**
@@ -80,7 +80,7 @@ export function LanguageMoment() {
       <div aria-hidden className="mt-12">
         <div className="flex min-h-[6.5rem] items-start border-l border-brand-text/34 pl-5 sm:min-h-[5.5rem]">
           <AnimatePresence mode="wait" initial={false}>
-            <motion.p
+            <m.p
               key={moving ? line.code : "static"}
               dir={moving && line.rtl ? "rtl" : undefined}
               initial={moving ? { opacity: 0, y: 8 } : false}
@@ -90,7 +90,7 @@ export function LanguageMoment() {
               className="v2-read text-[1.1875rem] leading-[1.55] text-ink"
             >
               {moving ? line.text : LINES[0].text}
-            </motion.p>
+            </m.p>
           </AnimatePresence>
         </div>
 

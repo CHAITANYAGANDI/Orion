@@ -4,6 +4,7 @@ import { Reveal, Stagger } from "@/components/v2/landing/reveal";
 import { StageShowcase } from "@/components/v2/landing/stage-showcase";
 import { AskShowcase } from "@/components/v2/landing/ask-showcase";
 import { LanguageMoment } from "@/components/v2/landing/language-moment";
+import { LandingMotion } from "@/components/v2/landing/motion-provider";
 
 /**
  * The front door.
@@ -52,9 +53,12 @@ import { LanguageMoment } from "@/components/v2/landing/language-moment";
  * system-audio or tab capture. `app/page.test.tsx` asserts the absence of each,
  * and the reasoning is in `docs/v2-implementation/final-parity-audit.md` §6.
  *
- * <p>This file is a server component. Only the four motion pieces are clients,
- * so the copy is in the served HTML — with a `<noscript>` override below for
- * the one thing that would otherwise depend on JavaScript.
+ * <p>This file is a server component. The clients are the four motion pieces
+ * and `LandingMotion`, which is a context provider with no markup of its own —
+ * so the copy is in the served HTML, with a `<noscript>` override below for the
+ * one thing that would otherwise depend on JavaScript. `LandingMotion` wraps
+ * the whole body rather than only the sections that animate today, so a reveal
+ * added to the header or footer later cannot silently fail to run.
  */
 
 export const metadata = {
@@ -106,29 +110,31 @@ export default function LandingPage() {
         className="pointer-events-none absolute inset-x-0 top-0 h-[60vmax] bg-[radial-gradient(120%_62%_at_50%_-12%,hsl(var(--brand)/0.15),transparent_62%),radial-gradient(80%_40%_at_82%_8%,hsl(var(--success)/0.05),transparent_70%)]"
       />
 
-      <div className="relative">
-        <Header />
+      <LandingMotion>
+        <div className="relative">
+          <Header />
 
-        {/*
-         * The rhythm. Roughly a screen of air between moments on a desktop, so
-         * each one arrives alone — which is most of what makes a long page read
-         * as considered rather than as a list of sections.
-         */}
-        <main className="space-y-32 pb-32 sm:space-y-40 lg:space-y-48">
-          <div className="space-y-14">
-            <Hero />
-            <Preview />
-          </div>
+          {/*
+           * The rhythm. Roughly a screen of air between moments on a desktop, so
+           * each one arrives alone — which is most of what makes a long page read
+           * as considered rather than as a list of sections.
+           */}
+          <main className="space-y-32 pb-32 sm:space-y-40 lg:space-y-48">
+            <div className="space-y-14">
+              <Hero />
+              <Preview />
+            </div>
 
-          <StageShowcase />
-          <AskShowcase />
-          <LanguageMoment />
-          <Included />
-          <Keeping />
-        </main>
+            <StageShowcase />
+            <AskShowcase />
+            <LanguageMoment />
+            <Included />
+            <Keeping />
+          </main>
 
-        <Footer />
-      </div>
+          <Footer />
+        </div>
+      </LandingMotion>
     </div>
   );
 }

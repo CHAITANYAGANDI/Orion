@@ -479,3 +479,57 @@ describe("motion never hides the page", () => {
     }
   });
 });
+
+/**
+ * The public page is the one route a stranger pays for before they have decided
+ * anything, and Framer Motion is the largest thing on it.
+ *
+ * <p>`motion.div` statically pulls in every feature the library has, including
+ * drag and the layout-projection engine, neither of which this page uses. So
+ * the page renders `m` components against a `LazyMotion` provider carrying
+ * `domAnimation` only, which took the route from 44.3 kB to 33.7 kB.
+ *
+ * <p>`LandingMotion` runs `strict`, which throws in development if a full
+ * `motion` component appears inside it — but only if that component is
+ * rendered, and only in development. This is the half that fails in CI: one
+ * `motion.div` added later would quietly put ~11 kB back on the front door and
+ * nothing else in the suite would notice.
+ */
+describe("what the front door costs to load", () => {
+  const SOURCES = [
+    "reveal.tsx",
+    "stage-showcase.tsx",
+    "ask-showcase.tsx",
+    "language-moment.tsx",
+  ];
+
+  it("animates with `m`, never the full `motion` component", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+
+    for (const file of SOURCES) {
+      const src = readFileSync(
+        resolve(process.cwd(), "components/v2/landing", file),
+        "utf8",
+      );
+
+      // The import, and every element rendered from it.
+      expect(src).not.toMatch(/import\s*\{[^}]*\bmotion\b[^}]*\}\s*from\s*"framer-motion"/);
+      expect(src).not.toMatch(/<motion\./);
+    }
+  });
+
+  it("asks for `domAnimation` and not `domMax`", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const src = readFileSync(
+      resolve(process.cwd(), "components/v2/landing/motion-provider.tsx"),
+      "utf8",
+    );
+
+    // domMax adds drag and layout projection. Nothing on this page drags, and
+    // nothing animates layout, so paying for either is the regression.
+    expect(src).toContain("domAnimation");
+    expect(src).not.toMatch(/\bdomMax\b(?![^\n]*`)/);
+  });
+});

@@ -32,7 +32,7 @@
  */
 
 import * as React from "react";
-import { motion, useInView } from "framer-motion";
+import { m, useInView } from "framer-motion";
 import { AtSign, Quote } from "lucide-react";
 import { LANDING_EASE, useMotionAllowed } from "@/components/v2/landing/reveal";
 import { cn } from "@/lib/utils";
@@ -117,7 +117,7 @@ export function AskShowcase() {
             )}
 
             {(beat === "citing" || beat === "settled") && (
-              <motion.div
+              <m.div
                 initial={moving ? { opacity: 0, y: 8 } : false}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5, ease: LANDING_EASE }}
@@ -129,7 +129,7 @@ export function AskShowcase() {
                     <Quote className="h-3 w-3" /> 12:34
                   </span>
                 </span>
-              </motion.div>
+              </m.div>
             )}
           </div>
         </div>
@@ -142,7 +142,7 @@ export function AskShowcase() {
             {TRANSCRIPT.map((line) => {
               const lit = line.cited && (beat === "citing" || beat === "settled");
               return (
-                <motion.div
+                <m.div
                   key={line.at}
                   animate={
                     moving
@@ -171,7 +171,7 @@ export function AskShowcase() {
                       {line.text}
                     </span>
                   </p>
-                </motion.div>
+                </m.div>
               );
             })}
           </div>
