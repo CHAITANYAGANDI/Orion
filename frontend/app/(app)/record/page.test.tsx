@@ -511,8 +511,10 @@ describe("RecordPage live text", () => {
     expect(screen.getByText("Hello, hello, hello.")).toBeInTheDocument();
     expect(screen.getByText("Shall we start?")).toBeInTheDocument();
     // Who said it, which the browser-speech preview could not answer at all.
-    expect(screen.getByText(/Speaker 1 \u00b7/)).toBeInTheDocument();
-    expect(screen.getByText(/Speaker 2 \u00b7/)).toBeInTheDocument();
+    // Matched on the name alone: the separator is its own element now, so it
+    // is decoration between two facts rather than part of either.
+    expect(screen.getByText("Speaker 1")).toBeInTheDocument();
+    expect(screen.getByText("Speaker 2")).toBeInTheDocument();
     // The provider's own timeline, and the one the finished transcript uses.
     expect(screen.getByText(/0:04/)).toBeInTheDocument();
     expect(screen.getByText(/0:20/)).toBeInTheDocument();

@@ -694,3 +694,111 @@ succeeds.
 
 `backend-spring/` and `ai-service/` are unchanged across phases 7, 8 and 9. No
 data model, no endpoint and no request shape was altered.
+
+
+---
+
+## Phase 10 — record
+
+**The provider was not touched.** `lib/recording-context.tsx`,
+`lib/use-recorder.ts`, `lib/use-save-job.ts` and `lib/use-live-transcript.ts`
+are byte-for-byte unchanged. The /record page is presentation; the recorder,
+the session, the live transcript and the save job are application state living
+above the route, and they stayed there.
+
+### The inventory
+
+| Responsibility | Owner | Touched |
+|---|---|---|
+| Microphone permission request, `requesting` state | `useRecorder` | no |
+| Permission denied → `error` | `useRecorder` | no |
+| Active recording, pause, resume, stop | `useRecorder` | no |
+| Elapsed timer (excludes paused time) | `useRecorder` | no |
+| Input level → waveform | `useRecorder` | restyled only |
+| Silence detection → "no audio" notice | `useRecorder` | no |
+| Device list + mid-recording switch | `useRecorder` | no — see below |
+| Live text, speaker turns, reconnect, error | `useLiveTranscript` | restyled only |
+| Title and `returnTo`, surviving navigation | `RecordingSession` | no |
+| Folder context (`returnTo` → `folderIdFrom`) | `RecordingSession` | no |
+| Save → presigned upload → meeting creation | `useSaveJob` | no |
+| Upload progress, `busy`, `stopping` | `useSaveJob` | no |
+| Discard | page + recorder | no |
+| Allowance refusal | `recordRefusal` | restyled only |
+| Processing hand-off (`trackProcessing`) | `useSaveJob` | no |
+| Unload guard | provider | no |
+| Docked bar on every route | `AppShell` | restyled only |
+| Reopening /record from the bar | `RecordingBar` | restyled only |
+
+Nothing was added. There is no source chooser, no system-audio option, no tab
+capture, no consent checkbox, no pre-recording wizard and no second "Start
+recording" button — the page already opened the microphone on arrival, and its
+own test file has four negative assertions keeping it that way.
+
+### One thing to flag: the microphone picker
+
+`UseRecorder` exposes `devices` / `deviceId` / `setDeviceId`, and
+`RecordingBar` renders a `MicrophonePicker` — a glyph with the device name as a
+tooltip, shown only **while a recording is running**, that switches the live
+input mid-meeting.
+
+The brief says "do NOT add: microphone device selector". This one is not being
+added; it is existing, reachable, working behaviour, and it is not a
+pre-recording chooser. Removing it would be removing current functionality,
+which the same brief forbids. **Kept, restyled, and flagged here** — say the
+word if it should go.
+
+### The presentation
+
+**The timer** is the largest quantity in the product now: `title-2`, mono,
+tabular, so the digits do not jitter as the seconds turn over. At 13.5px it was
+the same size as the word "Pause", on the one element somebody reads from across
+a desk.
+
+**The waveform is calm.** It was full-strength red across the whole card, which
+turns a level meter into an alarm. Ink for sound, a hairline for silence — and
+the thing that is genuinely urgent, the recording lamp beside the title, keeps
+the red and gains `recpulse` (a slow breath, which stops under
+`prefers-reduced-motion`).
+
+**Stop outranks Pause.** They were the same size in opposite colours, which
+reads as two equal choices; ending a meeting is the consequential one.
+
+**The bar is glass**, like the meeting's transport — it floats over content, so
+it is the functional layer.
+
+**The bar lost `lg:left-[var(--rail-w,16rem)]`**, the last consumer of that
+variable outside the shell. The `16rem` fallback is the dangerous half: it would
+have shoved the bar a sidebar's width right the moment the variable stopped
+being published.
+
+**Live text is set like a transcript** — sans for who and when, serif for what
+was said, in the 680px measure. It is the same document arriving a few seconds
+early, and it should read like it.
+
+### The regression test that matters
+
+`components/recording-survives-navigation.test.tsx` — new, 4 tests, and it mocks
+**nothing** about the provider.
+
+`useRecorder` tears down its streams when the component holding it unmounts, so
+the property being defended is *structural*: the provider must not be remounted.
+Nothing about `useRecorder` in isolation can see that, and neither can
+`app-shell.test.tsx`, which mocks the provider to a passthrough.
+
+So this file counts mounts of the three hooks the real `RecordingProvider` owns
+and drives real route changes through the real `AppShell`:
+
+- `/record` → `/library` — recorder mounted **once**, bar still reads `recording`
+- `/now` → `/meetings/:id` — a route with a side pane and one without
+- `/now` → `/ask` — the live transcript and the save job are not rebuilt either
+- `/settings/plans` — the bar is on every route, including ones with no chrome
+
+`vi.mock` factories hoist above every import, so the bar stand-in uses an **async
+factory** to reach the real `useRecording`. `require` is not available; this runs
+as ESM.
+
+### Verified at the end of the phase
+
+`npm run typecheck` clean · `npm run lint` clean (same two pre-existing warnings)
+· `npx vitest run` 120 files, 2267 tests, all passing · `npm run build`
+succeeds.

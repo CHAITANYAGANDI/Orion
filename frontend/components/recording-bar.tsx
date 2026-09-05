@@ -162,26 +162,26 @@ export function RecordingBar() {
 
   return (
     /*
-     * `left-0 right-0` centres this on the viewport, which is not where the
-     * page is. On a wide screen the rail takes the first 16rem of it, so a bar
-     * centred on the window sits visibly left of the column it belongs to —
-     * the width of half a sidebar, which reads as a mistake rather than a
-     * choice. Offsetting by the rail lines it up with what it controls.
+     * Centred on the page, which is now the window minus whatever the side
+     * pane is taking.
+     *
+     * <p>This used to offset by `--rail-w`, because the shell had a 256px
+     * navigation column and a bar centred on the viewport sat visibly left of
+     * what it controlled. There is no rail. The `16rem` fallback in that
+     * expression is the dangerous half: it would have shoved the bar a
+     * sidebar's width to the right the moment the variable stopped being
+     * published.
      */
     <div
       ref={shell}
-      /* Between the two panes rather than across the window. Both can be
-         dragged now, so the offsets are the shell's own variables — see
-         components/app-shell.tsx — and the right one is zero on any page
-         without a rail. */
-      className="pointer-events-none fixed bottom-0 left-0 right-0 z-30 flex flex-col items-center gap-2 p-3 sm:p-4 lg:left-[var(--rail-w,16rem)] lg:right-[var(--side-pane-w,0px)]"
+      className="pointer-events-none fixed bottom-0 left-0 right-0 z-30 flex flex-col items-center gap-2 p-3 sm:p-4 lg:right-[var(--side-pane-w,0px)]"
     >
       <NoAudioNotice />
 
       <div
         role="region"
         aria-label="Recording controls"
-        className="pointer-events-auto w-auto max-w-full rounded-2xl border bg-card/95 px-4 py-3 shadow-lg backdrop-blur"
+        className="v2-glass pointer-events-auto w-auto max-w-full rounded-xl px-4 py-3"
       >
         {/* Inside the card, not floating above it. On the page background this
             sat over the transcript with nothing behind it, so the newest thing
@@ -215,7 +215,7 @@ export function RecordingBar() {
             type="button"
             onClick={openRecordPage}
             aria-label={`Open recording: ${noteTitle}`}
-            className="mb-2 flex w-full items-center gap-2 rounded-lg px-1 py-0.5 text-left transition-colors hover:bg-accent"
+            className="mb-2 flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors duration-press ease-soft hover:bg-surface-hover"
           >
             {/* Red and only while the microphone is open, so the dot means
                 "capturing" rather than "a recording exists". Paused and stopped
@@ -224,17 +224,21 @@ export function RecordingBar() {
               aria-hidden
               className={cn(
                 "h-2 w-2 shrink-0 rounded-full",
+                // The one place a filled shape and an animation are both
+                // justified: the cost of not noticing is recording something
+                // you did not mean to. `recpulse` is a slow breath rather than
+                // a blink, and it stops under prefers-reduced-motion.
                 recorder.state === "recording"
-                  ? "animate-pulse bg-destructive"
-                  : "bg-muted-foreground/40",
+                  ? "animate-recpulse bg-danger"
+                  : "bg-ink-5",
               )}
             />
-            <span className="min-w-0 flex-1 truncate text-sm font-medium">{noteTitle}</span>
-            <Maximize2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate text-callout text-ink">{noteTitle}</span>
+            <Maximize2 className="h-3.5 w-3.5 shrink-0 text-ink-4" />
           </button>
         )}
 
-        <p className="mb-2 text-center text-[11px] text-muted-foreground">
+        <p className="mb-2 text-center text-cap text-ink-4">
           Always ask permission before recording
         </p>
 
@@ -295,14 +299,21 @@ export function RecordingBar() {
                 </Button>
               )}
 
+              {/* Set at the title step, mono and tabular. It is the one
+                  thing on this bar somebody reads from across a desk, and at
+                  13.5px it was the same size as the word "Pause". Tabular so
+                  the digits do not jitter as the seconds turn over. */}
               <span
-                className="font-mono text-sm tabular-nums"
+                className="tabular font-mono text-title-2 leading-none text-ink"
                 aria-label={`Recorded so far: ${stopwatch(recorder.elapsed)}`}
               >
                 {stopwatch(recorder.elapsed)}
               </span>
 
-              <Button size="sm" variant="destructive" className="gap-2" onClick={recorder.stop}>
+              {/* Stop is the emphasised control and Pause is not. They were
+                  the same size in opposite colours, which reads as two equal
+                  choices -- and ending a meeting is the consequential one. */}
+              <Button size="sm" className="gap-2 bg-danger text-white hover:bg-danger/90" onClick={recorder.stop}>
                 <Square className="h-4 w-4" /> Stop
               </Button>
             </div>
@@ -310,16 +321,21 @@ export function RecordingBar() {
 
           {unsaved && recorder.result && (
             <div className="flex flex-wrap items-center justify-center gap-3">
-              <span className="text-sm text-muted-foreground">
+              <span className="text-callout text-ink-3">
                 {empty ? (
-                  <span className="flex items-center gap-1.5 text-destructive">
+                  <span className="flex items-center gap-1.5 text-danger">
                     <AlertTriangle className="h-4 w-4" />
                     No audio was captured — the recording was stopped too soon.
                   </span>
                 ) : (
                   <>
-                    {stopwatch(recorder.result.durationSeconds)} ·{" "}
-                    {(recorder.result.file.size / 1024 / 1024).toFixed(1)} MB
+                    <span className="tabular font-mono">
+                      {stopwatch(recorder.result.durationSeconds)}
+                    </span>{" "}
+                    <span className="text-ink-5" aria-hidden>·</span>{" "}
+                    <span className="tabular font-mono">
+                      {(recorder.result.file.size / 1024 / 1024).toFixed(1)} MB
+                    </span>
                   </>
                 )}
               </span>
@@ -340,7 +356,7 @@ export function RecordingBar() {
 
         </div>
 
-        {recorder.error && <p className="mt-3 text-xs text-destructive">{recorder.error}</p>}
+        {recorder.error && <p className="mt-3 text-foot text-danger">{recorder.error}</p>}
       </div>
     </div>
   );
@@ -497,8 +513,12 @@ function Waveform({ level, active }: { level: number; active: boolean }) {
         <span
           key={i}
           className={cn(
-            "w-[2px] rounded-full",
-            value > 0.02 ? "bg-destructive/70" : "bg-muted-foreground/20",
+            // Calm. It was full-strength red across the whole card, which turns
+            // a signal meter into an alarm — and the thing that is genuinely
+            // urgent here is the lamp beside the title, not the level. Ink for
+            // sound, a hairline for silence.
+            "w-[2px] rounded-full transition-[height] duration-75",
+            value > 0.02 ? "bg-ink-2" : "bg-line-strong",
           )}
           // A floor of 2px so silence is a dotted line rather than a gap, which
           // is what the bar looks like before anybody has said anything.
