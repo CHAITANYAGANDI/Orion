@@ -154,24 +154,27 @@ export function NotificationBell({ onNavigate }: { onNavigate?: () => void } = {
         if (!next) setFilter("inbox");
       }}
     >
-      {/* An icon in the wordmark row, not a row of its own.
-          There is no width for a written label beside "Reverie", so the name
-          lives in aria-label and in the tooltip and the count goes back to the
-          corner of the icon. That is the cost of the move, and it is paid
-          knowingly: the row it left was below the fold on a short window with a
-          few folders open, and a bell nobody scrolls to is a bell that does not
-          work. The number is kept rather than reduced to a dot — "3" and "9+"
-          are different amounts of reason to stop what you are doing. */}
+      {/* An icon in the band, not a row of its own.
+          There is no width for a written label there, so the name lives in
+          aria-label and in the tooltip and the count sits in the corner of the
+          icon. That is the cost of the move, and it is paid knowingly: the row
+          it left was below the fold on a short window with a few folders open,
+          and a bell nobody scrolls to is a bell that does not work. The number
+          is kept rather than reduced to a dot -- "3" and "9+" are different
+          amounts of reason to stop what you are doing. */}
       <DropdownMenuTrigger asChild>
         <button
           type="button"
           aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}
           title="Notifications"
           className={cn(
-            "relative ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors",
-            open || unread > 0 ? "text-foreground" : "text-muted-foreground",
-            "hover:bg-accent hover:text-accent-foreground",
-            open && "bg-accent",
+            // 32px, which is what a 48px band leaves after its own padding. No
+            // `ml-auto` any more: it was placing this against the right edge of
+            // a rail row, and in the band the layout says where it goes.
+            "relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors",
+            open || unread > 0 ? "text-ink" : "text-ink-3",
+            "hover:bg-surface-hover hover:text-ink",
+            open && "bg-surface-hover",
           )}
         >
           <Bell className="h-[18px] w-[18px]" />
@@ -179,7 +182,7 @@ export function NotificationBell({ onNavigate }: { onNavigate?: () => void } = {
               number, and announcing it twice is how a badge becomes noise. */}
           {unread > 0 && (
             <span
-              className="absolute right-0.5 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold leading-none text-primary-foreground"
+              className="absolute -right-0.5 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-fill px-1 text-[10px] font-bold leading-none text-white"
               aria-hidden
             >
               {unread > BADGE_MAX ? `${BADGE_MAX}+` : unread}
@@ -188,16 +191,18 @@ export function NotificationBell({ onNavigate }: { onNavigate?: () => void } = {
         </button>
       </DropdownMenuTrigger>
 
-      {/* Downwards now. Out to the side was for a trigger halfway down the
-          rail, where a panel opening below it ran off the bottom of a short
-          window; from the top row the whole window is underneath. The rail is
-          16rem and the panel is 24rem, so it covers the page either way —
-          `collisionPadding` is what keeps it on screen on a narrow one. Radix
-          portals this to the body, so the rail's own overflow scrolling never
-          clips it. */}
+      {/* Downwards, and anchored to its right edge. Out to the side was for a
+          trigger halfway down a navigation rail, where a panel opening below it
+          ran off the bottom of a short window; this one is in the top row, so
+          the whole window is underneath it. `align="end"` because the trigger
+          is now near the right edge of the screen and a 24rem panel growing
+          rightwards from `start` would hang off it -- `collisionPadding` would
+          drag it back, which is a panel that shifts under the pointer rather
+          than one that opens where it belongs. Radix portals this to the body,
+          so nothing above can clip it. */}
       <DropdownMenuContent
         side="bottom"
-        align="start"
+        align="end"
         sideOffset={8}
         collisionPadding={16}
         className="w-[min(24rem,calc(100vw-2rem))] p-0"

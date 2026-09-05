@@ -170,6 +170,7 @@ const config: Config = {
       },
       spacing: {
         band: "var(--band)",
+        tabbar: "var(--tabbar)",
         measure: "var(--measure)",
         margincol: "var(--margin-col)",
         doc: "var(--doc)",

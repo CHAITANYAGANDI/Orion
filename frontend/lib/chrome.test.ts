@@ -1,243 +1,181 @@
 import { describe, it, expect } from "vitest";
 
-import { headerChrome } from "@/lib/chrome";
+import { bandChrome } from "@/lib/chrome";
+import { placeFor } from "@/lib/places";
 import { SETTINGS_TABS, LEGACY_PATHS, pathForTab } from "@/lib/settings-tabs";
 
 /**
- * What the top bar carries, page by page.
+ * What the band carries, page by page.
  *
- * <p>Both rules here fail the same quiet way: a control that should be absent
- * is present on one route and gone on another that renders the identical
- * screen. Nobody reports that — it reads as the header flickering at random —
- * so the tests below walk every URL each page answers to rather than one
- * representative of each.
+ * <h2>What this file used to assert, and why it does not any more</h2>
  *
- * <p>The last group pins which pages end up with a stripped header at all.
- * Account Settings is the one that ends up with nothing, and an empty bar reads
- * as a rendering failure rather than a decision — so it is written down here
- * before somebody tries to fix it.
+ * <p>It pinned `headerChrome`: search absent on Account Settings, Import and
+ * Record absent on the chat, on a meeting and on every settings URL, plus a
+ * `bare` flag for the pages that ended up with an empty 64px bar. Those rules
+ * are gone with the bar they refereed — see the header comment on lib/chrome.ts
+ * and feature-parity §8. Deleting the assertions without replacing them would
+ * have left the one rule that still matters untested, so the same URLs are
+ * walked here against the opposite expectation: the band is the same shape
+ * everywhere, and the tests say so route by route rather than in general.
+ *
+ * <p>The failure mode is unchanged and is why this is exhaustive rather than
+ * representative: a control that is present on one URL of a page and absent on
+ * another that renders the identical screen. Nobody reports that — it reads as
+ * chrome flickering at random.
  */
 
-/** Pages that offer a new meeting, because none of the rules apply to them. */
+/** Ordinary pages. Every one of them offers a new meeting. */
 const WORKING_PAGES = [
   "/home",
+  "/library",
+  "/folders",
   "/folder/prj_1",
+  "/ask",
+  "/meetings/mtg_1",
   "/action-items",
   "/upload",
 ];
 
-/**
- * Not in WORKING_PAGES, and that is the rule under test. A meeting carries its
- * own Share, Export and overflow menu, which act on the document being read;
- * Import and Record make a different one. Both at the same end of the same bar
- * were five buttons that looked like one toolbar.
- */
-const MEETING_PAGE = "/meetings/mtg_1";
+/** Every URL Account Settings answers to. */
+const SETTINGS_PAGES = [
+  "/settings",
+  ...SETTINGS_TABS.map((tab) => pathForTab(tab.id)),
+  ...Object.keys(LEGACY_PATHS),
+];
 
-/** Pages and states where the two buttons that make a meeting are withheld. */
+/** The page that exists to record, and anything under it. */
 const CAPTURING_PAGES = ["/record", "/record/live"];
 
-describe("search in the header", () => {
-  it("is gone on Account Settings, under every URL it answers to", () => {
-    expect(headerChrome("/settings").search).toBe(false);
-    for (const tab of SETTINGS_TABS) {
-      expect(headerChrome(pathForTab(tab.id)).search).toBe(false);
-    }
-    // The old page URLs render the identical component. Hiding the bar on one
-    // and not the other would depend on which link somebody followed.
-    for (const path of Object.keys(LEGACY_PATHS)) {
-      expect(headerChrome(path).search).toBe(false);
-    }
-  });
-
-  it("stays on the chat", () => {
-    // Asking a question and finding the meeting the answer came from are the
-    // same activity, so this is the one control worth keeping here.
-    expect(headerChrome("/ask").search).toBe(true);
-  });
-
-  it("stays everywhere there are meetings to find", () => {
-    for (const path of [...WORKING_PAGES, MEETING_PAGE]) {
-      expect(headerChrome(path).search).toBe(true);
-    }
-  });
-});
-
-describe("what the header offers to create", () => {
-  it("offers nothing on the chat", () => {
-    expect(headerChrome("/ask").create).toBe("none");
-  });
-
-  it("offers nothing on a chat with an id, if there is ever one", () => {
-    // A string compare at the call site would drop this rule the day the route
-    // grows a segment, and the buttons would come back without anyone deciding.
-    expect(headerChrome("/ask/thr_1").create).toBe("none");
-  });
-
-  it("does not treat a path that merely starts the same as the chat", () => {
-    expect(headerChrome("/asking").create).toBe("meeting");
-  });
-
-  it("offers a folder on the folder list, not a meeting", () => {
-    // The one page whose obvious next action is not recording something.
-    expect(headerChrome("/folders").create).toBe("folder");
-    expect(headerChrome("/folders/").create).toBe("folder");
-  });
-
-  it("offers a meeting again inside a folder", () => {
-    // Filing a call into the folder you are looking at is exactly the moment
-    // to record one.
-    expect(headerChrome("/folder/prj_1").create).toBe("meeting");
-  });
-
-  it("offers nothing on Account Settings, under every URL it answers to", () => {
-    // Changing a setting and capturing a call are different sittings, and the
-    // buttons there were an invitation to walk away from a half-filled form.
-    expect(headerChrome("/settings").create).toBe("none");
-    for (const tab of SETTINGS_TABS) {
-      expect(headerChrome(pathForTab(tab.id)).create).toBe("none");
-    }
-    for (const path of Object.keys(LEGACY_PATHS)) {
-      expect(headerChrome(path).create).toBe("none");
-    }
-  });
-
-  it("offers a meeting everywhere else", () => {
+describe("what the band offers to create", () => {
+  it("offers a meeting on every ordinary page", () => {
     for (const path of WORKING_PAGES) {
-      expect(headerChrome(path).create).toBe("meeting");
+      expect(bandChrome(path).create).toBe(true);
     }
   });
 
-  it("offers nothing on a meeting, which has controls of its own", () => {
-    // A prefix rather than an exact match, so every id and any sub-route a
-    // meeting grows later is covered by the same rule. Getting this wrong is
-    // invisible in review and obvious on screen: the buttons would reappear on
-    // one URL of the same page.
-    expect(headerChrome(MEETING_PAGE).create).toBe("none");
-    expect(headerChrome("/meetings/mtg_1/anything").create).toBe("none");
+  it("offers a meeting on Account Settings too, under every URL it answers to", () => {
+    // The old rule — "changing a setting and capturing a call are different
+    // sittings" — was true of a bar the settings page shared. The band is not
+    // shared with anything, and a band that loses two of its five controls when
+    // you open Settings is the flicker this whole file is here to prevent.
+    for (const path of SETTINGS_PAGES) {
+      expect(bandChrome(path).create).toBe(true);
+    }
   });
-});
 
-describe("while a recording is in hand", () => {
-  it("offers nothing to create on the page that exists to record", () => {
-    // Record here would be offering to start what is already running.
+  it("offers nothing on the page that exists to record", () => {
+    // A prefix, so a future /record/:id cannot quietly put Record back on the
+    // page that is already recording.
     for (const path of CAPTURING_PAGES) {
-      expect(headerChrome(path).create).toBe("none");
+      expect(bandChrome(path).create).toBe(false);
     }
   });
 
-  it("offers nothing to create on any other page either, while recording", () => {
-    // The point of the rule: the recorder survives navigation, so wandering
+  it("offers nothing on any other page either, while a recording is in hand", () => {
+    // The point of the rule. The recorder survives navigation, so wandering
     // onto Home must not put Import and Record back over a live microphone.
-    for (const path of WORKING_PAGES) {
-      expect(headerChrome(path, true).create).toBe("none");
+    for (const path of [...WORKING_PAGES, ...SETTINGS_PAGES]) {
+      expect(bandChrome(path, true).create).toBe(false);
     }
-  });
-
-  it("still offers a folder on the folder list", () => {
-    // Filing something is not making a second recording, and the folder list
-    // has no other action of its own.
-    expect(headerChrome("/folders", true).create).toBe("folder");
-  });
-
-  it("leaves search alone, since finding a meeting does not make one", () => {
-    expect(headerChrome("/record").search).toBe(true);
-    expect(headerChrome("/home", true).search).toBe(true);
   });
 
   it("puts them back the moment the recorder is empty", () => {
     // Held audio is the condition, not having ever recorded. After a save or a
-    // discard the header has to come back on its own.
-    expect(headerChrome("/home", false).create).toBe("meeting");
+    // discard the band has to come back on its own.
+    expect(bandChrome("/home", false).create).toBe(true);
   });
 
   it("treats a path that merely starts the same as an ordinary page", () => {
-    expect(headerChrome("/records").create).toBe("meeting");
+    expect(bandChrome("/records").create).toBe(true);
+    expect(bandChrome("/recordings/mtg_1").create).toBe(true);
   });
 });
 
-describe("the folder whose actions belong in the header", () => {
+describe("the folder whose actions belong beside the page", () => {
   it("is the one being looked at", () => {
-    expect(headerChrome("/folder/prj_1").folderId).toBe("prj_1");
+    expect(bandChrome("/folder/prj_1").folderId).toBe("prj_1");
+  });
+
+  it("survives a query string, since a return path carries one", () => {
+    expect(bandChrome("/folder/prj_1?sort=name").folderId).toBe("prj_1");
   });
 
   it("is nothing on the folder list itself", () => {
     // Rename and delete need a folder. On the list there are many, and the
     // per-row menus are where they belong.
-    expect(headerChrome("/folders").folderId).toBeNull();
+    expect(bandChrome("/folders").folderId).toBeNull();
+    expect(bandChrome("/library").folderId).toBeNull();
   });
 
   it("is nothing on a deeper path under a folder", () => {
     // Guards the id being read positionally: a third segment means this is not
     // the folder page, and taking parts[1] anyway would put a stale folder's
-    // rename and delete in the header.
-    expect(headerChrome("/folder/prj_1/anything").folderId).toBeNull();
+    // rename and delete beside a page it does not belong to.
+    expect(bandChrome("/folder/prj_1/anything").folderId).toBeNull();
   });
 
   it("is nothing anywhere else", () => {
     const notAFolder = WORKING_PAGES.filter((p) => p !== "/folder/prj_1");
-    for (const path of [...notAFolder, MEETING_PAGE, ...CAPTURING_PAGES, "/ask", "/settings", "/billing"]) {
-      expect(headerChrome(path).folderId).toBeNull();
+    for (const path of [...notAFolder, ...CAPTURING_PAGES, ...SETTINGS_PAGES]) {
+      expect(bandChrome(path).folderId).toBeNull();
     }
   });
 });
 
-describe("the two pages that strip the header", () => {
-  it("leaves Account Settings with nothing in it", () => {
-    // Deliberate, and the only page where both rules fire at once. Asserted
-    // rather than left implicit: an empty bar looks like a rendering failure,
-    // and the next person to see one should find this test before they
-    // "fix" it.
-    const chrome = headerChrome("/settings/emails");
-    expect(chrome.search).toBe(false);
-    expect(chrome.create).toBe("none");
+/**
+ * The band's own state, which is the other half of "where am I".
+ *
+ * <p>Kept in the same file as the create rule because together they are the
+ * whole of what the band renders differently from one page to the next, and
+ * splitting them across two files is how one of them gets a rule the other
+ * contradicts.
+ */
+describe("which place a page is in", () => {
+  it("puts each of the three on itself", () => {
+    expect(placeFor("/home")).toEqual({ id: "now", nested: false });
+    expect(placeFor("/library")).toEqual({ id: "library", nested: false });
+    expect(placeFor("/ask")).toEqual({ id: "ask", nested: false });
   });
 
-  it("leaves the chat with search and nothing else", () => {
-    const chrome = headerChrome("/ask");
-    expect(chrome.search).toBe(true);
-    expect(chrome.create).toBe("none");
+  it("tolerates a trailing slash, which a link can carry", () => {
+    expect(placeFor("/home/")).toEqual({ id: "now", nested: false });
+    expect(placeFor("/library/")).toEqual({ id: "library", nested: false });
+    expect(placeFor("/ask/")).toEqual({ id: "ask", nested: false });
   });
 
-  it("strips nothing on any page that is neither", () => {
-    for (const path of [...WORKING_PAGES, "/folders"]) {
-      const chrome = headerChrome(path);
-      expect(chrome.search).toBe(true);
-      expect(chrome.create).not.toBe("none");
-    }
-    // A meeting keeps search; only its create control stands down. Finding the
-    // next meeting from inside one is how people move between them.
-    expect(headerChrome(MEETING_PAGE).search).toBe(true);
-    expect(headerChrome(MEETING_PAGE).bare).toBe(false);
-  });
-});
-
-describe("an empty top bar", () => {
-  it("is reported on every settings tab", () => {
-    // Search is stripped there and there is nothing to create, so all that
-    // remains is the button that opens the rail — and that is hidden from lg
-    // up. What was left was sixty-four pixels of nothing above the title.
-    for (const path of ["/settings", "/settings/general", "/settings/integrations", "/billing"]) {
-      const chrome = headerChrome(path);
-      if (chrome.search || chrome.create !== "none") continue;
-      expect(chrome.bare).toBe(true);
-    }
-    expect(headerChrome("/settings").bare).toBe(true);
+  it("ignores a query string and a hash", () => {
+    expect(placeFor("/library?sort=name")).toEqual({ id: "library", nested: false });
+    expect(placeFor("/meetings/mtg_1#t=120")).toEqual({ id: "library", nested: true });
   });
 
-  it("is not reported where the bar still has something in it", () => {
-    // Dropping the bar on these would take search with it.
-    for (const path of [...WORKING_PAGES, MEETING_PAGE, "/ask", "/folders", "/record"]) {
-      expect(headerChrome(path).bare).toBe(false);
+  it("keeps Library lit, dimmed, one level down", () => {
+    // The rule the old rail got for free: something is always lit. Three words
+    // that all go quiet inside a meeting read as navigation that has stopped
+    // working, and a meeting is where people spend most of their time.
+    for (const path of ["/folders", "/folder/prj_1", "/meetings/mtg_1", "/meetings/mtg_1/anything"]) {
+      expect(placeFor(path)).toEqual({ id: "library", nested: true });
     }
   });
 
-  it("never claims to be empty while it is still holding search", () => {
-    // The two must not disagree: a bar that is dropped while it carries the
-    // only way to search is a feature deleted by a layout tweak.
-    for (const path of ["/home", "/settings", "/ask", MEETING_PAGE, "/folder/prj_1"]) {
-      const chrome = headerChrome(path);
-      if (chrome.bare) expect(chrome.search).toBe(false);
+  it("puts a page in no place where it is a thing you are doing", () => {
+    // Not a gap. Each of these is entered from a control of its own and left by
+    // finishing, and underlining a destination nobody navigated to would be a
+    // lie about where they are.
+    for (const path of ["/record", "/settings", "/settings/plans", "/welcome", "/upload", "/"]) {
+      expect(placeFor(path)).toEqual({ id: null, nested: false });
     }
+  });
+
+  it("does not treat a path that merely starts the same as a place", () => {
+    expect(placeFor("/asking")).toEqual({ id: null, nested: false });
+    expect(placeFor("/homework")).toEqual({ id: null, nested: false });
+  });
+
+  it("answers for nothing at all", () => {
+    // usePathname is typed as string but is null during the first render of a
+    // few Next builds, and a band that throws there takes the whole app with it.
+    expect(placeFor(null)).toEqual({ id: null, nested: false });
+    expect(placeFor(undefined)).toEqual({ id: null, nested: false });
+    expect(placeFor("")).toEqual({ id: null, nested: false });
   });
 });

@@ -208,6 +208,7 @@
     --r-xl: 1.25rem;          /* the floating dock */
 
     --band: 48px;             /* the whole of the permanent chrome */
+    --tabbar: 56px;           /* the same navigation, on a phone, at the bottom */
 
     /* Short and dark. The half-pixel white inset is what actually separates a
      * floating layer from content: it reads as the lit top edge of a physical

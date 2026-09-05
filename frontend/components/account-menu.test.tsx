@@ -5,9 +5,23 @@ import userEvent from "@testing-library/user-event";
 /**
  * The account button.
  *
- * Two items, and the shortness is the point: the plan, privacy and the settings
- * themselves are all tabs of one page now, so listing them here as well would be
- * listing the same page three times under three names.
+ * <p>Two items, and the shortness is the point: the plan, privacy and the
+ * settings themselves are all tabs of one page now, so listing them here as
+ * well would be listing the same page three times under three names.
+ *
+ * <h2>What moved, and why these tests open the menu</h2>
+ *
+ * <p>This used to be a 256px button at the foot of a navigation rail, with the
+ * name and the second line printed on its face. The rail is gone; the trigger
+ * is now the avatar alone at the end of a 48px band, and every fact that was on
+ * the button is the first two lines of the menu it opens.
+ *
+ * <p>So the assertions below are the same assertions — never the user id, the
+ * settings name beats the provider's, dev mode says it is dev — asked one click
+ * later. That is deliberate: the facts are what these tests are for, and
+ * checking them where they now live is the only way the move stays honest. The
+ * one thing that is checked on the button itself is its accessible name, which
+ * is the whole of what a picture-only control offers a screen reader.
  */
 const { signOut } = vi.hoisted(() => ({ signOut: vi.fn() }));
 
@@ -22,13 +36,24 @@ vi.mock("@/lib/auth", () => ({
 
 vi.mock("@/lib/api", () => ({
   useGetPreferencesQuery: () => ({ data: profile }),
+  // The allowance lives inside this menu now, so the module it reads has to be
+  // answerable here. A real row rather than `undefined`: a skeleton would let
+  // the card render as a grey block and pass every assertion below.
+  useGetUsageQuery: () => ({
+    data: { plan: "FREE", minutesUsed: 12, minutesLimit: 100, importsUsed: 1, importsLimit: 3 },
+  }),
 }));
 
 import { AccountMenu } from "@/components/account-menu";
 
+/** The trigger, found the way a screen reader finds it. */
+function trigger() {
+  return screen.getByRole("button", { name: /Priya|Ada|Your account|ada@|user_3IU/ });
+}
+
 async function openMenu() {
   render(<AccountMenu />);
-  await userEvent.click(screen.getByRole("button", { name: /Priya|Your account|ada@/ }));
+  await userEvent.click(trigger());
 }
 
 beforeEach(() => {
@@ -40,10 +65,10 @@ beforeEach(() => {
   identity = { name: "", email: "", imageUrl: "" };
 });
 
-describe("the button", () => {
-  it("never shows the user id, however little else is known", () => {
+describe("who it says you are", () => {
+  it("never shows the user id, however little else is known", async () => {
     /*
-     * THE bug, reported from production: this button read
+     * THE bug, reported from production: this read
      * `user_3IUiqZSNuF0gbjwWA...` for somebody who had just signed in with
      * Google, which does not read as "you" -- it reads as somebody else's
      * account.
@@ -53,39 +78,86 @@ describe("the button", () => {
      * unless a Clerk JWT template is configured to send one. So the fallback
      * was the primary key, in the place a name goes.
      */
-    render(<AccountMenu />);
+    await openMenu();
 
     expect(screen.queryByText(/user_3IU/)).not.toBeInTheDocument();
     expect(screen.getByText("Your account")).toBeInTheDocument();
   });
 
-  it("uses the name the identity provider knows", () => {
+  it("uses the name the identity provider knows", async () => {
     // Signing in with Google hands Clerk a name. It was in the browser the
     // whole time; nothing was reading it.
     identity = { name: "Ada Lovelace", email: "ada@example.com", imageUrl: "" };
-    render(<AccountMenu />);
+    await openMenu();
 
     expect(screen.getByText("Ada Lovelace")).toBeInTheDocument();
     expect(screen.queryByText(/user_3IU/)).not.toBeInTheDocument();
   });
 
-  it("falls back to the address before it gives up on a name", () => {
+  it("falls back to the address before it gives up on a name", async () => {
     identity = { name: "", email: "ada@example.com", imageUrl: "" };
-    render(<AccountMenu />);
+    await openMenu();
 
     // A poor name, but a true one, and the one that catches being signed in as
     // the wrong person.
     expect(screen.getByText("ada@example.com")).toBeInTheDocument();
   });
 
-  it("lets a name chosen in Settings win over the provider's", () => {
+  it("lets a name chosen in Settings win over the provider's", async () => {
     // Somebody who has typed a name has said what they want to be called.
     identity = { name: "Ada Lovelace", email: "ada@example.com", imageUrl: "" };
     profile = { displayName: "Priya Raman", avatarUrl: null };
-    render(<AccountMenu />);
+    await openMenu();
 
     expect(screen.getByText("Priya Raman")).toBeInTheDocument();
     expect(screen.queryByText("Ada Lovelace")).not.toBeInTheDocument();
+  });
+
+  it("says the address underneath, when the line above is a name", async () => {
+    // The second line is what catches being signed in as the wrong person, and
+    // it is the reason the name did not simply replace it when this shrank to
+    // an avatar. Both are here, one under the other.
+    identity = { name: "Ada Lovelace", email: "ada@example.com", imageUrl: "" };
+    await openMenu();
+
+    expect(screen.getByText("Ada Lovelace")).toBeInTheDocument();
+    expect(screen.getByText("ada@example.com")).toBeInTheDocument();
+  });
+
+  it("does not say the same fact twice when the address is the name", async () => {
+    identity = { name: "", email: "ada@example.com", imageUrl: "" };
+    await openMenu();
+
+    expect(screen.getAllByText("ada@example.com")).toHaveLength(1);
+    expect(screen.getByText("Signed in")).toBeInTheDocument();
+  });
+
+  it("still shows the dev user id in dev mode, which is the identity there", async () => {
+    // Not the same thing at all. In dev the id is how you switch tenant, it is
+    // typed by hand, and the line under it says "Development session". It is
+    // the identity rather than a stand-in for one.
+    mode = "dev";
+    await openMenu();
+
+    expect(screen.getByText("user_3IUiqZSNuF0gbjwWA")).toBeInTheDocument();
+    expect(screen.getByText("Development session")).toBeInTheDocument();
+  });
+});
+
+describe("the button, which is only a picture", () => {
+  it("carries the name as its accessible label", () => {
+    // The whole of what a picture-only control offers a screen reader. Without
+    // it the band ends in an unlabelled button.
+    profile = { displayName: "Priya Raman", avatarUrl: null };
+    render(<AccountMenu />);
+
+    expect(screen.getByRole("button", { name: "Priya Raman" })).toBeInTheDocument();
+  });
+
+  it("is labelled even when nothing at all is known", () => {
+    render(<AccountMenu />);
+
+    expect(screen.getByRole("button", { name: "Your account" })).toBeInTheDocument();
   });
 
   it("shows the Google picture when there is no uploaded one", () => {
@@ -105,23 +177,33 @@ describe("the button", () => {
     expect(img).toHaveAttribute("src", "data:image/png;base64,iVBORw0KGgo=");
   });
 
-  it("still shows the dev user id in dev mode, which is the identity there", () => {
-    // Not the same thing at all. In dev the id is how you switch tenant, it is
-    // typed by hand, and the line under it says "Development session". It is
-    // the identity rather than a stand-in for one.
-    mode = "dev";
-    render(<AccountMenu />);
-
-    expect(screen.getByText("user_3IUiqZSNuF0gbjwWA")).toBeInTheDocument();
-    expect(screen.getByText("Development session")).toBeInTheDocument();
-  });
-
   it("uses real initials, not the tail of an id", () => {
     profile = { displayName: "Chaitanyasai Gandi", avatarUrl: null };
     render(<AccountMenu />);
 
     // "CG", not "WA" or whatever the id happens to end with.
     expect(screen.getByText("CG")).toBeInTheDocument();
+  });
+
+  /**
+   * <p>This replaces a test on a chevron that used to sit beside the name. The
+   * bug it was written for was real — the glyph never turned, because nothing
+   * read Radix's `data-state` — and the fix survives the arrow being dropped:
+   * the trigger still says whether it is open, in the one way that is announced
+   * rather than merely drawn.
+   */
+  it("says whether it is open", async () => {
+    const user = userEvent.setup();
+    render(<AccountMenu />);
+
+    // Held rather than looked up twice. Radix marks everything outside the open
+    // menu `aria-hidden`, so the trigger is unreachable by role the moment it
+    // has done its job -- which is correct behaviour and would read here as the
+    // button having disappeared.
+    const button = trigger();
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    await user.click(button);
+    expect(button).toHaveAttribute("aria-expanded", "true");
   });
 });
 
@@ -155,36 +237,29 @@ describe("the menu", () => {
 });
 
 /**
- * The arrow on the trigger.
+ * The allowance, which has nowhere else to be.
  *
- * <p>It never moved. Radix writes `data-state` on the trigger and nothing was
- * reading it, so the one glyph saying the button opens something said the same
- * thing whether the menu was open or shut.
- *
- * <p>Asserted on the trigger's own state rather than on a computed rotation:
- * jsdom applies no Tailwind, so what is checkable is that the icon is wired to
- * the attribute and that the attribute flips.
+ * <p>It was the row above this button in the navigation rail. With the rail
+ * gone the only alternative was a settings tab, and an allowance that is only
+ * visible on a page nobody opens until they have run out is not a meter — it is
+ * an explanation delivered after the fact.
  */
-describe("the arrow", () => {
-  it("is wired to whether the menu is open", () => {
-    render(<AccountMenu />);
+describe("the allowance", () => {
+  it("is in the menu, with the count and the way to the plans", async () => {
+    await openMenu();
 
-    const icon = screen.getByRole("button", { name: /Your account/ }).querySelector("svg");
-    expect(icon).toHaveClass("group-data-[state=open]:rotate-180");
+    const link = screen.getByRole("link", { name: /minutes transcribed/ });
+    expect(link).toHaveAttribute("href", "/settings/plans");
+    expect(link).toHaveTextContent("12 of 100");
   });
 
-  it("turns over when the menu opens", async () => {
-    const user = userEvent.setup();
-    render(<AccountMenu />);
+  it("is not a menu item, because a count is not an action", async () => {
+    await openMenu();
 
-    const trigger = screen.getByRole("button", { name: /Your account/ });
-    expect(trigger).toHaveAttribute("data-state", "closed");
-
-    await user.click(trigger);
-
-    // The trigger carries the state and `group` on it carries it to the icon,
-    // so this flipping is the rotation happening.
-    expect(trigger).toHaveAttribute("data-state", "open");
-    expect(trigger).toHaveClass("group");
+    // Guards the assertion above about there being exactly two menu items: if
+    // this ever becomes one, that test fails for a reason nobody would guess
+    // from its name.
+    const items = screen.getAllByRole("menuitem").map((el) => el.textContent?.trim());
+    expect(items).not.toContain(expect.stringContaining("minutes"));
   });
 });

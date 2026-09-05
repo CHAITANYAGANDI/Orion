@@ -24,6 +24,25 @@ export const HOME = "/home";
  */
 export const WELCOME = "/welcome";
 
+/**
+ * The chat.
+ *
+ * <p>The third place in the band. A constant rather than six literals, for the
+ * same reason the folder paths are: it is written by the band and by the mobile
+ * tabs and parsed by lib/places.ts.
+ */
+export const ASK = "/ask";
+
+/**
+ * Everything you have, and the folders you filed it in.
+ *
+ * <p>The second of the three places in the band. Home answers "what is
+ * happening"; this answers "where is the thing I am looking for" — which used
+ * to be a scope inside Home and a separate /folders page, two halves of one
+ * question in two places.
+ */
+export const LIBRARY = "/library";
+
 /** Every folder. */
 export const FOLDERS = "/folders";
 

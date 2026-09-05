@@ -197,23 +197,45 @@ describe("the row menu", () => {
 });
 
 describe("creating", () => {
-  it("does not put a New folder button above the list", () => {
+  /*
+   * THIS USED TO ASSERT THE OPPOSITE, and the reversal is deliberate.
+   *
+   * <p>The button was in the top bar, and this file said so: "It is in the top
+   * bar on this page, where Import and Record sit everywhere else." That was
+   * right while the bar belonged to the page. It does not any more -- what is
+   * up there is a global band that carries the same five controls on every
+   * screen in the app, and a New folder button in it would be offering the
+   * action of one page from all of them.
+   *
+   * <p>So the page took its own action back, and what these tests now pin is
+   * the thing that made the old arrangement worth writing down: there is
+   * exactly ONE of them above the list, never two a centimetre apart.
+   */
+  it("puts a New folder button beside the heading, and only one", () => {
     render(<FoldersPage />);
 
-    // It is in the top bar on this page, where Import and Record sit
-    // everywhere else. Two of them a centimetre apart, doing the same thing,
-    // is the state this asserts against.
-    expect(screen.queryByRole("button", { name: /New folder/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /New folder/ })).toHaveLength(1);
+  });
+
+  it("opens the dialog from it", async () => {
+    render(<FoldersPage />);
+
+    await userEvent.click(screen.getByRole("button", { name: /New folder/ }));
+
+    expect(await screen.findByRole("heading", { name: "Create a folder" })).toBeInTheDocument();
   });
 
   it("keeps one in the empty state, where it is being explained", async () => {
     folders = [];
     render(<FoldersPage />);
 
-    // The header button is off-screen for this component, and somebody reading
-    // "a folder groups meetings by the work they belong to" is going to press
-    // the thing directly under it.
-    await userEvent.click(screen.getByRole("button", { name: /New folder/ }));
+    // Two now, and that is not the thing this file argued against: the heading
+    // button and the one inside the explanation are a page-length apart, and
+    // somebody reading "a folder groups meetings by the work they belong to"
+    // is going to press the thing directly under it rather than scroll back.
+    const buttons = screen.getAllByRole("button", { name: /New folder/ });
+    expect(buttons).toHaveLength(2);
+    await userEvent.click(buttons[1]);
 
     expect(await screen.findByRole("heading", { name: "Create a folder" })).toBeInTheDocument();
   });

@@ -53,12 +53,26 @@ export default function FoldersPage() {
 
   return (
     <div className="space-y-4">
-      {/* No New folder button here. It is in the top bar on this page, where
-          Import and Record sit everywhere else — one obvious next action in the
-          place the eye already goes for one, rather than two buttons a
-          centimetre apart doing the same thing. The empty state below keeps its
-          own, because a button in the middle of an explanation of what folders
-          are for is the one somebody reading that explanation will press. */}
+      {/* The button came back to the page.
+
+          It used to be in the top bar, which was the right place while the bar
+          was per-page: one obvious next action where the eye already goes. The
+          bar is a global band now and it carries nothing that belongs to the
+          page underneath, so a New folder button in it would be offering, on
+          every screen in the app, the action of one. Beside the heading is
+          where it acts on what is under it.
+
+          The empty state below keeps its own. A button in the middle of an
+          explanation of what folders are for is the one somebody reading that
+          explanation will press. */}
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-title-1 font-headline text-ink">Folders</h1>
+        <Button size="sm" className="gap-1.5" onClick={() => setCreating(true)}>
+          <Plus className="h-4 w-4" />
+          New folder
+        </Button>
+      </div>
+
       <div>
         {/* The header is the sort control. Two columns, so a dropdown of two
             choices would be one more click than clicking the column itself. */}

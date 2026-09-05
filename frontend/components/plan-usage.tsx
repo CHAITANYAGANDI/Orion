@@ -29,8 +29,23 @@ import { useGetUsageQuery } from "@/lib/api";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { planLabel, quotaCount, usageFraction } from "@/lib/plan";
+import { cn } from "@/lib/utils";
 
-export function PlanUsage({ onNavigate }: { onNavigate?: () => void }) {
+/**
+ * @param className replaces the outer spacing and surface, not just adds to it.
+ *   This used to be the footer of a navigation rail and carried `mx-3 mb-3`
+ *   accordingly; it is now inside the account menu, where an outer margin is a
+ *   gap between the card and a popover edge that has its own padding. The
+ *   measurements travel with the caller because only the caller knows what it
+ *   is sitting in.
+ */
+export function PlanUsage({
+  onNavigate,
+  className,
+}: {
+  onNavigate?: () => void;
+  className?: string;
+}) {
   const { data, isError } = useGetUsageQuery();
 
   // Nothing at all if it cannot be read. A rail footer is not the place to
@@ -41,7 +56,9 @@ export function PlanUsage({ onNavigate }: { onNavigate?: () => void }) {
   // Held space rather than nothing, because this sits under a `flex-1` folder
   // tree: appearing late would shove the account menu down at the moment
   // somebody was reaching for it.
-  if (!data) return <Skeleton className="mx-3 mb-3 h-[4.75rem] rounded-lg" />;
+  if (!data) {
+    return <Skeleton className={cn("mx-3 mb-3 h-[4.75rem] rounded-lg", className)} />;
+  }
 
   const { minutesUsed: used, minutesLimit: limit } = data;
   const spent = limit >= 0 && used >= limit;
@@ -50,7 +67,10 @@ export function PlanUsage({ onNavigate }: { onNavigate?: () => void }) {
     <Link
       href="/settings/plans"
       onClick={onNavigate}
-      className="mx-3 mb-3 block rounded-lg border bg-muted/40 p-3 transition-colors hover:bg-accent"
+      className={cn(
+        "mx-3 mb-3 block rounded-lg border bg-muted/40 p-3 transition-colors hover:bg-accent",
+        className,
+      )}
     >
       <div className="flex items-center gap-2">
         <span className="text-xs font-semibold">{planLabel(data.plan)}</span>

@@ -210,6 +210,39 @@ Where a meeting has no moments and no anchored action items, **the margin collap
 
 **Retired (visual only, no capability lost):** rail and pane drag-resizing (`PaneResizer`, `usePaneWidth`). V2 has no resizable columns — the margin is a fixed 400px and the rail no longer exists. `pane-size.ts` and `pane-resizer.tsx` are kept in the tree with their tests until the final sweep, then removed if nothing references them.
 
+### 8a · What actually happened to items 5, 10 and 11 — done in phase 2
+
+Nine of the twelve carried over unchanged. Three did not survive in the form written above, and each is a decision rather than an omission.
+
+**5 · `FolderDialog` for New folder — moved to the page, not dropped.** The dialog was mounted by the shell because the *header* opened it, and the header was per-page. The band is not: it carries the same five controls on every screen, so a New folder button in it would be offering one page's action from all of them. The button and both dialogs (create, rename) now live on `/folders`, beside the list they act on. `folders/page.test.tsx` reverses its "does not put a New folder button above the list" assertion and pins the thing that assertion was protecting — that there is exactly **one** of them above the list.
+
+**10 · `headerChrome` → `bandChrome`.** The old rulebook existed to referee a 64px bar shared between global actions and the page's own. V2 separates them — the band is global, page actions render in the page — which dissolves the reason for most of the rules. What is left is one rule and one lookup:
+
+| Old rule | Now | Why |
+|---|---|---|
+| search hidden on Account Settings | **search everywhere** | a band that drops a control on one navigation reads as broken chrome, which is worse than a control that finds nothing on one page |
+| Import/Record hidden on `/ask` | **offered** | they left that page because they crowded its composer in a shared bar; they do not share a bar with it now |
+| Import/Record hidden on a meeting | **offered** | they left because five buttons in a row read as one toolbar when they were two; the meeting's own Share/Export are no longer in the same row |
+| Import/Record hidden on Settings | **offered** | same as search — shape constancy beats the "different sittings" argument once the bar is global |
+| `create: "folder"` on `/folders` | **removed** | see item 5 |
+| `bare` for the empty settings bar | **removed** | structural now: the page-action row has no height of its own, so a page with nothing in it contributes zero pixels rather than needing a flag |
+| **Import/Record withheld while recording** | **kept** | the only rule with a consequence rather than an opinion. Record would offer to start what is already running; Import is a file picker over a live microphone |
+| `folderId` from the path | **kept** | Import files into it, and the folder's own rename/delete render beside the page |
+
+`lib/chrome.test.ts` was rewritten rather than trimmed: it walks the same URL sets (every settings tab, every legacy path, both `/record` forms) against the new expectations, and absorbs the `placeFor` cases so the two halves of "what does the band show here" cannot drift into contradicting each other.
+
+**11 · Mobile drawer → bottom tabs.** The hamburger slid the entire 256px desktop rail in over a scrim: navigation behind a gesture, in the corner furthest from a thumb, showing a folder tree and an allowance meter to somebody who wanted the chat. `components/v2/mobile-tabs.tsx` is the same three places as the band in the same order, plus Record as a fourth — and it lifts above the recording bar via `--recording-bar` rather than sitting under it.
+
+### 8b · Where the rail's other contents went
+
+| Was in the rail | Now |
+|---|---|
+| Home / AI Chat links | Now / Library / Ask, in the band |
+| `FolderTree` | **unused as of phase 2.** Library links to `/folders`; the tree's rail shape (collapsible section, uppercase heading, hover-reveal plus) has no home in V2. Retired in phase 4 when Library absorbs the folder list. |
+| `NotificationBell` | band, right group — 32px, `align="end"` so a 24rem panel does not hang off the right edge |
+| `PlanUsage` | **inside the account menu.** An allowance nobody sees until they have run out of it is not a meter |
+| `AccountMenu` | band, far right. The trigger is the avatar alone; the name, the address and "Development session" are the first two lines of the menu, so nothing was dropped in the move |
+
 ---
 
 ## 9 · Terminology

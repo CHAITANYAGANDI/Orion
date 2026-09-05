@@ -48,7 +48,7 @@ export default function AskPage() {
   );
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col">
+    <div className="flex h-[calc(100vh-var(--band))] flex-col">
       {/* The same three regions as the rails — header, thread, dock. The
           thread and the dock are held to a readable column: a grounded answer
           is something you quote from, and a line that runs the length of a
