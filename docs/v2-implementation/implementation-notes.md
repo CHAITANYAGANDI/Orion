@@ -802,3 +802,63 @@ as ESM.
 `npm run typecheck` clean · `npm run lint` clean (same two pre-existing warnings)
 · `npx vitest run` 120 files, 2267 tests, all passing · `npm run build`
 succeeds.
+
+---
+
+## Phase 11 — import
+
+### The audit came back clean
+
+Every source on the forbidden list was **already absent** from the production
+import flow. Nothing had to be removed:
+
+| V2 prototype source | In production? |
+|---|---|
+| YouTube URL | no |
+| PDF / document | no |
+| Google Drive, Dropbox, Zoom, Teams, Meet | no |
+| Destination picker | no — see below |
+
+The input is `accept="audio/*,video/*"` and the copy says so: the named formats
+are examples, followed by "or any other audio or video file", because the server
+takes any `audio/*` or `video/*` and an eight-format allowlist in the UI would
+turn a working file into a refusal. That sentence has its own test.
+
+`/upload` — the fuller form, still reachable for filing straight into a folder
+and for direct links — is the same: one file input, audio and video.
+
+### The folder is inherited, never asked
+
+`ImportDialog` takes `projectId` from the shell, which reads it off the pathname.
+Import pressed inside a folder means "into this folder"; the destination came
+from the press. What the dialog does is **state** the answer before the file
+goes — `FilingInto`, a row naming the folder — which is the difference between
+"it went where I meant" and "where has it gone". A picker here would ask the same
+question twice, and it is exactly what the V2 prototype had.
+
+### Everything preserved
+
+Drag/drop, browse, `isImportable` validation with the wrong-format toast,
+filename, size, `probeDuration`, the two separate allowance refusals (imports
+spent vs minutes spent, in that order, because they are different sentences),
+presigned `createUploadUrl`, `putWithProgress`, `createMeeting` with
+`projectId`, `trackProcessing` hand-off to the dock, navigation to the meeting,
+and the failure path that keeps the dialog open with the file still chosen.
+
+### The presentation
+
+The dropzone's 2px dashed border is 1px — a shape shouting at a target somebody
+is already aiming for. Brand while a file is over it, because that is Reverie
+about to take something. Size and duration are mono and tabular: they are read
+against the allowance, so they are figures rather than prose. The refusal is a
+`.v2-note` in the warning tone instead of a tinted box.
+
+One copy change, and one test with it: the dropzone said **"Drag & Drop"** — a
+label for the gesture — and now says **"Drag a file here"**, an instruction. The
+test still asserts both ways in are offered.
+
+### Verified at the end of the phase
+
+`npm run typecheck` clean · `npm run lint` clean (same two pre-existing warnings)
+· `npx vitest run` 120 files, 2267 tests, all passing · `npm run build`
+succeeds.

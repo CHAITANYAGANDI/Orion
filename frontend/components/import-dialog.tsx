@@ -226,8 +226,14 @@ export function ImportDialog({
           }}
           aria-label="Drag and drop a file, or browse"
           className={cn(
-            "flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 text-center transition-colors",
-            dragging ? "border-primary bg-primary/5" : "border-input hover:border-primary/50",
+            "flex cursor-pointer flex-col items-center justify-center rounded-md border border-dashed p-8 text-center transition-colors duration-press ease-soft",
+            // Brand while a file is over it, because that is Reverie about to
+            // take something -- the one thing the accent means. A 2px dashed
+            // border is a shape shouting at a target somebody is already aiming
+            // for, so it is 1px.
+            dragging
+              ? "border-brand bg-brand/5"
+              : "border-line hover:border-edge",
             busy && "pointer-events-none opacity-60",
           )}
         >
@@ -242,12 +248,15 @@ export function ImportDialog({
 
           {file ? (
             <div className="flex w-full items-center gap-3 text-left">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <div className="flex h-10 w-10 items-center justify-center rounded-md bg-surface-hover text-ink-2">
                 <FileAudio className="h-5 w-5" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate font-medium">{file.name}</p>
-                <p className="text-xs text-muted-foreground">
+                <p className="truncate text-callout font-headline text-ink">{file.name}</p>
+                {/* Both quantities mono and tabular. The size is read against
+                    the allowance and the duration against the minutes left, so
+                    they are figures rather than prose. */}
+                <p className="tabular font-mono text-cap text-ink-4">
                   {(file.size / 1024 / 1024).toFixed(1)} MB
                   {duration ? ` · ${formatDuration(duration)}` : ""}
                 </p>
@@ -270,10 +279,13 @@ export function ImportDialog({
             </div>
           ) : (
             <>
-              <p className="text-lg font-semibold">Drag &amp; Drop</p>
-              <UploadCloud className="mt-3 h-8 w-8 text-muted-foreground" />
-              <p className="mt-3 text-xs text-muted-foreground">{COMMON_FORMATS}</p>
-              <p className="mt-1 text-xs text-muted-foreground">
+              <UploadCloud className="h-8 w-8 text-ink-4" />
+              <p className="mt-3 text-title-3 font-headline text-ink">Drag a file here</p>
+              {/* The formats, and then the sentence that matters more: this
+                  list is examples rather than a whitelist. Somebody with an
+                  .m4a should not have to find it in a row of five chips. */}
+              <p className="mt-2 font-mono text-cap uppercase text-ink-4">{COMMON_FORMATS}</p>
+              <p className="mt-1 text-foot text-ink-3">
                 or any other audio or video file
               </p>
               <span className="mt-4">
@@ -287,18 +299,18 @@ export function ImportDialog({
 
         {busy && (
           <div className="space-y-2">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">
+            <div className="flex items-center justify-between text-callout">
+              <span className="text-ink-3">
                 {phase === "uploading" ? "Uploading to storage…" : "Starting processing…"}
               </span>
-              <span>{progress}%</span>
+              <span className="tabular font-mono text-ink-2">{progress}%</span>
             </div>
             <Progress value={phase === "creating" ? 100 : progress} />
           </div>
         )}
 
         {refusal && (
-          <p className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-muted-foreground">
+          <p className="v2-note py-1 text-callout text-ink-2" data-tone="warning">
             {refusal}
           </p>
         )}
@@ -335,10 +347,15 @@ function FilingInto({ projectId }: { projectId: string }) {
   if (!project) return null;
 
   return (
-    <p className="flex items-center gap-1.5 rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-      <Folder className="h-3.5 w-3.5 shrink-0" />
+    /* Stated, never asked. Import pressed inside a folder means "into this
+       folder" — the destination came from the press, and a picker here would
+       ask the same question twice. What this does is make the answer visible
+       before the file goes, which is the difference between "it went where I
+       meant" and "where has it gone". */
+    <p className="flex items-center gap-1.5 rounded-md border border-line bg-surface-raised px-3 py-2 text-callout text-ink-3">
+      <Folder className="h-3.5 w-3.5 shrink-0 text-ink-4" />
       <span className="min-w-0">
-        Filing into <span className="font-medium text-foreground">{project.name}</span>
+        Filing into <span className="font-headline text-ink">{project.name}</span>
       </span>
     </p>
   );

@@ -108,7 +108,10 @@ describe("ImportDialog", () => {
   it("offers both ways in", () => {
     render(<ImportDialog open onOpenChange={vi.fn()} />);
 
-    expect(screen.getByText("Drag & Drop")).toBeInTheDocument();
+    // The wording is "Drag a file here" now — an instruction rather than a
+    // label for the gesture. Both ways in is what the test is about, and both
+    // are still there.
+    expect(screen.getByText("Drag a file here")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Browse files" })).toBeInTheDocument();
   });
 
