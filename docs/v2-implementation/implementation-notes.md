@@ -136,3 +136,55 @@ tests, all passing · `npm run build` succeeds, `/library` prerendered at 1.95 k
 
 `backend-spring/` and `ai-service/` are unchanged. Nothing in this phase needed a
 server change, and nothing in the parity matrix suggests a later one will.
+
+---
+
+## Phase 3 — Now
+
+### The scope picker became a page, and a third of a test file moved with it
+
+`All Conversations` is Library. What is left on Home is one list, `unfiled=true`,
+with no control above it — so the line under the heading ("Everything outside
+your folders. The rest is in Library.") is now the whole of the explanation for
+a list that hides filed meetings. It was the hint inside the picker's menu, and
+the file it lived in said in as many words: *do not drop it*. It is not dropped;
+it is promoted.
+
+`home/page.test.tsx` went from 1045 lines to 51 tests, and no rule was lost:
+
+- **"the wire says unfiled"** — still asserted, now unconditionally.
+- **"a stored choice survives a visit and not a sign-in"** — re-asked of the date
+  window. The production defect it was written for was a value stored under
+  session 1 still being reported as ready under session 2, which is a property of
+  `useStickyPreference`, not of the scope. The window goes through the identical
+  machinery.
+- **"an empty Recent must say which filter emptied it"** — unchanged, including
+  every probe state: workspace unknown, folder list unknown, folder list failed,
+  no folders at all. `Show all conversations` is now a **link to Library** rather
+  than a control that flips a filter.
+
+What can no longer be asked here is what happens when All is chosen. That is
+`app/(app)/library/page.test.tsx`, which pins the thing that matters: Library
+asks for everything, and an inherited `unfiled` would make it a second Home.
+
+### "Needs you" — the parity matrix was wrong, and this is why
+
+See [`feature-parity.md` §3a](./feature-parity.md). The short version: `mine`
+matches an unset display name, and the margin's panel is standalone-only with no
+due dates, so both proposed tallies would have been numbers that contradict the
+list beside them. What ships is derived from the rows already on screen — how
+many are still being made, how many failed — which costs no request and cannot
+disagree with anything.
+
+### The greeting is computed after mounting, deliberately
+
+`/home` is prerendered as static content. A greeting computed during render
+would be baked at **build** time — "Good evening" at nine in the morning, for
+everybody, until the next deploy — and would mismatch on hydration. So it is
+`null` until an effect has run, and both lines reserve their height so the list
+underneath does not move when it arrives.
+
+### Verified at the end of the phase
+
+`npm run typecheck` clean · `npm run lint` clean (same two pre-existing warnings)
+· `npx vitest run` 119 files, 2202 tests, all passing · `npm run build` succeeds.

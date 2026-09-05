@@ -93,6 +93,23 @@ V2's Now had a memory-derived "Needs you". That is removed. What replaces it is 
 | Side pane: chat \| action items | KEEP | `HomeChatPanel`, `ActionItemsPanel` — becomes the V2 margin |
 | Empty states (5 variants) | KEEP | `homeListState` already distinguishes them |
 
+### 3a · What "Needs you" actually became — done in phase 3
+
+The remap above proposed action items: `{ mine: true, status: "OPEN" }`, overdue first, with *open* and *overdue* tallies. That was written before two facts about the production data made it dishonest on this screen:
+
+- **`mine` matches against the display name in Settings**, which is empty until somebody sets one. A tally reading "0 open" over an account with a dozen open items is worse than no tally.
+- **The panel in the margin is `standalone: true` only** — items somebody typed for themselves, not what a transcript produced. A workspace-wide count above a three-row list contradicts the thing under it. And a standalone item is created from a title alone, so it carries no `dueOn`: an *overdue* figure there would be a permanent zero.
+
+What ships instead is derived from the page's own list, costs no extra request, and cannot be wrong: **how many conversations are still being made, and how many could not be**. A failed transcription is the one thing on Now that genuinely needs a human, and it was previously findable only by scrolling for a red badge. `Masthead` in `app/(app)/home/page.tsx`.
+
+The Ask entry field from the V2 concept is **not** built. The workspace chat is already in this page's margin with its own composer; a second field on the page opening a *different* thread on `/ask` — which deliberately does not resume the margin's conversation — is two chats a centimetre apart. Ask stays a place in the band.
+
+### 3b · The scope picker, relocated
+
+`All Conversations` is `/library`. `Recent` has no picker above it any more, which makes the line under the heading the whole of the explanation for why a meeting recorded inside a folder is not in a list called Recent — it was the hint inside the picker's menu. `home/page.test.tsx` keeps every rule those tests held: `unfiled=true` is still asserted on the wire, the sticky-preference session defect is re-asked of the date window (identical `useStickyPreference` machinery), and the probe behind the empty states is unchanged. "Show all conversations" is a **link to Library**, not a control that flips a filter.
+
+`home.scope.v2` is left in storage rather than cleared. Nothing reads it, and clearing it would mean a write on load from a page whose whole problem once was doing something surprising on load.
+
 ---
 
 ## 4 · The margin — the signature V2 mechanism, kept honest

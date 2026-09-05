@@ -1,19 +1,37 @@
 "use client";
 
 /**
- * Home.
+ * Now.
  *
- * Your conversations on the left, and on the right the two things you do with
- * them: ask a question about them, or look at what they committed you to. That
- * pairing is the whole design — the old dashboard led with usage bars and a plan
+ * <p>Where you are in the day, what needs a person, and what you have not filed
+ * yet — with the chat and your own list in the margin beside it. That pairing is
+ * the whole design: the dashboard this replaced led with usage bars and a plan
  * summary, which is information about the account rather than about the work,
  * and nobody opens a meeting recorder to find out how many minutes they have
  * left.
  *
- * The list is grouped by day and the day is a heading, not a column, because a
- * meeting archive is read as a diary. The scope picker above it answers the one
- * question the list cannot: whether this is everything in the workspace, or
- * only what was never filed into a folder.
+ * <p>The list is grouped by day and the day is a heading, not a column, because
+ * a meeting archive is read as a diary.
+ *
+ * <h2>The scope picker is gone, and the list it hid is a page now</h2>
+ *
+ * <p>There were two options: <i>Recent Conversations</i> (everything outside
+ * your folders) and <i>All Conversations</i> (everything in this workspace).
+ * They are not two filters. They are two questions — "what is happening" and
+ * "what do I have" — and answering both with one screen is why this page needed
+ * three different empty states to explain which of them you were looking at.
+ *
+ * <p>So <i>All</i> became <b>Library</b>, a place in the band, and this page is
+ * <i>Recent</i> with no picker above it. Which makes the label under the
+ * heading load-bearing rather than decorative: it is the only thing on screen
+ * that explains why a meeting recorded ten minutes ago inside a folder is
+ * missing from a list called Recent, and it is what connects that heading to
+ * the "Everything is in a folder" empty state behind it. It used to be a hint
+ * inside the picker's menu. <b>Do not drop it.</b>
+ *
+ * <p>The stored preference key is left where it is rather than cleared. Nothing
+ * reads `home.scope.v2` any more, and clearing it would mean a write on load
+ * from a page whose whole problem once was doing something surprising on load.
  */
 
 import * as React from "react";
@@ -29,7 +47,7 @@ import {
   CalendarDays,
   RotateCw,
 } from "lucide-react";
-import { useGetMeetingsQuery, useGetProjectsQuery } from "@/lib/api";
+import { useGetMeetingsQuery, useGetPreferencesQuery, useGetProjectsQuery } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -44,134 +62,14 @@ import {
 import { useStickyPreference, type PreferenceCodec } from "@/lib/preferences";
 import { HomeChatPanel } from "@/components/home-chat-panel";
 import { SidePane } from "@/components/side-pane";
+import { isTerminal } from "@/lib/format";
 import { groupByDay } from "@/lib/days";
 import { homeListState } from "@/lib/home-list-state";
+import type { MeetingResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { recordHref } from "@/lib/routes";
-
-/**
- * Which conversations to list.
- *
- * <p>Two, and they differ. There were three: "For you" took the twenty most
- * recent and called them unread, which they were not — nothing tracks whether a
- * meeting has been read — and "My Conversations" and "All Conversations"
- * returned the same rows as each other, because one account per workspace means
- * every meeting is yours. A picker whose options produce identical lists is
- * worse than no picker: it is read as a filter that is broken.
- *
- * <p>What is left is the distinction that does exist now that recordings and
- * imports file themselves into the folder they were started in — whether this
- * is the whole workspace, or only what was never filed into one.
- *
- * <p><strong>Recent Conversations is about folders, not about time.</strong>
- * Both options are newest-first and both sit inside the same date window, so
- * the label is doing no work that "All" is not; what separates them is
- * `unfiled=true` on the wire — whether a meeting was ever put in a folder.
- *
- * <p>Which makes <b>the hint load-bearing</b>, not decoration. It is the only
- * thing on screen that explains why a meeting recorded ten minutes ago inside a
- * folder is missing from a list called Recent, and it is what connects the
- * label to the "Everything is in a folder" empty state behind it. Renaming the
- * option to "Unfiled Conversations" would carry that in the label instead;
- * that was tried and reverted, and "Recent" is the product's word for this
- * list. So the hint is the whole of the explanation. Do not drop it.
- *
- * <p>The hints are written as a pair, and read as one: everything outside your
- * folders, or everything in this workspace. Said that way round they describe
- * two lists, rather than one list and one property a meeting either has or does
- * not.
- *
- * <p>Otter offers "Shared with me" as well, and Reverie cannot: nobody can
- * share anything *into* a one-account workspace. Offering the row anyway would
- * be a filter that is permanently empty and reads as a fault.
- */
-const SCOPES = [
-  { value: "recent", label: "Recent Conversations", hint: "everything outside your folders" },
-  { value: "all", label: "All Conversations", hint: "everything in this workspace" },
-] as const;
-
-/*
- * The order here is the order in the menu, and Recent leads it because Recent
- * is where Home opens -- but those are two decisions rather than one, and they
- * have not always agreed. There was a stretch where this list led with Recent
- * and DEFAULT_SCOPE below said `all`, which is a picker that does not lead with
- * the option it is on. Moving one is not moving the other.
- */
-
-type Scope = (typeof SCOPES)[number]["value"];
+import { LIBRARY, recordHref } from "@/lib/routes";
 
 type Panel = "chat" | "actions";
-
-/**
- * Both filters are remembered until you sign out. See lib/preferences.ts.
- *
- * <p>Defined out here rather than inline because the hook depends on them: a
- * codec rebuilt on every render would re-read storage on every render, and put
- * back the value you had just changed.
- */
-const SCOPE_CODEC: PreferenceCodec<Scope> = {
-  save: (value) => value,
-  load: (raw) => (raw === "recent" || raw === "all" ? raw : null),
-};
-
-/**
- * Where the chosen scope is written down, and why the name carries a version.
- *
- * <h2>What v1 could not answer</h2>
- *
- * <p>A stored value is only worth honouring if it was a choice. Under v1 the
- * default was `recent` and the picker wrote on every interaction, so a stored
- * `"recent"` meant either "I chose this" or "I opened the menu once and it
- * wrote down where I already was" -- and nothing on disk told them apart. That
- * mattered then, because `recent` was hiding filed meetings with nothing on
- * screen to say so, and honouring the ambiguous value carried that through the
- * deployment into exactly the browsers it was happening in.
- *
- * <p>So v1 was abandoned wholesale rather than repaired. Everything under v2 is
- * a value somebody selected, because nothing writes this key except the picker
- * -- which is still true now that the default has moved back to Recent. A
- * stored `"all"` is honoured, and so is a stored `"recent"`.
- *
- * <p><b>The key stays at v2.</b> Bumping it again would throw away real choices
- * to fix an ambiguity that no longer exists. And the old `home.scope` entry is
- * left where it is rather than deleted: nothing reads that name any more, and
- * clearing it would mean a write on load, from a page whose whole problem once
- * was doing something surprising on load.
- */
-const SCOPE_PREF_KEY = "home.scope.v2";
-
-/**
- * Recent Conversations: what has not been filed anywhere else.
- *
- * <h2>This has moved twice, and the middle step is the one to understand</h2>
- *
- * <p>`recent`, then `all`, and now `recent` again. The move to `all` was not a
- * preference -- it was a bug fix, and undoing it blind would put the bug back.
- *
- * <p>`recent` is `unfiled=true` on the wire, so the list it draws is "your
- * meetings, minus the ones you organised". An account that had filed everything
- * therefore opened Home to a list with nothing in it -- and the page said <b>No
- * conversations</b> and offered to help with a first recording. The
- * archive-lost screen, over a full archive, reached by doing nothing at all.
- *
- * <p>But the default was only how people arrived there. What made it
- * unrecoverable is that an empty list never said <em>which filter had emptied
- * it</em>: the same screen appeared whether the workspace was empty or merely
- * tidy, and the way out was a control you had to remember you had never
- * touched.
- *
- * <p>That is now answered. An empty Recent asks the server whether the
- * workspace holds anything at all, and the two cases get opposite screens --
- * "Everything is in a folder" with the way to the whole list, or the
- * first-recording screen. See {@link EmptyState}, and note that the probe is
- * the only reason this is safe to open on: anybody moving the default again
- * should move that guard with it rather than through it.
- *
- * <p>So this is a product choice once more instead of a trap, and the choice is
- * Recent. Home is what you have not filed yet; the folders in the rail are
- * where the rest of it went.
- */
-const DEFAULT_SCOPE: Scope = "recent";
 
 const WHEN_CODEC: PreferenceCodec<DateWindow> = {
   // The choice, not the window. Storing the instants would pin "Last 7 days" to
@@ -181,40 +79,31 @@ const WHEN_CODEC: PreferenceCodec<DateWindow> = {
 };
 
 export default function HomePage() {
-  // Home opens on Recent: what has not been filed anywhere else. A meeting
-  // recorded inside a folder is therefore not on this list until you switch to
-  // All — deliberately, because the folder is where it was put and the rail on
-  // the left is how you get back to it. See DEFAULT_SCOPE for why that is safe
-  // to open on now and was not before.
-  //
-  // Both filters are remembered until sign-out. Home is a page people leave and
+  // The window is remembered until sign-out. This is a page people leave and
   // come back to constantly — open a meeting, come back, open another — and a
   // filter that reset on every return meant narrowing the list was work you did
-  // once per visit rather than once. A new sign-in starts from the defaults;
-  // see lib/preferences.ts for why a preference must never outlive its
-  // session.
-  const scopePref = useStickyPreference<Scope>(SCOPE_PREF_KEY, DEFAULT_SCOPE, SCOPE_CODEC);
+  // once per visit rather than once. A new sign-in starts from the default; see
+  // lib/preferences.ts for why a preference must never outlive its session.
   const whenPref = useStickyPreference<DateWindow>("home.when", ANY_TIME, WHEN_CODEC);
-  const { value: scope, set: setScope } = scopePref;
   const { value: when, set: setWhen } = whenPref;
   const [panel, setPanel] = React.useState<Panel>("chat");
 
   /**
-   * Whether the remembered filters have been read back yet.
+   * Whether the remembered window has been read back yet.
    *
-   * <p>They cannot be read while rendering, so the first render always holds
-   * the defaults. Asking the server during that render would fetch the whole
-   * workspace and then immediately fetch it again narrowed — two requests, and
-   * a list that visibly changes under the reader. Waiting one tick costs the
-   * skeleton that was going to be on screen anyway.
+   * <p>It cannot be read while rendering, so the first render always holds the
+   * default. Asking the server during that render would fetch everything and
+   * then immediately fetch it again narrowed — two requests, and a list that
+   * visibly changes under the reader. Waiting one tick costs the skeleton that
+   * was going to be on screen anyway.
    */
-  const restored = scopePref.ready && whenPref.ready;
+  const restored = whenPref.ready;
 
-  // Both filters go to the server rather than narrowing what came back. This
-  // asks for fifty rows; dropping the filed ones from those would answer
-  // "conversations outside a folder" with whichever of the fifty most recent
-  // happened to be outside one, and would look right until somebody had more
-  // than fifty meetings. The scope used to be applied here, over the page,
+  // Both narrowings go to the server rather than being applied to what came
+  // back. This asks for fifty rows; dropping the filed ones from those would
+  // answer "conversations outside a folder" with whichever of the fifty most
+  // recent happened to be outside one, and would look right until somebody had
+  // more than fifty meetings. The scope used to be applied here, over the page,
   // which is half of why it did nothing.
   const meetings = useGetMeetingsQuery(
     {
@@ -222,10 +111,12 @@ export default function HomePage() {
       size: 50,
       from: when.from ?? undefined,
       to: when.to ?? undefined,
-      // The screen says Recent and the wire says unfiled, and each is right
-      // where it is: the label is the product's word for this list, the
-      // parameter is what the query actually does to it. One seam, here.
-      unfiled: scope === "recent",
+      // Fixed now that the picker is gone. The screen says Recent and the wire
+      // says unfiled, and each is right where it is: the label is the product's
+      // word for this list, the parameter is what the query actually does to
+      // it. Everything, filed included, is Library — a page rather than a value
+      // this line used to take.
+      unfiled: true,
     },
     {
       skip: !restored,
@@ -275,21 +166,32 @@ export default function HomePage() {
   return (
     <>
       {/* The list, and nothing else. What used to be the second column of this
-          page — the chat and the action items — is now a pane of the shell, so
-          it runs the full height of the window rather than starting under the
-          top bar, and this page no longer states its width. See
-          components/side-pane.tsx. */}
-      <section className="scrollbar-none h-[calc(100vh-var(--band))] overflow-y-auto px-4 py-4 lg:px-6">
+          page — the chat and the action items — is a pane of the shell, so it
+          runs the full height of the window and this page does not state its
+          width. See components/side-pane.tsx. */}
+      <section className="scrollbar-none h-[calc(100vh-var(--band))] overflow-y-auto px-4 py-6 lg:px-6">
         <div className="mx-auto max-w-3xl">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            {/* When on the left, whose on the right — the two questions the
-                list itself cannot answer, in the order people ask them. */}
+          <Masthead meetings={data?.content} />
+
+          <div className="mb-3 mt-8 flex items-end justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-title-3 font-headline text-ink">Recent</h2>
+              {/* LOAD-BEARING. It is the only thing on screen that explains
+                  why a meeting recorded ten minutes ago inside a folder is not
+                  in a list called Recent, and it is what connects this heading
+                  to the "Everything is in a folder" screen behind it. It was
+                  the hint inside the scope picker's menu; the picker is gone
+                  and this is now the whole of the explanation. */}
+              <p className="mt-0.5 text-foot text-ink-3">
+                Everything outside your folders. The rest is in{" "}
+                <Link href={LIBRARY} className="underline underline-offset-2 hover:text-ink-2">
+                  Library
+                </Link>
+                .
+              </p>
+            </div>
+            {/* The one question the list cannot answer about itself. */}
             <DateFilter value={when} onChange={setWhen} />
-            {/* The button that hid the panel used to sit here. It is in the
-                top bar now, next to the rest of the controls that act on the
-                window rather than on the list, and it works at every width
-                instead of only on a phone. */}
-            <ScopePicker value={scope} onChange={setScope} />
           </div>
 
           {listState === "skeleton" ? (
@@ -302,18 +204,14 @@ export default function HomePage() {
             <HomeLoadError onRetry={() => void meetings.refetch()} />
           ) : listState === "empty" ? (
             <EmptyState
-              scope={scope}
               when={when}
               onClearDate={() => setWhen(ANY_TIME)}
-              onShowAll={() => setScope("all")}
               onRetry={() => void meetings.refetch()}
             />
           ) : (
             groups.map((group) => (
               <div key={group.key} className="mb-6">
-                <h2 className="mb-2 flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
-                  {group.label}
-                </h2>
+                <h3 className="v2-label mb-2">{group.label}</h3>
                 <ul className="space-y-2">
                   {group.items.map((meeting) => (
                     <ConversationRow key={meeting.id} meeting={meeting} />
@@ -358,98 +256,118 @@ export default function HomePage() {
   );
 }
 
-/* -------------------------------- the list -------------------------------- */
+/* ------------------------------- the masthead ------------------------------ */
 
 /**
- * Narrow the list to a scope.
+ * Where you are in the day, and whether anything needs a person.
  *
- * "For you" is the recent slice rather than a different query: a workspace with
- * one account has no notion of relevance beyond recency, and inventing a ranking
- * would be a claim the data cannot support. "Mine" and "All" are identical today
- * for the same reason, and are kept apart because the distinction becomes real
- * the moment a workspace has two people in it — at which point this is the one
- * place that has to change.
+ * <h2>What is NOT here, and why</h2>
+ *
+ * <p>The V2 concept put a "Needs you" block at the top of this page, built from
+ * cross-meeting memory — decisions that had moved, risks open N days, promises
+ * that had slipped twice. None of that exists: the migrations dropped
+ * `meeting_decisions`, `decision_links`, `commitments` and
+ * `commitment_evidence`, and nothing has replaced them. See
+ * docs/v2-implementation/feature-parity.md §2.
+ *
+ * <p>The parity matrix proposed remapping it to action items —
+ * `{ mine: true, status: "OPEN" }`, overdue first. That was written before the
+ * two things that make it dishonest here:
+ *
+ * <ul>
+ *   <li><b>`mine` is matched against the display name in Settings</b>, which is
+ *       empty until somebody sets one. A tally reading "0 open" for an account
+ *       with a dozen open items is worse than no tally.</li>
+ *   <li><b>The panel in the margin is standalone items only</b> — what somebody
+ *       typed for themselves. A workspace-wide count above a list of three rows
+ *       is a number that contradicts the thing under it, and standalone items
+ *       carry no due date, so an "overdue" figure would be a permanent zero.</li>
+ * </ul>
+ *
+ * <p>So what is here instead is derived from the page's own list, costs no
+ * request, and cannot be wrong: how many conversations are still being made,
+ * and how many could not be. A failed transcription is the one thing on this
+ * screen that genuinely needs a human, and it was previously findable only by
+ * scrolling for a red badge.
  */
-function ScopePicker({
-  value,
-  onChange,
-}: {
-  value: Scope;
-  onChange: (scope: Scope) => void;
-}) {
-  const [open, setOpen] = React.useState(false);
-  const ref = React.useRef<HTMLDivElement | null>(null);
+function Masthead({ meetings }: { meetings?: MeetingResponse[] }) {
+  const { mode, userId, profile } = useAuth();
+  const prefs = useGetPreferencesQuery();
 
-  React.useEffect(() => {
-    if (!open) return;
-    function onDown(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  /*
+   * The clock is read after mounting, never during a render.
+   *
+   * This page is prerendered as static content, so a greeting computed while
+   * rendering would be baked at BUILD time — "Good evening" at nine in the
+   * morning, for everybody, until the next deploy — and would mismatch on
+   * hydration into the bargain. `null` until the browser has a clock, and the
+   * two lines hold their height so nothing under them moves when it arrives.
+   */
+  const [now, setNow] = React.useState<Date | null>(null);
+  React.useEffect(() => setNow(new Date()), []);
 
-  const current = SCOPES.find((s) => s.value === value) ?? SCOPES[0];
+  // The same order of precedence as the account menu: what this person typed
+  // into Settings, then what they told their identity provider, then nothing.
+  // Never the user id -- an opaque key in the place a name goes reads as
+  // somebody else's account, which is exactly how it was reported.
+  const full = prefs.data?.displayName?.trim() || profile.name || (mode === "dev" ? userId : "");
+  // First name only. "Good morning, Chaitanyasai Gandi" is a form letter.
+  const first = full.trim().split(/\s+/)[0] || null;
+
+  const hour = now?.getHours() ?? 0;
+  const greeting =
+    hour < 5 ? "Good evening" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+
+  // From the list already on screen. `undefined` means it has not arrived, and
+  // nothing is claimed until it has.
+  const making = meetings?.filter((m) => !isTerminal(m.status)).length ?? 0;
+  const failed = meetings?.filter((m) => m.status === "FAILED").length ?? 0;
 
   return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        className="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-accent"
-      >
-        {current.label}
-        <ChevronDown className={cn("h-4 w-4 transition-transform", open && "rotate-180")} />
-      </button>
+    <header>
+      {/* Both lines reserve their height, so the greeting arriving one tick
+          after the list does not push the list down under a reader's cursor. */}
+      <p className="v2-label h-4">
+        {now
+          ? now.toLocaleDateString(undefined, {
+              weekday: "long",
+              month: "long",
+              day: "numeric",
+            })
+          : ""}
+      </p>
+      <h1 className="mt-1 h-9 text-title-l font-headline text-ink">
+        {now ? (first ? `${greeting}, ${first}` : greeting) : ""}
+      </h1>
 
-      {open && (
-        <div
-          role="menu"
-          // Anchored to the button's right edge, not its left. This trigger
-          // sits at the right edge of the content column, so a menu growing
-          // rightward from `left-0` ran ~120px past it — and the scroll
-          // container it lives in cannot clip one axis without clipping the
-          // other, so `overflow-y-auto` quietly became `overflow: auto`. The
-          // hint text was cut off mid-word and the whole list grew a
-          // horizontal scrollbar to reach a menu nobody wanted to scroll to.
-          className="absolute right-0 z-30 mt-1 w-56 overflow-hidden rounded-lg border bg-popover shadow-lg"
-        >
-          {SCOPES.map((s) => (
-            <button
-              key={s.value}
-              type="button"
-              role="menuitemradio"
-              aria-checked={s.value === value}
-              onClick={() => {
-                onChange(s.value);
-                setOpen(false);
-              }}
-              className={cn(
-                "flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-accent",
-                s.value === value && "bg-accent/60",
-              )}
-            >
-              <span>
-                <span className="block">{s.label}</span>
-                <span className="block text-xs text-muted-foreground">{s.hint}</span>
-              </span>
-              {s.value === value && <span aria-hidden>✓</span>}
-            </button>
-          ))}
-        </div>
+      {(failed > 0 || making > 0) && (
+        <p className="mt-2 space-x-1.5 text-body">
+          {/* Two sentences rather than one clause-joined one. A failed
+              transcription and a job still running are different amounts of
+              your problem, and the reader should be able to stop after the
+              first. No link on either: both are rows in the list four
+              centimetres below, carrying the stage and the percentage. */}
+          {failed > 0 && (
+            <span className="text-danger">
+              {failed === 1
+                ? "One conversation could not be transcribed."
+                : `${failed} conversations could not be transcribed.`}
+            </span>
+          )}
+          {making > 0 && (
+            <span className="text-ink-2">
+              {making === 1
+                ? "One conversation is still being made."
+                : `${making} conversations are still being made.`}
+            </span>
+          )}
+        </p>
       )}
-    </div>
+    </header>
   );
 }
+
+/* -------------------------------- the list -------------------------------- */
 
 /**
  * The list could not be fetched, and we are not going to pretend otherwise.
@@ -495,40 +413,36 @@ function HomeLoadError({ onRetry }: { onRetry: () => void }) {
  * doing its job — and the way out is a control they have to remember they
  * touched.
  *
- * <p>Two filters can do it now. The date window is checked first because it is
- * the likelier cause and the one somebody has just used; the scope is checked
+ * <p>Two things can do it. The date window is checked first because it is the
+ * likelier cause and the one somebody has just used; the filing is checked
  * second, and it is the one most likely to be misread, since a folder is
  * exactly where a meeting goes when it stops appearing where you left it.
  *
  * <p>Which makes one question worth a request of its own: an empty Recent means
  * either that everything is filed or that there is nothing at all, and those
- * two want opposite screens — the way to the folders, or the way to a first
+ * two want opposite screens — the way to Library, or the way to a first
  * recording. One row is enough to tell them apart, and it is only ever asked
  * for when there is nothing to show.
  *
- * <p><b>Only on Recent.</b> "Everything is in a folder" describes a list that
- * is hiding rows, which is only true of Recent. On All Conversations an empty
- * list means the workspace is empty, full stop, so the probe below is skipped
- * and the first-recording screen is what shows. That skip is the whole guard:
- * get it wrong and a new account is told its meetings are filed somewhere, and
- * handed a button to another empty list.
+ * <p><b>The probe is not optional.</b> This list is narrowed by default and
+ * always has been, so an account that had filed everything opened Home to
+ * nothing and was told "No conversations" with an offer to help with a first
+ * recording — the archive-lost screen, over a full archive, reached by doing
+ * nothing at all. That is the common path rather than a corner, which is
+ * exactly why this exists.
  *
- * <p>Home opens on Recent, so this is the common path rather than a corner —
- * which is exactly why it exists. It is the difference between a default that
- * explains itself and the one that used to say "No conversations" to somebody
- * with a hundred of them.
+ * <p>What changed when the scope picker became a page: the way out is a
+ * navigation rather than a control somebody has to remember they never touched.
+ * The `scope !== "recent"` guard that used to skip the probe is gone with the
+ * other scope, because there is only one list here now.
  */
 function EmptyState({
-  scope,
   when,
   onClearDate,
-  onShowAll,
   onRetry,
 }: {
-  scope: Scope;
   when: DateWindow;
   onClearDate: () => void;
-  onShowAll: () => void;
   /** Fetch the list again, for the one state below that cannot explain itself. */
   onRetry: () => void;
 }) {
@@ -537,10 +451,7 @@ function EmptyState({
 
   // Skipped unless it is the question being asked. `size: 1` because the count
   // is the whole answer.
-  const workspace = useGetMeetingsQuery(
-    { page: 0, size: 1 },
-    { skip: scope !== "recent" || filtered },
-  );
+  const workspace = useGetMeetingsQuery({ page: 0, size: 1 }, { skip: filtered });
   /*
    * The same truthfulness rule as the main list, on the probe behind it.
    *
@@ -554,8 +465,9 @@ function EmptyState({
   /*
    * The folders, because "everything is in a folder" is a claim about them.
    *
-   * <p>Already in the cache: the rail fetches this on every page, so reading it
-   * here costs nothing and adds no request. Three-state for the same reason
+   * <p>Usually already in the cache — Library and the import dialog both ask
+   * for it — so this is a cache read rather than a request on most arrivals.
+   * Three-state for the same reason
    * everything else on this screen is -- a folder list that has not arrived is
    * not a folder list with nothing in it.
    */
@@ -585,8 +497,7 @@ function EmptyState({
    * neither -- it says the list could not be shown and offers the two things
    * that recover it.
    */
-  const unexplained =
-    scope === "recent" && !filtered && total !== null && total > 0 && folderCount === 0;
+  const unexplained = !filtered && total !== null && total > 0 && folderCount === 0;
   /**
    * The probe was asked and did not answer, so neither screen below is known.
    *
@@ -596,8 +507,7 @@ function EmptyState({
    * the drift would land on the screen that tells somebody their account is
    * empty.
    */
-  const probeUnresolved =
-    scope === "recent" && !filtered && (total === null || folderCount === null);
+  const probeUnresolved = !filtered && (total === null || folderCount === null);
 
   if (filtered) {
     return (
@@ -622,10 +532,7 @@ function EmptyState({
   // Nothing rather than a guess, for the moment between the two answers. It is
   // one row over a warm connection, and a sentence that turns out to be wrong
   // is worse than a blank half-second.
-  if (
-    scope === "recent" &&
-    (workspace.isLoading || workspace.isFetching || folders.isLoading || folders.isFetching)
-  ) {
+  if (workspace.isLoading || workspace.isFetching || folders.isLoading || folders.isFetching) {
     return null;
   }
 
@@ -645,20 +552,19 @@ function EmptyState({
           This list leaves out anything filed into a folder. Your other
           conversations may be in one.
         </p>
-        <Button variant="outline" className="mt-4" onClick={onShowAll}>
-          Show all conversations
-        </Button>
+        <LibraryButton />
       </div>
     );
   }
 
   /*
-   * `scope === "recent"` as well as the count, though the probe above is
-   * already skipped on any other scope so `filedElsewhere` cannot be true here.
-   * Stated anyway: this screen must appear only when the user has explicitly
-   * narrowed to the unfiled list, and tying that to one `skip` expression makes
-   * it true by accident. Two lines apart, either could be relaxed without the
-   * other being noticed.
+   * The workspace has meetings and there is no folder that could be holding
+   * them, so one of the two answers is wrong and this claims neither.
+   *
+   * <p>It is a distinct screen rather than a fallback because the two things it
+   * offers are different: try the request again, and go and look at the whole
+   * list. Telling somebody their account is empty here would be the worst
+   * available reading of a state where we know it is not.
    */
   if (unexplained) {
     return (
@@ -677,15 +583,15 @@ function EmptyState({
           <Button variant="outline" onClick={onRetry}>
             Try again
           </Button>
-          <Button variant="outline" onClick={onShowAll}>
-            Show all conversations
+          <Button variant="outline" asChild>
+            <Link href={LIBRARY}>Go to Library</Link>
           </Button>
         </div>
       </div>
     );
   }
 
-  if (scope === "recent" && filedElsewhere) {
+  if (filedElsewhere) {
     return (
       <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center">
         <FolderOpen className="h-8 w-8 text-muted-foreground" />
@@ -694,9 +600,7 @@ function EmptyState({
           A conversation recorded or imported inside a folder is filed there.
           Nothing has been lost — this list is the ones that were not.
         </p>
-        <Button variant="outline" className="mt-4" onClick={onShowAll}>
-          Show all conversations
-        </Button>
+        <LibraryButton />
       </div>
     );
   }
@@ -722,6 +626,23 @@ function EmptyState({
         </Button>
       </div>
     </div>
+  );
+}
+
+/**
+ * The way to the whole list.
+ *
+ * <p>A link, not a button that flips a filter. That is the substance of the
+ * change: "Show all conversations" used to set a scope on this page, so the way
+ * out of an empty list was a control somebody had to remember they had never
+ * touched. Library is a place in the band, reachable whether or not this screen
+ * ever appeared.
+ */
+function LibraryButton() {
+  return (
+    <Button variant="outline" className="mt-4" asChild>
+      <Link href={LIBRARY}>Go to Library</Link>
+    </Button>
   );
 }
 
