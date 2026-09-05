@@ -137,3 +137,86 @@ if (typeof Blob !== "undefined" && !Blob.prototype.arrayBuffer) {
     });
   };
 }
+
+/**
+ * jsdom implements no `IntersectionObserver`.
+ *
+ * The landing page's scroll choreography is built on it — Framer Motion's
+ * `whileInView` and `useInView` both subscribe through it — so without this
+ * every test that renders the public page dies with a ReferenceError naming the
+ * observer rather than whatever the test was about.
+ *
+ * <p><b>It reports everything as visible, immediately.</b> That is the honest
+ * stand-in for a layout engine that has no viewport and no scrolling: a
+ * revealed section is one a reader has reached, and in jsdom every section has
+ * been reached. The alternative — never firing — would make the page's own copy
+ * untestable, which is exactly the content those tests exist to pin.
+ *
+ * <p>The animation itself is not under test anywhere. What is under test is
+ * that the words are present and the links land, and both are true the moment
+ * the reveal has run.
+ */
+if (typeof globalThis.IntersectionObserver === "undefined") {
+  globalThis.IntersectionObserver = class IntersectionObserver {
+    readonly root = null;
+    readonly rootMargin = "";
+    readonly thresholds: ReadonlyArray<number> = [];
+
+    constructor(private readonly callback: IntersectionObserverCallback) {}
+
+    observe(target: Element) {
+      this.callback(
+        [
+          {
+            target,
+            isIntersecting: true,
+            intersectionRatio: 1,
+            // Framer Motion reads only `isIntersecting`; the rest are here so
+            // the object satisfies the interface rather than to be believed.
+            boundingClientRect: target.getBoundingClientRect(),
+            intersectionRect: target.getBoundingClientRect(),
+            rootBounds: null,
+            time: 0,
+          } as IntersectionObserverEntry,
+        ],
+        this,
+      );
+    }
+
+    unobserve() {}
+    disconnect() {}
+    takeRecords(): IntersectionObserverEntry[] {
+      return [];
+    }
+  } as unknown as typeof IntersectionObserver;
+}
+
+/**
+ * jsdom implements no `matchMedia`, and the answer it needs is "reduce".
+ *
+ * <p>Framer Motion's `useReducedMotion` asks
+ * `matchMedia("(prefers-reduced-motion: reduce)")`. Unstubbed, that call has no
+ * function to make; stubbed to `false`, every animated sequence on the landing
+ * page starts running inside the test and assertions land mid-typewriter — a
+ * suite that fails on timing rather than on content.
+ *
+ * <p>So it reports **reduce**, and that is the right answer rather than a
+ * convenient one. Under reduced motion the whole page renders in its finished
+ * state: no fade, no sequence, everything present. That is the accessible
+ * baseline, it is what a reader with the OS setting on actually gets, and it is
+ * the state worth pinning — the animation is not what these tests are about.
+ *
+ * <p>Any test that needs the opposite can override this per-file.
+ */
+if (typeof globalThis.matchMedia === "undefined") {
+  globalThis.matchMedia = ((query: string) => ({
+    media: query,
+    matches: /prefers-reduced-motion/.test(query),
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof matchMedia;
+}

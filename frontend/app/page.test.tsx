@@ -95,6 +95,10 @@ describe("what it promises", () => {
   it("names only capabilities that have a surface behind them", () => {
     render(<LandingPage />);
 
+    // `getAllBy`, because several of these are named twice on purpose now: the
+    // sticky showcase says what a stage does and Included says it again as a
+    // capability. Mentioning something in the demonstration and in the list is
+    // ordinary; what the test is about is that it is named at all.
     for (const real of [
       /Record in your browser/i,
       /Import audio or video/i,
@@ -104,7 +108,7 @@ describe("what it promises", () => {
       /A transcript you can correct/i,
       /PDF, Word, Markdown or plain text/i,
     ]) {
-      expect(screen.getByText(real)).toBeInTheDocument();
+      expect(screen.getAllByText(real).length).toBeGreaterThan(0);
     }
   });
 });
@@ -202,9 +206,14 @@ describe("the product identity", () => {
     // It was a `<Mic />` in a filled rounded square, which is the generic
     // recorder logo the V2 identity study explicitly rejected -- and it meant
     // the public page and the application wore two different brands.
+    //
+    // Scoped to the header and the footer, which is where identity lives. A
+    // mic glyph elsewhere is not the brand: the product preview draws the
+    // application's own Record button, and that button has one.
     const { container } = render(<LandingPage />);
 
-    expect(container.querySelector(".lucide-mic")).toBeNull();
+    expect(container.querySelector("header")!.querySelector(".lucide-mic")).toBeNull();
+    expect(container.querySelector("footer")!.querySelector(".lucide-mic")).toBeNull();
     expect(screen.getAllByRole("img", { name: "Reverie" }).length).toBeGreaterThan(0);
   });
 
@@ -240,8 +249,11 @@ describe("the Included section", () => {
     // the sort of thing nobody notices and everybody half-reads.
     render(<LandingPage />);
 
-    const capture = screen.getByRole("heading", { name: "Capture & understand" }).parentElement!;
-    const work = screen.getByRole("heading", { name: "Work with it" }).parentElement!;
+    // Anchored on the group's own <section>, which is what a group is now.
+    // `parentElement` broke the moment the list gained a stagger wrapper — a
+    // selector reaching through markup rather than through structure.
+    const capture = screen.getByRole("heading", { name: "Capture & understand" }).closest("section")!;
+    const work = screen.getByRole("heading", { name: "Work with it" }).closest("section")!;
 
     expect(capture).toHaveTextContent("Record in your browser");
     expect(capture).not.toHaveTextContent("PDF, Word, Markdown");
@@ -296,5 +308,174 @@ describe("the product preview", () => {
     expect(preview).toHaveTextContent("Ask");
     // Memory was the fourth destination in the concept and has no schema.
     expect(preview).not.toHaveTextContent(/Memory/i);
+  });
+});
+
+/**
+ * The moments that were added, and the rule every one of them follows.
+ *
+ * <p>The page grew from three sections to seven. The risk in that is not
+ * layout — it is that a marketing page which needs more to say starts saying
+ * things the product cannot do. So each new moment is checked for what it
+ * claims, and the forbidden-concept sweep above runs over all of it.
+ */
+describe("how it works", () => {
+  it("is three stages of one recording, in order", () => {
+    render(<LandingPage />);
+
+    expect(screen.getByText("How it works")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Record it, or bring it" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Speakers, separated" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "A brief, and what it asks of you" }),
+    ).toBeInTheDocument();
+  });
+
+  it("says the live text is the live pass, not the finished transcript", () => {
+    // Reverie transcribes from the file after Stop. Letting the live words read
+    // as the final transcript would promise a fidelity the pipeline does not
+    // offer, and the product itself says so on /record.
+    //
+    // Asserted on the stage COPY rather than on the window's caption: the
+    // window is `aria-hidden` demo art and shows one stage at a time, so a
+    // caveat living only in there is one a screen reader never reaches and a
+    // scroll position can hide.
+    render(<LandingPage />);
+
+    expect(
+      screen.getAllByText(/full transcript is written from the recording after you stop/i).length,
+    ).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * The centrepiece.
+ *
+ * <p>Under `prefers-reduced-motion` — which is what jsdom reports, since
+ * `matchMedia` is unstubbed and answers false to everything — the sequence
+ * renders in its finished state. So these assert the *end* of the
+ * demonstration, which is the state a reader with reduced motion sees
+ * immediately and every other reader sees after four beats.
+ */
+describe("the Ask showcase", () => {
+  it("leads the page's largest moment", () => {
+    render(<LandingPage />);
+
+    expect(screen.getByText("Ask Reverie")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: /Ask a question\. Get the words it came from\./ }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a question, an answer, and the line the answer came from", () => {
+    // The whole argument of the section: the answer is checkable. If the cited
+    // line stops being rendered, the demonstration still animates and no
+    // longer demonstrates anything.
+    render(<LandingPage />);
+
+    expect(screen.getByText(/What did we decide about pricing, and who owns/i)).toBeInTheDocument();
+    expect(screen.getByText(/You held list pricing and moved the annual discount/i)).toBeInTheDocument();
+    expect(screen.getByText("The words behind it")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Hold the price and move the annual discount to fifteen per cent/i),
+    ).toBeInTheDocument();
+  });
+
+  it("says the scope can be a meeting, a folder or everything", () => {
+    render(<LandingPage />);
+
+    expect(screen.getByText(/or a folder, or everything/i)).toBeInTheDocument();
+  });
+
+  it("claims nothing about meaning or similarity", () => {
+    // Retrieval is lexical. This is the one section where a similarity score or
+    // a "found by meaning" line would be the natural thing to write and the
+    // wrong thing to ship.
+    const { container } = render(<LandingPage />);
+
+    expect(container.textContent).not.toMatch(/similarity|relevance score|embedding|vector/i);
+  });
+});
+
+describe("the languages moment", () => {
+  it("demonstrates a translated brief rather than quoting a number in a strip", () => {
+    render(<LandingPage />);
+
+    expect(screen.getByText("Languages")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: /Read it in the language you think in\./ }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/across eighteen of them/i)).toBeInTheDocument();
+  });
+
+  it("says the translation is kept, which is what makes it worth doing twice", () => {
+    render(<LandingPage />);
+
+    expect(screen.getByText(/once translated it is kept/i)).toBeInTheDocument();
+  });
+});
+
+describe("the closing section", () => {
+  it("is about what happens to the recording, not a second call to action", () => {
+    // The hero already asked. A page that asks again at the bottom did not
+    // trust its own middle.
+    render(<LandingPage />);
+
+    expect(screen.getByText("Yours")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /Create a free account/ })).toHaveLength(1);
+  });
+
+  it("states the four things somebody weighing this up actually wants", () => {
+    render(<LandingPage />);
+
+    expect(screen.getByText("No training on your meetings")).toBeInTheDocument();
+    expect(screen.getByText("Retention you set")).toBeInTheDocument();
+    expect(screen.getByText("Delete what you like")).toBeInTheDocument();
+    expect(screen.getByText("One plan, no card")).toBeInTheDocument();
+  });
+
+  it("does not offer a tier that does not exist", () => {
+    const { container } = render(<LandingPage />);
+
+    expect(container.textContent).toMatch(/no team tier/i);
+    expect(container.textContent).not.toMatch(/upgrade to|contact sales|per seat|per user/i);
+  });
+});
+
+/**
+ * The motion, and the one thing it must never do.
+ *
+ * <p>A scroll reveal renders `opacity: 0` into the server HTML. That is
+ * acceptable for a reader with JavaScript and unacceptable for one without, so
+ * the page carries a `<noscript>` override. This is the only test of the
+ * animation itself, because the animation is not the point — the copy being
+ * readable regardless is.
+ */
+describe("motion never hides the page", () => {
+  it("carries a noscript override for every revealed section", () => {
+    const { container } = render(<LandingPage />);
+
+    const fallback = container.querySelector("noscript");
+    expect(fallback).not.toBeNull();
+    expect(fallback!.textContent).toContain("[data-reveal]");
+    expect(fallback!.textContent).toContain("opacity:1");
+  });
+
+  it("puts every claim in the server-rendered markup", () => {
+    // Not behind an interaction, a tab or a hover. A landing page whose copy
+    // arrives only after JavaScript is a landing page with no copy for a
+    // crawler or for anybody whose JavaScript failed.
+    const { container } = render(<LandingPage />);
+
+    for (const claim of [
+      "Remember the conversation.",
+      "Ask a question. Get the words it came from.",
+      "Read it in the language you think in.",
+      "Capture & understand",
+      "Work with it",
+      "No training on your meetings",
+    ]) {
+      expect(container.textContent).toContain(claim);
+    }
   });
 });
