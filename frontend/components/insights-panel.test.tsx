@@ -78,8 +78,11 @@ describe("InsightsPanel", () => {
     ];
     render(<InsightsPanel meetingId="mtg_1" />);
 
-    const decisions = screen.getByText("Decisions").closest("div[class*='rounded']")!;
-    const risks = screen.getByText("Risks and blockers").closest("div[class*='rounded']")!;
+    // Anchored on the section, not on a rounded box. These were cards and are
+    // sections of the brief now; what the test is about is that a row cannot
+    // leak from one kind into the other, which is structural either way.
+    const decisions = screen.getByText("Decisions").closest("section")!;
+    const risks = screen.getByText("Risks and blockers").closest("section")!;
     expect(decisions).toHaveTextContent("Ship on the 14th.");
     expect(decisions).not.toHaveTextContent("The contract is unsigned.");
     expect(risks).toHaveTextContent("The contract is unsigned.");

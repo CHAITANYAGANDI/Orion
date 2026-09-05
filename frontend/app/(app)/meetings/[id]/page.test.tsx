@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {
+  ActionItemResponse,
   MeetingResponse,
   SummaryResponse,
   SummarySection,
@@ -74,6 +75,9 @@ let templates: { slug: string; name: string }[];
 let transcriptQuery: "ok" | "error" | "absent";
 /** The flat body a document import has instead of utterances. */
 let transcriptText: string | undefined;
+let actionItems: ActionItemResponse[];
+/** How the action-items request is going. */
+let actionsQuery: "ok" | "error";
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ id: "mtg_1" }),
@@ -120,7 +124,17 @@ vi.mock("@/lib/api", () => ({
     return ok({ segments, speakers: [], transcript: transcriptText });
   },
   // A bare array here, not a page: this endpoint answers one meeting.
-  useGetMeetingActionItemsQuery: () => ok([]),
+  useGetMeetingActionItemsQuery: () => {
+    if (actionsQuery === "error") {
+      return {
+        ...ok(undefined),
+        isError: true,
+        isSuccess: false,
+        error: { status: 500, data: { message: "boom" } },
+      };
+    }
+    return ok(actionItems);
+  },
   useGetChatQuery: () => ok({ messages: [] }),
   useGetChatModesQuery: () => ok([]),
   useGetTranslationsQuery: () => ok([]),
@@ -171,7 +185,25 @@ vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
  * Each has its own test file. What is asserted here is that the page puts them
  * in the right tab, in the right column — not what they draw, which is theirs.
  */
-vi.mock("@/components/insights-panel", () => ({ InsightsPanel: () => null }));
+vi.mock("@/components/insights-panel", () => ({
+  InsightsPanel: () => <div data-testid="insights-panel" />,
+}));
+vi.mock("@/components/action-item-row", () => ({
+  ActionItemRow: (props: {
+    item: { id: string; title: string; sourceStartSeconds?: number | null };
+    onOpenSource?: (s: number) => void;
+  }) => (
+    <li
+      data-testid={`action-row-${props.item.id}`}
+      // The two wires the page owns: whether the row was told it can seek
+      // (there is a player here) and whether the sentence was ever placed.
+      data-seekable={String(Boolean(props.onOpenSource))}
+      data-anchored={String(props.item.sourceStartSeconds != null)}
+    >
+      {props.item.title}
+    </li>
+  ),
+}));
 vi.mock("@/components/export-dialog", () => ({ ExportDialog: () => null }));
 vi.mock("@/components/meeting-menu", () => ({ MeetingMenu: () => null }));
 vi.mock("@/components/transcript-editor", () => ({
@@ -188,7 +220,9 @@ vi.mock("@/components/turn-actions", () => ({
 vi.mock("@/components/moments-panel", () => ({ MomentsPanel: () => null }));
 vi.mock("@/components/outline-nav", () => ({ OutlineNav: () => null }));
 vi.mock("@/components/translated-transcript", () => ({ TranslatedTranscript: () => null }));
-vi.mock("@/components/new-action-item-dialog", () => ({ NewActionItemDialog: () => null }));
+vi.mock("@/components/new-action-item-dialog", () => ({
+  NewActionItemDialog: () => <div data-testid="new-action-item" />,
+}));
 vi.mock("@/components/moment-composer", () => ({
   ActionItemDialog: () => <div data-testid="action-item-dialog" />,
   NoteDialog: () => <div data-testid="note-dialog" />,
@@ -244,6 +278,20 @@ function aSegment(over: Partial<TranscriptSegment> = {}): TranscriptSegment {
   };
 }
 
+function anActionItem(over: Partial<ActionItemResponse> = {}): ActionItemResponse {
+  return {
+    id: "mtg_a",
+    meetingId: "mtg_1",
+    title: "Send the contract",
+    dueStatus: "NONE",
+    status: "OPEN",
+    edited: false,
+    commentCount: 0,
+    sourceStartSeconds: 754,
+    ...over,
+  };
+}
+
 function aSection(over: Partial<SummarySection> = {}): SummarySection {
   return { key: "s1", title: "Budget", kind: "prose", text: "", bullets: [], groups: [], ...over };
 }
@@ -269,6 +317,8 @@ beforeEach(() => {
   templates = [];
   transcriptQuery = "ok";
   transcriptText = undefined;
+  actionItems = [];
+  actionsQuery = "ok";
 });
 
 /**
@@ -1058,5 +1108,161 @@ describe("the transcript's states", () => {
 
     expect(screen.getByText(/The whole document/)).toBeInTheDocument();
     expect(screen.queryByText("Transcript unavailable.")).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * What the meeting asks of you, and what it decided.
+ *
+ * <h2>Three models, and they stay three models</h2>
+ *
+ * <p>Action items are action items. Per-meeting decisions are decisions.
+ * Per-meeting risks are risks. The V2 concept had a Commitment Ledger, a
+ * Promise Journey and Decision Drift on top of them — none of which exists:
+ * `V14` and `V15` dropped `meeting_decisions`, `decision_links`,
+ * `decision_vectors`, `commitments` and `commitment_evidence`. Nothing here
+ * introduces a lifecycle, a history or a cross-meeting relationship, and the
+ * assertions below are partly here to make that hard to do by accident.
+ *
+ * <p>`ActionItemRow` and `InsightsPanel` have their own files for the row-level
+ * behaviour — ticking off, editing, deleting, comments. What only the page can
+ * be wrong about is which of them is mounted, in which reading mode, in what
+ * order, and whether a state that is not "ready" is allowed to make a claim
+ * about somebody's commitments.
+ */
+describe("action items on the meeting", () => {
+  it("puts them under the brief, in the reading mode where the brief is", () => {
+    // What a meeting asks of you is the part with consequences. It used to sit
+    // third, below two lists that are commentary on what happened.
+    actionItems = [anActionItem()];
+    render(<MeetingDetailPage />);
+
+    expect(screen.getByRole("heading", { name: /Action items/ })).toBeInTheDocument();
+    expect(screen.getByText("Send the contract")).toBeInTheDocument();
+  });
+
+  it("counts what is still open against the whole list", () => {
+    actionItems = [
+      anActionItem({ id: "a", status: "OPEN" }),
+      anActionItem({ id: "b", title: "Book the room", status: "DONE" }),
+    ];
+    render(<MeetingDetailPage />);
+
+    expect(screen.getByText("1 of 2 still open.")).toBeInTheDocument();
+  });
+
+  it("says so when everything is done", () => {
+    actionItems = [anActionItem({ status: "DONE" })];
+    render(<MeetingDetailPage />);
+
+    expect(screen.getByText("Everything here is done.")).toBeInTheDocument();
+  });
+
+  it("never congratulates the reader on work it has not seen", () => {
+    // "Everything here is done." is a claim about what the meeting asked of
+    // you. Derived from `(actions.data ?? []).filter(...)`, a failed request
+    // made it while having seen nothing at all.
+    actionsQuery = "error";
+    render(<MeetingDetailPage />);
+
+    expect(screen.queryByText("Everything here is done.")).not.toBeInTheDocument();
+    expect(screen.queryByText(/still open/)).not.toBeInTheDocument();
+    expect(screen.getByText("Couldn't load the action items")).toBeInTheDocument();
+  });
+
+  it("offers a retry on that failure, wired to refetch", async () => {
+    actionsQuery = "error";
+    render(<MeetingDetailPage />);
+
+    await userEvent.click(screen.getByRole("button", { name: /Try again/ }));
+
+    expect(refetch).toHaveBeenCalled();
+  });
+
+  it("says none were extracted only from a settled, empty list", () => {
+    actionItems = [];
+    render(<MeetingDetailPage />);
+
+    expect(screen.getByText("No action items were extracted.")).toBeInTheDocument();
+  });
+
+  it("says they are still being extracted while the meeting runs", () => {
+    // Not "none were extracted", which is the same sentence meaning the
+    // opposite thing about a meeting that has not finished.
+    meeting = aMeeting({ status: "EXTRACTING" });
+    actionItems = [];
+    render(<MeetingDetailPage />);
+
+    expect(screen.queryByText("No action items were extracted.")).not.toBeInTheDocument();
+  });
+
+  it("offers a way to add one that was never said aloud", () => {
+    // A commitment made in the room and never spoken is exactly the one the
+    // extractor cannot find, so this needs no transcript selection.
+    render(<MeetingDetailPage />);
+
+    expect(screen.getByTestId("new-action-item")).toBeInTheDocument();
+  });
+
+  it("plays the sentence here rather than opening the meeting again", () => {
+    // There is a player on this page. `onOpenSource` is what tells the row to
+    // seek instead of navigating to the meeting it is already on.
+    actionItems = [anActionItem({ sourceStartSeconds: 754 })];
+    render(<MeetingDetailPage />);
+
+    expect(screen.getByTestId("action-row-mtg_a")).toHaveAttribute("data-seekable", "true");
+  });
+
+  it("does not invent a source link when the sentence could not be placed", () => {
+    // A link that seeks to the wrong moment plays somebody saying something
+    // else, and reads as the evidence being fabricated.
+    actionItems = [anActionItem({ sourceStartSeconds: null })];
+    render(<MeetingDetailPage />);
+
+    expect(screen.getByTestId("action-row-mtg_a")).toHaveAttribute("data-anchored", "false");
+  });
+});
+
+describe("decisions and risks on the meeting", () => {
+  it("are read below the brief, not above it", () => {
+    // These rows are read OUT of the brief. Putting them first would suggest
+    // they were the source rather than the reading.
+    actionItems = [anActionItem()];
+    render(<MeetingDetailPage />);
+
+    const brief = screen.getByRole("heading", { name: /Action items/ });
+    const insights = screen.getByTestId("insights-panel");
+    expect(brief.compareDocumentPosition(insights)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it("are mounted on the summary, and only there", async () => {
+    render(<MeetingDetailPage />);
+    expect(screen.getByTestId("insights-panel")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("tab", { name: "Transcript" }));
+
+    // A decision list under a transcript is commentary parked over the source.
+    expect(screen.queryByTestId("insights-panel")).not.toBeInTheDocument();
+  });
+
+  it("introduces no lifecycle, history or drift anywhere on the page", () => {
+    // The V2 concept's cross-meeting intelligence has no schema behind it. This
+    // is a guard rather than an assertion about markup: any of these words
+    // appearing on this page means something was rendered from data that does
+    // not exist.
+    actionItems = [anActionItem()];
+    const { container } = render(<MeetingDetailPage />);
+
+    for (const forbidden of [
+      /commitment/i,
+      /promise/i,
+      /decision drift/i,
+      /decision history/i,
+      /slipped/i,
+      /reversed/i,
+      /since last meeting/i,
+    ]) {
+      expect(container.textContent ?? "").not.toMatch(forbidden);
+    }
   });
 });

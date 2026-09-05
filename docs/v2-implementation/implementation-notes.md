@@ -609,3 +609,88 @@ Three tests earned their place immediately by failing:
 `npm run typecheck` clean · `npm run lint` clean (same two pre-existing warnings)
 · `npx vitest run` 119 files, 2250 tests, all passing · `npm run build`
 succeeds.
+
+
+---
+
+## Phase 9 — action items, decisions and risks
+
+Three models, and they stay three models. Action items are action items,
+per-meeting decisions are decisions, per-meeting risks are risks. Nothing was
+introduced: no Commitment Ledger, no Promise Journey, no Decision History, no
+Decision Drift, no reversed-decision intelligence, no cross-meeting lifecycle.
+`V14` and `V15` dropped the tables all of those would have needed.
+
+### The inventory, and where each one ended up
+
+| Capability | Kept | Now |
+|---|---|---|
+| Tick an action item off (`patchActionItem` OPEN/DONE) | yes | checkbox accent is brand — the one moment on the row worth a colour |
+| Title, and the strike-through when done | yes | unchanged |
+| Owner, or "Unassigned" when the API returns none | yes | `ink-4` at cap size; still a fact, not a filled gap |
+| Due date, `dueStatus` tone, the phrase it was said in | yes | unchanged |
+| "Read from '…', said in the meeting" | yes | unchanged |
+| Expand/collapse, comment count | yes | mono-ish cap sizing |
+| Edit title / owner / due, Save gated on `dirty` | yes | unchanged |
+| Delete, behind the overflow | yes | unchanged |
+| Comments (`getActionItemComments`, add, delete) | yes | unchanged |
+| Source sentence | yes | `.v2-note` + reading serif — the same 1px rule a brief quotation and a chat citation get |
+| Source link → **seek here** rather than navigate | yes | tested via the `onOpenSource` wire |
+| No source link when the sentence could not be placed | yes | tested |
+| Add one that was never said aloud (`NewActionItemDialog`) | yes | unchanged |
+| "N of M still open" / "Everything here is done." | yes | only over a settled list — tested |
+| `loading` / `extracting` / `waiting` / `error` + retry / `empty` | yes | unchanged wording |
+| Decisions and risks, per kind, with their count | yes | sections of the brief |
+| `sourceSection` label ("blocker" vs "risk") | yes | unchanged — losing it loses the difference between what is already happening and what might |
+| Add / edit / delete an insight, Enter saves, Esc cancels | yes | unchanged |
+| **InsightsPanel renders nothing when there is nothing** | yes | still no empty state, deliberately |
+
+### Two structural changes
+
+**The action items card became a section of the brief.** What a meeting asks of
+you is part of the same document as what it said; a bordered box around it made
+it read as a widget parked below the summary.
+
+**Decisions and risks stack instead of sitting in a two-column grid.** Inside the
+680px measure two columns are ~330px each, which is too narrow for a sentence
+about what was decided. The special case that grid needed — a lone card widened
+to fill the row so it did not leave a hole — disappears with it.
+
+`InsightsPanel` still renders **nothing at all** when a meeting produced neither.
+Its own file says why in as many words, and repeats: *do not add an empty state
+here*. A "No decisions were recorded" card derived from `(data ?? [])` would be
+the `?? []` bug freshly introduced in the one place on the page that never had
+it.
+
+### Tests
+
+The harness grew from 62 to **75**. `ActionItemRow` and `InsightsPanel` are now
+mocked *identifiably*, which is what lets the page's own decisions be asserted:
+which is mounted, in which reading mode, in what order, and what it wires into
+each — specifically `onOpenSource` (there is a player on this page, so the
+sentence plays here rather than opening the meeting again) and whether the
+sentence was ever anchored.
+
+One test is a guard rather than an assertion about markup: the page's text is
+checked against `/commitment/i`, `/promise/i`, `/decision drift/i`,
+`/decision history/i`, `/slipped/i`, `/reversed/i` and `/since last meeting/i`.
+Any of those appearing means something was rendered from data that does not
+exist.
+
+The insights test's card selector (`closest("div[class*='rounded']")`) was
+reanchored to `closest("section")`. Same assertion — a row must not leak from
+one kind into the other — on the structure that now carries it.
+
+One typing slip the compiler caught: `dueStatus: "none"` where the union is
+`"NONE"`.
+
+### Verified at the end of the phase
+
+`npm run typecheck` clean · `npm run lint` clean (same two pre-existing warnings)
+· `npx vitest run` 119 files, 2263 tests, all passing · `npm run build`
+succeeds.
+
+### Not touched
+
+`backend-spring/` and `ai-service/` are unchanged across phases 7, 8 and 9. No
+data model, no endpoint and no request shape was altered.

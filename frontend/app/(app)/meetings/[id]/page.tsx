@@ -1122,11 +1122,14 @@ export default function MeetingDetailPage() {
 
                 Titled, because it is now one section of a document rather than
                 the only card on the page without a name. */}
-            <Card>
-              <CardContent className="space-y-3 pt-6">
-                <h3 className="flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
-                  <ListChecks className="h-4 w-4" /> Action items
-                </h3>
+            {/* A section of the brief, not a card on top of it. What a
+                meeting asks of you is part of the same document as what it
+                said, and a bordered box around it is what made it read as a
+                widget parked below the summary. */}
+            <section className="space-y-3">
+              <h3 className="flex items-center gap-2 text-title-3 font-headline text-ink">
+                <ListChecks className="h-4 w-4 text-ink-3" /> Action items
+              </h3>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   {/* Only over a list that actually arrived. "Everything here is
                       done." is a claim about what the meeting asked of you, and
@@ -1134,7 +1137,7 @@ export default function MeetingDetailPage() {
                       failed request congratulated the reader on finishing work
                       it had never seen. */}
                   {actionsState === "ready" ? (
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-callout text-ink-3">
                       {openActions === 0
                         ? "Everything here is done."
                         : `${openActions} of ${actions.data?.length ?? 0} still open.`}
@@ -1149,7 +1152,7 @@ export default function MeetingDetailPage() {
                 </div>
 
                 {actionsState === "ready" ? (
-                  <ul className="divide-y divide-border">
+                  <ul className="divide-y divide-line">
                     {(actions.data ?? []).map((a) => (
                       <ActionItemRow
                         key={a.id}
@@ -1186,11 +1189,10 @@ export default function MeetingDetailPage() {
                   <EmptyText>No action items were extracted.</EmptyText>
                 )}
                 {/* No "manage all" link any more, and no page behind it. This
-                    card is where a commitment out of this call is read and
-                    ticked off; a second list of the same rows somewhere else
-                    was three places to do one thing. */}
-              </CardContent>
-            </Card>
+                    is where a commitment out of this call is read and ticked
+                    off; a second list of the same rows somewhere else was three
+                    places to do one thing. */}
+            </section>
 
             {/* Last, and still below the summary rather than above it: these
                 rows are read out of the brief, and putting them first would

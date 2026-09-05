@@ -80,7 +80,9 @@ export function InsightsPanel({ meetingId }: { meetingId: string }) {
   const risks = React.useMemo(() => (data ?? []).filter((i) => i.kind === "RISK"), [data]);
 
   if (isLoading) {
-    return <Skeleton className="h-32 w-full" />;
+    // Held space rather than nothing: these sit under the action items, and
+    // appearing late would shove the reader's place down the page.
+    return <Skeleton className="h-24 w-full" />;
   }
 
   const all: CardSpec[] = [
@@ -92,10 +94,19 @@ export function InsightsPanel({ meetingId }: { meetingId: string }) {
   if (cards.length === 0) return null;
 
   return (
-    // One card takes the full width rather than half of it: a lone card in a
-    // two-column grid leaves a hole where the reader looks for the one that is
-    // not there.
-    <div className={cn("grid gap-4", cards.length > 1 && "md:grid-cols-2")}>
+    /*
+     * Stacked, not side by side.
+     *
+     * <p>They were a two-column grid, with a lone card widened to fill the row
+     * so it did not leave a hole where the reader looks for the one that is not
+     * there. Inside the 680px measure two columns are ~330px each, which is too
+     * narrow for a sentence about what was decided — and the special case
+     * disappears with the grid rather than needing to be handled.
+     *
+     * <p>They are sections of the brief now, in the same shape as its own:
+     * a heading, a count, and rows.
+     */
+    <div className="space-y-7">
       {cards.map((c) => (
         <InsightList
           key={c.kind}
@@ -151,16 +162,16 @@ function InsightList({
   }
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Icon className="h-4 w-4 text-primary" /> {title}
-          {items.length > 0 && (
-            <span className="text-sm font-normal text-muted-foreground">{items.length}</span>
-          )}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2">
+    <section>
+      <h3 className="mb-3 flex items-center gap-2 text-title-3 font-headline text-ink">
+        <Icon className="h-4 w-4 text-ink-3" /> {title}
+        {items.length > 0 && (
+          <span className="tabular font-mono text-cap font-normal text-ink-4">
+            {items.length}
+          </span>
+        )}
+      </h3>
+      <div className="space-y-2">
         {items.map((item) => (
           <InsightRow key={item.id} item={item} meetingId={meetingId} />
         ))}
@@ -180,7 +191,7 @@ function InsightList({
                   setComposing(false);
                 }
               }}
-              className="h-8 text-sm"
+              className="h-8 border-edge bg-surface-raised text-callout"
             />
             <Button size="icon" variant="ghost" aria-label="Save" onClick={submit} disabled={adding}>
               <Check className="h-4 w-4" />
@@ -190,13 +201,13 @@ function InsightList({
           <button
             type="button"
             onClick={() => setComposing(true)}
-            className="no-print inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+            className="no-print inline-flex items-center gap-1 pt-1 text-foot text-ink-3 transition-colors hover:text-ink"
           >
             <Plus className="h-3 w-3" /> Add
           </button>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }
 
@@ -240,7 +251,7 @@ function InsightRow({ item, meetingId }: { item: Insight; meetingId: string }) {
               setEditing(false);
             }
           }}
-          className="h-8 text-sm"
+          className="h-8 border-edge bg-surface-raised text-callout"
         />
         <Button size="icon" variant="ghost" aria-label="Save" onClick={save} disabled={saving}>
           <Check className="h-4 w-4" />
@@ -250,14 +261,17 @@ function InsightRow({ item, meetingId }: { item: Insight; meetingId: string }) {
   }
 
   return (
-    <div className="group flex items-start gap-2 rounded-md border p-2 text-sm">
-      <span className="min-w-0 flex-1">
+    /* A rule and text, not a bordered box. Each of these is one sentence read
+       out of the brief above it, so a card around every one turns a short list
+       into a stack of objects. */
+    <div className="group v2-note flex items-start gap-2" data-tone="quiet">
+      <span className="v2-read min-w-0 flex-1">
         {item.text}
         {/* Which section it came from: "Blockers" and "Risks" both store as
             RISK, and losing the distinction loses the difference between what
             is already happening and what might. */}
         {item.sourceSection && item.sourceSection !== "decisions" && (
-          <span className="ml-2 text-xs text-muted-foreground">
+          <span className="ml-2 font-sans text-cap uppercase text-ink-4">
             {sectionLabel(item.sourceSection)}
           </span>
         )}

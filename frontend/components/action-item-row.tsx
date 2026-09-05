@@ -110,7 +110,7 @@ export function ActionItemRow({
             checked={selected}
             aria-label={`Select “${title}”`}
             onChange={(e) => onSelectedChange?.(e.target.checked)}
-            className="mt-1.5 h-4 w-4 shrink-0 accent-[hsl(var(--muted-foreground))]"
+            className="mt-1.5 h-4 w-4 shrink-0 accent-[hsl(var(--ink-4))]"
           />
         )}
 
@@ -120,7 +120,7 @@ export function ActionItemRow({
           disabled={saving}
           aria-label={`Mark “${title}” complete`}
           onChange={(e) => update({ status: e.target.checked ? "DONE" : "OPEN" })}
-          className="mt-1.5 h-4 w-4 shrink-0 accent-[hsl(var(--primary))]"
+          className="mt-1.5 h-4 w-4 shrink-0 accent-[hsl(var(--brand))]"
         />
 
         <div className="min-w-0 flex-1">
@@ -137,8 +137,10 @@ export function ActionItemRow({
             {title}
           </p>
 
-          <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs">
-            <span className="text-muted-foreground">{item.ownerName || "Unassigned"}</span>
+          <p className="mt-1 flex flex-wrap items-center gap-x-2 text-cap">
+            {/* "Unassigned" is a fact the API returns, not a gap being
+                filled in: `ownerName` is null when nobody was named. */}
+            <span className="text-ink-4">{item.ownerName || "Unassigned"}</span>
             {deadline && (
               <>
                 <Separator />
@@ -152,7 +154,7 @@ export function ActionItemRow({
                 <Separator />
                 <Link
                   href={`/meetings/${item.meetingId}`}
-                  className="text-muted-foreground hover:text-primary hover:underline"
+                  className="text-ink-4 transition-colors hover:text-brand-text hover:underline"
                 >
                   {item.meetingTitle}
                 </Link>
@@ -165,7 +167,7 @@ export function ActionItemRow({
           <Button
             variant="ghost"
             size="sm"
-            className="h-8 gap-1 px-2 text-xs text-muted-foreground"
+            className="h-8 gap-1 px-2 text-cap text-ink-4"
             aria-expanded={open}
             onClick={() => setOpen((v) => !v)}
           >
@@ -186,7 +188,7 @@ export function ActionItemRow({
           {/* Said once, where it matters: the fields below hold the words the
               meeting was in, not the ones on the row above. */}
           {translation?.translated && (
-            <p className="ml-7 mt-2 text-xs text-muted-foreground">
+            <p className="ml-7 mt-2 text-foot text-ink-4">
               Editing works on the original wording: “{item.title}”.
             </p>
           )}
@@ -199,7 +201,7 @@ export function ActionItemRow({
 
 function Separator() {
   return (
-    <span className="text-border" aria-hidden>
+    <span className="text-ink-5" aria-hidden>
       ·
     </span>
   );
@@ -260,7 +262,7 @@ function ActionItemDetails({
   }
 
   return (
-    <div className="ml-7 mt-2 space-y-4 border-l pl-4">
+    <div className="ml-7 mt-3 space-y-4 border-l border-line pl-4">
       <div className="grid gap-3 sm:grid-cols-[2fr_1fr_1fr]">
         <div className="space-y-1.5">
           <Label htmlFor={`title-${item.id}`}>What needs to happen</Label>
@@ -323,7 +325,10 @@ function ActionItemDetails({
 
       {item.sourceSentence && (
         <div className="space-y-1">
-          <blockquote className="border-l-2 border-highlight/40 pl-3 text-sm italic text-muted-foreground">
+          {/* The sentence this was read out of, as evidence. The same
+              1px rule a quotation gets in the brief and a citation gets
+              under a chat answer -- three places, one device. */}
+          <blockquote className="v2-note v2-read italic">
             {item.sourceSentence}
           </blockquote>
           <SourceLink item={item} onOpenSource={onOpenSource} />
@@ -374,7 +379,7 @@ function SourceLink({
   return (
     <Link
       href={`/meetings/${item.meetingId}?t=${Math.floor(at)}`}
-      className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+      className="inline-flex items-center gap-1 text-cap text-brand-text hover:underline"
     >
       {label}
     </Link>
