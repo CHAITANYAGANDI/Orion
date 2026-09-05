@@ -1,161 +1,120 @@
 import Link from "next/link";
-import {
-  ArrowRight,
-  Bot,
-  Download,
-  FolderTree,
-  Languages,
-  ListChecks,
-  Mic,
-  PencilLine,
-  Search,
-  Users,
-} from "lucide-react";
+import { BrandMark } from "@/components/v2/brand-mark";
 
 /**
  * The front door.
  *
- * <h2>The thesis</h2>
+ * <h2>Restored from the approved V2 landing screen, with one substitution</h2>
  *
- * <p>The hero is a transcript. Not a screenshot of one and not an illustration
- * of one — a real one, typeset in the same two faces the product uses, with the
- * timecodes in the margin where the meeting page puts them. Reverie turns speech
- * into a record you can act on, so the page opens by doing that: three lines of
- * a meeting, one of them marked, and the commitment that was pulled out of it
- * sitting underneath with an owner and a date on it.
+ * <p>The composition is `design-demo/final/55-landing.html`: the public canvas
+ * with its one ambient wash, a 68px quiet nav, a centred hero, and then — the
+ * point of the whole page — the claim demonstrated in the product's own
+ * material at large size. Not twelve sections. One claim, then the product.
  *
- * <p>That is the whole argument, made in the product's own material rather than
- * asserted in a headline over a gradient. Everything else on the page is
- * quieter than it on purpose.
+ * <p>What this replaced was an invented marketing layout: a three-line
+ * transcript vignette, a 100/18/3 statistics strip, a numbered "how it works",
+ * an eight-item feature grid and a closing slogan. Every line of it was true
+ * and none of it was the approved design.
  *
- * <h2>Every claim here is one the code makes good on</h2>
+ * <h2>The substitution, and why it is not a reinterpretation</h2>
  *
- * <p>This page used to promise five meetings a month, share links, and agent
- * follow-ups that would "draft emails, create tasks, schedule meetings and
- * Notion notes". The allowance is 100 minutes and 3 imports and always was;
- * sharing was removed; the agents never existed; and there is no email sender
- * in this codebase at all. A landing page is the one screen read by people with
- * no way to check, which is exactly why it is the one that has to be true.
+ * <p>The artifact's hero sells the <b>memory layer</b>: "Your meetings stop
+ * being recordings", "then keeps watching", "when a later meeting reverses a
+ * decision or a promise quietly slips, you are the one who is told" — and its
+ * hero demonstration is a Decision Drift margin note reading "Reverses 12
+ * August".
  *
- * <p>So the numbers below come from `UsageLimitService.MINUTES_ALLOWANCE` and
- * `IMPORT_ALLOWANCE`, and every feature named is one with a route behind it.
+ * <p>None of that exists. `V14` and `V15` dropped `meeting_decisions`,
+ * `decision_links`, `decision_vectors`, `commitments` and
+ * `commitment_evidence`, and nothing replaced them. A landing page is the one
+ * screen read by people with no way to check, which is exactly why it is the
+ * last place to claim a capability the code cannot keep.
+ *
+ * <p>So the hero copy is the V2-safe wording from the correction brief, and the
+ * hero demonstration is the product preview it specifies — Now, Library, Ask, a
+ * conversation list, folders, a selected conversation and a contextual answer.
+ * Every capability shown is one production has. The *composition* — quiet nav,
+ * centred claim, one large in-situ demonstration, restrained Included section,
+ * hairline footer — is the artifact's.
+ *
+ * <h2>Nothing here is interactive</h2>
+ *
+ * <p>The preview is a static picture of the product, not the product. It is
+ * marked `aria-hidden` and carries no controls: a landing page with half-working
+ * chrome in it teaches people that the real thing is also half-working.
  */
 
-/** The allowance, as the server enforces it. */
-const FACTS = [
-  { figure: "100", unit: "minutes", note: "of transcription, free" },
-  { figure: "18", unit: "languages", note: "detected or fixed by you" },
-  { figure: "3", unit: "imports", note: "of audio or video you already have" },
-];
-
-/** A real sequence, which is why it is numbered. */
-const STEPS = [
-  {
-    title: "Record it, or bring it",
-    body: "Capture a meeting in the browser, or import audio or video you already have.",
-  },
-  {
-    title: "Watch it come apart",
-    // "Action items", which is the product's own word for these everywhere
-    // else. "Commitments" was English rather than a claim about a feature, but
-    // it is also the name of a V2 concept this product does not have -- and a
-    // landing page is exactly where a reader would take it for one.
-    body: "Transcription, then the summary, then the action items — each appearing as it lands, over a socket.",
-  },
-  {
-    title: "Ask it anything",
-    body: "Search every meeting, chat across all of them, and export what you need as PDF, Word, Markdown or text.",
-  },
-];
-
-const FEATURES = [
-  {
-    icon: Users,
-    title: "Speakers, separated",
-    body: "Diarization tells the voices apart and numbers them by who spoke first. Naming them is a rename you make.",
-  },
-  {
-    icon: ListChecks,
-    title: "Decisions and action items",
-    body: "Every action item with an owner, a due date and comments — and quotations matched back to the transcript before they are stored.",
-  },
-  {
-    icon: Bot,
-    title: "Chat across everything",
-    body: "Ask one meeting a question, or ask all of them at once. Answers cite the passages they came from.",
-  },
-  {
-    icon: PencilLine,
-    title: "A transcript you can correct",
-    body: "Edit the words and the speaker labels. Highlight, bookmark and annotate up to 2,000 moments in a meeting.",
-  },
-  {
-    icon: Search,
-    title: "Search that reads",
-    body: "Find a phrase, or find the meeting where a decision was made without knowing the words used.",
-  },
-  {
-    icon: Languages,
-    title: "Read it in another language",
-    body: "The brief, the tasks and the transcript, translated once and kept.",
-  },
-  {
-    icon: FolderTree,
-    title: "Folders",
-    body: "Group meetings by the work they belong to, then ask questions of the whole folder.",
-  },
-  {
-    icon: Download,
-    title: "Yours to take",
-    body: "Export a meeting as PDF, Word, Markdown or plain text. Delete a recording, a transcript or the whole account.",
-  },
-];
-
-/** The hero's meeting. Short, ordinary, and the kind of exchange that produces a task. */
-const TURNS = [
-  { at: "00:12", who: "Priya", said: "We should get the export work out before the quarter closes." },
-  { at: "00:19", who: "Dev", said: "I can take that. Friday?", marked: true },
-  { at: "00:24", who: "Priya", said: "Friday works. I will let support know." },
-];
+export const metadata = {
+  title: "Reverie — remember the conversation",
+  description:
+    "Reverie turns recordings into a clear record: speakers, transcript, brief, action items, search, and answers grounded in the exact words that were said.",
+};
 
 export default function LandingPage() {
   return (
-    <div className="min-h-screen bg-background">
-      <Header />
+    <div className="relative min-h-screen overflow-hidden bg-background">
+      {/*
+       * THE ONE ORNAMENT IN THE PRODUCT.
+       *
+       * V1 had two and used them on most screens. This appears on the public
+       * and auth pages only, and it exists for a single reason: a marketing
+       * page with no photograph needs somewhere for the eye to land before the
+       * type starts. It never appears behind product content.
+       */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-[60vmax] bg-[radial-gradient(120%_62%_at_50%_-12%,hsl(var(--brand)/0.15),transparent_62%),radial-gradient(80%_40%_at_82%_8%,hsl(var(--success)/0.05),transparent_70%)]"
+      />
 
-      <main>
-        <Hero />
-        <Facts />
-        <HowItWorks />
-        <Features />
-        <Closing />
-      </main>
-
-      <Footer />
+      <div className="relative">
+        <Header />
+        <main>
+          <Hero />
+          <Preview />
+          <Included />
+        </main>
+        <Footer />
+      </div>
     </div>
   );
 }
 
+/**
+ * The public nav: the lockup, and the two ways in.
+ *
+ * <p>Sixty-eight pixels and no border. It must not be heavier than the hero —
+ * this page has one job, and a bar competing with the claim under it is the
+ * commonest way a landing page loses that job.
+ *
+ * <p>The mark is the product's own. It was a `<Mic />` glyph in a filled
+ * rounded square, which is the generic recorder logo the V2 identity study
+ * explicitly rejected — and it meant the public page and the application were
+ * wearing two different brands.
+ */
 function Header() {
   return (
-    <header className="sticky top-0 z-30 border-b border-border/60 bg-background/80 backdrop-blur-md">
-      <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-6">
-        <div className="flex items-center gap-2.5">
-          <span className="flex h-7 w-7 items-center justify-center rounded-[7px] bg-primary text-primary-foreground">
-            <Mic className="h-3.5 w-3.5" />
-          </span>
-          <span className="text-[15px] font-semibold tracking-tight">Reverie</span>
-        </div>
-        <nav className="flex items-center gap-1">
+    <header className="relative z-10">
+      <div className="mx-auto flex h-[68px] max-w-doc items-center gap-8 px-6 lg:px-8">
+        <Lockup size={19} />
+        <nav aria-label="Reverie" className="ml-auto flex items-center gap-6">
+          {/* A 36px target, not a 20px line of text. It sits beside a filled
+              button of the same height, and a link half its neighbour's height
+              is both harder to hit and reads as less of an option than it is. */}
           <Link
             href="/sign-in"
-            className="rounded-lg px-4 py-2 text-[14px] text-muted-foreground transition-colors hover:text-foreground"
+            className="flex h-9 items-center rounded-full px-2 text-body text-ink-3 transition-colors hover:text-ink"
           >
             Sign in
           </Link>
+          {/* INK, not the accent.
+              The V2 palette's own rule: "the primary button in this product is
+              INK — a Save button is not an observation, and an accent spent on
+              every button is an accent that means nothing." The approved
+              landing follows it, and a brand-filled pill here was me spending
+              the accent on the two loudest controls on the page. */}
           <Link
             href="/sign-up"
-            className="rounded-lg bg-primary px-4 py-2 text-[14px] font-medium text-primary-foreground transition-opacity hover:opacity-90"
+            className="flex h-9 items-center rounded-full bg-ink px-4 text-body font-headline text-surface transition-opacity duration-press ease-soft hover:opacity-90"
           >
             Get started
           </Link>
@@ -165,236 +124,346 @@ function Header() {
   );
 }
 
+/**
+ * The mark and the word, at 0.92x.
+ *
+ * <p>The mark is drawn slightly smaller than the type: at parity it out-weighs
+ * it — the mark is solid and the type is not — and the lockup reads
+ * front-heavy. Found by rendering both, not by calculation. See
+ * `design-demo/lib/mark.js`.
+ */
+function Lockup({ size, muted = false }: { size: number; muted?: boolean }) {
+  return (
+    <span
+      className={muted ? "inline-flex items-center text-ink-3" : "inline-flex items-center text-ink"}
+      style={{ gap: Math.max(6, Math.round(size * 0.38)) }}
+    >
+      <BrandMark size={Math.round(size * 0.92)} title="Reverie" />
+      <span
+        className="font-headline leading-none"
+        style={{ fontSize: size, letterSpacing: "-0.028em" }}
+      >
+        Reverie
+      </span>
+    </span>
+  );
+}
+
+/**
+ * One claim, centred, and the two ways in under it.
+ *
+ * <p>The measures are the artifact's: roughly 20 characters on the headline so
+ * it breaks where it is written to break, and 62 on the body. The display step
+ * is `--t-display`, which the type scale annotates as "the landing hero, once
+ * per product" — this is the once.
+ */
 function Hero() {
   return (
-    <section className="relative overflow-hidden px-6 pb-24 pt-20 sm:pt-28">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute left-1/2 top-0 h-[50vmax] w-[80vmax] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(closest-side,hsl(var(--highlight)/0.09),transparent)]"
-      />
+    <section className="px-6 pb-11 pt-[68px] text-center lg:px-8">
+      <p className="v2-label text-brand-text">
+        Meeting intelligence, without the meeting-tool clutter.
+      </p>
 
-      <div className="relative mx-auto max-w-3xl text-center">
-        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-          Meeting intelligence
-        </p>
-        {/* Light weight, large, tight. The same face the app sets its body in,
-            which is what makes this page read as the front of that product. */}
-        <h1 className="mx-auto mt-5 max-w-[16ch] text-[clamp(2.5rem,7vw,4.25rem)] font-light leading-[1.04] tracking-[-0.035em]">
-          Everything said. Everything decided.
-        </h1>
-        <p className="mx-auto mt-6 max-w-xl text-[17px] leading-relaxed text-muted-foreground">
-          Reverie records or imports a meeting, writes it down with the speakers
-          separated, and turns it into a brief you can search, question and act
-          on.
-        </p>
+      {/* Two lines, and the break is written rather than left to the viewport:
+          "Remember the conversation." and "Keep the meaning." are a pair, and a
+          reflow that puts "Keep" at the end of the first line breaks the
+          rhythm the copy is built on. `block` rather than a <br>, so it
+          collapses to one flow only if the words themselves do not fit. */}
+      <h1 className="mx-auto mt-[18px] max-w-[20ch] text-[clamp(1.875rem,7vw,var(--t-display))] font-headline leading-[1.06] tracking-[-0.022em] text-ink">
+        <span className="block">Remember the conversation.</span>
+        <span className="block">Keep the meaning.</span>
+      </h1>
 
-        <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
-          <Link
-            href="/sign-up"
-            className="group inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-6 text-[15px] font-medium text-primary-foreground transition-opacity hover:opacity-90"
-          >
-            Create a free account
-            <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 motion-reduce:transition-none" />
-          </Link>
-          <Link
-            href="/sign-in"
-            className="inline-flex h-11 items-center justify-center rounded-lg border px-6 text-[15px] transition-colors hover:bg-accent"
-          >
-            Sign in
-          </Link>
-        </div>
-        <p className="mt-4 text-[13px] text-muted-foreground">No card. No trial. No seat count.</p>
+      <p className="mx-auto mt-5 max-w-[62ch] text-[1.0625rem] leading-[1.6] text-ink-2">
+        Reverie turns recordings into a clear record: speakers, transcript,
+        brief, action items, search, and answers grounded in the exact words
+        that were said.
+      </p>
+
+      {/* Stacks below `sm`, where two side-by-side buttons are each too narrow
+          to read and neither is a comfortable target. */}
+      <div className="mt-[30px] flex flex-col items-center justify-center gap-2.5 sm:flex-row">
+        <Link
+          href="/sign-up"
+          className="flex h-11 w-full items-center justify-center gap-2 rounded-full bg-ink px-6 text-body font-headline text-surface transition-opacity duration-press ease-soft hover:opacity-90 sm:w-auto"
+        >
+          Create a free account
+          <span aria-hidden>&rarr;</span>
+        </Link>
+        <Link
+          href="/sign-in"
+          className="flex h-11 w-full items-center justify-center rounded-full border border-edge px-6 text-body text-ink-2 transition-colors duration-press ease-soft hover:border-edge-hover hover:text-ink sm:w-auto"
+        >
+          Sign in
+        </Link>
       </div>
 
-      <TranscriptDemo />
+      {/* One quiet line, from the approved hero. Not the statistics strip that
+          replaced it: this is the answer to "what does it cost", read once,
+          under the button it qualifies. The numbers are
+          `UsageLimitService.MINUTES_ALLOWANCE` and `IMPORT_ALLOWANCE`. */}
+      <p className="mt-3.5 text-foot text-ink-4">
+        100 minutes and three imports, for the life of the account. No card.
+      </p>
     </section>
   );
 }
 
 /**
- * The signature.
+ * The demonstration.
  *
- * <p>A meeting, three lines of it, in the product's own typography: JetBrains
- * Mono holds the timecodes so they do not jitter, IBM Plex Sans carries the
- * speech. One line is marked the way the transcript page marks a passage, and
- * what Reverie pulled out of it is underneath with the owner and the date on it.
+ * <h2>Why this is the largest thing on the page</h2>
  *
- * <p>The lines settle in sequence on load — the pace of something being
- * transcribed rather than a decoration. `motion-reduce` stops all of it: the
- * point is legible without any of it moving.
+ * <p>The approved landing put the product itself under the claim at full size,
+ * on the argument that showing it in situ is more convincing than any headline
+ * about it. That is the composition being restored; only the content differs,
+ * because the artifact demonstrated a margin note about a reversed decision and
+ * there is no such thing to demonstrate.
+ *
+ * <p>What it shows instead is the shape of the product as it is: the band with
+ * its three places, the newest conversations, the folders they are filed in,
+ * one of them open, and an answer that cites the meeting it came from. Every
+ * one of those is a screen somebody can reach after signing up.
+ *
+ * <p>Embedded rather than floating. The window has no drop shadow and no
+ * perspective: it sits on the page behind a mask that fades its foot, so it
+ * reads as a glimpse into the product rather than a screenshot pasted onto a
+ * marketing page.
  */
-function TranscriptDemo() {
+function Preview() {
   return (
-    <div className="relative mx-auto mt-16 max-w-2xl">
-      <div className="rounded-xl border bg-card/60 p-5 shadow-2xl shadow-black/40 backdrop-blur-sm sm:p-7">
-        <div className="flex items-center justify-between border-b pb-4">
-          <p className="text-[14px] font-medium">Quarterly planning</p>
-          <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-            2 speakers · 00:31
-          </p>
+    <section className="px-6 lg:px-8" aria-label="A preview of Reverie">
+      <div
+        aria-hidden
+        className="mx-auto max-w-doc overflow-hidden rounded-xl border border-line bg-surface [mask-image:linear-gradient(to_bottom,#000_calc(100%-72px),transparent)]"
+      >
+        {/* The band, as the product draws it: 48px, glass, the mark, three
+            places, and the controls at the far end. */}
+        <div className="v2-band flex h-band items-center gap-1 pl-3 pr-3">
+          <span className="flex h-8 w-8 items-center justify-center text-ink">
+            <BrandMark size={18} />
+          </span>
+          <span className="ml-1 flex items-center">
+            <span className="relative flex h-band items-center px-[11px] text-body font-headline text-ink after:absolute after:inset-x-[11px] after:bottom-0 after:h-[2px] after:rounded-t-[1px] after:bg-ink after:content-['']">
+              Now
+            </span>
+            <span className="flex h-band items-center px-[11px] text-body text-ink-3">
+              Library
+            </span>
+            <span className="flex h-band items-center px-[11px] text-body text-ink-3">Ask</span>
+          </span>
+          <span className="flex-1" />
+          {/* The band carries five controls at desktop width. Inside a 342px
+              preview it cannot, and `overflow-hidden` was quietly cropping the
+              avatar off the right edge — a picture of the product with a
+              half-drawn control in it. So the two that are not load-bearing to
+              the composition stand down below `sm`, and what is left is the
+              mark, the three places and Record. A preview crops on purpose or
+              it crops by accident; this one does it on purpose. */}
+          <span className="hidden h-8 items-center gap-1.5 rounded-full border border-edge bg-surface-raised px-2.5 text-foot text-ink-3 sm:flex">
+            Search
+          </span>
+          <span className="flex h-8 items-center gap-1.5 rounded-full bg-brand-fill pl-2.5 pr-3.5 text-foot font-headline text-white">
+            Record
+          </span>
+          <span className="ml-1.5 hidden h-7 w-7 rounded-full bg-brand-fill/25 sm:block" />
         </div>
 
-        <div className="mt-5 space-y-4">
-          {TURNS.map((turn, i) => (
-            <div
-              key={turn.at}
-              style={{ animationDelay: `${150 + i * 220}ms` }}
-              className="flex animate-in gap-4 fade-in slide-in-from-bottom-2 fill-mode-backwards duration-500 motion-reduce:animate-none"
-            >
-              <span className="w-11 shrink-0 pt-0.5 font-mono text-[11px] tabular-nums text-muted-foreground">
-                {turn.at}
-              </span>
-              <p className="text-left text-[15px] leading-relaxed">
-                <span className="mr-2 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                  {turn.who}
-                </span>
-                <span
+        {/* The page: the list on the left, an answer in the margin — the same
+            680 + 400 spread the product is built to. */}
+        <div className="grid gap-8 p-5 sm:p-7 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="min-w-0">
+            <p className="v2-label">Thursday, 28 August</p>
+            <p className="mt-1 text-title-1 font-headline text-ink">Good morning, Priya</p>
+
+            <p className="mt-6 v2-label">Recent</p>
+            <div className="mt-2 space-y-1.5">
+              {PREVIEW_ROWS.map((row) => (
+                <div
+                  key={row.title}
                   className={
-                    turn.marked
-                      ? "rounded-[3px] bg-[hsl(var(--highlight)/0.22)] px-1 py-0.5 decoration-clone"
-                      : undefined
+                    row.open
+                      ? "flex items-baseline gap-3 rounded-md border border-line bg-surface-raised px-3 py-2.5"
+                      : "flex items-baseline gap-3 rounded-md px-3 py-2.5"
                   }
                 >
-                  {turn.said}
+                  <span className="min-w-0 flex-1 truncate text-body text-ink">{row.title}</span>
+                  <span className="tabular shrink-0 font-mono text-cap text-ink-4">
+                    {row.length}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <p className="mt-6 v2-label">Folders</p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {PREVIEW_FOLDERS.map((folder) => (
+                <span
+                  key={folder.name}
+                  className="rounded-full border border-line bg-surface-raised px-2.5 py-1 text-cap text-ink-2"
+                >
+                  {folder.name}{" "}
+                  <span className="tabular font-mono text-ink-4">{folder.count}</span>
                 </span>
-              </p>
+              ))}
             </div>
-          ))}
-        </div>
-
-        <div
-          style={{ animationDelay: "1050ms" }}
-          className="mt-6 animate-in border-t pt-5 fade-in fill-mode-backwards duration-700 motion-reduce:animate-none"
-        >
-          <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-            Extracted
-          </p>
-          <div className="mt-3 flex items-center gap-3 rounded-lg border bg-background/60 px-4 py-3">
-            <ListChecks className="h-4 w-4 shrink-0 text-[hsl(var(--highlight))]" aria-hidden />
-            <span className="flex-1 text-left text-[14px]">Ship the export work</span>
-            <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-              Dev · Fri
-            </span>
           </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
-function Facts() {
-  return (
-    <section className="border-y bg-card/30">
-      <div className="mx-auto grid max-w-5xl grid-cols-1 divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-        {FACTS.map((fact) => (
-          <div key={fact.unit} className="px-6 py-10 text-center">
-            <p className="text-[40px] font-light leading-none tracking-[-0.03em]">
-              {fact.figure}
-              <span className="ml-2 font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                {fact.unit}
-              </span>
+          {/* The margin, carrying the thing this product is for: an answer, and
+              the words it came from. */}
+          <div className="min-w-0">
+            <p className="v2-label">Ask Product Weekly</p>
+            <p className="mt-2 rounded-2xl border border-line bg-surface-raised px-3.5 py-2 text-body text-ink">
+              What did we decide about pricing?
             </p>
-            <p className="mt-3 text-[13.5px] text-muted-foreground">{fact.note}</p>
+            <p className="v2-read mt-4">
+              You held the price and moved the annual discount to 15%. Dev asked
+              for a note on the invoice copy.
+            </p>
+            <div className="v2-note mt-3">
+              <span className="block text-foot font-headline text-ink-2">Product Weekly</span>
+              <span className="tabular block font-mono text-cap text-ink-3">12:34</span>
+            </div>
           </div>
-        ))}
+        </div>
       </div>
     </section>
   );
 }
 
-function HowItWorks() {
+/** Static demo content. Ordinary meeting names; nothing from any real account. */
+const PREVIEW_ROWS = [
+  { title: "Product Weekly", length: "42:07", open: true },
+  { title: "Pricing sync", length: "18:22", open: false },
+  { title: "Design review", length: "36:14", open: false },
+];
+
+const PREVIEW_FOLDERS = [
+  { name: "Q4 planning", count: 6 },
+  { name: "Hiring", count: 3 },
+];
+
+/**
+ * What is in it, in two groups.
+ *
+ * <p>Two conceptual halves rather than a wall of feature cards: what Reverie
+ * does to a recording, and what you then do with it. Each line is a line — a
+ * hairline between them and nothing else. A bordered card per capability is how
+ * eight true sentences come to read as a comparison table for a comparison
+ * nobody is making, and there is one plan.
+ *
+ * <p>Every line is a capability production has today. The search line in
+ * particular is deliberate: `SearchCommand` is lexical, with `when:` `type:`
+ * `tag:` and `in:` operators over conversations and transcript mentions, and it
+ * does not call `POST /search/semantic`. So it does not say "find a decision
+ * without knowing the words", which is what the page it replaced claimed.
+ */
+function Included() {
   return (
-    <section className="mx-auto max-w-5xl px-6 py-24">
-      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-        How it works
+    <section className="mx-auto max-w-doc px-6 pb-24 pt-20 lg:px-8" aria-labelledby="included">
+      <p className="v2-label" id="included">
+        Included
       </p>
-      <h2 className="mt-4 max-w-[18ch] text-[clamp(1.75rem,4vw,2.5rem)] font-light leading-tight tracking-[-0.025em]">
-        Three steps, and two of them are Reverie&apos;s.
-      </h2>
 
-      <ol className="mt-14 grid gap-10 sm:grid-cols-3">
-        {STEPS.map((step, i) => (
-          <li key={step.title} className="border-t pt-5">
-            {/* Numbered because this genuinely is an order: nothing can be
-                summarised before it is transcribed. */}
-            <p className="font-mono text-[11px] tabular-nums text-muted-foreground">
-              {String(i + 1).padStart(2, "0")}
-            </p>
-            <h3 className="mt-3 text-[17px] font-medium">{step.title}</h3>
-            <p className="mt-2 text-[14.5px] leading-relaxed text-muted-foreground">{step.body}</p>
-          </li>
+      <div className="mt-8 grid gap-x-12 gap-y-12 lg:grid-cols-2">
+        {GROUPS.map((group) => (
+          <div key={group.heading}>
+            <h2 className="text-title-1 font-headline text-ink">{group.heading}</h2>
+            <ul className="mt-4">
+              {group.items.map((item) => (
+                <li key={item.label} className="border-b border-line py-3.5 last:border-b-0">
+                  <p className="text-body text-ink">{item.label}</p>
+                  <p className="mt-1 text-callout leading-[1.5] text-ink-3">{item.detail}</p>
+                </li>
+              ))}
+            </ul>
+          </div>
         ))}
-      </ol>
-    </section>
-  );
-}
-
-function Features() {
-  return (
-    <section className="border-t">
-      <div className="mx-auto max-w-5xl px-6 py-24">
-        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-          What you get
-        </p>
-        <h2 className="mt-4 max-w-[20ch] text-[clamp(1.75rem,4vw,2.5rem)] font-light leading-tight tracking-[-0.025em]">
-          One account. All of it.
-        </h2>
-
-        <div className="mt-14 grid gap-x-12 gap-y-11 sm:grid-cols-2">
-          {FEATURES.map((feature) => (
-            <div key={feature.title} className="flex gap-4">
-              <feature.icon className="mt-0.5 h-[18px] w-[18px] shrink-0 text-muted-foreground" aria-hidden />
-              <div>
-                <h3 className="text-[16px] font-medium">{feature.title}</h3>
-                <p className="mt-1.5 text-[14.5px] leading-relaxed text-muted-foreground">
-                  {feature.body}
-                </p>
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
     </section>
   );
 }
 
-function Closing() {
-  return (
-    <section className="border-t">
-      <div className="mx-auto max-w-2xl px-6 py-28 text-center">
-        <h2 className="text-[clamp(2rem,5vw,3rem)] font-light leading-tight tracking-[-0.03em]">
-          Your next meeting is worth keeping.
-        </h2>
-        <p className="mx-auto mt-5 max-w-md text-[16px] leading-relaxed text-muted-foreground">
-          100 minutes of transcription and three imports, for the life of the account.
-        </p>
-        <Link
-          href="/sign-up"
-          className="group mt-9 inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-6 text-[15px] font-medium text-primary-foreground transition-opacity hover:opacity-90"
-        >
-          Create a free account
-          <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 motion-reduce:transition-none" />
-        </Link>
-      </div>
-    </section>
-  );
-}
+const GROUPS = [
+  {
+    heading: "Capture & understand",
+    items: [
+      {
+        label: "Record in your browser",
+        detail:
+          "Nothing to install, and nothing joins the call to do it. The recording keeps running while you look something else up.",
+      },
+      {
+        label: "Import audio or video",
+        detail: "A file you already have, uploaded straight to private storage.",
+      },
+      {
+        label: "Speakers, separated",
+        detail:
+          "Diarization tells the voices apart and numbers them by who spoke first. Naming them is a rename you make.",
+      },
+      {
+        label: "A brief you can shape",
+        detail:
+          "Summary templates for the kind of meeting it was, and a rewrite when the transcript changes.",
+      },
+      {
+        label: "Action items, decisions and risks",
+        detail:
+          "Each with the sentence it was read out of, playable at the moment it was said.",
+      },
+    ],
+  },
+  {
+    heading: "Work with it",
+    items: [
+      {
+        label: "Ask one meeting, or all of them",
+        detail:
+          "Answers cite the passages they came from, and a folder can be the scope.",
+      },
+      {
+        label: "A transcript you can correct",
+        detail:
+          "Edit the words and the speaker labels. Highlight, bookmark and annotate up to 2,000 moments in a meeting.",
+      },
+      {
+        label: "Search that jumps",
+        detail:
+          "Search conversations and transcript mentions, then jump to the exact moment.",
+      },
+      {
+        label: "Read it in another language",
+        detail: "The brief, the action items and the transcript, kept once translated.",
+      },
+      {
+        label: "Yours to take, and to delete",
+        detail:
+          "Export as PDF, Word, Markdown or plain text. Delete a recording, a transcript or the whole account.",
+      },
+    ],
+  },
+];
 
+/** A hairline, the lockup, and only links that go somewhere. */
 function Footer() {
   return (
-    <footer className="border-t">
-      <div className="mx-auto flex max-w-5xl flex-col items-center justify-between gap-4 px-6 py-8 sm:flex-row">
-        <div className="flex items-center gap-2">
-          <span className="flex h-5 w-5 items-center justify-center rounded-[5px] bg-muted text-muted-foreground">
-            <Mic className="h-2.5 w-2.5" />
-          </span>
-          <span className="text-[13px] text-muted-foreground">Reverie</span>
-        </div>
-        <div className="flex items-center gap-6 text-[13px] text-muted-foreground">
-          <Link href="/privacy" className="transition-colors hover:text-foreground">
+    <footer className="border-t border-line">
+      <div className="mx-auto flex max-w-doc flex-col items-center justify-between gap-4 px-6 py-8 sm:flex-row lg:px-8">
+        <Lockup size={14} muted />
+        {/* `-mx-2` so the padding that makes these tappable does not push them
+            off the footer's own alignment. */}
+        <div className="-mx-2 flex items-center text-callout text-ink-3">
+          <Link
+            href="/privacy"
+            className="flex h-9 items-center px-2 transition-colors hover:text-ink"
+          >
             Privacy
           </Link>
-          <Link href="/sign-in" className="transition-colors hover:text-foreground">
+          <Link
+            href="/sign-in"
+            className="flex h-9 items-center px-2 transition-colors hover:text-ink"
+          >
             Sign in
           </Link>
         </div>
